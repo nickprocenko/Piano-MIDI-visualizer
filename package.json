@@ -1,0 +1,32 @@
+{
+  "name": "piano-midi-visualizer",
+  "version": "0.1.0",
+  "description": "Real-time piano roll / note highway visualizer with Web MIDI input and WebSocket streaming.",
+  "main": "src/server/index.js",
+  "scripts": {
+    "start": "node src/server/index.js",
+    "dev": "nodemon src/server/index.js",
+    "lint": "eslint src/**/*.js"
+  },
+  "keywords": [
+    "midi",
+    "piano",
+    "visualizer",
+    "piano-roll",
+    "note-highway",
+    "twitch",
+    "websocket"
+  ],
+  "author": "nickprocenko",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.4.1",
+    "ws": "^8.16.0",
+    "midi": "^2.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "nodemon": "^3.1.0"
+  }
+}
