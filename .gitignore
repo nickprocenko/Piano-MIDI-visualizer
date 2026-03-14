@@ -18,3 +18,9 @@ env/
 .vscode/
 *.DS_Store
 Thumbs.db
+
+# Local config with personal paths / hardware addresses — use config.example.json as template
+config.json
+
+# Crash logs are local only
+crash_logs/

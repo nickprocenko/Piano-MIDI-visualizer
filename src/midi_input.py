@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from typing import Optional
+import pygame
 
 try:
     import rtmidi  # type: ignore
@@ -15,6 +16,43 @@ except ImportError:
 _STATUS_MASK = 0xF0
 _NOTE_OFF = 0x80
 _NOTE_ON = 0x90
+
+VIRTUAL_PORT_NAME = "Computer Keyboard (Virtual MIDI)"
+
+# Two-row QWERTY piano layout (C3..F5-ish)
+_VIRTUAL_KEY_TO_NOTE: dict[int, int] = {
+    pygame.K_z: 48,
+    pygame.K_s: 49,
+    pygame.K_x: 50,
+    pygame.K_d: 51,
+    pygame.K_c: 52,
+    pygame.K_v: 53,
+    pygame.K_g: 54,
+    pygame.K_b: 55,
+    pygame.K_h: 56,
+    pygame.K_n: 57,
+    pygame.K_j: 58,
+    pygame.K_m: 59,
+    pygame.K_COMMA: 60,
+    pygame.K_q: 60,
+    pygame.K_2: 61,
+    pygame.K_w: 62,
+    pygame.K_3: 63,
+    pygame.K_e: 64,
+    pygame.K_r: 65,
+    pygame.K_5: 66,
+    pygame.K_t: 67,
+    pygame.K_6: 68,
+    pygame.K_y: 69,
+    pygame.K_7: 70,
+    pygame.K_u: 71,
+    pygame.K_i: 72,
+    pygame.K_9: 73,
+    pygame.K_o: 74,
+    pygame.K_0: 75,
+    pygame.K_p: 76,
+    pygame.K_LEFTBRACKET: 77,
+}
 
 
 class MidiInput:
@@ -34,6 +72,7 @@ class MidiInput:
         self._midi_in: Optional[object] = None  # rtmidi.MidiIn instance
         self._active_notes: set[int] = set()
         self._lock = threading.Lock()
+        self._virtual_mode: bool = False
         self.port_name: str = ""
         self.connected: bool = False
         self.available: bool = _RTMIDI_AVAILABLE
@@ -42,8 +81,8 @@ class MidiInput:
     # Public API
     # ------------------------------------------------------------------
 
-    def list_ports(self) -> list[str]:
-        """Return a list of available MIDI input port names."""
+    def _list_hardware_ports(self) -> list[str]:
+        """Return hardware MIDI input ports only."""
         if not _RTMIDI_AVAILABLE:
             return []
         try:
@@ -54,31 +93,67 @@ class MidiInput:
         except Exception:
             return []
 
-    def connect(self) -> bool:
-        """
-        Auto-detect and open the first available MIDI input port.
+    def list_ports(self) -> list[str]:
+        """Return selectable input ports including virtual computer keyboard."""
+        return [VIRTUAL_PORT_NAME] + self._list_hardware_ports()
 
-        Returns True if a port was successfully opened, False otherwise.
+    def connect(self, port_index: int = 0) -> bool:
         """
+        Open the MIDI input port at *port_index*.
+
+        Returns True if the port was successfully opened, False otherwise.
+        """
+        self.close()
+
+        # Virtual keyboard is always selectable as index 0.
+        if port_index == 0:
+            self._virtual_mode = True
+            self.port_name = VIRTUAL_PORT_NAME
+            self.connected = True
+            return True
+
         if not _RTMIDI_AVAILABLE:
             return False
 
         try:
-            ports = self.list_ports()
-            if not ports:
+            ports = self._list_hardware_ports()
+            hw_index = port_index - 1
+            if not ports or hw_index < 0 or hw_index >= len(ports):
                 return False
 
             self._midi_in = rtmidi.MidiIn()
-            self._midi_in.open_port(0)
+            self._midi_in.open_port(hw_index)
             self._midi_in.set_callback(self._midi_callback)
             self._midi_in.ignore_types(sysex=True, timing=True, active_sense=True)
 
-            self.port_name = ports[0]
+            self.port_name = ports[hw_index]
             self.connected = True
             return True
         except Exception:
             self._midi_in = None
             return False
+
+    def handle_keydown(self, key: int) -> bool:
+        """Apply a computer-key press when virtual mode is active."""
+        if not self._virtual_mode or not self.connected:
+            return False
+        note = _VIRTUAL_KEY_TO_NOTE.get(key)
+        if note is None:
+            return False
+        with self._lock:
+            self._active_notes.add(note)
+        return True
+
+    def handle_keyup(self, key: int) -> bool:
+        """Apply a computer-key release when virtual mode is active."""
+        if not self._virtual_mode or not self.connected:
+            return False
+        note = _VIRTUAL_KEY_TO_NOTE.get(key)
+        if note is None:
+            return False
+        with self._lock:
+            self._active_notes.discard(note)
+        return True
 
     def get_active_notes(self) -> set[int]:
         """Return a *copy* of the set of currently held MIDI note numbers."""
@@ -96,6 +171,7 @@ class MidiInput:
             self._midi_in = None
         with self._lock:
             self._active_notes.clear()
+        self._virtual_mode = False
         self.connected = False
         self.port_name = ""
 

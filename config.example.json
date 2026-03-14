@@ -1,0 +1,71 @@
+{
+  "search_folders": [
+    "C:/Users/YourName/Downloads/Midi Songs"
+  ],
+  "note_style": {
+    "speed_px_per_sec": 420,
+    "width_px": 18,
+    "edge_roundness_px": 9,
+    "outer_edge_width_px": 2,
+    "decay_speed": 95,
+    "decay_value": 22,
+    "inner_blend_percent": 35,
+    "glow_strength_percent": 115,
+    "effect_glow_enabled": 1,
+    "effect_highlight_enabled": 1,
+    "effect_sparks_enabled": 1,
+    "effect_smoke_enabled": 1,
+    "effect_press_smoke_enabled": 1,
+    "effect_moon_dust_enabled": 1,
+    "effect_steam_smoke_enabled": 1,
+    "effect_halo_pulse_enabled": 1,
+    "highlight_strength_percent": 95,
+    "spark_amount_percent": 150,
+    "smoke_amount_percent": 140,
+    "press_smoke_amount_percent": 120,
+    "color_r": 22,
+    "color_g": 180,
+    "color_b": 255,
+    "interior_r": 160,
+    "interior_g": 245,
+    "interior_b": 255
+  },
+  "led_output": {
+    "enabled": false,
+    "transport": "ble",
+    "port": "COM3",
+    "baudrate": 115200,
+    "ble_address": "AA:BB:CC:DD:EE:FF",
+    "ble_service_uuid": "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+    "ble_char_uuid": "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
+    "ble_write_with_response": false,
+    "ble_chunk_size": 180,
+    "led_count": 177,
+    "mirror_per_key": 2,
+    "fps_limit": 12,
+    "active_r": 0,
+    "active_g": 220,
+    "active_b": 220
+  },
+  "display_style": {
+    "width_scale_percent": 66,
+    "background_alpha": 50,
+    "background_image": "",
+    "background_slideshow_paths": [],
+    "background_slide_duration_sec": 5,
+    "background_transition_percent": 35,
+    "gif_speed_percent": 100
+  },
+  "keyboard_style": {
+    "height_percent": 18,
+    "brightness": 30,
+    "visible": false
+  },
+  "audience_control": {
+    "enabled": false,
+    "ws_url": "ws://localhost:8080/ws/app",
+    "channel_id": "YOUR_CHANNEL_ID",
+    "app_api_key": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
+    "reconnect_sec": 2.0
+  }
+}
