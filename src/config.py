@@ -33,11 +33,21 @@ _DEFAULTS: dict[str, Any] = {
         "active_r": 0,
         "active_g": 220,
         "active_b": 220,
+        "black_r": 0,
+        "black_g": 240,
+        "black_b": 255,
     },
     "display_style": {
         "width_scale_percent": 66,
         "background_alpha": 120,
         "background_image": "",
+        "fullscreen": True,
+    },
+    "keyboard_style": {
+        "height_percent": 18,
+        "brightness": 100,
+        "visible": True,
+        "sustain_latch": False,
     },
     "audience_control": {
         "enabled": False,

@@ -167,6 +167,23 @@ class App:
     def _enter_display_settings(self) -> None:
         self._display_settings_screen = DisplaySettingsScreen(self.screen)
 
+    def _toggle_fullscreen(self) -> None:
+        data = cfg.load()
+        currently_fullscreen = bool(data.get("display_style", {}).get("fullscreen", True))
+        new_fullscreen = not currently_fullscreen
+        data.setdefault("display_style", {})["fullscreen"] = new_fullscreen
+        cfg.save(data)
+        if new_fullscreen:
+            info = pygame.display.Info()
+            new_screen = pygame.display.set_mode(
+                (info.current_w, info.current_h),
+                pygame.NOFRAME | pygame.FULLSCREEN,
+            )
+        else:
+            new_screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
+        self.screen = new_screen
+        self.menu = type(self.menu)(self.screen)
+
     def _enter_audience_settings(self) -> None:
         self._audience_settings_screen = AudienceSettingsScreen(self.screen)
 
@@ -189,6 +206,7 @@ class App:
         )
         self._midi = MidiInput()
         self._midi.connect(self._selected_port)
+        self._midi.sustain_latch = bool(self._keyboard_style.get("sustain_latch", False))
         self._led_output = LedOutput.from_config()
         self._led_output.connect()
         self._audience_client = AudienceColorClient.from_config()
@@ -319,6 +337,7 @@ class App:
                 if self._led_settings_screen is not None:
                     result = self._led_settings_screen.handle_event(event)
                     if result == "back":
+                        self._led_settings_screen.cleanup()
                         self._led_settings_screen = None
                         self.state = State.SETTINGS
 
@@ -329,6 +348,10 @@ class App:
                         self._display_style = self._load_display_style()
                         self._display_settings_screen = None
                         self.state = State.SETTINGS
+                    elif result == "toggle_fullscreen":
+                        self._toggle_fullscreen()
+                        # Rebuild the screen after toggling so layout fits new size
+                        self._enter_display_settings()
 
             elif self.state == State.AUDIENCE_SETTINGS:
                 if self._audience_settings_screen is not None:
@@ -373,6 +396,7 @@ class App:
             return
 
         if self.state == State.LED_SETTINGS and self._led_settings_screen is not None:
+            self._led_settings_screen.update(dt)
             return
 
         if self.state == State.DISPLAY_SETTINGS and self._display_settings_screen is not None:
@@ -717,6 +741,7 @@ class App:
             "height_percent": int(style.get("height_percent", 18)),
             "brightness": int(style.get("brightness", 100)),
             "visible": bool(style.get("visible", True)),
+            "sustain_latch": bool(style.get("sustain_latch", False)),
         }
 
     def _load_note_style_meta(self) -> dict[str, str | bool]:

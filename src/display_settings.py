@@ -93,6 +93,7 @@ class DisplaySettingsScreen:
         self._hover_pick = False
         self._hover_clear = False
         self._hover_add = False
+        self._hover_fullscreen = False
 
         self._title_pos = (0, 0)
         self._left_panel = pygame.Rect(0, 0, 0, 0)
@@ -104,6 +105,7 @@ class DisplaySettingsScreen:
         self._pick_rect = pygame.Rect(0, 0, 0, 0)
         self._clear_rect = pygame.Rect(0, 0, 0, 0)
         self._add_rect = pygame.Rect(0, 0, 0, 0)
+        self._fullscreen_rect = pygame.Rect(0, 0, 0, 0)
         self._preview_rect = pygame.Rect(0, 0, 0, 0)
 
         self._load()
@@ -163,6 +165,9 @@ class DisplaySettingsScreen:
                 self._bg_first_frame = None
                 return None
 
+            if self._fullscreen_rect.collidepoint(event.pos):
+                return "toggle_fullscreen"
+
             for i, rect in enumerate(self._slider_rects):
                 if rect.inflate(0, 18).collidepoint(event.pos):
                     self._drag_slider = i
@@ -195,6 +200,7 @@ class DisplaySettingsScreen:
             "background_slide_duration_sec": int(data.get("background_slide_duration_sec", 5)),
             "background_transition_percent": int(data.get("background_transition_percent", 35)),
             "gif_speed_percent": int(data.get("gif_speed_percent", 100)),
+            "fullscreen": bool(data.get("fullscreen", True)),
         }
         self._preview_keyboard_height = int(keyboard.get("height_percent", 18))
         self._preview_keyboard_brightness = int(keyboard.get("brightness", 100))
@@ -209,6 +215,7 @@ class DisplaySettingsScreen:
             "background_slide_duration_sec": int(self._values["background_slide_duration_sec"]),
             "background_transition_percent": int(self._values["background_transition_percent"]),
             "gif_speed_percent": int(self._values["gif_speed_percent"]),
+            "fullscreen": bool(self._values["fullscreen"]),
         }
         cfg.save(data)
 
@@ -274,16 +281,31 @@ class DisplaySettingsScreen:
         self._slider_rects = []
         y = self._left_panel.top + 12
         row_w = self._left_panel.width - 24
+        # Reserve space for 4 action buttons (min ~28px each) below sliders
+        _btn_reserve = 4 * 30 + 3 * 6 + 16
+        available_for_rows = self._left_panel.height - 24 - _btn_reserve
+        row_h = max(40, min(ROW_H, (available_for_rows - ROW_GAP * (len(self.FIELDS) - 1)) // max(1, len(self.FIELDS))))
         for _ in self.FIELDS:
-            row = pygame.Rect(self._left_panel.left + 12, y, row_w, ROW_H)
+            row = pygame.Rect(self._left_panel.left + 12, y, row_w, row_h)
             slider = pygame.Rect(row.left + 6, row.bottom - 18, row.width - 12, SLIDER_H)
             self._row_rects.append(row)
             self._slider_rects.append(slider)
-            y += ROW_H + ROW_GAP
+            y += row_h + ROW_GAP
 
-        self._pick_rect = pygame.Rect(self._left_panel.left + 12, y + 8, row_w, 44)
-        self._add_rect = pygame.Rect(self._left_panel.left + 12, y + 58, row_w, 44)
-        self._clear_rect = pygame.Rect(self._left_panel.left + 12, y + 108, row_w, 44)
+        # Distribute the 4 action buttons evenly in the remaining left-panel space
+        btn_area_top = y + 8
+        btn_area_bottom = self._left_panel.bottom - 8
+        btn_h = min(44, max(28, (btn_area_bottom - btn_area_top - 3 * 8) // 4))
+        btn_gap = max(4, (btn_area_bottom - btn_area_top - 4 * btn_h) // 3)
+
+        def _btn(n: int) -> pygame.Rect:
+            by = btn_area_top + n * (btn_h + btn_gap)
+            return pygame.Rect(self._left_panel.left + 12, by, row_w, btn_h)
+
+        self._pick_rect = _btn(0)
+        self._add_rect = _btn(1)
+        self._clear_rect = _btn(2)
+        self._fullscreen_rect = _btn(3)
 
         rp = self._right_panel
         self._preview_rect = pygame.Rect(rp.left + 12, rp.top + 12, rp.width - 24, rp.height - 24)
@@ -295,6 +317,7 @@ class DisplaySettingsScreen:
         self._hover_pick = self._pick_rect.collidepoint(pos)
         self._hover_add = self._add_rect.collidepoint(pos)
         self._hover_clear = self._clear_rect.collidepoint(pos)
+        self._hover_fullscreen = self._fullscreen_rect.collidepoint(pos)
         self._hover_slider = -1
         for i, rect in enumerate(self._slider_rects):
             if rect.inflate(0, 18).collidepoint(pos):
@@ -356,6 +379,17 @@ class DisplaySettingsScreen:
         self._draw_action_button(self._pick_rect, self._hover_pick, "SELECT BACKGROUND(S) / GIF")
         self._draw_action_button(self._add_rect, self._hover_add, "ADD MORE TO SLIDESHOW")
         self._draw_action_button(self._clear_rect, self._hover_clear, "CLEAR BACKGROUND")
+
+        fs = bool(self._values.get("fullscreen", True))
+        fs_label = "WINDOWED MODE" if fs else "FULLSCREEN MODE"
+        # Highlight the fullscreen button teal when active to show current state
+        fs_active_bg = (0, 80, 80) if not self._hover_fullscreen else (0, 110, 110)
+        fs_inactive_bg = BUTTON_HOVER_BG if self._hover_fullscreen else BUTTON_NORMAL_BG
+        fs_bg = fs_active_bg if not fs else fs_inactive_bg
+        pygame.draw.rect(self.screen, fs_bg, self._fullscreen_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._fullscreen_rect, width=1, border_radius=8)
+        fs_surf = self._value_font.render(fs_label, True, BUTTON_HOVER_TEXT_COLOR if self._hover_fullscreen else BUTTON_TEXT_COLOR)
+        self.screen.blit(fs_surf, fs_surf.get_rect(center=self._fullscreen_rect.center))
 
         # Status line: show what's loaded
         slideshow: list[str] = list(self._values.get("background_slideshow_paths", []))

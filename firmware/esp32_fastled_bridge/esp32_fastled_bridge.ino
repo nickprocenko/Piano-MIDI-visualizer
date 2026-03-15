@@ -146,21 +146,25 @@ void setupBleReceiver() {
   service->start();
 
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
+  advertising->useLegacyAdvertising(true);  // BLE 4.x compatible — visible to phones + Windows
   advertising->addServiceUUID(BLE_SERVICE_UUID);
   advertising->setName(BLE_DEVICE_NAME);
+  advertising->enableScanResponse(true);    // Name in scan response so Windows sees it
   advertising->start();
 }
 #endif
 
 void setup() {
-  delay(2000);
-  Serial.begin(SERIAL_BAUD);
-  Serial.println("=== Piano-LED-Bridge booting ===");
-  Serial.print("HAS_NIMBLE = "); Serial.println(HAS_NIMBLE);
-
+  // Clear LEDs immediately on boot — before any delay — so a reset wipes
+  // whatever noise/state the strip was showing.
   FastLED.addLeds<LED_TYPE, DATA_PIN, CLOCK_PIN, COLOR_ORDER>(leds, LED_COUNT);
   FastLED.setBrightness(BRIGHTNESS);
   clearAll();
+
+  delay(500);
+  Serial.begin(SERIAL_BAUD);
+  Serial.println("=== Piano-LED-Bridge booting ===");
+  Serial.print("HAS_NIMBLE = "); Serial.println(HAS_NIMBLE);
   Serial.println("FastLED ready");
 
 #if ENABLE_BLE

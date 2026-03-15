@@ -41,11 +41,16 @@ def main() -> None:
         pygame.init()
         pygame.font.init()
 
+        from src import config as cfg
+        fullscreen = bool(cfg.load().get("display_style", {}).get("fullscreen", True))
         info = pygame.display.Info()
-        screen = pygame.display.set_mode(
-            (info.current_w, info.current_h),
-            pygame.NOFRAME | pygame.FULLSCREEN,
-        )
+        if fullscreen:
+            screen = pygame.display.set_mode(
+                (info.current_w, info.current_h),
+                pygame.NOFRAME | pygame.FULLSCREEN,
+            )
+        else:
+            screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
         pygame.display.set_caption("Piano MIDI Visualizer")
 
         app = App(screen)

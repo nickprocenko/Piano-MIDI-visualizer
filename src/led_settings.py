@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import threading
+from typing import Optional
+
 import pygame
 from src import config as cfg
+from src.led_output import LedOutput
 
 try:
     from serial.tools import list_ports  # type: ignore
@@ -37,17 +41,22 @@ KNOB_R = 9
 PANEL_MARGIN_X = 26
 PANEL_GAP = 16
 
+_SWEEP_MS_PER_STEP = 8  # ms between LED steps (~1.4 s for 177 LEDs)
+
 
 class LedSettingsScreen:
     """UI for LED serial port, baud, and color/mapping tuning."""
 
     BAUD_OPTIONS = [115200, 230400, 460800, 921600]
     FIELDS = [
-        ("fps_limit", "LED FPS", 5, 120, 1),
-        ("mirror_per_key", "LEDs Per Key", 1, 4, 1),
-        ("active_r", "Active Red", 0, 255, 5),
-        ("active_g", "Active Green", 0, 255, 5),
-        ("active_b", "Active Blue", 0, 255, 5),
+        ("fps_limit",      "LED FPS",          5,   120, 1),
+        ("mirror_per_key", "LEDs Per Key",      1,     4, 1),
+        ("active_r",       "White Key Red",     0,   255, 5),
+        ("active_g",       "White Key Green",   0,   255, 5),
+        ("active_b",       "White Key Blue",    0,   255, 5),
+        ("black_r",        "Black Key Red",     0,   255, 5),
+        ("black_g",        "Black Key Green",   0,   255, 5),
+        ("black_b",        "Black Key Blue",    0,   255, 5),
     ]
 
     def __init__(self, screen: pygame.Surface) -> None:
@@ -79,10 +88,22 @@ class LedSettingsScreen:
         self._port_rect = pygame.Rect(0, 0, 0, 0)
         self._baud_rect = pygame.Rect(0, 0, 0, 0)
         self._refresh_rect = pygame.Rect(0, 0, 0, 0)
+        self._preview_bar_rect = pygame.Rect(0, 0, 0, 0)
+        self._sweep_rect = pygame.Rect(0, 0, 0, 0)
+        self._conn_dot_center: tuple[int, int] = (0, 0)
+
+        # LED output connection state (owned by this screen for test purposes)
+        self._led_output: Optional[LedOutput] = None
+        self._connecting = False
+        self._closed = False
+        self._sweep_pos: int = -1
+        self._sweep_timer_ms: float = 0.0
+        self._hover_sweep = False
 
         self._load()
         self._refresh_ports()
         self._build_layout()
+        self._start_connect()
 
     def handle_event(self, event: pygame.event.Event) -> str | None:
         if event.type == pygame.MOUSEMOTION:
@@ -121,6 +142,19 @@ class LedSettingsScreen:
                     self._set_slider_from_x(i, event.pos[0])
                     return None
 
+            if self._sweep_rect.collidepoint(event.pos):
+                if bool(self._values.get("enabled", False)) and not self._connecting:
+                    if self._led_output is not None and self._led_output.connected:
+                        if self._sweep_pos < 0:
+                            self._sweep_pos = 0
+                            self._sweep_timer_ms = 0.0
+                    else:
+                        if self._led_output is not None:
+                            self._led_output.close()
+                            self._led_output = None
+                        self._start_connect()
+                return None
+
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self._drag_slider = -1
 
@@ -145,6 +179,9 @@ class LedSettingsScreen:
             "active_r": int(data.get("active_r", 0)),
             "active_g": int(data.get("active_g", 220)),
             "active_b": int(data.get("active_b", 220)),
+            "black_r":  int(data.get("black_r",  0)),
+            "black_g":  int(data.get("black_g",  240)),
+            "black_b":  int(data.get("black_b",  255)),
         }
 
     def _save(self) -> None:
@@ -159,6 +196,9 @@ class LedSettingsScreen:
             "active_r": int(self._values["active_r"]),
             "active_g": int(self._values["active_g"]),
             "active_b": int(self._values["active_b"]),
+            "black_r":  int(self._values["black_r"]),
+            "black_g":  int(self._values["black_g"]),
+            "black_b":  int(self._values["black_b"]),
         }
         cfg.save(data)
 
@@ -235,12 +275,18 @@ class LedSettingsScreen:
 
         self._back_rect = pygame.Rect(cx - BACK_W // 2, sr.height - BACK_H - 24, BACK_W, BACK_H)
 
+        preview_y = self._refresh_rect.bottom + 90
+        self._preview_bar_rect = pygame.Rect(rp.left + 20, preview_y, rp.width - 40, 24)
+        self._sweep_rect = pygame.Rect(rp.left + 20, self._preview_bar_rect.bottom + 14, rp.width - 40, 46)
+        self._conn_dot_center = (rp.right - 18, rp.top + 18)
+
     def _update_hover(self, pos: tuple[int, int]) -> None:
         self._hover_back = self._back_rect.collidepoint(pos)
         self._hover_enable = self._enable_rect.collidepoint(pos)
         self._hover_port = self._port_rect.collidepoint(pos)
         self._hover_baud = self._baud_rect.collidepoint(pos)
         self._hover_refresh = self._refresh_rect.collidepoint(pos)
+        self._hover_sweep = self._sweep_rect.collidepoint(pos)
         self._hover_slider = -1
         for i, rect in enumerate(self._slider_rects):
             if rect.inflate(0, 18).collidepoint(pos):
@@ -305,6 +351,18 @@ class LedSettingsScreen:
         title = self._label_font.render("Output", True, TEXT_COLOR)
         self.screen.blit(title, (self._right_panel.left + 16, self._right_panel.top + 14))
 
+        # Connection status dot (top-right of panel)
+        if not bool(self._values.get("enabled", False)):
+            _dot_color = (70, 70, 90)      # gray  — disabled
+        elif self._connecting:
+            _dot_color = (230, 160, 0)     # amber — connecting
+        elif self._led_output is not None and self._led_output.connected:
+            _dot_color = (0, 200, 80)      # green — connected
+        else:
+            _dot_color = (200, 50, 50)     # red   — disconnected
+        pygame.draw.circle(self.screen, _dot_color, self._conn_dot_center, 7)
+        pygame.draw.circle(self.screen, (40, 40, 60), self._conn_dot_center, 7, width=1)
+
         cb_bg = (45, 45, 60) if self._hover_enable else (35, 35, 45)
         pygame.draw.rect(self.screen, cb_bg, self._enable_rect, border_radius=5)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._enable_rect, width=1, border_radius=5)
@@ -325,12 +383,29 @@ class LedSettingsScreen:
         count_txt = self._value_font.render(f"LED Count: {led_count}", True, TEXT_COLOR)
         self.screen.blit(count_txt, (self._right_panel.left + 20, self._refresh_rect.bottom + 54))
 
-        preview = pygame.Rect(self._right_panel.left + 20, self._refresh_rect.bottom + 90, self._right_panel.width - 40, 24)
-        pygame.draw.rect(self.screen, (20, 20, 24), preview, border_radius=6)
-        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, preview, width=1, border_radius=6)
-        c = (int(self._values["active_r"]), int(self._values["active_g"]), int(self._values["active_b"]))
-        on_bar = preview.inflate(-4, -6)
-        pygame.draw.rect(self.screen, c, on_bar, border_radius=4)
+        pygame.draw.rect(self.screen, (20, 20, 24), self._preview_bar_rect, border_radius=6)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._preview_bar_rect, width=1, border_radius=6)
+        # Left half = white key color, right half = black key color
+        half_w = (self._preview_bar_rect.width - 6) // 2
+        white_c = (int(self._values["active_r"]), int(self._values["active_g"]), int(self._values["active_b"]))
+        black_c = (int(self._values["black_r"]),  int(self._values["black_g"]),  int(self._values["black_b"]))
+        white_bar = pygame.Rect(self._preview_bar_rect.left + 2, self._preview_bar_rect.top + 3, half_w, self._preview_bar_rect.height - 6)
+        black_bar = pygame.Rect(white_bar.right + 2, white_bar.top, self._preview_bar_rect.right - 2 - white_bar.right - 2, white_bar.height)
+        pygame.draw.rect(self.screen, white_c, white_bar, border_radius=4)
+        pygame.draw.rect(self.screen, black_c, black_bar, border_radius=4)
+
+        # Sweep test / connect button
+        if bool(self._values.get("enabled", False)):
+            if self._connecting:
+                self._draw_action_row(self._sweep_rect, False, "Connecting...")
+            elif self._led_output is not None and self._led_output.connected:
+                if self._sweep_pos >= 0:
+                    led_count = int(self._values["mirror_per_key"]) * 88
+                    self._draw_action_row(self._sweep_rect, False, f"Sweeping {self._sweep_pos}/{led_count}")
+                else:
+                    self._draw_action_row(self._sweep_rect, self._hover_sweep, "Sweep Test")
+            else:
+                self._draw_action_row(self._sweep_rect, self._hover_sweep, "Reconnect")
 
     def _draw_action_row(self, rect: pygame.Rect, hover: bool, text: str) -> None:
         bg = BUTTON_HOVER_BG if hover else BUTTON_NORMAL_BG
@@ -344,6 +419,80 @@ class LedSettingsScreen:
         key, _label, min_v, max_v, _step = self.FIELDS[index]
         span = max(1, max_v - min_v)
         return (int(self._values[key]) - min_v) / float(span)
+
+    # ------------------------------------------------------------------
+    # BLE/Serial test connection
+    # ------------------------------------------------------------------
+
+    def update(self, dt: int) -> None:
+        """Called every frame from App._update while this screen is active."""
+        if self._sweep_pos < 0:
+            return
+        if self._led_output is None or not self._led_output.connected:
+            self._sweep_pos = -1
+            return
+
+        self._sweep_timer_ms += dt
+        if self._sweep_timer_ms < _SWEEP_MS_PER_STEP:
+            return
+        self._sweep_timer_ms -= _SWEEP_MS_PER_STEP
+
+        led_count = int(self._values["mirror_per_key"]) * 88
+        if self._sweep_pos >= led_count:
+            blank = f"LEDS,{led_count}," + ",".join(["0,0,0"] * led_count) + "\n"
+            self._led_output.send_raw(blank.encode())
+            self._sweep_pos = -1
+            return
+
+        leds = ["0,0,0"] * led_count
+        leds[self._sweep_pos] = "255,0,0"
+        frame = f"LEDS,{led_count}," + ",".join(leds) + "\n"
+        self._led_output.send_raw(frame.encode())
+        self._sweep_pos += 1
+
+    def cleanup(self) -> None:
+        """Release the LED connection.  Call before discarding this screen."""
+        self._closed = True
+        self._sweep_pos = -1
+        if self._led_output is not None:
+            if self._led_output.connected:
+                try:
+                    led_count = int(self._values["mirror_per_key"]) * 88
+                    blank = f"LEDS,{led_count}," + ",".join(["0,0,0"] * led_count) + "\n"
+                    self._led_output.send_raw(blank.encode())
+                except Exception:
+                    pass
+            self._led_output.close()
+            self._led_output = None
+        self._connecting = False
+
+    def _start_connect(self) -> None:
+        if self._connecting or self._closed:
+            return
+        if not bool(self._values.get("enabled", False)):
+            return
+        self._connecting = True
+        t = threading.Thread(target=self._do_connect, daemon=True)
+        t.start()
+
+    def _do_connect(self) -> None:
+        try:
+            lo = LedOutput.from_config()
+            lo.connect()
+            if self._closed:
+                lo.close()
+                return
+            old = self._led_output
+            self._led_output = lo
+            if old is not None:
+                try:
+                    old.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        finally:
+            self._connecting = False
 
     def _draw_back(self) -> None:
         bg = BUTTON_HOVER_BG if self._hover_back else BUTTON_NORMAL_BG

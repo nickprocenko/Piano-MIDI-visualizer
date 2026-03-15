@@ -56,6 +56,12 @@ class LedOutputConfig:
     active_r: int
     active_g: int
     active_b: int
+    black_r: int
+    black_g: int
+    black_b: int
+
+
+_BLACK_KEY_SEMITONES: frozenset[int] = frozenset({1, 3, 6, 8, 10})  # C# D# F# G# A#
 
 
 class _BleLedSender:
@@ -185,12 +191,26 @@ class LedOutput:
 
     @property
     def connected(self) -> bool:
+        if self._cfg.transport == "ble":
+            return self._connected and self._ble is not None and bool(self._ble.connected)
         return self._connected
+
+    def send_raw(self, data: bytes) -> bool:
+        """Send a pre-built raw frame, bypassing the FPS rate limiter."""
+        if not self.connected:
+            return False
+        return self._send_frame(data)
 
     def set_active_color(self, r: int, g: int, b: int) -> None:
         self._cfg.active_r = max(0, min(255, int(r)))
         self._cfg.active_g = max(0, min(255, int(g)))
         self._cfg.active_b = max(0, min(255, int(b)))
+        self._last_frame = b""
+
+    def set_black_key_color(self, r: int, g: int, b: int) -> None:
+        self._cfg.black_r = max(0, min(255, int(r)))
+        self._cfg.black_g = max(0, min(255, int(g)))
+        self._cfg.black_b = max(0, min(255, int(b)))
         self._last_frame = b""
 
     @staticmethod
@@ -216,6 +236,9 @@ class LedOutput:
             active_r=max(0, min(255, int(data.get("active_r", 0)))),
             active_g=max(0, min(255, int(data.get("active_g", 220)))),
             active_b=max(0, min(255, int(data.get("active_b", 220)))),
+            black_r=max(0, min(255, int(data.get("black_r", 0)))),
+            black_g=max(0, min(255, int(data.get("black_g", 240)))),
+            black_b=max(0, min(255, int(data.get("black_b", 255)))),
         )
         return LedOutput(conf)
 
@@ -318,10 +341,16 @@ class LedOutput:
                 continue
             key_index = note - PIANO_FIRST_NOTE
             base = key_index * self._cfg.mirror_per_key
+            is_black = (note % 12) in _BLACK_KEY_SEMITONES
+            color = (
+                (self._cfg.black_r, self._cfg.black_g, self._cfg.black_b)
+                if is_black
+                else (self._cfg.active_r, self._cfg.active_g, self._cfg.active_b)
+            )
             for i in range(self._cfg.mirror_per_key):
                 led_idx = base + i
                 if 0 <= led_idx < led_count:
-                    leds[led_idx] = (self._cfg.active_r, self._cfg.active_g, self._cfg.active_b)
+                    leds[led_idx] = color
 
         flat = [str(led_count)]
         for r, g, b in leds:
