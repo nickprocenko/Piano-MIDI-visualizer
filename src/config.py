@@ -56,6 +56,12 @@ _DEFAULTS: dict[str, Any] = {
         "app_api_key": "",
         "reconnect_sec": 2.0,
     },
+    "slide_palette": {
+        "enabled": False,
+        "transition_ms": 2000,
+        "palette": [],
+        "palette_index": 0,
+    },
 }
 
 

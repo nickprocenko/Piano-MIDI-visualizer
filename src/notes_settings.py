@@ -75,6 +75,9 @@ class NotesSettingsScreen:
         ("effect_sparks_enabled", "Sparks"),
         ("effect_smoke_enabled", "Smoke"),
         ("effect_press_smoke_enabled", "Start Mist"),
+        ("effect_moon_dust_enabled", "Moon Dust"),
+        ("effect_steam_smoke_enabled", "Steam Wisps"),
+        ("effect_halo_pulse_enabled", "Halo Pulse"),
     ]
 
     EFFECT_FIELDS = [
@@ -90,6 +93,36 @@ class NotesSettingsScreen:
         ("color", "COLOR"),
         ("effects", "EFFECTS"),
         ("themes", "THEMES"),
+    ]
+
+    # Slide palette for Claire De Lune: 5 moonlit colour scenes tied to slideshow slides.
+    # Each entry sets note outer/interior colours and LED white/black key colours.
+    CLAIRE_DE_LUNE_PALETTE: list[dict[str, int]] = [
+        # 1 — Moonlight (opening)
+        {"color_r": 86,  "color_g": 128, "color_b": 220,
+         "interior_r": 180, "interior_g": 210, "interior_b": 255,
+         "active_r": 40,  "active_g": 90,  "active_b": 200,
+         "black_r": 20,  "black_g": 60,  "black_b": 180},
+        # 2 — Sapphire depths (development)
+        {"color_r": 30,  "color_g": 70,  "color_b": 200,
+         "interior_r": 100, "interior_g": 140, "interior_b": 240,
+         "active_r": 0,   "active_g": 60,  "active_b": 200,
+         "black_r": 0,   "black_g": 40,  "black_b": 170},
+        # 3 — Violet cascade (climax)
+        {"color_r": 110, "color_g": 55,  "color_b": 195,
+         "interior_r": 185, "interior_g": 140, "interior_b": 255,
+         "active_r": 90,  "active_g": 40,  "active_b": 185,
+         "black_r": 120, "black_g": 30,  "black_b": 200},
+        # 4 — Pearl shimmer (recapitulation)
+        {"color_r": 160, "color_g": 190, "color_b": 255,
+         "interior_r": 215, "interior_g": 230, "interior_b": 255,
+         "active_r": 120, "active_g": 155, "active_b": 220,
+         "black_r": 140, "black_g": 175, "black_b": 240},
+        # 5 — Dawn fade (coda)
+        {"color_r": 55,  "color_g": 105, "color_b": 210,
+         "interior_r": 145, "interior_g": 185, "interior_b": 255,
+         "active_r": 30,  "active_g": 80,  "active_b": 200,
+         "black_r": 10,  "black_g": 60,  "black_b": 175},
     ]
 
     THEMES: list[tuple[str, str, dict[str, int | str]]] = [
@@ -125,6 +158,7 @@ class NotesSettingsScreen:
                 "interior_b": 255,
                 "active_theme_id": "claire_de_lune",
                 "experimental_claire_script_enabled": 1,
+                "_slide_palette": CLAIRE_DE_LUNE_PALETTE,
             },
         ),
         (
@@ -229,7 +263,10 @@ class NotesSettingsScreen:
         self._preview_active_trail: dict[str, float | bool] | None = None
         self._preview_cycle_ms = 0
         self._preview_was_on = False
-        self._fx_renderer = NoteEffectRenderer(screen)
+        # Dedicated off-screen surface for the preview panel so bloom/glow is
+        # contained and never bleeds across the rest of the settings UI.
+        self._preview_surf: pygame.Surface | None = None
+        self._preview_fx_renderer: NoteEffectRenderer | None = None
 
         self._load()
         self._build_layout()
@@ -326,7 +363,7 @@ class NotesSettingsScreen:
             trail["top_y"] = float(trail["top_y"]) - dy
             if bool(trail["released"]):
                 trail["bottom_y"] = float(trail["bottom_y"]) - dy
-            if float(trail["bottom_y"]) > self._preview_rect.top:
+            if float(trail["bottom_y"]) > 0:  # surface-relative: 0 is top of preview
                 survivors.append(trail)
         self._preview_trails = survivors
 
@@ -396,6 +433,14 @@ class NotesSettingsScreen:
             self._left_panel.right + PANEL_GAP, content_top, half_w, content_h
         )
         self._preview_rect = self._right_panel.inflate(-16, -16)
+
+        # Create/resize the off-screen preview surface so bloom stays inside it.
+        pw, ph = self._preview_rect.width, self._preview_rect.height
+        if pw > 0 and ph > 0:
+            self._preview_surf = pygame.Surface((pw, ph))
+            # bloom_downscale=0 disables the full-surface bloom pass in the preview;
+            # the glow rings in _fx_surf look correct without it on a small surface.
+            self._preview_fx_renderer = NoteEffectRenderer(self._preview_surf, bloom_downscale=0)
 
         # Layer buttons
         layers_count = len(self.LAYERS)
@@ -748,8 +793,24 @@ class NotesSettingsScreen:
 
     def _apply_theme(self, theme_index: int) -> None:
         _theme_id, _label, vals = self.THEMES[theme_index]
-        self._values.update(vals)
+        # Separate note_style fields from private meta keys (prefixed with _).
+        note_style_vals = {k: v for k, v in vals.items() if not k.startswith("_")}
+        self._values.update(note_style_vals)
         self._save()
+        # If this theme carries a slide palette, enable it in config.
+        palette = vals.get("_slide_palette")
+        if palette is not None:
+            data = cfg.load()
+            sp = data.setdefault("slide_palette", {})
+            sp["enabled"] = True
+            sp["palette"] = [dict(entry) for entry in palette]
+            sp["palette_index"] = 0
+            cfg.save(data)
+        else:
+            # Applying a non-palette theme disables slide-palette cycling.
+            data = cfg.load()
+            data.setdefault("slide_palette", {})["enabled"] = False
+            cfg.save(data)
 
     def _value_ratio(self, index: int) -> float:
         key, _label, min_v, max_v, _step = self._active_fields()[index]
@@ -786,11 +847,14 @@ class NotesSettingsScreen:
         self._preview_active_trail["width"] = float(self._values["width_px"])
 
     def _preview_key_rect(self) -> pygame.Rect:
+        """Return key rect in preview-surface–relative coordinates."""
         key_w = 42
         key_h = 88
+        pw = self._preview_rect.width
+        ph = self._preview_rect.height
         return pygame.Rect(
-            self._preview_rect.centerx - key_w // 2,
-            self._preview_rect.bottom - key_h - 14,
+            pw // 2 - key_w // 2,
+            ph - key_h - 14,
             key_w,
             key_h,
         )
@@ -807,9 +871,14 @@ class NotesSettingsScreen:
         hint = self._value_font.render("1s on, 1s off preview loop", True, MUTED_TEXT_COLOR)
         self.screen.blit(hint, (self._preview_rect.left + 12, self._preview_rect.top + 38))
 
-        key_rect = self._preview_key_rect()
-        pygame.draw.rect(self.screen, KEY_COLOR, key_rect, border_radius=4)
-        pygame.draw.rect(self.screen, KEY_BORDER, key_rect, width=1, border_radius=4)
+        if self._preview_surf is None or self._preview_fx_renderer is None:
+            return
+
+        # Clear the off-screen surface and draw the key into it.
+        self._preview_surf.fill(PANEL_BG)
+        key_rect = self._preview_key_rect()  # surface-relative
+        pygame.draw.rect(self._preview_surf, KEY_COLOR, key_rect, border_radius=4)
+        pygame.draw.rect(self._preview_surf, KEY_BORDER, key_rect, width=1, border_radius=4)
 
         note_style = {
             "color_r": self._values["color_r"],
@@ -837,12 +906,16 @@ class NotesSettingsScreen:
             "decay_speed": self._values["decay_speed"],
             "decay_value": self._values["decay_value"],
         }
-        self._fx_renderer.begin_frame()
+        self._preview_fx_renderer.begin_frame()
         for trail in self._preview_trails:
-            self._fx_renderer.draw_trail(trail, note_style, clip_rect=self._preview_rect)
-        self._fx_renderer.end_frame()
+            # No clip_rect needed — the surface is already the preview size.
+            self._preview_fx_renderer.draw_trail(trail, note_style)
+        self._preview_fx_renderer.end_frame()
 
-        # Re-draw borders so they sit on top of any glow bleed
+        # Blit the fully-composited preview surface onto the screen.
+        self.screen.blit(self._preview_surf, self._preview_rect.topleft)
+
+        # Re-draw borders so they sit on top of any glow bleed.
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._right_panel, width=1, border_radius=8)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._preview_rect, width=1, border_radius=8)
 

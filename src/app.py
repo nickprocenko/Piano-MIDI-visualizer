@@ -91,6 +91,19 @@ class App:
         self._claire_color_target = list(self._color_current)
         self._claire_blend_ms = 0
         self._claire_blend_elapsed_ms = 0
+        # Slide-linked colour palette cycling
+        self._slide_palette_cfg: dict = {}
+        self._palette_index: int = 0
+        self._palette_color_current: list[float] = list(self._color_current)
+        self._palette_color_start: list[float] = list(self._color_current)
+        self._palette_color_target: list[float] = list(self._color_current)
+        self._palette_interior_current: list[float] = [float(self._note_style.get("interior_r", 200)),
+                                                        float(self._note_style.get("interior_g", 220)),
+                                                        float(self._note_style.get("interior_b", 255))]
+        self._palette_interior_start: list[float] = list(self._palette_interior_current)
+        self._palette_interior_target: list[float] = list(self._palette_interior_current)
+        self._palette_blend_ms: int = 0
+        self._palette_blend_elapsed_ms: int = 0
         self._last_dt_ms: int = 0
         self._smoothed_dt_ms: float = 16.67
         self._last_phase: str = "init"
@@ -220,6 +233,31 @@ class App:
         self._active_note_trails.clear()
         self._note_trails.clear()
         self._fx_renderer = NoteEffectRenderer(self.screen)
+        # Load slide palette config and initialise colour state from first entry.
+        self._slide_palette_cfg = cfg.load().get("slide_palette", {})
+        palette = self._slide_palette_cfg.get("palette", [])
+        self._palette_index = 0
+        if palette:
+            entry = palette[0]
+            self._palette_color_current  = [float(entry.get("color_r", self._note_style["color_r"])),
+                                             float(entry.get("color_g", self._note_style["color_g"])),
+                                             float(entry.get("color_b", self._note_style["color_b"]))]
+            self._palette_interior_current = [float(entry.get("interior_r", self._note_style.get("interior_r", 200))),
+                                               float(entry.get("interior_g", self._note_style.get("interior_g", 220))),
+                                               float(entry.get("interior_b", self._note_style.get("interior_b", 255)))]
+        else:
+            self._palette_color_current  = [float(self._note_style["color_r"]),
+                                             float(self._note_style["color_g"]),
+                                             float(self._note_style["color_b"])]
+            self._palette_interior_current = [float(self._note_style.get("interior_r", 200)),
+                                               float(self._note_style.get("interior_g", 220)),
+                                               float(self._note_style.get("interior_b", 255))]
+        self._palette_color_start    = list(self._palette_color_current)
+        self._palette_color_target   = list(self._palette_color_current)
+        self._palette_interior_start  = list(self._palette_interior_current)
+        self._palette_interior_target = list(self._palette_interior_current)
+        self._palette_blend_ms = 0
+        self._palette_blend_elapsed_ms = 0
 
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
@@ -411,6 +449,7 @@ class App:
         self._sync_highway_targets()
 
         self._update_audience_color(dt)
+        self._update_slide_palette(dt)
 
         if self._selected_midi_file is not None:
             return
@@ -858,6 +897,93 @@ class App:
         except Exception:
             return [], []
 
+    def _on_slide_advance(self) -> None:
+        """Called each time the background slideshow advances to the next slide.
+        If a slide palette is active, cycle to the next palette colour entry."""
+        sp = self._slide_palette_cfg
+        if not sp.get("enabled", False):
+            return
+        palette: list[dict] = sp.get("palette", [])
+        if len(palette) < 2:
+            return
+        self._palette_index = (self._palette_index + 1) % len(palette)
+        entry = palette[self._palette_index]
+        transition_ms = max(200, int(sp.get("transition_ms", 2000)))
+        self._palette_color_start    = list(self._palette_color_current)
+        self._palette_color_target   = [float(entry.get("color_r", 86)),
+                                         float(entry.get("color_g", 128)),
+                                         float(entry.get("color_b", 220))]
+        self._palette_interior_start  = list(self._palette_interior_current)
+        self._palette_interior_target = [float(entry.get("interior_r", 180)),
+                                          float(entry.get("interior_g", 210)),
+                                          float(entry.get("interior_b", 255))]
+        self._palette_blend_ms = transition_ms
+        self._palette_blend_elapsed_ms = 0
+
+    def _update_slide_palette(self, dt: int) -> None:
+        """Advance the slide-palette colour blend and push colours to note_style + LEDs."""
+        sp = self._slide_palette_cfg
+        if not sp.get("enabled", False):
+            return
+        palette: list[dict] = sp.get("palette", [])
+        if not palette:
+            return
+
+        if self._palette_blend_ms > 0 and self._palette_blend_elapsed_ms < self._palette_blend_ms:
+            self._palette_blend_elapsed_ms = min(self._palette_blend_ms,
+                                                  self._palette_blend_elapsed_ms + dt)
+            a = self._palette_blend_elapsed_ms / float(max(1, self._palette_blend_ms))
+            smooth = a * a * (3.0 - 2.0 * a)
+            self._palette_color_current = [
+                self._palette_color_start[i] + (self._palette_color_target[i] - self._palette_color_start[i]) * smooth
+                for i in range(3)
+            ]
+            self._palette_interior_current = [
+                self._palette_interior_start[i] + (self._palette_interior_target[i] - self._palette_interior_start[i]) * smooth
+                for i in range(3)
+            ]
+
+        r  = max(0, min(255, int(self._palette_color_current[0])))
+        g  = max(0, min(255, int(self._palette_color_current[1])))
+        b  = max(0, min(255, int(self._palette_color_current[2])))
+        ir = max(0, min(255, int(self._palette_interior_current[0])))
+        ig = max(0, min(255, int(self._palette_interior_current[1])))
+        ib = max(0, min(255, int(self._palette_interior_current[2])))
+
+        self._note_style["color_r"] = r
+        self._note_style["color_g"] = g
+        self._note_style["color_b"] = b
+        self._note_style["interior_r"] = ir
+        self._note_style["interior_g"] = ig
+        self._note_style["interior_b"] = ib
+
+        # Keep the audience-color tracker in sync so audience events blend
+        # from the current palette colour rather than jumping.
+        self._color_current = [float(r), float(g), float(b)]
+
+        if self._led_output is not None:
+            entry = palette[self._palette_index % len(palette)]
+            prev_entry = palette[(self._palette_index - 1) % len(palette)]
+            bratio = min(1.0, self._palette_blend_elapsed_ms / float(max(1, self._palette_blend_ms))) \
+                if self._palette_blend_ms > 0 else 1.0
+            smooth = bratio * bratio * (3.0 - 2.0 * bratio)
+            # White-key LED colour
+            pr = prev_entry.get("active_r", r);  tr = entry.get("active_r", r)
+            pg = prev_entry.get("active_g", g);  tg = entry.get("active_g", g)
+            pb = prev_entry.get("active_b", b);  tb = entry.get("active_b", b)
+            ar = max(0, min(255, int(pr + (tr - pr) * smooth)))
+            ag = max(0, min(255, int(pg + (tg - pg) * smooth)))
+            ab = max(0, min(255, int(pb + (tb - pb) * smooth)))
+            self._led_output.set_active_color(ar, ag, ab)
+            # Black-key LED colour
+            pbkr = prev_entry.get("black_r", 0);  bkr = entry.get("black_r", 0)
+            pbkg = prev_entry.get("black_g", 60); bkg = entry.get("black_g", 60)
+            pbkb = prev_entry.get("black_b", 180); bkb = entry.get("black_b", 180)
+            fkr = max(0, min(255, int(pbkr + (bkr - pbkr) * smooth)))
+            fkg = max(0, min(255, int(pbkg + (bkg - pbkg) * smooth)))
+            fkb = max(0, min(255, int(pbkb + (bkb - pbkb) * smooth)))
+            self._led_output.set_black_key_color(fkr, fkg, fkb)
+
     def _load_background_slides(self) -> list[tuple[list[pygame.Surface], list[float]]]:
         """Build slide list from config. Slideshow paths take priority over single image."""
         slideshow_paths: list[str] = list(self._display_style.get("background_slideshow_paths", []))
@@ -891,6 +1017,7 @@ class App:
                 self._bg_slide_index = (self._bg_slide_index + 1) % len(self._bg_slides)
                 self._bg_frame_index = 0
                 self._bg_frame_ms = 0.0
+                self._on_slide_advance()
 
         frames, durations = self._bg_slides[self._bg_slide_index % len(self._bg_slides)]
         if not frames:
