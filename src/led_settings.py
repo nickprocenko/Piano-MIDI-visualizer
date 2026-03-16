@@ -51,12 +51,6 @@ class LedSettingsScreen:
     FIELDS = [
         ("fps_limit",      "LED FPS",          5,   120, 1),
         ("mirror_per_key", "LEDs Per Key",      1,     4, 1),
-        ("active_r",       "White Key Red",     0,   255, 5),
-        ("active_g",       "White Key Green",   0,   255, 5),
-        ("active_b",       "White Key Blue",    0,   255, 5),
-        ("black_r",        "Black Key Red",     0,   255, 5),
-        ("black_g",        "Black Key Green",   0,   255, 5),
-        ("black_b",        "Black Key Blue",    0,   255, 5),
     ]
 
     def __init__(self, screen: pygame.Surface) -> None:
@@ -168,7 +162,9 @@ class LedSettingsScreen:
         self._draw_back()
 
     def _load(self) -> None:
-        data = cfg.load().get("led_output", {})
+        full = cfg.load()
+        data = full.get("led_output", {})
+        note = full.get("note_style", {})
         self._values = {
             "enabled": bool(data.get("enabled", False)),
             "port": str(data.get("port", "COM5")),
@@ -176,30 +172,24 @@ class LedSettingsScreen:
             "led_count": int(data.get("led_count", 176)),
             "fps_limit": int(data.get("fps_limit", 30)),
             "mirror_per_key": int(data.get("mirror_per_key", 2)),
-            "active_r": int(data.get("active_r", 0)),
-            "active_g": int(data.get("active_g", 220)),
-            "active_b": int(data.get("active_b", 220)),
-            "black_r":  int(data.get("black_r",  0)),
-            "black_g":  int(data.get("black_g",  240)),
-            "black_b":  int(data.get("black_b",  255)),
+            # Active colour tracks note colour — not stored separately
+            "active_r": int(note.get("color_r", 0)),
+            "active_g": int(note.get("color_g", 230)),
+            "active_b": int(note.get("color_b", 230)),
         }
 
     def _save(self) -> None:
         data = cfg.load()
-        data["led_output"] = {
+        # Merge — only overwrite fields this screen owns; preserve transport/ble_* etc.
+        # active_r/g/b are NOT saved here — they track note colour at runtime.
+        data.setdefault("led_output", {}).update({
             "enabled": bool(self._values["enabled"]),
             "port": str(self._values["port"]),
             "baudrate": int(self._values["baudrate"]),
             "led_count": int(self._values["led_count"]),
             "mirror_per_key": int(self._values["mirror_per_key"]),
             "fps_limit": int(self._values["fps_limit"]),
-            "active_r": int(self._values["active_r"]),
-            "active_g": int(self._values["active_g"]),
-            "active_b": int(self._values["active_b"]),
-            "black_r":  int(self._values["black_r"]),
-            "black_g":  int(self._values["black_g"]),
-            "black_b":  int(self._values["black_b"]),
-        }
+        })
         cfg.save(data)
 
     def _refresh_ports(self) -> None:
@@ -385,14 +375,9 @@ class LedSettingsScreen:
 
         pygame.draw.rect(self.screen, (20, 20, 24), self._preview_bar_rect, border_radius=6)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._preview_bar_rect, width=1, border_radius=6)
-        # Left half = white key color, right half = black key color
-        half_w = (self._preview_bar_rect.width - 6) // 2
-        white_c = (int(self._values["active_r"]), int(self._values["active_g"]), int(self._values["active_b"]))
-        black_c = (int(self._values["black_r"]),  int(self._values["black_g"]),  int(self._values["black_b"]))
-        white_bar = pygame.Rect(self._preview_bar_rect.left + 2, self._preview_bar_rect.top + 3, half_w, self._preview_bar_rect.height - 6)
-        black_bar = pygame.Rect(white_bar.right + 2, white_bar.top, self._preview_bar_rect.right - 2 - white_bar.right - 2, white_bar.height)
-        pygame.draw.rect(self.screen, white_c, white_bar, border_radius=4)
-        pygame.draw.rect(self.screen, black_c, black_bar, border_radius=4)
+        note_c = (int(self._values["active_r"]), int(self._values["active_g"]), int(self._values["active_b"]))
+        note_bar = pygame.Rect(self._preview_bar_rect.left + 2, self._preview_bar_rect.top + 3, self._preview_bar_rect.width - 4, self._preview_bar_rect.height - 6)
+        pygame.draw.rect(self.screen, note_c, note_bar, border_radius=4)
 
         # Sweep test / connect button
         if bool(self._values.get("enabled", False)):

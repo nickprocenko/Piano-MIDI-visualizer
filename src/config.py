@@ -30,24 +30,12 @@ _DEFAULTS: dict[str, Any] = {
         "led_count": 177,
         "mirror_per_key": 2,
         "fps_limit": 30,
-        "active_r": 0,
-        "active_g": 220,
-        "active_b": 220,
-        "black_r": 0,
-        "black_g": 240,
-        "black_b": 255,
     },
     "display_style": {
         "width_scale_percent": 66,
         "background_alpha": 120,
         "background_image": "",
         "fullscreen": True,
-    },
-    "keyboard_style": {
-        "height_percent": 18,
-        "brightness": 100,
-        "visible": True,
-        "sustain_latch": False,
     },
     "audience_control": {
         "enabled": False,
@@ -56,12 +44,8 @@ _DEFAULTS: dict[str, Any] = {
         "app_api_key": "",
         "reconnect_sec": 2.0,
     },
-    "slide_palette": {
-        "enabled": False,
-        "transition_ms": 2000,
-        "palette": [],
-        "palette_index": 0,
-    },
+    "user_themes": [],
+    "active_user_theme_index": 0,
 }
 
 

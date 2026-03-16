@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import threading
 from typing import Optional
 import pygame
@@ -15,9 +16,8 @@ except ImportError:
 # MIDI status byte constants (high nibble after masking out channel)
 _STATUS_MASK = 0xF0
 _NOTE_OFF = 0x80
-_NOTE_ON  = 0x90
-_CC       = 0xB0
-_CC_SUSTAIN = 64
+_NOTE_ON = 0x90
+_CC = 0xB0  # Control Change (CC 64 = sustain pedal)
 
 VIRTUAL_PORT_NAME = "Computer Keyboard (Virtual MIDI)"
 
@@ -73,9 +73,7 @@ class MidiInput:
     def __init__(self) -> None:
         self._midi_in: Optional[object] = None  # rtmidi.MidiIn instance
         self._active_notes: set[int] = set()
-        self._sustained_notes: set[int] = set()  # notes held only by sustain pedal
-        self._sustain_active: bool = False
-        self.sustain_latch: bool = False          # settable from outside
+        self._cc_events: collections.deque[tuple[int, int]] = collections.deque(maxlen=64)
         self._lock = threading.Lock()
         self._virtual_mode: bool = False
         self.port_name: str = ""
@@ -165,6 +163,13 @@ class MidiInput:
         with self._lock:
             return set(self._active_notes)
 
+    def drain_cc_events(self) -> list[tuple[int, int]]:
+        """Atomically drain and return all queued CC events as (cc_number, value) pairs."""
+        with self._lock:
+            events = list(self._cc_events)
+            self._cc_events.clear()
+        return events
+
     def close(self) -> None:
         """Close the MIDI port and release all resources."""
         if self._midi_in is not None:
@@ -176,8 +181,6 @@ class MidiInput:
             self._midi_in = None
         with self._lock:
             self._active_notes.clear()
-            self._sustained_notes.clear()
-            self._sustain_active = False
         self._virtual_mode = False
         self.connected = False
         self.port_name = ""
@@ -206,23 +209,11 @@ class MidiInput:
         if status == _NOTE_ON and velocity > 0:
             with self._lock:
                 self._active_notes.add(note)
-                self._sustained_notes.discard(note)  # physical press overrides sustain hold
         # Note Off OR Note On with velocity 0 → remove note
         elif status == _NOTE_OFF or (status == _NOTE_ON and velocity == 0):
             with self._lock:
-                if self.sustain_latch and self._sustain_active:
-                    # Keep note sounding; mark it as sustain-held
-                    self._sustained_notes.add(note)
-                else:
-                    self._active_notes.discard(note)
-        # CC — handle sustain pedal (CC 64)
-        elif status == _CC and note == _CC_SUSTAIN:
-            pedal_down = velocity >= 64
+                self._active_notes.discard(note)
+        # Control Change → queue for polling
+        elif status == _CC:
             with self._lock:
-                if pedal_down:
-                    self._sustain_active = True
-                elif self._sustain_active:
-                    self._sustain_active = False
-                    # Release all sustain-held notes that aren't physically held
-                    self._active_notes -= self._sustained_notes
-                    self._sustained_notes.clear()
+                self._cc_events.append((note, velocity))  # note=cc number, velocity=cc value

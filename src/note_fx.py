@@ -46,8 +46,9 @@ class NoteEffectRenderer:
     they travel/expire alongside the ribbon.
     """
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: pygame.Surface, bloom_downscale: int = _BLOOM_DOWNSCALE) -> None:
         self._screen = screen
+        self._bloom_downscale = bloom_downscale  # set 0 to disable bloom (e.g. small preview surfaces)
         self._fx_surf: pygame.Surface | None = None
         self._bloom_downsample: pygame.Surface | None = None
         self._bloom_upsample: pygame.Surface | None = None
@@ -59,10 +60,15 @@ class NoteEffectRenderer:
         self._screen = screen
         w, h = screen.get_size()
         self._fx_surf = pygame.Surface((w, h), pygame.SRCALPHA)
-        bloom_w = max(1, w // _BLOOM_DOWNSCALE)
-        bloom_h = max(1, h // _BLOOM_DOWNSCALE)
-        self._bloom_downsample = pygame.Surface((bloom_w, bloom_h), pygame.SRCALPHA)
-        self._bloom_upsample = pygame.Surface((w, h), pygame.SRCALPHA)
+        ds = getattr(self, "_bloom_downscale", _BLOOM_DOWNSCALE)
+        if ds > 0:
+            bloom_w = max(1, w // ds)
+            bloom_h = max(1, h // ds)
+            self._bloom_downsample = pygame.Surface((bloom_w, bloom_h), pygame.SRCALPHA)
+            self._bloom_upsample = pygame.Surface((w, h), pygame.SRCALPHA)
+        else:
+            self._bloom_downsample = None
+            self._bloom_upsample = None
 
     def set_target(self, screen: pygame.Surface) -> None:
         """Retarget drawing to *screen*, resizing buffers only when needed."""
@@ -318,10 +324,15 @@ class NoteEffectRenderer:
                 )
 
             if highlight_enabled and highlight_strength > 0.0:
-                # Soft inset highlight avoids hard edge seams on the left side.
-                hl_w = max(2, min(max(2, w // 10), max(2, bar.width // 5)))
+                # Left-edge specular highlight — wide enough to be clearly visible.
+                hl_w = max(3, min(max(3, w // 5), max(3, bar.width // 3)))
                 hl = pygame.Rect(bar.left + 1, bar.top + 1, hl_w, max(1, bar.height - 2))
-                hl_top = (min(255, int(r * 1.12)), min(255, int(g * 1.12)), min(255, int(b * 1.12)))
+                # Blend 50% toward white so the highlight pops against any note colour.
+                hl_top = (
+                    min(255, int(r * 0.50 + 128)),
+                    min(255, int(g * 0.50 + 128)),
+                    min(255, int(b * 0.50 + 128)),
+                )
                 hl_bottom = (
                     int(max(0, min(255, hl_top[0] * bottom_bright))),
                     int(max(0, min(255, hl_top[1] * bottom_bright))),
@@ -334,7 +345,7 @@ class NoteEffectRenderer:
                     hl_bottom,
                     max(0, roundness - 2),
                     clip_rect,
-                    alpha=max(1, int(62 * highlight_strength)),
+                    alpha=max(1, int(105 * highlight_strength)),
                 )
 
         # ── Sparks ──────────────────────────────────────────────────────────
@@ -364,7 +375,7 @@ class NoteEffectRenderer:
                 continue
             life_frac = sm["life"] / sm["max_life"]
             # Fade out quickly at the end so wisps vanish rather than blob-out
-            alpha = int(64 * life_frac * life_frac * min(1.4, smoke_strength))
+            alpha = int(100 * life_frac * life_frac * min(1.4, smoke_strength))
             alpha = max(0, min(255, alpha))
             if alpha <= 0:
                 continue
@@ -386,7 +397,7 @@ class NoteEffectRenderer:
             if not press_smoke_enabled:
                 continue
             life_frac = ms["life"] / ms["max_life"]
-            alpha = int(56 * life_frac * life_frac)
+            alpha = int(85 * life_frac * life_frac)
             alpha = max(0, min(255, alpha))
             if alpha <= 0:
                 continue

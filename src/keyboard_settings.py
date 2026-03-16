@@ -56,7 +56,6 @@ class KeyboardSettingsScreen:
         self._hover_slider: int = -1
         self._drag_slider: int = -1
         self._hover_checkbox = False
-        self._hover_sustain = False
 
         self._title_pos = (0, 0)
         self._left_panel = pygame.Rect(0, 0, 0, 0)
@@ -65,7 +64,6 @@ class KeyboardSettingsScreen:
         self._row_rects: list[pygame.Rect] = []
         self._slider_rects: list[pygame.Rect] = []
         self._checkbox_rect = pygame.Rect(0, 0, 28, 28)
-        self._sustain_rect = pygame.Rect(0, 0, 28, 28)
         self._preview_rect = pygame.Rect(0, 0, 0, 0)
 
         self._load()
@@ -87,11 +85,6 @@ class KeyboardSettingsScreen:
 
             if self._checkbox_rect.collidepoint(event.pos):
                 self._values["visible"] = not bool(self._values["visible"])
-                self._save()
-                return None
-
-            if self._sustain_rect.collidepoint(event.pos):
-                self._values["sustain_latch"] = not bool(self._values["sustain_latch"])
                 self._save()
                 return None
 
@@ -119,7 +112,6 @@ class KeyboardSettingsScreen:
             "height_percent": int(data.get("height_percent", 18)),
             "brightness": int(data.get("brightness", 100)),
             "visible": bool(data.get("visible", True)),
-            "sustain_latch": bool(data.get("sustain_latch", False)),
         }
 
     def _save(self) -> None:
@@ -128,7 +120,6 @@ class KeyboardSettingsScreen:
             "height_percent": int(self._values["height_percent"]),
             "brightness": int(self._values["brightness"]),
             "visible": bool(self._values["visible"]),
-            "sustain_latch": bool(self._values["sustain_latch"]),
         }
         cfg.save(data)
 
@@ -167,14 +158,11 @@ class KeyboardSettingsScreen:
         cb_row = pygame.Rect(self._right_panel.left + 16, self._right_panel.top + 22, self._right_panel.width - 32, 56)
         self._checkbox_rect = pygame.Rect(cb_row.left + 8, cb_row.centery - 14, 28, 28)
 
-        sustain_row = pygame.Rect(self._right_panel.left + 16, cb_row.bottom + 10, self._right_panel.width - 32, 56)
-        self._sustain_rect = pygame.Rect(sustain_row.left + 8, sustain_row.centery - 14, 28, 28)
-
         self._preview_rect = pygame.Rect(
             self._right_panel.left + 16,
-            sustain_row.bottom + 14,
+            cb_row.bottom + 18,
             self._right_panel.width - 32,
-            max(80, self._right_panel.height - (sustain_row.bottom - self._right_panel.top) - 30),
+            max(120, self._right_panel.height - (cb_row.bottom - self._right_panel.top) - 34),
         )
 
         self._back_rect = pygame.Rect(cx - BACK_W // 2, sr.height - BACK_H - 24, BACK_W, BACK_H)
@@ -182,7 +170,6 @@ class KeyboardSettingsScreen:
     def _update_hover(self, pos: tuple[int, int]) -> None:
         self._hover_back = self._back_rect.collidepoint(pos)
         self._hover_checkbox = self._checkbox_rect.collidepoint(pos)
-        self._hover_sustain = self._sustain_rect.collidepoint(pos)
         self._hover_slider = -1
         for i, rect in enumerate(self._slider_rects):
             if rect.inflate(0, 18).collidepoint(pos):
@@ -245,28 +232,20 @@ class KeyboardSettingsScreen:
         pygame.draw.rect(self.screen, PANEL_BG, self._right_panel, border_radius=8)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._right_panel, width=1, border_radius=8)
 
-        title = self._label_font.render("Keyboard Options", True, TEXT_COLOR)
+        title = self._label_font.render("Keyboard Visibility", True, TEXT_COLOR)
         self.screen.blit(title, (self._right_panel.left + 16, self._right_panel.top + 16))
 
         cb_bg = (45, 45, 60) if self._hover_checkbox else (35, 35, 45)
         pygame.draw.rect(self.screen, cb_bg, self._checkbox_rect, border_radius=5)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._checkbox_rect, width=1, border_radius=5)
+
         if bool(self._values["visible"]):
             inner = self._checkbox_rect.inflate(-8, -8)
             pygame.draw.rect(self.screen, CHECK_ON_COLOR, inner, border_radius=3)
-        vis_text = "Show keyboard" if bool(self._values["visible"]) else "Hide keyboard"
-        label = self._value_font.render(vis_text, True, MUTED_TEXT_COLOR)
-        self.screen.blit(label, (self._checkbox_rect.right + 12, self._checkbox_rect.top + 2))
 
-        sus_bg = (45, 45, 60) if self._hover_sustain else (35, 35, 45)
-        pygame.draw.rect(self.screen, sus_bg, self._sustain_rect, border_radius=5)
-        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._sustain_rect, width=1, border_radius=5)
-        if bool(self._values["sustain_latch"]):
-            inner2 = self._sustain_rect.inflate(-8, -8)
-            pygame.draw.rect(self.screen, CHECK_ON_COLOR, inner2, border_radius=3)
-        sus_text = "Sustain pedal latch" if bool(self._values["sustain_latch"]) else "Sustain pedal latch"
-        sus_label = self._value_font.render(sus_text, True, MUTED_TEXT_COLOR)
-        self.screen.blit(sus_label, (self._sustain_rect.right + 12, self._sustain_rect.top + 2))
+        text = "Show keyboard" if bool(self._values["visible"]) else "Hide keyboard (notes start at bottom)"
+        label = self._value_font.render(text, True, MUTED_TEXT_COLOR)
+        self.screen.blit(label, (self._checkbox_rect.right + 12, self._checkbox_rect.top + 2))
 
         self._draw_live_preview()
 

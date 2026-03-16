@@ -56,12 +56,6 @@ class LedOutputConfig:
     active_r: int
     active_g: int
     active_b: int
-    black_r: int
-    black_g: int
-    black_b: int
-
-
-_BLACK_KEY_SEMITONES: frozenset[int] = frozenset({1, 3, 6, 8, 10})  # C# D# F# G# A#
 
 
 class _BleLedSender:
@@ -207,15 +201,12 @@ class LedOutput:
         self._cfg.active_b = max(0, min(255, int(b)))
         self._last_frame = b""
 
-    def set_black_key_color(self, r: int, g: int, b: int) -> None:
-        self._cfg.black_r = max(0, min(255, int(r)))
-        self._cfg.black_g = max(0, min(255, int(g)))
-        self._cfg.black_b = max(0, min(255, int(b)))
         self._last_frame = b""
 
     @staticmethod
     def from_config() -> "LedOutput":
-        data = cfg.load().get("led_output", {})
+        full = cfg.load()
+        data = full.get("led_output", {})
         transport = str(data.get("transport", "serial")).strip().lower()
         if transport not in {"serial", "ble"}:
             transport = "serial"
@@ -233,12 +224,10 @@ class LedOutput:
             led_count=max(1, int(data.get("led_count", 176))),
             mirror_per_key=max(1, int(data.get("mirror_per_key", 2))),
             fps_limit=max(1, int(data.get("fps_limit", 30))),
-            active_r=max(0, min(255, int(data.get("active_r", 0)))),
-            active_g=max(0, min(255, int(data.get("active_g", 220)))),
-            active_b=max(0, min(255, int(data.get("active_b", 220)))),
-            black_r=max(0, min(255, int(data.get("black_r", 0)))),
-            black_g=max(0, min(255, int(data.get("black_g", 240)))),
-            black_b=max(0, min(255, int(data.get("black_b", 255)))),
+            # Active colour is driven by note colour — read from note_style, not led_output
+            active_r=max(0, min(255, int(full.get("note_style", {}).get("color_r", 0)))),
+            active_g=max(0, min(255, int(full.get("note_style", {}).get("color_g", 230)))),
+            active_b=max(0, min(255, int(full.get("note_style", {}).get("color_b", 230)))),
         )
         return LedOutput(conf)
 
@@ -341,12 +330,7 @@ class LedOutput:
                 continue
             key_index = note - PIANO_FIRST_NOTE
             base = key_index * self._cfg.mirror_per_key
-            is_black = (note % 12) in _BLACK_KEY_SEMITONES
-            color = (
-                (self._cfg.black_r, self._cfg.black_g, self._cfg.black_b)
-                if is_black
-                else (self._cfg.active_r, self._cfg.active_g, self._cfg.active_b)
-            )
+            color = (self._cfg.active_r, self._cfg.active_g, self._cfg.active_b)
             for i in range(self._cfg.mirror_per_key):
                 led_idx = base + i
                 if 0 <= led_idx < led_count:

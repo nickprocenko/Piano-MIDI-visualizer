@@ -1,34 +1,41 @@
 # Piano MIDI Visualizer
 
 A full-screen, real-time piano MIDI visualizer for live performances.  
-Designed to run locally on Windows
+Designed to run locally on Windows with a dual-monitor setup (projector + PC).
 
-## Features (Phase 1)
-- Full-screen borderless window
-- Main menu with **START**, **SETTINGS**, and **QUIT**
-- Placeholder note highway screen (press **ESC** to return to menu)
-- 60 fps game loop
-
-
-## Planned
-- Real-time MIDI input (Roland JUNO-DS and other USB MIDI devices)
-- 88-key piano rendering with key highlights
-- Falling-note highway with coloured bars
-- Audience-controlled colours via Twitch/TikTok chat
-- ESP32 LED light synchronisation
+## Features
+- Borderless fullscreen on a second monitor — clicking your PC monitor won't minimise the window
+- Real-time MIDI input (USB MIDI devices — tested with Roland JUNO-DS)
+- 88-key piano rendering with brightness and height controls
+- Falling-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
+- Animated background image / GIF slideshow
+- ESP32 LED strip synchronisation over serial or BLE
+- Audience live colour control via WebSocket (Twitch channel-point integration)
+- Triple sustain-pedal tap to cycle through saved themes
+- Built-in theme manager — save, rename, load, and delete colour presets
+- **Live web control panel** at `http://localhost:8181` — change notes, effects, keyboard, and themes from your browser while a song is playing
+- 60 fps game loop with crash diagnostics
 
 ## Requirements
 - Python 3.10+
-- [pygame](https://www.pygame.org/)
+- Internet connection on first launch (to download packages)
 
 ## How to run
 
+### Double-click (recommended)
+Just double-click **`Launch Piano MIDI Visualizer.bat`**.
+On first launch it will automatically create a virtual environment and install all Python dependencies from `requirements.txt`. Subsequent launches start immediately.
+
+### Command line
+
 ```bash
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
 python main.py
 ```
 
-Press **ESC** from the highway placeholder to return to the main menu.  
+Press **ESC** during a song to return to the main menu.  
 Click **QUIT** or close the window to exit.
 
 ## Crash Diagnostics

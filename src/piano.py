@@ -98,6 +98,16 @@ class Piano:
             return rect.copy()
         return None
 
+    def set_height_percent(self, percent: int) -> None:
+        self._height_fraction = max(0.05, min(0.5, percent / 100.0))
+        self._build_layout()
+
+    def set_brightness(self, percent: int) -> None:
+        self._brightness = max(0.1, min(1.5, percent / 100.0))
+
+    def set_visible(self, visible: bool) -> None:
+        self._visible = visible
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------

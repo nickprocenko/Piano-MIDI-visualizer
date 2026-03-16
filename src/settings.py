@@ -37,6 +37,8 @@ DISPLAY_BTN_W = 340
 DISPLAY_BTN_H = 52
 AUDIENCE_BTN_W = 340
 AUDIENCE_BTN_H = 52
+THEMES_BTN_W = 340
+THEMES_BTN_H = 52
 BACK_BTN_W = 160
 BACK_BTN_H = 52
 
@@ -98,6 +100,7 @@ class SettingsScreen:
         self._led_rect = pygame.Rect(0, 0, LED_BTN_W, LED_BTN_H)
         self._display_rect = pygame.Rect(0, 0, DISPLAY_BTN_W, DISPLAY_BTN_H)
         self._audience_rect = pygame.Rect(0, 0, AUDIENCE_BTN_W, AUDIENCE_BTN_H)
+        self._themes_rect = pygame.Rect(0, 0, THEMES_BTN_W, THEMES_BTN_H)
         self._back_rect = pygame.Rect(0, 0, BACK_BTN_W, BACK_BTN_H)
         self._row_rects: list[pygame.Rect] = []
         self._remove_rects: list[pygame.Rect] = []
@@ -108,6 +111,7 @@ class SettingsScreen:
         self._hover_led = False
         self._hover_display = False
         self._hover_audience = False
+        self._hover_themes = False
         self._hover_back = False
         self._hover_remove: int = -1
 
@@ -149,6 +153,9 @@ class SettingsScreen:
             if self._audience_rect.collidepoint(event.pos):
                 return "audience_settings"
 
+            if self._themes_rect.collidepoint(event.pos):
+                return "theme_settings"
+
             if self._add_rect.collidepoint(event.pos):
                 folder = _pick_folder()
                 if folder and folder not in self._folders:
@@ -174,6 +181,7 @@ class SettingsScreen:
         self._draw_led_button()
         self._draw_display_button()
         self._draw_audience_button()
+        self._draw_themes_button()
         self._draw_add_button()
         self._draw_folders()
         self._draw_back_button()
@@ -224,7 +232,12 @@ class SettingsScreen:
             cx - AUDIENCE_BTN_W // 2, audience_y, AUDIENCE_BTN_W, AUDIENCE_BTN_H
         )
 
-        add_y = audience_y + AUDIENCE_BTN_H + 12
+        themes_y = audience_y + AUDIENCE_BTN_H + 12
+        self._themes_rect = pygame.Rect(
+            cx - THEMES_BTN_W // 2, themes_y, THEMES_BTN_W, THEMES_BTN_H
+        )
+
+        add_y = themes_y + THEMES_BTN_H + 12
         self._add_rect = pygame.Rect(cx - ADD_BTN_W // 2, add_y, ADD_BTN_W, ADD_BTN_H)
 
         list_y = add_y + ADD_BTN_H + 28
@@ -256,6 +269,7 @@ class SettingsScreen:
         self._hover_led = self._led_rect.collidepoint(pos)
         self._hover_display = self._display_rect.collidepoint(pos)
         self._hover_audience = self._audience_rect.collidepoint(pos)
+        self._hover_themes   = self._themes_rect.collidepoint(pos)
         self._hover_back = self._back_rect.collidepoint(pos)
         self._hover_remove = -1
         for i, rect in enumerate(self._remove_rects):
@@ -326,6 +340,16 @@ class SettingsScreen:
         )
         label = self._btn_font.render("AUDIENCE SETTINGS", True, fg)
         self.screen.blit(label, label.get_rect(center=self._audience_rect.center))
+
+    def _draw_themes_button(self) -> None:
+        bg = BUTTON_HOVER_BG if self._hover_themes else BUTTON_NORMAL_BG
+        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_themes else BUTTON_TEXT_COLOR
+        pygame.draw.rect(self.screen, bg, self._themes_rect, border_radius=8)
+        pygame.draw.rect(
+            self.screen, BUTTON_BORDER_COLOR, self._themes_rect, width=1, border_radius=8
+        )
+        label = self._btn_font.render("THEME MANAGER", True, fg)
+        self.screen.blit(label, label.get_rect(center=self._themes_rect.center))
 
     def _draw_folders(self) -> None:
         if not self._folders:

@@ -43,11 +43,17 @@ def main() -> None:
 
         from src import config as cfg
         fullscreen = bool(cfg.load().get("display_style", {}).get("fullscreen", True))
-        info = pygame.display.Info()
         if fullscreen:
+            # Borderless fullscreen on the second monitor when available.
+            # NOFRAME at native resolution avoids the exclusive-focus behaviour of
+            # pygame.FULLSCREEN, so clicking on monitor 1 won't minimise the window.
+            sizes = pygame.display.get_desktop_sizes()
+            disp_idx = 1 if len(sizes) > 1 else 0
+            w, h = sizes[disp_idx]
             screen = pygame.display.set_mode(
-                (info.current_w, info.current_h),
-                pygame.NOFRAME | pygame.FULLSCREEN,
+                (w, h),
+                pygame.NOFRAME,
+                display=disp_idx,
             )
         else:
             screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
