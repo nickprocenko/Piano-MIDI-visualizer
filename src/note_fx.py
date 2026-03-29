@@ -23,8 +23,10 @@ import pygame
 # ── Tuning constants ──────────────────────────────────────────────────────────
 _GLOW_PAD: int = 20          # px glow extends beyond each edge of the bar
 _MAX_SPARKS: int = 7         # sparks spawned per note press
+_MAX_EMBERS: int = 28        # embers spawned per note press in ember mode
 _MAX_SMOKE: int = 8          # smoke puffs spawned per note release
 _SPARK_LIFE_MS: float = 460.0
+_EMBER_LIFE_MS: float = 1320.0
 _SMOKE_LIFE_MS: float = 1080.0  # longer life lets wisps drift further
 _SPARK_GRAVITY: float = 240.0   # px/s² downward pull on sparks
 _BLOOM_DOWNSCALE: int = 6    # lower resolution bloom buffer for cheap blur
@@ -162,6 +164,18 @@ class NoteEffectRenderer:
 
         target.blit(surf, rect.topleft)
 
+    @staticmethod
+    def _effect_rgb(
+        note_style: dict[str, int],
+        prefix: str,
+        fallback: tuple[int, int, int],
+    ) -> tuple[int, int, int]:
+        return (
+            int(note_style.get(f"{prefix}_r", fallback[0])),
+            int(note_style.get(f"{prefix}_g", fallback[1])),
+            int(note_style.get(f"{prefix}_b", fallback[2])),
+        )
+
     def draw_trail(
         self,
         trail: dict,
@@ -184,6 +198,14 @@ class NoteEffectRenderer:
         ir = int(ir * (1.0 - blend) + r * blend)
         ig = int(ig * (1.0 - blend) + g * blend)
         ib = int(ib * (1.0 - blend) + b * blend)
+        glow_base = self._effect_rgb(note_style, "glow_color", (r, g, b))
+        highlight_base = self._effect_rgb(note_style, "highlight_color", (r, g, b))
+        spark_base = self._effect_rgb(note_style, "spark_color", (r, g, b))
+        ember_base = self._effect_rgb(note_style, "ember_color", (r, g, b))
+        smoke_base = self._effect_rgb(note_style, "smoke_color", (r, g, b))
+        mist_base = self._effect_rgb(note_style, "mist_color", (ir, ig, ib))
+        dust_base = self._effect_rgb(note_style, "dust_color", (ir, ig, ib))
+        steam_base = self._effect_rgb(note_style, "steam_color", (r, g, b))
         glow_strength = max(0.0, min(1.8, float(note_style.get("glow_strength_percent", 80)) / 100.0))
         highlight_strength = max(0.0, min(1.7, float(note_style.get("highlight_strength_percent", 70)) / 100.0))
         spark_strength = max(0.0, min(3.0, float(note_style.get("spark_amount_percent", 100)) / 100.0))
@@ -195,6 +217,7 @@ class NoteEffectRenderer:
         press_smoke_enabled = bool(note_style.get("effect_press_smoke_enabled", 0))
         moon_dust_enabled = bool(note_style.get("effect_moon_dust_enabled", 0))
         halo_pulse_enabled = bool(note_style.get("effect_halo_pulse_enabled", 0))
+        embers_enabled = bool(note_style.get("effect_embers_enabled", 0))
         roundness = max(0, int(note_style.get("edge_roundness_px", 4)))
         decay_speed = max(0.0, float(note_style.get("decay_speed", 80)))
         decay_floor = max(0.0, min(1.0, float(note_style.get("decay_value", 20)) / 100.0))
@@ -219,9 +242,9 @@ class NoteEffectRenderer:
                 glow_strength = max(0.08, glow_strength)
             self._frame_bloom_strength = max(self._frame_bloom_strength, glow_strength * 0.90)
             glow_scale = max(decay_floor, 1.0 - 0.5 * (decay_speed / 100.0))
-            glow_r = int(max(0, min(255, r * glow_scale)))
-            glow_g = int(max(0, min(255, g * glow_scale)))
-            glow_b = int(max(0, min(255, b * glow_scale)))
+            glow_r = int(max(0, min(255, glow_base[0] * glow_scale)))
+            glow_g = int(max(0, min(255, glow_base[1] * glow_scale)))
+            glow_b = int(max(0, min(255, glow_base[2] * glow_scale)))
             bloom_scale_x = 1.0
             bloom_scale_y = 1.0
             if self._bloom_downsample is not None:
@@ -277,9 +300,9 @@ class NoteEffectRenderer:
                 alpha = max(0, min(255, int(40 + 90 * max(0.0, tw) + t * 38)))
                 size = 1 if (i % 4) else 2
                 sc = (
-                    min(255, int(0.55 * ir + 120)),
-                    min(255, int(0.55 * ig + 120)),
-                    min(255, int(0.60 * ib + 128)),
+                    min(255, int(0.55 * dust_base[0] + 120)),
+                    min(255, int(0.55 * dust_base[1] + 120)),
+                    min(255, int(0.60 * dust_base[2] + 128)),
                     alpha,
                 )
                 pygame.draw.circle(self._fx_surf, sc, (px, py), size)
@@ -329,9 +352,9 @@ class NoteEffectRenderer:
                 hl = pygame.Rect(bar.left + 1, bar.top + 1, hl_w, max(1, bar.height - 2))
                 # Blend 50% toward white so the highlight pops against any note colour.
                 hl_top = (
-                    min(255, int(r * 0.50 + 128)),
-                    min(255, int(g * 0.50 + 128)),
-                    min(255, int(b * 0.50 + 128)),
+                    min(255, int(highlight_base[0] * 0.50 + 128)),
+                    min(255, int(highlight_base[1] * 0.50 + 128)),
+                    min(255, int(highlight_base[2] * 0.50 + 128)),
                 )
                 hl_bottom = (
                     int(max(0, min(255, hl_top[0] * bottom_bright))),
@@ -349,6 +372,9 @@ class NoteEffectRenderer:
                 )
 
         # ── Sparks ──────────────────────────────────────────────────────────
+        if embers_enabled and sparks_enabled and spark_strength > 0.0:
+            self._emit_ember_stream(trail, note_style)
+
         for sp in trail.get("sparks", ()):
             if not sparks_enabled or spark_strength <= 0.0:
                 continue
@@ -361,12 +387,30 @@ class NoteEffectRenderer:
             if clip_rect and not clip_rect.collidepoint(sx, sy):
                 continue
             sz = max(1, int(sp["size"] * (0.75 + 0.75 * life_frac)))
-            sc = (
-                min(255, int(0.35 * r + 170)),
-                min(255, int(0.35 * g + 170)),
-                min(255, int(0.35 * b + 170)),
-                alpha,
-            )
+            if sp.get("ember"):
+                sc = (
+                    min(255, max(160, int(0.78 * ember_base[0] + 110))),
+                    min(255, max(84, int(0.40 * ember_base[1] + 88))),
+                    min(120, max(16, int(0.22 * ember_base[2] + 18))),
+                    alpha,
+                )
+            else:
+                sc = (
+                    min(255, int(0.35 * spark_base[0] + 170)),
+                    min(255, int(0.35 * spark_base[1] + 170)),
+                    min(255, int(0.35 * spark_base[2] + 170)),
+                    alpha,
+                )
+            if sp.get("ember"):
+                px = int(sp.get("px", sp["x"]))
+                py = int(sp.get("py", sp["y"]))
+                tail_alpha = max(0, min(255, int(alpha * 0.62)))
+                if tail_alpha > 0 and (px != sx or py != sy):
+                    tail_w = max(1, int(max(1.0, sz * 0.8)))
+                    pygame.draw.line(self._fx_surf, (sc[0], sc[1], sc[2], tail_alpha), (px, py), (sx, sy), tail_w)
+                glow_alpha = max(0, min(255, int(alpha * 0.45)))
+                if glow_alpha > 0:
+                    pygame.draw.circle(self._fx_surf, (255, min(255, sc[1] + 28), 72, glow_alpha), (sx, sy), sz + 1)
             pygame.draw.circle(self._fx_surf, sc, (sx, sy), sz)
 
         # ── Smoke ───────────────────────────────────────────────────────────
@@ -384,10 +428,11 @@ class NoteEffectRenderer:
                 continue
             # Wisps expand only slightly — stay thin as they drift
             rad = max(1, int(sm["radius"] * (1.0 + 0.20 * (1.0 - life_frac))))
+            smoke_rgb = steam_base if sm.get("steam") else smoke_base
             sc = (
-                min(255, int(r * 0.35 + 95)),
-                min(255, int(g * 0.35 + 95)),
-                min(255, int(b * 0.35 + 95)),
+                min(255, int(smoke_rgb[0] * 0.35 + 95)),
+                min(255, int(smoke_rgb[1] * 0.35 + 95)),
+                min(255, int(smoke_rgb[2] * 0.35 + 95)),
                 alpha,
             )
             pygame.draw.circle(self._fx_surf, sc, (sx, sy), rad)
@@ -406,14 +451,66 @@ class NoteEffectRenderer:
                 continue
             rad = max(1, int(ms["radius"] * (1.0 + 0.30 * (1.0 - life_frac))))
             sc = (
-                min(255, int(ir * 0.45 + 110)),
-                min(255, int(ig * 0.45 + 110)),
-                min(255, int(ib * 0.50 + 120)),
+                min(255, int(mist_base[0] * 0.45 + 110)),
+                min(255, int(mist_base[1] * 0.45 + 110)),
+                min(255, int(mist_base[2] * 0.50 + 120)),
                 alpha,
             )
             pygame.draw.circle(self._fx_surf, sc, (sx, sy), rad)
 
     # ── Particle lifecycle (static so callers don't need a renderer instance) ─
+
+    @staticmethod
+    def _emit_ember_stream(trail: dict, note_style: dict[str, int]) -> None:
+        """Continuously emit embers while a note is held for a dense, fiery stream."""
+        if bool(trail.get("released", False)):
+            trail["_ember_emit_tick"] = pygame.time.get_ticks()
+            trail["_ember_emit_carry"] = 0.0
+            return
+
+        now = pygame.time.get_ticks()
+        last_tick = int(trail.get("_ember_emit_tick", now))
+        if last_tick > now:
+            last_tick = now
+        trail["_ember_emit_tick"] = now
+
+        elapsed_ms = now - last_tick
+        if elapsed_ms <= 0:
+            return
+
+        spark_strength = max(0.0, min(3.0, float(note_style.get("spark_amount_percent", 100)) / 100.0))
+        emit_rate = 26.0 * (0.75 + spark_strength)
+        pending = (elapsed_ms / 1000.0) * emit_rate + float(trail.get("_ember_emit_carry", 0.0))
+        count = int(pending)
+        trail["_ember_emit_carry"] = pending - count
+        if count <= 0:
+            return
+
+        cx = float(trail["x"])
+        oy = float(trail["bottom_y"])
+        sparks = trail.setdefault("sparks", [])
+        for _ in range(min(count, 42)):
+            angle = random.uniform(-math.pi * 0.88, -math.pi * 0.12)
+            speed = random.uniform(90, 260)
+            life = _EMBER_LIFE_MS * random.uniform(0.82, 1.58)
+            sx = cx + random.uniform(-7, 7)
+            sy = oy - random.uniform(0, 7)
+            sparks.append({
+                "x": sx,
+                "y": sy,
+                "px": sx,
+                "py": sy,
+                "vx": math.cos(angle) * speed,
+                "vy": math.sin(angle) * speed,
+                "life": life,
+                "max_life": life,
+                "size": random.uniform(1.2, 2.8),
+                "ember": True,
+            })
+
+        overflow = len(sparks) - 280
+        if overflow > 0:
+            del sparks[:overflow]
 
     @staticmethod
     def spawn_sparks(trail: dict, note_style: dict[str, int] | None = None) -> None:
@@ -422,11 +519,14 @@ class NoteEffectRenderer:
             if not bool(note_style.get("effect_sparks_enabled", 1)):
                 trail["sparks"] = []
                 return
-            spark_strength = max(0.0, min(2.0, float(note_style.get("spark_amount_percent", 100)) / 100.0))
+            ember_mode = bool(note_style.get("effect_embers_enabled", 0))
+            spark_strength = max(0.0, min(3.0 if ember_mode else 2.0, float(note_style.get("spark_amount_percent", 100)) / 100.0))
         else:
+            ember_mode = False
             spark_strength = 1.0
 
-        count = max(0, int(round(_MAX_SPARKS * spark_strength)))
+        base_count = _MAX_EMBERS if ember_mode else _MAX_SPARKS
+        count = max(0, int(round(base_count * spark_strength)))
         if count <= 0:
             trail["sparks"] = []
             return
@@ -437,17 +537,25 @@ class NoteEffectRenderer:
         for _ in range(count):
             # Keep angle in the upper hemisphere so sparks fly upward/outward
             angle = random.uniform(-math.pi * 0.90, -math.pi * 0.10)
-            speed = random.uniform(70, 190)
+            speed = random.uniform(80, 240 if ember_mode else 190)
+            life = (_EMBER_LIFE_MS * random.uniform(0.82, 1.55)) if ember_mode else _SPARK_LIFE_MS
+            sx = cx + random.uniform(-6, 6 if ember_mode else 4)
+            sy = oy - random.uniform(0, 6 if ember_mode else 0)
             sparks.append({
-                "x":        cx + random.uniform(-4, 4),
-                "y":        oy,
+                "x":        sx,
+                "y":        sy,
+                "px":       sx,
+                "py":       sy,
                 "vx":       math.cos(angle) * speed,
                 "vy":       math.sin(angle) * speed,
-                "life":     _SPARK_LIFE_MS,
-                "max_life": _SPARK_LIFE_MS,
-                "size":     random.uniform(1.6, 3.2),
+                "life":     life,
+                "max_life": life,
+                "size":     random.uniform(1.2, 2.8) if ember_mode else random.uniform(1.6, 3.2),
+                "ember":    ember_mode,
             })
         trail["sparks"] = sparks
+        trail["_ember_emit_tick"] = pygame.time.get_ticks()
+        trail["_ember_emit_carry"] = 0.0
 
     @staticmethod
     def spawn_press_smoke(trail: dict, note_style: dict[str, int] | None = None) -> None:
@@ -547,10 +655,16 @@ class NoteEffectRenderer:
                 for sp in sparks:
                     sp["life"] -= dt
                     if sp["life"] > 0:
+                        sp["px"] = sp.get("x", 0.0)
+                        sp["py"] = sp.get("y", 0.0)
                         sp["x"] += sp["vx"] * dt_s
                         sp["y"] += sp["vy"] * dt_s
-                        sp["vx"] *= 0.985
-                        sp["vy"] += _SPARK_GRAVITY * dt_s
+                        if sp.get("ember"):
+                            sp["vx"] *= 0.994
+                            sp["vy"] += (_SPARK_GRAVITY * 0.42) * dt_s
+                        else:
+                            sp["vx"] *= 0.985
+                            sp["vy"] += _SPARK_GRAVITY * dt_s
                         alive.append(sp)
                 trail["sparks"] = alive
 

@@ -8,15 +8,20 @@ from typing import Any
 
 _CONFIG_PATH = pathlib.Path(__file__).parent.parent / "config.json"
 
+_DEFAULT_NOTE_STYLE_SINGLE = {
+    "speed_px_per_sec": 420,
+    "width_px": 12,
+    "color_r": 0,
+    "color_g": 230,
+    "color_b": 230,
+}
+
+# Per-channel note style: dict of 16 channels (1-based, as strings)
 _DEFAULTS: dict[str, Any] = {
     "search_folders": [],
-    "note_style": {
-        "speed_px_per_sec": 420,
-        "width_px": 12,
-        "color_r": 0,
-        "color_g": 230,
-        "color_b": 230,
-    },
+    "note_channel_priority": [],
+    "blend_same_pitch_channels": False,
+    "note_style": {str(ch): _DEFAULT_NOTE_STYLE_SINGLE.copy() for ch in range(1, 17)},
     "led_output": {
         "enabled": False,
         "transport": "serial",
@@ -44,8 +49,8 @@ _DEFAULTS: dict[str, Any] = {
         "app_api_key": "",
         "reconnect_sec": 2.0,
     },
-    "user_themes": [],
-    "active_user_theme_index": 0,
+    "banks": [],
+    "active_bank_index": 0,
 }
 
 
@@ -66,6 +71,29 @@ def load() -> dict[str, Any]:
             with _CONFIG_PATH.open("r", encoding="utf-8") as f:
                 loaded = json.load(f)
                 if isinstance(loaded, dict):
+                    # Migrate note_style if needed
+                    ns = loaded.get("note_style")
+                    if ns is not None:
+                        # If it's a single dict (old format), migrate to per-channel
+                        if isinstance(ns, dict) and ("speed_px_per_sec" in ns or "color_r" in ns):
+                            loaded["note_style"] = {str(ch): ns.copy() for ch in range(1, 17)}
+                        # If it's already per-channel, ensure all channels present
+                        elif isinstance(ns, dict):
+                            for ch in range(1, 17):
+                                key = str(ch)
+                                if key not in ns:
+                                    ns[key] = _DEFAULT_NOTE_STYLE_SINGLE.copy()
+                    # Migrate old user_themes → banks
+                    if "user_themes" in loaded and "banks" not in loaded:
+                        old = loaded.pop("user_themes")
+                        # Promote each old flat theme to a bank with channel 1 data
+                        banks = []
+                        for t in old:
+                            ch1 = {k: v for k, v in t.items() if k.startswith("note_") or k.startswith("led_")}
+                            banks.append({"name": t.get("name", "Bank"), "channels": {"1": ch1}})
+                        loaded["banks"] = banks
+                    if "active_user_theme_index" in loaded and "active_bank_index" not in loaded:
+                        loaded["active_bank_index"] = loaded.pop("active_user_theme_index")
                     return _merge_with_defaults(_DEFAULTS, loaded)
         except Exception:
             pass

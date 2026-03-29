@@ -27,8 +27,6 @@ ROW_WIDTH = 600
 REMOVE_BTN_W = 60
 ADD_BTN_W = 340
 ADD_BTN_H = 52
-NOTES_BTN_W = 340
-NOTES_BTN_H = 52
 KEYBOARD_BTN_W = 340
 KEYBOARD_BTN_H = 52
 LED_BTN_W = 340
@@ -79,7 +77,6 @@ class SettingsScreen:
 
     ``handle_event()`` returns:
       ``"back"``  — user pressed BACK or ESC (changes are auto-saved).
-        ``"notes_settings"`` — open the note visual customization screen.
         ``"keyboard_settings"`` — open keyboard settings screen.
                 ``"led_settings"`` — open ESP32 LED output settings screen.
         ``"display_settings"`` — open projector/display settings screen.
@@ -95,7 +92,6 @@ class SettingsScreen:
 
         self._folders: list[str] = []
         self._add_rect = pygame.Rect(0, 0, ADD_BTN_W, ADD_BTN_H)
-        self._notes_rect = pygame.Rect(0, 0, NOTES_BTN_W, NOTES_BTN_H)
         self._keyboard_rect = pygame.Rect(0, 0, KEYBOARD_BTN_W, KEYBOARD_BTN_H)
         self._led_rect = pygame.Rect(0, 0, LED_BTN_W, LED_BTN_H)
         self._display_rect = pygame.Rect(0, 0, DISPLAY_BTN_W, DISPLAY_BTN_H)
@@ -106,7 +102,6 @@ class SettingsScreen:
         self._remove_rects: list[pygame.Rect] = []
 
         self._hover_add = False
-        self._hover_notes = False
         self._hover_keyboard = False
         self._hover_led = False
         self._hover_display = False
@@ -118,6 +113,16 @@ class SettingsScreen:
         self._title_surf: pygame.Surface | None = None
         self._title_pos = (0, 0)
         self._list_start_y = 0
+        self._cursor: int = 0
+        self._nav_actions = [
+            "keyboard_settings",
+            "led_settings",
+            "display_settings",
+            "audience_settings",
+            "theme_settings",
+            "add_folder",
+            "back",
+        ]
 
         self._load()
         self._build_layout()
@@ -131,15 +136,23 @@ class SettingsScreen:
             self._update_hover(event.pos)
             return None
 
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            return "back"
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                return "back"
+            if event.key == pygame.K_UP:
+                self._cursor = (self._cursor - 1) % len(self._nav_actions)
+                self._apply_cursor_hover()
+                return None
+            if event.key == pygame.K_DOWN:
+                self._cursor = (self._cursor + 1) % len(self._nav_actions)
+                self._apply_cursor_hover()
+                return None
+            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                return self._activate_cursor()
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._back_rect.collidepoint(event.pos):
                 return "back"
-
-            if self._notes_rect.collidepoint(event.pos):
-                return "notes_settings"
 
             if self._keyboard_rect.collidepoint(event.pos):
                 return "keyboard_settings"
@@ -176,7 +189,6 @@ class SettingsScreen:
     def draw(self) -> None:
         self.screen.fill(BG_COLOR)
         self._draw_title()
-        self._draw_notes_button()
         self._draw_keyboard_button()
         self._draw_led_button()
         self._draw_display_button()
@@ -207,12 +219,7 @@ class SettingsScreen:
         self._title_surf = title_surf
         self._title_pos = (cx - title_surf.get_width() // 2, title_y)
 
-        notes_y = title_y + title_surf.get_height() + 24
-        self._notes_rect = pygame.Rect(
-            cx - NOTES_BTN_W // 2, notes_y, NOTES_BTN_W, NOTES_BTN_H
-        )
-
-        keyboard_y = notes_y + NOTES_BTN_H + 12
+        keyboard_y = title_y + title_surf.get_height() + 24
         self._keyboard_rect = pygame.Rect(
             cx - KEYBOARD_BTN_W // 2, keyboard_y, KEYBOARD_BTN_W, KEYBOARD_BTN_H
         )
@@ -261,10 +268,10 @@ class SettingsScreen:
         self._back_rect = pygame.Rect(
             cx - BACK_BTN_W // 2, back_y, BACK_BTN_W, BACK_BTN_H
         )
+        self._apply_cursor_hover()
 
     def _update_hover(self, pos: tuple[int, int]) -> None:
         self._hover_add = self._add_rect.collidepoint(pos)
-        self._hover_notes = self._notes_rect.collidepoint(pos)
         self._hover_keyboard = self._keyboard_rect.collidepoint(pos)
         self._hover_led = self._led_rect.collidepoint(pos)
         self._hover_display = self._display_rect.collidepoint(pos)
@@ -276,6 +283,42 @@ class SettingsScreen:
             if rect.collidepoint(pos):
                 self._hover_remove = i
                 break
+
+        # Keep keyboard/MIDI cursor aligned with mouse hover target.
+        if self._hover_keyboard:
+            self._cursor = 0
+        elif self._hover_led:
+            self._cursor = 1
+        elif self._hover_display:
+            self._cursor = 2
+        elif self._hover_audience:
+            self._cursor = 3
+        elif self._hover_themes:
+            self._cursor = 4
+        elif self._hover_add:
+            self._cursor = 5
+        elif self._hover_back:
+            self._cursor = 6
+
+    def _apply_cursor_hover(self) -> None:
+        self._hover_keyboard = self._cursor == 0
+        self._hover_led = self._cursor == 1
+        self._hover_display = self._cursor == 2
+        self._hover_audience = self._cursor == 3
+        self._hover_themes = self._cursor == 4
+        self._hover_add = self._cursor == 5
+        self._hover_back = self._cursor == 6
+
+    def _activate_cursor(self) -> str | None:
+        action = self._nav_actions[self._cursor]
+        if action == "add_folder":
+            folder = _pick_folder()
+            if folder and folder not in self._folders:
+                self._folders.append(folder)
+                self._save()
+                self._build_layout()
+            return None
+        return action
 
     def _draw_title(self) -> None:
         if self._title_surf:
@@ -290,16 +333,6 @@ class SettingsScreen:
         )
         label = self._btn_font.render("+ ADD SEARCH FOLDER", True, fg)
         self.screen.blit(label, label.get_rect(center=self._add_rect.center))
-
-    def _draw_notes_button(self) -> None:
-        bg = BUTTON_HOVER_BG if self._hover_notes else BUTTON_NORMAL_BG
-        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_notes else BUTTON_TEXT_COLOR
-        pygame.draw.rect(self.screen, bg, self._notes_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._notes_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("NOTES SETTINGS", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._notes_rect.center))
 
     def _draw_keyboard_button(self) -> None:
         bg = BUTTON_HOVER_BG if self._hover_keyboard else BUTTON_NORMAL_BG

@@ -42,21 +42,37 @@ def main() -> None:
         pygame.font.init()
 
         from src import config as cfg
-        fullscreen = bool(cfg.load().get("display_style", {}).get("fullscreen", True))
+        conf = cfg.load()
+        display_style = conf.get("display_style", {})
+        fullscreen = bool(display_style.get("fullscreen", True))
+        sizes = pygame.display.get_desktop_sizes()
+        default_idx = 1 if len(sizes) > 1 else 0
+        display_idx = int(display_style.get("display_index", default_idx))
+        if sizes:
+            display_idx = max(0, min(len(sizes) - 1, display_idx))
+        else:
+            display_idx = 0
+
         if fullscreen:
-            # Borderless fullscreen on the second monitor when available.
-            # NOFRAME at native resolution avoids the exclusive-focus behaviour of
-            # pygame.FULLSCREEN, so clicking on monitor 1 won't minimise the window.
-            sizes = pygame.display.get_desktop_sizes()
-            disp_idx = 1 if len(sizes) > 1 else 0
-            w, h = sizes[disp_idx]
+            # True fullscreen on the configured monitor. This guarantees full
+            # coverage (no "almost fullscreen" gaps on some Windows setups).
+            modes = pygame.display.list_modes(display=display_idx)
+            if modes and modes[0] != (-1, -1):
+                w, h = modes[0]
+            else:
+                w, h = sizes[display_idx]
             screen = pygame.display.set_mode(
                 (w, h),
-                pygame.NOFRAME,
-                display=disp_idx,
+                pygame.FULLSCREEN,
+                display=display_idx,
             )
         else:
-            screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
+            # Windowed mode keeps the monitor's orientation/aspect to avoid
+            # rotated or misaligned layouts on portrait/rotated displays.
+            base_w, base_h = sizes[display_idx] if sizes else (1280, 720)
+            win_w = max(800, int(base_w * 0.75))
+            win_h = max(500, int(base_h * 0.75))
+            screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE, display=display_idx)
         pygame.display.set_caption("Piano MIDI Visualizer")
 
         app = App(screen)

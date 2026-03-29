@@ -10,7 +10,7 @@ TEST_FRAME   = b"LEDS,3,255,0,0,0,255,0,0,0,255\n"  # 3 LEDs: red, green, blue
 
 
 FALLBACK_ADDRESS = "84:FC:E6:50:A6:F9"  # known address from initial scan
-
+                   
 
 async def scan() -> str | None:
     print("Scanning 6 s...")
@@ -27,7 +27,7 @@ async def scan() -> str | None:
         if by_name or by_uuid:
             found = address
 
-    if not found and FALLBACK_ADDRESS in {a.upper() for a in devices}:
+    if not found and FALLBACK_ADDRESS.upper() in {a.upper() for a in devices}:
         print(f"  (falling back to known address {FALLBACK_ADDRESS})")
         found = FALLBACK_ADDRESS
 

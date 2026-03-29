@@ -49,14 +49,15 @@ class Button:
 class Menu:
     """Main menu screen."""
 
-    BUTTON_LABELS = ["SELECT FILE", "FREEPLAY", "MIDI DEVICE", "SETTINGS", "QUIT"]
-    BUTTON_ACTIONS = ["select_file", "freeplay", "midi_device", "settings", "quit"]
+    BUTTON_LABELS = ["SELECT FILE", "FREEPLAY", "MIDI DEVICE", "SETTINGS", "HOTKEYS", "QUIT"]
+    BUTTON_ACTIONS = ["select_file", "freeplay", "midi_device", "settings", "hotkeys", "quit"]
 
     def __init__(self, screen: pygame.Surface) -> None:
         self.screen = screen
         self._title_font = pygame.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
         self._button_font = pygame.font.SysFont("Arial", BUTTON_FONT_SIZE)
         self._buttons: list[Button] = []
+        self._cursor: int = 0  # keyboard / MIDI nav cursor
         self._build_layout()
 
     # ------------------------------------------------------------------
@@ -69,6 +70,19 @@ class Menu:
             for btn in self._buttons:
                 btn.update_hover(event.pos)
             return None
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_UP:
+                self._cursor = (self._cursor - 1) % len(self._buttons)
+                self._apply_cursor_hover()
+                return None
+            elif event.key == pygame.K_DOWN:
+                self._cursor = (self._cursor + 1) % len(self._buttons)
+                self._apply_cursor_hover()
+                return None
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                if 0 <= self._cursor < len(self.BUTTON_ACTIONS):
+                    return self.BUTTON_ACTIONS[self._cursor]
 
         for btn, action in zip(self._buttons, self.BUTTON_ACTIONS):
             if btn.is_clicked(event):
@@ -104,6 +118,12 @@ class Menu:
             rect = pygame.Rect(cx - BUTTON_WIDTH // 2, button_y, BUTTON_WIDTH, BUTTON_HEIGHT)
             self._buttons.append(Button(label, rect, self._button_font))
             button_y += BUTTON_HEIGHT + BUTTON_GAP
+        self._apply_cursor_hover()
 
     def _draw_title(self) -> None:
         self.screen.blit(self._title_surf, self._title_pos)
+
+    def _apply_cursor_hover(self) -> None:
+        """Highlight the button at _cursor and clear all others."""
+        for i, btn in enumerate(self._buttons):
+            btn.hovered = (i == self._cursor)

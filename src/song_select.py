@@ -5,6 +5,7 @@ from __future__ import annotations
 import pathlib
 import pygame
 from src import config as cfg
+from src import file_limits
 
 # Colour palette (matches menu.py)
 BG_COLOR = (15, 15, 20)
@@ -30,10 +31,11 @@ SCROLLBAR_W = 8
 SCROLL_SPEED = 3   # items per mouse-wheel tick
 
 
-def _scan_folders(folders: list[str]) -> list[pathlib.Path]:
-    """Recursively find all .mid / .midi files in *folders*, deduplicated."""
+def _scan_folders(folders: list[str]) -> tuple[list[pathlib.Path], int]:
+    """Recursively find allowed .mid / .midi files in *folders*, deduplicated."""
     seen: set[pathlib.Path] = set()
     result: list[pathlib.Path] = []
+    skipped_oversize = 0
     for folder in folders:
         p = pathlib.Path(folder)
         if not p.is_dir():
@@ -42,8 +44,11 @@ def _scan_folders(folders: list[str]) -> list[pathlib.Path]:
             for f in sorted(p.rglob(ext)):
                 if f not in seen:
                     seen.add(f)
+                    if not file_limits.is_allowed_midi_file(f):
+                        skipped_oversize += 1
+                        continue
                     result.append(f)
-    return result
+    return result, skipped_oversize
 
 
 def _truncate(font: pygame.font.Font, text: str, max_w: int) -> str:
@@ -75,11 +80,13 @@ class SongSelect:
         self._back_font = pygame.font.SysFont("Arial", BACK_FONT_SIZE)
 
         self._files: list[pathlib.Path] = []
+        self._skipped_oversize_files: int = 0
         self._scroll: int = 0          # index of the topmost visible item
         self._visible_count: int = 1
 
         self._hover_item: int = -1
         self._hover_back: bool = False
+        self._cursor: int = 0  # keyboard / MIDI nav cursor
 
         self._list_rect = pygame.Rect(0, 0, 0, 0)
         self._item_rects: list[pygame.Rect] = []
@@ -97,8 +104,9 @@ class SongSelect:
     def refresh(self) -> None:
         """Re-scan configured folders and rebuild the layout."""
         folders = cfg.load().get("search_folders", [])
-        self._files = _scan_folders(folders)
+        self._files, self._skipped_oversize_files = _scan_folders(folders)
         self._scroll = 0
+        self._cursor = 0
         self._build_layout()
 
     def handle_event(self, event: pygame.event.Event) -> str | None:
@@ -106,8 +114,27 @@ class SongSelect:
             self._update_hover(event.pos)
             return None
 
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            return "back"
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                return "back"
+            elif event.key == pygame.K_UP:
+                if self._cursor > 0:
+                    self._cursor -= 1
+                    if self._cursor < self._scroll:
+                        self._scroll = self._cursor
+                        self._rebuild_item_rects()
+                return None
+            elif event.key == pygame.K_DOWN:
+                if self._cursor < len(self._files) - 1:
+                    self._cursor += 1
+                    if self._cursor >= self._scroll + self._visible_count:
+                        self._scroll = self._cursor - self._visible_count + 1
+                        self._rebuild_item_rects()
+                return None
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                if 0 <= self._cursor < len(self._files):
+                    self.selected_file = self._files[self._cursor]
+                    return "select"
 
         if event.type == pygame.MOUSEWHEEL:
             max_scroll = max(0, len(self._files) - self._visible_count)
@@ -192,6 +219,11 @@ class SongSelect:
         if not self._files:
             sr = self.screen.get_rect()
             lines = ["No MIDI files found.", "Add search folders in Settings."]
+            if self._skipped_oversize_files > 0:
+                lines.append(
+                    f"{self._skipped_oversize_files} oversized MIDI file(s) were skipped "
+                    f"(limit: {file_limits.format_limit_mb(file_limits.MAX_MIDI_FILE_BYTES)})."
+                )
             y = self._list_rect.centery - len(lines) * 18
             for line in lines:
                 surf = self._item_font.render(line, True, NO_FILES_COLOR)
@@ -203,7 +235,8 @@ class SongSelect:
         self.screen.set_clip(self._list_rect)
 
         for screen_idx, rect in enumerate(self._item_rects):
-            hovered = screen_idx == self._hover_item
+            file_idx_this = self._scroll + screen_idx
+            hovered = screen_idx == self._hover_item or file_idx_this == self._cursor
             bg = BUTTON_HOVER_BG if hovered else BUTTON_NORMAL_BG
             fg = BUTTON_HOVER_TEXT_COLOR if hovered else BUTTON_TEXT_COLOR
             pygame.draw.rect(self.screen, bg, rect, border_radius=6)
@@ -215,6 +248,16 @@ class SongSelect:
             name = _truncate(self._item_font, self._files[file_idx].name, rect.width - 20)
             surf = self._item_font.render(name, True, fg)
             self.screen.blit(surf, surf.get_rect(midleft=(rect.left + 10, rect.centery)))
+
+        if self._skipped_oversize_files > 0:
+            note = self._item_font.render(
+                f"Skipped {self._skipped_oversize_files} oversized MIDI file(s) "
+                f"over {file_limits.format_limit_mb(file_limits.MAX_MIDI_FILE_BYTES)}.",
+                True,
+                NO_FILES_COLOR,
+            )
+            note_rect = note.get_rect(bottomleft=(self._list_rect.left + 4, self._list_rect.bottom - 4))
+            self.screen.blit(note, note_rect)
 
         self.screen.set_clip(prev_clip)
 

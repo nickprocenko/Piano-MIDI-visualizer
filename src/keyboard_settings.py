@@ -56,6 +56,7 @@ class KeyboardSettingsScreen:
         self._hover_slider: int = -1
         self._drag_slider: int = -1
         self._hover_checkbox = False
+        self._cursor: int = 0
 
         self._title_pos = (0, 0)
         self._left_panel = pygame.Rect(0, 0, 0, 0)
@@ -68,6 +69,7 @@ class KeyboardSettingsScreen:
 
         self._load()
         self._build_layout()
+        self._apply_cursor_hover()
 
     def handle_event(self, event: pygame.event.Event) -> str | None:
         if event.type == pygame.MOUSEMOTION:
@@ -76,8 +78,29 @@ class KeyboardSettingsScreen:
             self._update_hover(event.pos)
             return None
 
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            return "back"
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                return "back"
+            _nav = len(self.FIELDS) + 2
+            if event.key == pygame.K_UP:
+                self._cursor = (self._cursor - 1) % _nav
+                self._apply_cursor_hover()
+                return None
+            if event.key == pygame.K_DOWN:
+                self._cursor = (self._cursor + 1) % _nav
+                self._apply_cursor_hover()
+                return None
+            if event.key == pygame.K_LEFT:
+                self._cursor_adjust(-1)
+                return None
+            if event.key == pygame.K_RIGHT:
+                self._cursor_adjust(1)
+                return None
+            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                result = self._cursor_confirm()
+                if result is not None:
+                    return result
+                return None
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._back_rect.collidepoint(event.pos):
@@ -192,6 +215,33 @@ class KeyboardSettingsScreen:
 
         self._values[key] = new_v
         self._save()
+
+    def _apply_cursor_hover(self) -> None:
+        n = len(self.FIELDS)
+        self._hover_slider = self._cursor if self._cursor < n else -1
+        self._hover_checkbox = (self._cursor == n)
+        self._hover_back = (self._cursor == n + 1)
+
+    def _cursor_adjust(self, delta: int) -> None:
+        n = len(self.FIELDS)
+        if self._cursor < n:
+            key, _lbl, min_v, max_v, step, _sfx = self.FIELDS[self._cursor]
+            new_v = max(min_v, min(max_v, int(self._values[key]) + delta * step))
+            if new_v != self._values[key]:
+                self._values[key] = new_v
+                self._save()
+        elif self._cursor == n:
+            self._values["visible"] = not bool(self._values["visible"])
+            self._save()
+
+    def _cursor_confirm(self) -> str | None:
+        n = len(self.FIELDS)
+        if self._cursor == n + 1:
+            return "back"
+        if self._cursor == n:
+            self._values["visible"] = not bool(self._values["visible"])
+            self._save()
+        return None
 
     def _draw_title(self) -> None:
         self.screen.blit(self._title_surf, self._title_pos)

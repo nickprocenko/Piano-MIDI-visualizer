@@ -1,7 +1,6 @@
 import queue
 import sys
 import pathlib
-import time
 import pygame
 from enum import Enum, auto
 from typing import Optional
@@ -21,8 +20,30 @@ from src.led_settings import LedSettingsScreen
 from src.notes_settings import NotesSettingsScreen
 from src.settings import SettingsScreen
 from src.song_select import SongSelect
+from src.hotkeys import HotkeysScreen
 from src.theme_settings import ThemeSettingsScreen
 import src.themes as themes_mod
+from src import file_limits
+
+# ---------------------------------------------------------------------------
+# MIDI CC button defaults — navigation controls only.
+# These are unassigned in most MIDI gear so they rarely conflict.
+# Override any value in config.json under the "midi_cc_buttons" key.
+# ---------------------------------------------------------------------------
+_DEFAULT_CC_BUTTONS: dict[str, int] = {
+    "nav_up":            20,  # Navigate Up in menus / scroll up
+    "nav_down":          21,  # Navigate Down in menus / scroll down
+    "nav_left":          22,  # Step slider/value left (encoder CCW)
+    "nav_right":         23,  # Step slider/value right (encoder CW)
+    "confirm":           24,  # Confirm / activate highlighted item
+    "back":              25,  # Back / Escape
+    "cycle_theme":       26,  # Next theme in current bank
+    "cycle_bank":        27,  # Next bank
+    "cycle_theme_prev":  28,  # Previous theme in current bank
+    "cycle_bank_prev":   29,  # Previous bank
+    "toggle_keyboard":   30,  # Show / hide piano keyboard
+    "toggle_fullscreen": 31,  # Toggle fullscreen projector mode
+}
 
 
 FREEPLAY_PARTICLE_HEIGHT_PX = 32
@@ -39,6 +60,7 @@ class State(Enum):
     AUDIENCE_SETTINGS = auto()
     THEME_SETTINGS = auto()
     SONG_SELECT = auto()
+    HOTKEYS = auto()
     HIGHWAY = auto()
 
 
@@ -50,6 +72,9 @@ class App:
         self.state = State.MENU
         self.clock = pygame.time.Clock()
         self.running = True
+
+        # Per-channel note style support
+        self.selected_channel: str = "1"  # Default to channel 1 for preview/UI
 
         from src.menu import Menu
         self.menu = Menu(screen)
@@ -67,12 +92,17 @@ class App:
         self._audience_settings_screen: Optional[AudienceSettingsScreen] = None
         self._theme_settings_screen: Optional[ThemeSettingsScreen] = None
         self._song_select: Optional[SongSelect] = None
+        self._hotkeys_screen: Optional[HotkeysScreen] = None
+        self._hotkeys_prev_state: State = State.MENU
         self._selected_port: int = 0
         self._selected_midi_file: Optional[pathlib.Path] = None
-        self._note_style: dict[str, int] = self._load_note_style()
-        self._note_style_meta: dict[str, str | bool] = self._load_note_style_meta()
+        self._channel_note_styles: dict[str, dict[str, int]] = self._load_all_channel_note_styles()
+        self._note_style: dict[str, int] = dict(self._channel_note_styles.get(self.selected_channel, self._load_note_style(self.selected_channel)))
+        self._channel_note_colours: dict[str, dict[str, int]] = self._load_channel_note_colours()
+        self._note_style_meta: dict[str, str | bool] = self._load_note_style_meta(self.selected_channel)
         self._keyboard_style: dict[str, int | bool] = self._load_keyboard_style()
         self._display_style: dict[str, int | str] = self._load_display_style()
+        self._blend_same_pitch_channels: bool = self._load_same_pitch_blend_enabled()
         self._highway_surface: Optional[pygame.Surface] = None
         self._prev_active_notes: set[int] = set()
         self._active_note_trails: dict[int, dict[str, float | bool]] = {}
@@ -101,7 +131,9 @@ class App:
         self._last_dt_ms: int = 0
         self._smoothed_dt_ms: float = 16.67
         self._last_phase: str = "init"
-        self._sustain_tap_times: list[float] = []
+        self._ui_midi: Optional[MidiInput] = None  # persistent midi for CC buttons in menus
+        self._cc_action_to_num_map: dict[str, int] = {}
+        self._cc_buttons: dict[int, str] = self._load_cc_buttons()
         self._refresh_claire_script_state()
 
         self._control_patches: queue.SimpleQueue = queue.SimpleQueue()
@@ -168,7 +200,30 @@ class App:
         self._settings_screen = SettingsScreen(self.screen)
 
     def _enter_notes_settings(self) -> None:
-        self._notes_settings_screen = NotesSettingsScreen(self.screen)
+        self._notes_settings_screen = NotesSettingsScreen(self.screen, on_change=self._apply_live_note_settings)
+
+    def _apply_live_note_settings(self, channel: str, values: dict[str, int | str]) -> None:
+        """Apply note/effect settings immediately to the live runtime state."""
+        channel = str(channel)
+        self._channel_note_styles = self._load_all_channel_note_styles()
+        self._channel_note_colours = self._load_channel_note_colours()
+
+        if channel == self.selected_channel:
+            self._note_style = dict(self._channel_note_styles.get(channel, self._load_note_style(channel)))
+            self._note_style_meta = self._load_note_style_meta(channel)
+            self._refresh_claire_script_state()
+
+        for trail in self._note_trails:
+            trail_channel = int(trail.get("channel", 1))
+            if str(trail_channel) == channel:
+                trail["note_style"] = self._resolve_note_style_for_channel(trail_channel)
+
+        if self._led_output is not None and channel == self.selected_channel:
+            self._led_output.set_active_color(
+                int(self._note_style.get("color_r", 0)),
+                int(self._note_style.get("color_g", 230)),
+                int(self._note_style.get("color_b", 230)),
+            )
 
     def _enter_keyboard_settings(self) -> None:
         self._keyboard_settings_screen = KeyboardSettingsScreen(self.screen)
@@ -181,18 +236,37 @@ class App:
 
     def _toggle_fullscreen(self) -> None:
         data = cfg.load()
-        currently_fullscreen = bool(data.get("display_style", {}).get("fullscreen", True))
+        display_style = data.setdefault("display_style", {})
+        currently_fullscreen = bool(display_style.get("fullscreen", True))
         new_fullscreen = not currently_fullscreen
-        data.setdefault("display_style", {})["fullscreen"] = new_fullscreen
+        display_style["fullscreen"] = new_fullscreen
+
+        sizes = pygame.display.get_desktop_sizes()
+        default_idx = 1 if len(sizes) > 1 else 0
+        display_idx = int(display_style.get("display_index", default_idx))
+        if sizes:
+            display_idx = max(0, min(len(sizes) - 1, display_idx))
+        else:
+            display_idx = 0
+
         cfg.save(data)
         if new_fullscreen:
-            info = pygame.display.Info()
+            modes = pygame.display.list_modes(display=display_idx)
+            if modes and modes[0] != (-1, -1):
+                w, h = modes[0]
+            else:
+                w, h = sizes[display_idx] if sizes else (pygame.display.Info().current_w, pygame.display.Info().current_h)
             new_screen = pygame.display.set_mode(
-                (info.current_w, info.current_h),
-                pygame.NOFRAME | pygame.FULLSCREEN,
+                (w, h),
+                pygame.FULLSCREEN,
+                display=display_idx,
             )
         else:
-            new_screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
+            # Keep selected monitor orientation/aspect in windowed mode.
+            base_w, base_h = sizes[display_idx] if sizes else (1280, 720)
+            win_w = max(800, int(base_w * 0.75))
+            win_h = max(500, int(base_h * 0.75))
+            new_screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE, display=display_idx)
         self.screen = new_screen
         self.menu = type(self.menu)(self.screen)
 
@@ -203,20 +277,217 @@ class App:
         self._theme_settings_screen = ThemeSettingsScreen(self.screen)
 
     def _cycle_theme(self) -> None:
-        """Advance to the next user theme (wraps around).  Called on triple sustain-tap."""
-        user_themes = themes_mod.load_user_themes()
-        if not user_themes:
+        """Advance to the next bank (wraps around)."""
+        banks = themes_mod.load_banks()
+        if not banks:
             return
-        idx = themes_mod.get_active_index()
-        idx = (idx + 1) % len(user_themes)
-        themes_mod.set_active_index(idx)
-        themes_mod.apply_theme_to_config(user_themes[idx])
-        self._apply_theme_to_live(user_themes[idx])
+        idx = themes_mod.get_active_bank_index()
+        idx = (idx + 1) % len(banks)
+        themes_mod.set_active_bank_index(idx)
+        themes_mod.apply_bank_to_config(banks[idx])
+        self._apply_theme_to_live(banks[idx])
 
-    def _apply_theme_to_live(self, theme: dict) -> None:
-        """Immediately update in-memory note style and LED colors from a theme dict."""
-        patch = themes_mod.build_live_note_style_patch(theme)
+    def _cycle_theme_in_bank(self) -> None:
+        """Advance to the next theme in the currently active bank (wraps around)."""
+        banks = themes_mod.load_banks()
+        if not banks:
+            return
+        bank_idx = themes_mod.get_active_bank_index()
+        if bank_idx < 0 or bank_idx >= len(banks):
+            bank_idx = 0
+        bank = banks[bank_idx]
+        themes = bank.get("themes", []) if isinstance(bank, dict) else []
+        if not themes:
+            return
+
+        theme_idx = themes_mod.get_active_theme_index()
+        theme_idx = (theme_idx + 1) % len(themes)
+        themes_mod.set_active_theme_index(theme_idx)
+        themes_mod.apply_bank_to_config(bank)
+        self._apply_theme_to_live(bank)
+
+    def _cycle_theme_prev(self) -> None:
+        """Step backward through banks (wraps around)."""
+        banks = themes_mod.load_banks()
+        if not banks:
+            return
+        idx = themes_mod.get_active_bank_index()
+        idx = (idx - 1) % len(banks)
+        themes_mod.set_active_bank_index(idx)
+        themes_mod.apply_bank_to_config(banks[idx])
+        self._apply_theme_to_live(banks[idx])
+
+    def _cycle_theme_in_bank_prev(self) -> None:
+        """Step backward through themes in the current bank (wraps around)."""
+        banks = themes_mod.load_banks()
+        if not banks:
+            return
+        bank_idx = themes_mod.get_active_bank_index()
+        if bank_idx < 0 or bank_idx >= len(banks):
+            bank_idx = 0
+        bank = banks[bank_idx]
+        themes = bank.get("themes", []) if isinstance(bank, dict) else []
+        if not themes:
+            return
+
+        theme_idx = themes_mod.get_active_theme_index()
+        theme_idx = (theme_idx - 1) % len(themes)
+        themes_mod.set_active_theme_index(theme_idx)
+        themes_mod.apply_bank_to_config(bank)
+        self._apply_theme_to_live(bank)
+
+    def _toggle_keyboard_visible(self) -> None:
+        """Toggle piano keyboard visibility and persist it."""
+        current = bool(self._keyboard_style.get("visible", True))
+        new_visible = not current
+        self._keyboard_style["visible"] = new_visible
+
+        data = cfg.load()
+        keyboard = data.setdefault("keyboard_style", {})
+        keyboard["visible"] = new_visible
+        cfg.save(data)
+
+        if self._piano is not None:
+            self._piano.set_visible(new_visible)
+
+    def _load_cc_buttons(self) -> dict[int, str]:
+        """Build a CC-number → action mapping from defaults plus any config overrides."""
+        overrides = cfg.load().get("midi_cc_buttons", {})
+        action_to_cc: dict[str, int] = {}
+        for action, default_cc in _DEFAULT_CC_BUTTONS.items():
+            try:
+                cc = int(overrides.get(action, default_cc))
+            except (TypeError, ValueError):
+                cc = int(default_cc)
+            cc = max(0, min(127, cc))
+            action_to_cc[action] = cc
+        return self._apply_cc_action_map(action_to_cc)
+
+    def _apply_cc_action_map(self, action_to_cc: dict[str, int]) -> dict[int, str]:
+        """Apply action->CC map, resolving collisions and caching both directions."""
+        resolved_action_to_cc: dict[str, int] = {}
+        cc_to_action: dict[int, str] = {}
+        for action in _DEFAULT_CC_BUTTONS:
+            cc = max(0, min(127, int(action_to_cc.get(action, _DEFAULT_CC_BUTTONS[action]))))
+            while cc in cc_to_action:
+                cc = (cc + 1) % 128
+            resolved_action_to_cc[action] = cc
+            cc_to_action[cc] = action
+        self._cc_action_to_num_map = resolved_action_to_cc
+        return cc_to_action
+
+    def _cc_action_to_num(self) -> dict[str, int]:
+        """Return action -> cc mapping for display/help screens."""
+        return dict(self._cc_action_to_num_map)
+
+    def _get_cc_action_map(self) -> dict[str, int]:
+        """Hotkeys screen callback: return current action->CC mapping."""
+        return self._cc_action_to_num()
+
+    def _set_cc_binding(self, action: str, cc_num: int) -> None:
+        """Persist and apply a single MIDI CC binding (keeps CC numbers unique)."""
+        if action not in _DEFAULT_CC_BUTTONS:
+            return
+        cc_num = max(0, min(127, int(cc_num)))
+        action_to_cc = self._cc_action_to_num()
+        old_cc = int(action_to_cc.get(action, _DEFAULT_CC_BUTTONS[action]))
+
+        for other_action, other_cc in action_to_cc.items():
+            if other_action != action and int(other_cc) == cc_num:
+                action_to_cc[other_action] = old_cc
+                break
+
+        action_to_cc[action] = cc_num
+        conf = cfg.load()
+        conf["midi_cc_buttons"] = {k: int(action_to_cc[k]) for k in _DEFAULT_CC_BUTTONS}
+        cfg.save(conf)
+        self._cc_buttons = self._apply_cc_action_map(action_to_cc)
+
+    def _reset_cc_bindings_to_default(self) -> None:
+        """Restore MIDI CC bindings to app defaults and persist them."""
+        conf = cfg.load()
+        conf["midi_cc_buttons"] = dict(_DEFAULT_CC_BUTTONS)
+        cfg.save(conf)
+        self._cc_buttons = self._apply_cc_action_map(dict(_DEFAULT_CC_BUTTONS))
+
+    def _enter_hotkeys(self, previous_state: State) -> None:
+        self._hotkeys_prev_state = previous_state
+        self._hotkeys_screen = HotkeysScreen(
+            self.screen,
+            self._cc_action_to_num(),
+            get_cc_map=self._get_cc_action_map,
+            on_set_cc=self._set_cc_binding,
+            on_reset_defaults=self._reset_cc_bindings_to_default,
+        )
+
+    def _exit_hotkeys(self) -> None:
+        self._hotkeys_screen = None
+        self.state = self._hotkeys_prev_state
+
+    def _process_ui_cc(self) -> None:
+        """Drain CC events from the always-on UI MIDI and dispatch button actions."""
+        if self._ui_midi is None or not self._ui_midi.connected:
+            return
+        for cc_num, cc_val in self._ui_midi.drain_cc_events():
+            if cc_val > 0:
+                self._handle_cc_button(cc_num)
+
+    def _handle_cc_button(self, cc_num: int) -> None:
+        """Execute the UI action mapped to *cc_num* (no-op if not mapped)."""
+        action = self._cc_buttons.get(cc_num)
+        if action is None:
+            return
+
+        def _post_key(key: int) -> None:
+            pygame.event.post(pygame.event.Event(
+                pygame.KEYDOWN, key=key, mod=0, unicode='', scancode=0
+            ))
+
+        if action == "nav_up":
+            _post_key(pygame.K_UP)
+        elif action == "nav_down":
+            _post_key(pygame.K_DOWN)
+        elif action == "nav_left":
+            _post_key(pygame.K_LEFT)
+        elif action == "nav_right":
+            _post_key(pygame.K_RIGHT)
+        elif action == "confirm":
+
+            _post_key(pygame.K_RETURN)
+        elif action == "back":
+            _post_key(pygame.K_ESCAPE)
+        elif action == "cycle_theme":
+            self._cycle_theme_in_bank()
+        elif action == "cycle_bank":
+            self._cycle_theme()
+        elif action == "cycle_theme_prev":
+            self._cycle_theme_in_bank_prev()
+        elif action == "cycle_bank_prev":
+            self._cycle_theme_prev()
+        elif action == "toggle_keyboard":
+            self._toggle_keyboard_visible()
+        elif action == "toggle_fullscreen":
+            self._toggle_fullscreen()
+
+    def _apply_theme_to_live(self, bank: dict) -> None:
+        """Immediately update in-memory note and display state from the active bank/theme."""
+        patch = themes_mod.build_live_note_style_patch(bank, channel=self.selected_channel)
         self._note_style.update(patch)
+
+        self._display_style = self._load_display_style()
+        self._bg_slides = self._load_background_slides()
+        self._bg_slide_index = 0
+        self._bg_slide_ms = 0.0
+        self._bg_frame_index = 0
+        self._bg_frame_ms = 0.0
+
+        # Save to config for the selected channel
+        data = cfg.load()
+        if "note_style" in data and self.selected_channel in data["note_style"]:
+            data["note_style"][self.selected_channel].update(self._note_style)
+            cfg.save(data)
+        self._channel_note_styles = self._load_all_channel_note_styles()
+        self._channel_note_colours = self._load_channel_note_colours()
 
         # Reset colour animation to the new note base colour
         new_r = float(self._note_style.get("color_r", 0))
@@ -240,12 +511,108 @@ class App:
     def _enter_song_select(self) -> None:
         self._song_select = SongSelect(self.screen)
 
+    def _load_note_channel_priority(self) -> list[int]:
+        """Load configured channel precedence for same-note overlaps."""
+        data = cfg.load()
+        raw_priority = data.get("note_channel_priority", [])
+        if not isinstance(raw_priority, list):
+            return []
+
+        normalized: list[int] = []
+        seen: set[int] = set()
+        for raw in raw_priority:
+            try:
+                ch = int(raw)
+            except Exception:
+                continue
+            if 1 <= ch <= 16 and ch not in seen:
+                normalized.append(ch)
+                seen.add(ch)
+        return normalized
+
+    def _load_same_pitch_blend_enabled(self) -> bool:
+        """Return whether same-pitch multi-channel colour blending is enabled."""
+        return bool(cfg.load().get("blend_same_pitch_channels", False))
+
+    def _build_same_pitch_color_overrides(
+        self,
+        effective_channels: dict[int, int],
+        note_channel_sets: dict[int, set[int]],
+    ) -> dict[int, dict[str, int]]:
+        """Build per-note colour overrides by averaging active channels per pitch."""
+        if not self._blend_same_pitch_channels:
+            return {}
+
+        color_fields = [
+            "color_r", "color_g", "color_b",
+            "interior_r", "interior_g", "interior_b",
+            "glow_color_r", "glow_color_g", "glow_color_b",
+            "highlight_color_r", "highlight_color_g", "highlight_color_b",
+            "spark_color_r", "spark_color_g", "spark_color_b",
+            "ember_color_r", "ember_color_g", "ember_color_b",
+            "smoke_color_r", "smoke_color_g", "smoke_color_b",
+            "mist_color_r", "mist_color_g", "mist_color_b",
+            "dust_color_r", "dust_color_g", "dust_color_b",
+            "steam_color_r", "steam_color_g", "steam_color_b",
+        ]
+
+        overrides: dict[int, dict[str, int]] = {}
+        for note, channels in note_channel_sets.items():
+            if len(channels) < 2:
+                continue
+
+            blended: dict[str, int] = {}
+            channel_styles = [
+                self._resolve_note_style_for_channel(ch)
+                for ch in sorted(channels)
+            ]
+            if not channel_styles:
+                continue
+
+            for field in color_fields:
+                avg_val = sum(int(style.get(field, 0)) for style in channel_styles) / float(len(channel_styles))
+                blended[field] = max(0, min(255, int(round(avg_val))))
+
+            # Preserve current effective channel for non-color behaviour.
+            if note in effective_channels:
+                blended["_effective_channel"] = int(effective_channels[note])
+
+            overrides[note] = blended
+
+        return overrides
+
+    def _resolve_note_style_with_color_override(
+        self,
+        channel: int,
+        color_override: dict[str, int] | None,
+    ) -> dict[str, int]:
+        style = self._resolve_note_style_for_channel(channel)
+        if not color_override:
+            return style
+
+        for key, value in color_override.items():
+            if key.startswith("_"):
+                continue
+            if key in style:
+                style[key] = int(value)
+        return style
+
     def _enter_highway(self, midi_file: Optional[pathlib.Path] = None) -> None:
         """Set up MIDI and piano when entering the HIGHWAY state."""
-        self._note_style = self._load_note_style()
-        self._note_style_meta = self._load_note_style_meta()
+        # Ensure the active bank/theme is pushed into config before loading
+        # note/display styles for highway rendering.
+        banks = themes_mod.load_banks()
+        active_bank_idx = themes_mod.get_active_bank_index()
+        if 0 <= active_bank_idx < len(banks):
+            themes_mod.apply_bank_to_config(banks[active_bank_idx])
+
+        self._channel_note_styles = self._load_all_channel_note_styles()
+        self._note_style = dict(self._channel_note_styles.get(self.selected_channel, self._load_note_style(self.selected_channel)))
+        self._channel_note_colours = self._load_channel_note_colours()
+        self._note_style_meta = self._load_note_style_meta(self.selected_channel)
         self._keyboard_style = self._load_keyboard_style()
         self._display_style = self._load_display_style()
+        self._blend_same_pitch_channels = self._load_same_pitch_blend_enabled()
         self._refresh_claire_script_state()
         self._selected_midi_file = midi_file
         self._piano = Piano(
@@ -254,8 +621,14 @@ class App:
             brightness_percent=int(self._keyboard_style["brightness"]),
             visible=bool(self._keyboard_style["visible"]),
         )
-        self._midi = MidiInput()
-        self._midi.connect(self._selected_port)
+        # Reuse the always-on UI MIDI if it is already open on the right port.
+        if self._ui_midi is not None and self._ui_midi.connected:
+            self._midi = self._ui_midi
+            self._midi.set_channel_priority(self._load_note_channel_priority())
+        else:
+            self._midi = MidiInput(channel_priority=self._load_note_channel_priority())
+            self._midi.connect(self._selected_port)
+            self._ui_midi = self._midi
         self._led_output = LedOutput.from_config()
         self._led_output.connect()
         self._audience_client = AudienceColorClient.from_config()
@@ -273,7 +646,9 @@ class App:
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
         if self._midi is not None:
-            self._midi.close()
+            # Keep _ui_midi alive for CC buttons during menus.
+            if self._midi is not self._ui_midi:
+                self._midi.close()
             self._midi = None
         if self._led_output is not None:
             self._led_output.close()
@@ -317,6 +692,14 @@ class App:
                 self._quit()
                 return
 
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
+                if self.state == State.HOTKEYS:
+                    self._exit_hotkeys()
+                else:
+                    self._enter_hotkeys(self.state)
+                    self.state = State.HOTKEYS
+                continue
+
             if self.state == State.MENU:
                 action = self.menu.handle_event(event)
                 if action == "select_file":
@@ -331,6 +714,9 @@ class App:
                 elif action == "settings":
                     self._enter_settings()
                     self.state = State.SETTINGS
+                elif action == "hotkeys":
+                    self._enter_hotkeys(self.state)
+                    self.state = State.HOTKEYS
                 elif action == "quit":
                     self._quit()
 
@@ -339,6 +725,12 @@ class App:
                     result = self._device_select.handle_event(event)
                     if result == "select":
                         self._selected_port = self._device_select.selected_port
+                        # (Re)connect the always-on UI MIDI so CC buttons work in menus.
+                        if self._ui_midi is not None:
+                            self._ui_midi.close()
+                        self._ui_midi = MidiInput(channel_priority=self._load_note_channel_priority())
+                        self._ui_midi.connect(self._selected_port)
+                        self._cc_buttons = self._load_cc_buttons()
                         self._device_select = None
                         self.state = State.MENU
                     elif result == "back":
@@ -418,6 +810,9 @@ class App:
                     if result == "back":
                         self._theme_settings_screen = None
                         self.state = State.SETTINGS
+                    elif result == "menu":
+                        self._theme_settings_screen = None
+                        self.state = State.MENU
 
             elif self.state == State.SONG_SELECT:
                 if self._song_select is not None:
@@ -430,6 +825,12 @@ class App:
                     elif result == "back":
                         self._song_select = None
                         self.state = State.MENU
+
+            elif self.state == State.HOTKEYS:
+                if self._hotkeys_screen is not None:
+                    result = self._hotkeys_screen.handle_event(event)
+                    if result == "back":
+                        self._exit_hotkeys()
 
             elif self.state == State.HIGHWAY:
                 if event.type == pygame.KEYDOWN:
@@ -469,6 +870,8 @@ class App:
                 conf = cfg.load()
                 conf.setdefault("note_style", {}).update(data)
                 cfg.save(conf)
+                self._channel_note_styles = self._load_all_channel_note_styles()
+                self._channel_note_colours = self._load_channel_note_colours()
                 for k, v in data.items():
                     if k in self._note_style:
                         self._note_style[k] = int(v)
@@ -501,14 +904,18 @@ class App:
 
             elif ptype == "theme":
                 idx = int(patch.get("index", 0))
-                user_themes = themes_mod.load_user_themes()
-                if 0 <= idx < len(user_themes):
-                    themes_mod.set_active_index(idx)
-                    themes_mod.apply_theme_to_config(user_themes[idx])
-                    self._apply_theme_to_live(user_themes[idx])
+                banks = themes_mod.load_banks()
+                if 0 <= idx < len(banks):
+                    themes_mod.set_active_bank_index(idx)
+                    themes_mod.apply_bank_to_config(banks[idx])
+                    self._apply_theme_to_live(banks[idx])
 
     def _update(self, dt: int) -> None:
         self._drain_control_patches()
+        # Process MIDI CC button events from the always-on connection (non-highway;
+        # during highway the CC drain happens inside the notes update block below).
+        if self.state != State.HIGHWAY:
+            self._process_ui_cc()
         if self.state == State.NOTES_SETTINGS and self._notes_settings_screen is not None:
             self._notes_settings_screen.update(dt)
             return
@@ -527,6 +934,10 @@ class App:
             return
 
         if self.state == State.THEME_SETTINGS and self._theme_settings_screen is not None:
+            self._theme_settings_screen.update(dt)
+            return
+
+        if self.state == State.HOTKEYS:
             return
 
         if self.state != State.HIGHWAY:
@@ -544,34 +955,37 @@ class App:
             self._note_trails.clear()
             return
 
-        # --- Sustain-pedal triple-tap theme cycling ---
+        # --- MIDI CC events: mapped UI control buttons ---
         for cc_num, cc_val in self._midi.drain_cc_events():
-            if cc_num == 64 and cc_val > 0:  # sustain pedal pressed down
-                now = time.monotonic()
-                self._sustain_tap_times.append(now)
-                # Keep only taps within the last second
-                cutoff = now - 1.0
-                self._sustain_tap_times = [t for t in self._sustain_tap_times if t >= cutoff]
-                if len(self._sustain_tap_times) >= 3:
-                    self._cycle_theme()
-                    self._sustain_tap_times = []
+            # Forward to UI CC handler (handles CC 20-27 by default; no-op for others).
+            if cc_val > 0:
+                self._handle_cc_button(cc_num)
 
         active_notes = self._midi.get_active_notes()
+        active_note_channels = self._midi.get_active_note_channels()
+        note_channel_sets = self._midi.get_active_note_channel_sets() if self._blend_same_pitch_channels else {}
+        note_color_overrides = self._build_same_pitch_color_overrides(active_note_channels, note_channel_sets)
         if self._led_output is not None:
-            self._led_output.update(active_notes, dt)
+            self._led_output.update(
+                active_notes,
+                dt,
+                note_channels=active_note_channels,
+                channel_colors=self._channel_note_colours,
+                note_color_overrides=note_color_overrides,
+            )
         newly_pressed = active_notes - self._prev_active_notes
         released_notes = self._prev_active_notes - active_notes
 
         self._update_claire_de_lune_script(dt, newly_pressed)
 
         for note in newly_pressed:
-            self._start_note_trail(note)
+            self._start_note_trail(note, active_note_channels.get(note, 1), note_color_overrides.get(note))
 
         for note in released_notes:
             self._release_note_trail(note)
 
         for note in active_notes:
-            self._anchor_note_trail(note)
+            self._anchor_note_trail(note, active_note_channels.get(note, 1), note_color_overrides.get(note))
 
         self._prev_active_notes = active_notes
         self._update_note_trails(dt)
@@ -605,38 +1019,48 @@ class App:
         if self._led_output is not None:
             self._led_output.set_active_color(r, g, b)
 
-    def _start_note_trail(self, note: int) -> None:
+    def _start_note_trail(self, note: int, channel: int, color_override: dict[str, int] | None = None) -> None:
         if self._piano is None:
             return
         rect = self._piano.get_note_rect(note)
         if rect is None:
             return
 
+        trail_style = self._resolve_note_style_with_color_override(channel, color_override)
+
         trail = {
             "note": float(note),
+            "channel": int(channel),
+            "color_override": color_override,
+            "note_style": trail_style,
             "x": float(rect.centerx),
             "top_y": float(self._note_anchor_y(note)),
             "bottom_y": float(self._note_anchor_y(note)),
-            "width": float(max(3, min(rect.width - 2, self._note_style["width_px"]))),
+            "width": float(max(3, min(rect.width - 2, trail_style["width_px"]))),
             "render_x": float(rect.centerx),
             "render_top_y": float(self._note_anchor_y(note)),
             "render_bottom_y": float(self._note_anchor_y(note)),
-            "render_width": float(max(3, min(rect.width - 2, self._note_style["width_px"]))),
+            "render_width": float(max(3, min(rect.width - 2, trail_style["width_px"]))),
             "released": False,
             "age_ms": 0.0,
         }
         self._active_note_trails[note] = trail
         self._note_trails.append(trail)
-        NoteEffectRenderer.spawn_sparks(trail, self._note_style)
-        NoteEffectRenderer.spawn_press_smoke(trail, self._note_style)
+        NoteEffectRenderer.spawn_sparks(trail, trail_style)
+        NoteEffectRenderer.spawn_press_smoke(trail, trail_style)
 
     def _release_note_trail(self, note: int) -> None:
         trail = self._active_note_trails.pop(note, None)
         if trail is not None:
             trail["released"] = True
-            NoteEffectRenderer.spawn_smoke(trail, self._note_style)
+            trail_style = trail.get("note_style")
+            if not isinstance(trail_style, dict):
+                trail_channel = int(trail.get("channel", 1))
+                trail_style = self._resolve_note_style_for_channel(trail_channel)
+            trail["note_style"] = trail_style
+            NoteEffectRenderer.spawn_smoke(trail, trail_style)
 
-    def _anchor_note_trail(self, note: int) -> None:
+    def _anchor_note_trail(self, note: int, channel: int, color_override: dict[str, int] | None = None) -> None:
         if self._piano is None:
             return
         trail = self._active_note_trails.get(note)
@@ -646,9 +1070,23 @@ class App:
         if rect is None:
             return
 
+        # If the same note is held by multiple channels, MIDI tracking resolves
+        # the effective channel; update style when precedence changes.
+        if int(trail.get("channel", channel)) != int(channel):
+            trail["channel"] = int(channel)
+        trail["color_override"] = color_override
+        trail["note_style"] = self._resolve_note_style_with_color_override(
+            int(trail.get("channel", channel)),
+            color_override,
+        )
+
+        trail_style = trail.get("note_style", self._note_style)
+        width_px = self._note_style["width_px"]
+        if isinstance(trail_style, dict):
+            width_px = int(trail_style.get("width_px", width_px))
         trail["x"] = float(rect.centerx)
         trail["bottom_y"] = float(self._note_anchor_y(note))
-        trail["width"] = float(max(3, min(rect.width - 2, self._note_style["width_px"])))
+        trail["width"] = float(max(3, min(rect.width - 2, width_px)))
 
     def _note_anchor_y(self, note: int) -> float:
         if self._piano is None:
@@ -667,9 +1105,16 @@ class App:
         NoteEffectRenderer.update_particles(self._note_trails, dt)
 
         sim_dt_ms = max(1.0, min(33.0, self._smoothed_dt_ms))
-        dy = float(self._note_style["speed_px_per_sec"]) * (sim_dt_ms / 1000.0)
         survivors: list[dict[str, float | bool]] = []
         for trail in self._note_trails:
+            trail_channel = int(trail.get("channel", 1))
+            color_override = trail.get("color_override")
+            if isinstance(color_override, dict):
+                trail_style = self._resolve_note_style_with_color_override(trail_channel, color_override)
+            else:
+                trail_style = self._resolve_note_style_for_channel(trail_channel)
+            trail["note_style"] = trail_style
+            dy = float(trail_style.get("speed_px_per_sec", self._note_style["speed_px_per_sec"])) * (sim_dt_ms / 1000.0)
             trail["age_ms"] = float(trail.get("age_ms", 0.0)) + sim_dt_ms
             trail["top_y"] = float(trail["top_y"]) - dy
             if bool(trail["released"]):
@@ -738,6 +1183,9 @@ class App:
         elif self.state == State.SONG_SELECT:
             if self._song_select is not None:
                 self._song_select.draw()
+        elif self.state == State.HOTKEYS:
+            if self._hotkeys_screen is not None:
+                self._hotkeys_screen.draw()
         elif self.state == State.HIGHWAY:
             self._draw_highway()
 
@@ -840,11 +1288,28 @@ class App:
         self._fx_renderer.set_target(self.screen)
         self._fx_renderer.begin_frame()
         for trail in self._note_trails:
-            self._fx_renderer.draw_trail(self._interpolated_trail_for_draw(trail), self._note_style)
+            style = trail.get("note_style")
+            if not isinstance(style, dict):
+                trail_channel = int(trail.get("channel", 1))
+                style = self._resolve_note_style_for_channel(trail_channel)
+            trail["note_style"] = style
+            self._fx_renderer.draw_trail(self._interpolated_trail_for_draw(trail), style)
         self._fx_renderer.end_frame()
 
-    def _load_note_style(self) -> dict[str, int]:
-        style = cfg.load().get("note_style", {})
+    def _load_note_style(self, channel: str) -> dict[str, int]:
+        """Load note style for a specific channel (1-16 as string)."""
+        all_styles = cfg.load().get("note_style", {})
+        style = all_styles.get(channel, {})
+        return self._coerce_note_style(style)
+
+    def _coerce_note_style(self, style: dict) -> dict[str, int]:
+        """Normalize a note-style dict into the runtime format used by rendering."""
+        outer_r = int(style.get("color_r", 0))
+        outer_g = int(style.get("color_g", 230))
+        outer_b = int(style.get("color_b", 230))
+        inner_r = int(style.get("interior_r", 120))
+        inner_g = int(style.get("interior_g", 255))
+        inner_b = int(style.get("interior_b", 255))
         return {
             "speed_px_per_sec": int(style.get("speed_px_per_sec", 420)),
             "width_px": int(style.get("width_px", 12)),
@@ -857,6 +1322,7 @@ class App:
             "effect_glow_enabled": int(bool(style.get("effect_glow_enabled", 1))),
             "effect_highlight_enabled": int(bool(style.get("effect_highlight_enabled", 1))),
             "effect_sparks_enabled": int(bool(style.get("effect_sparks_enabled", 1))),
+            "effect_embers_enabled": int(bool(style.get("effect_embers_enabled", 0))),
             "effect_smoke_enabled": int(bool(style.get("effect_smoke_enabled", 1))),
             "effect_press_smoke_enabled": int(bool(style.get("effect_press_smoke_enabled", 0))),
             "effect_moon_dust_enabled": int(bool(style.get("effect_moon_dust_enabled", 0))),
@@ -866,13 +1332,70 @@ class App:
             "spark_amount_percent": int(style.get("spark_amount_percent", 100)),
             "smoke_amount_percent": int(style.get("smoke_amount_percent", 100)),
             "press_smoke_amount_percent": int(style.get("press_smoke_amount_percent", 100)),
-            "color_r": int(style.get("color_r", 0)),
-            "color_g": int(style.get("color_g", 230)),
-            "color_b": int(style.get("color_b", 230)),
-            "interior_r": int(style.get("interior_r", 120)),
-            "interior_g": int(style.get("interior_g", 255)),
-            "interior_b": int(style.get("interior_b", 255)),
+            "color_r": outer_r,
+            "color_g": outer_g,
+            "color_b": outer_b,
+            "interior_r": inner_r,
+            "interior_g": inner_g,
+            "interior_b": inner_b,
+            "glow_color_r": int(style.get("glow_color_r", outer_r)),
+            "glow_color_g": int(style.get("glow_color_g", outer_g)),
+            "glow_color_b": int(style.get("glow_color_b", outer_b)),
+            "highlight_color_r": int(style.get("highlight_color_r", outer_r)),
+            "highlight_color_g": int(style.get("highlight_color_g", outer_g)),
+            "highlight_color_b": int(style.get("highlight_color_b", outer_b)),
+            "spark_color_r": int(style.get("spark_color_r", outer_r)),
+            "spark_color_g": int(style.get("spark_color_g", outer_g)),
+            "spark_color_b": int(style.get("spark_color_b", outer_b)),
+            "ember_color_r": int(style.get("ember_color_r", outer_r)),
+            "ember_color_g": int(style.get("ember_color_g", outer_g)),
+            "ember_color_b": int(style.get("ember_color_b", outer_b)),
+            "smoke_color_r": int(style.get("smoke_color_r", outer_r)),
+            "smoke_color_g": int(style.get("smoke_color_g", outer_g)),
+            "smoke_color_b": int(style.get("smoke_color_b", outer_b)),
+            "mist_color_r": int(style.get("mist_color_r", inner_r)),
+            "mist_color_g": int(style.get("mist_color_g", inner_g)),
+            "mist_color_b": int(style.get("mist_color_b", inner_b)),
+            "dust_color_r": int(style.get("dust_color_r", inner_r)),
+            "dust_color_g": int(style.get("dust_color_g", inner_g)),
+            "dust_color_b": int(style.get("dust_color_b", inner_b)),
+            "steam_color_r": int(style.get("steam_color_r", outer_r)),
+            "steam_color_g": int(style.get("steam_color_g", outer_g)),
+            "steam_color_b": int(style.get("steam_color_b", outer_b)),
         }
+
+    def _load_all_channel_note_styles(self) -> dict[str, dict[str, int]]:
+        """Load fully normalized note styles for all 16 MIDI channels."""
+        all_styles = cfg.load().get("note_style", {})
+        result: dict[str, dict[str, int]] = {}
+        for ch in range(1, 17):
+            ch_key = str(ch)
+            result[ch_key] = self._coerce_note_style(all_styles.get(ch_key, {}))
+        return result
+
+    def _load_channel_note_colours(self) -> dict[str, dict[str, int]]:
+        """Load per-channel note colour fields used for channel-priority rendering."""
+        result: dict[str, dict[str, int]] = {}
+        for ch in range(1, 17):
+            ch_key = str(ch)
+            style = self._channel_note_styles.get(ch_key, {})
+            result[ch_key] = {
+                "color_r": int(style.get("color_r", 0)),
+                "color_g": int(style.get("color_g", 230)),
+                "color_b": int(style.get("color_b", 230)),
+                "interior_r": int(style.get("interior_r", 120)),
+                "interior_g": int(style.get("interior_g", 255)),
+                "interior_b": int(style.get("interior_b", 255)),
+            }
+        return result
+
+    def _resolve_note_style_for_channel(self, channel: int) -> dict[str, int]:
+        """Return full draw style for a note based on its effective MIDI channel."""
+        ch_key = str(max(1, min(16, int(channel))))
+        style = self._channel_note_styles.get(ch_key)
+        if style is not None:
+            return dict(style)
+        return dict(self._note_style)
 
     def _load_keyboard_style(self) -> dict[str, int | bool]:
         style = cfg.load().get("keyboard_style", {})
@@ -882,8 +1405,9 @@ class App:
             "visible": bool(style.get("visible", True)),
         }
 
-    def _load_note_style_meta(self) -> dict[str, str | bool]:
-        style = cfg.load().get("note_style", {})
+    def _load_note_style_meta(self, channel: str) -> dict[str, str | bool]:
+        all_styles = cfg.load().get("note_style", {})
+        style = all_styles.get(channel, {})
         return {
             "active_theme_id": str(style.get("active_theme_id", "custom")),
             "experimental_claire_script_enabled": bool(style.get("experimental_claire_script_enabled", 0)),
@@ -965,9 +1489,41 @@ class App:
             "gif_speed_percent": int(style.get("gif_speed_percent", 100)),
         }
 
+    _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
+
     @staticmethod
     def _load_image_frames(path: pathlib.Path) -> tuple[list[pygame.Surface], list[float]]:
-        """Load an image file into (frames, durations_ms). Animated GIFs use Pillow."""
+        """Load an image or video file into (frames, durations_ms).
+        Animated GIFs use Pillow; video files use OpenCV (no audio decoded)."""
+        if not file_limits.is_allowed_media_file(path):
+            print(
+                "Skipping background media over size limit: "
+                f"{path} (limit {file_limits.format_limit_mb(file_limits.MAX_MEDIA_FILE_BYTES)})"
+            )
+            return [], []
+        if path.suffix.lower() in App._VIDEO_EXTS:
+            try:
+                import cv2  # type: ignore
+                cap = cv2.VideoCapture(str(path))
+                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                frame_dur = max(16.0, 1000.0 / fps)
+                frames: list[pygame.Surface] = []
+                durations: list[float] = []
+                _MAX_FRAMES = 1800  # ~60 s at 30 fps — guards against loading a full movie
+                while len(frames) < _MAX_FRAMES:
+                    ret, bgr = cap.read()
+                    if not ret:
+                        break
+                    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                    h, w = rgb.shape[:2]
+                    surf = pygame.image.fromstring(rgb.tobytes(), (w, h), "RGB").convert()
+                    frames.append(surf)
+                    durations.append(frame_dur)
+                cap.release()
+                if frames:
+                    return frames, durations
+            except ImportError:
+                pass  # opencv-python not installed — fall through to static load
         if path.suffix.lower() == ".gif":
             try:
                 from PIL import Image as _PILImage  # type: ignore
@@ -1005,7 +1561,7 @@ class App:
         slides: list[tuple[list[pygame.Surface], list[float]]] = []
         for p_str in paths_to_use:
             p = pathlib.Path(p_str)
-            if p.exists():
+            if p.exists() and file_limits.is_allowed_media_file(p):
                 frames, durs = self._load_image_frames(p)
                 if frames:
                     slides.append((frames, durs))

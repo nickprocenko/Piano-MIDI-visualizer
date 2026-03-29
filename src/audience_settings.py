@@ -49,6 +49,7 @@ class AudienceSettingsScreen:
         self._hover_back = False
         self._hover_enable = False
         self._active_field = -1
+        self._cursor: int = 0
 
         self._title_pos = (0, 0)
         self._panel = pygame.Rect(0, 0, 0, 0)
@@ -58,6 +59,7 @@ class AudienceSettingsScreen:
 
         self._load()
         self._build_layout()
+        self._apply_cursor_hover()
 
     def handle_event(self, event: pygame.event.Event) -> str | None:
         if event.type == pygame.MOUSEMOTION:
@@ -65,7 +67,30 @@ class AudienceSettingsScreen:
             return None
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self._active_field = -1
             return "back"
+
+        # Navigation when not actively typing into a field.
+        if event.type == pygame.KEYDOWN and self._active_field < 0:
+            _nav = len(self.TEXT_FIELDS) + 2
+            if event.key == pygame.K_UP:
+                self._cursor = (self._cursor - 1) % _nav
+                self._apply_cursor_hover()
+                return None
+            if event.key == pygame.K_DOWN:
+                self._cursor = (self._cursor + 1) % _nav
+                self._apply_cursor_hover()
+                return None
+            if event.key in (pygame.K_LEFT, pygame.K_RIGHT):
+                if self._cursor == 0:
+                    self._values["enabled"] = not bool(self._values["enabled"])
+                    self._save()
+                return None
+            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                result = self._cursor_confirm()
+                if result is not None:
+                    return result
+                return None
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._back_rect.collidepoint(event.pos):
@@ -158,6 +183,27 @@ class AudienceSettingsScreen:
     def _update_hover(self, pos: tuple[int, int]) -> None:
         self._hover_back = self._back_rect.collidepoint(pos)
         self._hover_enable = self._enable_rect.collidepoint(pos)
+
+    def _apply_cursor_hover(self) -> None:
+        n = len(self.TEXT_FIELDS)
+        self._hover_enable = (self._cursor == 0)
+        self._hover_back = (self._cursor == n + 1)
+        if 1 <= self._cursor <= n:
+            self._active_field = self._cursor - 1
+        else:
+            self._active_field = -1
+
+    def _cursor_confirm(self) -> str | None:
+        n = len(self.TEXT_FIELDS)
+        if self._cursor == 0:
+            self._values["enabled"] = not bool(self._values["enabled"])
+            self._save()
+        elif 1 <= self._cursor <= n:
+            self._active_field = self._cursor - 1
+        elif self._cursor == n + 1:
+            self._active_field = -1
+            return "back"
+        return None
 
     def _draw_title(self) -> None:
         self.screen.blit(self._title_surf, self._title_pos)

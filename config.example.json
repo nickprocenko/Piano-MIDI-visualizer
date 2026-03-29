@@ -2,6 +2,25 @@
   "search_folders": [
     "C:/Users/YourName/Downloads/Midi Songs"
   ],
+  "note_channel_priority": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+  ],
+  "blend_same_pitch_channels": false,
   "note_style": {
     "speed_px_per_sec": 420,
     "width_px": 18,
@@ -36,6 +55,7 @@
     "port": "COM3",
     "baudrate": 115200,
     "ble_address": "AA:BB:CC:DD:EE:FF",
+    "ble_device_name": "Piano-LED-Bridge",
     "ble_service_uuid": "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
     "ble_char_uuid": "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
     "ble_write_with_response": false,
@@ -48,6 +68,8 @@
     "active_b": 220
   },
   "display_style": {
+    "fullscreen": true,
+    "display_index": 1,
     "width_scale_percent": 66,
     "background_alpha": 50,
     "background_image": "",
@@ -67,5 +89,20 @@
     "channel_id": "YOUR_CHANNEL_ID",
     "app_api_key": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
     "reconnect_sec": 2.0
+  },
+  "midi_cc_buttons": {
+    "_comment": "CC numbers for global UI navigation + live performance controls.",
+    "nav_up":            20,
+    "nav_down":          21,
+    "nav_left":          22,
+    "nav_right":         23,
+    "confirm":           24,
+    "back":              25,
+    "cycle_theme":       26,
+    "cycle_bank":        27,
+    "cycle_theme_prev":  28,
+    "cycle_bank_prev":   29,
+    "toggle_keyboard":   30,
+    "toggle_fullscreen": 31
   }
 }

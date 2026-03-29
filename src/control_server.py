@@ -280,6 +280,7 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
       <div class="toggle-btn" data-ns-toggle="effect_glow_enabled">Glow</div>
       <div class="toggle-btn" data-ns-toggle="effect_highlight_enabled">Edge Highlight</div>
       <div class="toggle-btn" data-ns-toggle="effect_sparks_enabled">Sparks</div>
+      <div class="toggle-btn" data-ns-toggle="effect_embers_enabled">Embers</div>
       <div class="toggle-btn" data-ns-toggle="effect_smoke_enabled">Smoke</div>
       <div class="toggle-btn" data-ns-toggle="effect_press_smoke_enabled">Start Mist</div>
       <div class="toggle-btn" data-ns-toggle="effect_moon_dust_enabled">Moon Dust</div>

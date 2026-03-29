@@ -16,6 +16,12 @@ Designed to run locally on Windows with a dual-monitor setup (projector + PC).
 - **Live web control panel** at `http://localhost:8181` — change notes, effects, keyboard, and themes from your browser while a song is playing
 - 60 fps game loop with crash diagnostics
 
+## File Limits
+
+To avoid crashes from very large assets:
+- MIDI files larger than 16 MB are skipped in the song picker.
+- Background media files larger than 64 MB are skipped when previewing or loading themes.
+
 ## Requirements
 - Python 3.10+
 - Internet connection on first launch (to download packages)
@@ -148,5 +154,23 @@ Behavior:
 - App smooths from current to target color over `transition_ms`
 - Updates note colors in real time
 - Updates LED active color in real time
+
+## Channel Layer Priority (Same Note, Multiple Channels)
+
+When multiple MIDI channels play the same pitch at the same time, the app now
+uses `note_channel_priority` in `config.json` to decide which channel's color
+and style wins for that note.
+
+- Put most important channels first in the list.
+- Any channels you omit are appended automatically in numeric order.
+- If `note_channel_priority` is missing or empty, behavior stays effectively
+	the same as before (lower channel numbers win first).
+
+Optional blend mode:
+- Set `"blend_same_pitch_channels": true` in `config.json` to average colors
+	when multiple channels play the exact same pitch simultaneously.
+- This blends note/FX colors (and LED per-note color) while still using channel
+	priority for non-color behaviour (speed/width/effects toggles).
+- Keep it `false` (default) if you want strict per-channel winner-takes-all.
 
 

@@ -4,3 +4,4 @@ pyserial>=3.5
 bleak>=0.22.0
 websocket-client>=1.8.0
 Pillow>=10.0.0
+opencv-python>=4.8.0

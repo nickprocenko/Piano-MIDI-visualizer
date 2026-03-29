@@ -70,15 +70,19 @@ class MidiInput:
         midi.close()
     """
 
-    def __init__(self) -> None:
+    def __init__(self, channel_priority: list[int] | None = None) -> None:
         self._midi_in: Optional[object] = None  # rtmidi.MidiIn instance
         self._active_notes: set[int] = set()
+        # Tracks all currently active channels per note; channels are 1-16.
+        self._active_note_channels: dict[int, set[int]] = {}
         self._cc_events: collections.deque[tuple[int, int]] = collections.deque(maxlen=64)
         self._lock = threading.Lock()
+        self._channel_priority_rank: dict[int, int] = {}
         self._virtual_mode: bool = False
         self.port_name: str = ""
         self.connected: bool = False
         self.available: bool = _RTMIDI_AVAILABLE
+        self.set_channel_priority(channel_priority)
 
     # ------------------------------------------------------------------
     # Public API
@@ -145,6 +149,7 @@ class MidiInput:
             return False
         with self._lock:
             self._active_notes.add(note)
+            self._active_note_channels.setdefault(note, set()).add(1)
         return True
 
     def handle_keyup(self, key: int) -> bool:
@@ -156,12 +161,41 @@ class MidiInput:
             return False
         with self._lock:
             self._active_notes.discard(note)
+            self._active_note_channels.pop(note, None)
         return True
 
     def get_active_notes(self) -> set[int]:
         """Return a *copy* of the set of currently held MIDI note numbers."""
         with self._lock:
             return set(self._active_notes)
+
+    def get_active_note_channels(self) -> dict[int, int]:
+        """Return note -> effective channel mapping.
+
+        If a note is currently held by multiple channels, precedence is decided
+        by the configured channel-priority order.
+        """
+        with self._lock:
+            return {
+                note: min(channels, key=self._priority_key)
+                for note, channels in self._active_note_channels.items()
+                if channels
+            }
+
+    def get_active_note_channel_sets(self) -> dict[int, set[int]]:
+        """Return note -> set of currently held channels for each active note."""
+        with self._lock:
+            return {
+                note: set(channels)
+                for note, channels in self._active_note_channels.items()
+                if channels
+            }
+
+    def set_channel_priority(self, channel_priority: list[int] | None) -> None:
+        """Set preferred precedence for note conflicts across MIDI channels."""
+        ordered = self._normalize_channel_priority(channel_priority)
+        with self._lock:
+            self._channel_priority_rank = {ch: idx for idx, ch in enumerate(ordered)}
 
     def drain_cc_events(self) -> list[tuple[int, int]]:
         """Atomically drain and return all queued CC events as (cc_number, value) pairs."""
@@ -181,9 +215,36 @@ class MidiInput:
             self._midi_in = None
         with self._lock:
             self._active_notes.clear()
+            self._active_note_channels.clear()
         self._virtual_mode = False
         self.connected = False
         self.port_name = ""
+
+    def _normalize_channel_priority(self, channel_priority: list[int] | None) -> list[int]:
+        seen: set[int] = set()
+        ordered: list[int] = []
+
+        if channel_priority is not None:
+            for raw in channel_priority:
+                try:
+                    ch = int(raw)
+                except Exception:
+                    continue
+                if 1 <= ch <= 16 and ch not in seen:
+                    ordered.append(ch)
+                    seen.add(ch)
+
+        for ch in range(1, 17):
+            if ch not in seen:
+                ordered.append(ch)
+
+        return ordered
+
+    def _priority_key(self, channel: int) -> tuple[int, int]:
+        rank = self._channel_priority_rank.get(channel)
+        if rank is None:
+            return (16, channel)
+        return (rank, channel)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -201,7 +262,9 @@ class MidiInput:
         if len(midi_bytes) < 3:
             return
 
-        status = midi_bytes[0] & _STATUS_MASK  # strip channel nibble
+        status_byte = midi_bytes[0]
+        status = status_byte & _STATUS_MASK  # strip channel nibble
+        channel = (status_byte & 0x0F) + 1
         note = midi_bytes[1]
         velocity = midi_bytes[2]
 
@@ -209,10 +272,18 @@ class MidiInput:
         if status == _NOTE_ON and velocity > 0:
             with self._lock:
                 self._active_notes.add(note)
+                self._active_note_channels.setdefault(note, set()).add(channel)
         # Note Off OR Note On with velocity 0 → remove note
         elif status == _NOTE_OFF or (status == _NOTE_ON and velocity == 0):
             with self._lock:
-                self._active_notes.discard(note)
+                channels = self._active_note_channels.get(note)
+                if channels is not None:
+                    channels.discard(channel)
+                    if not channels:
+                        self._active_note_channels.pop(note, None)
+                        self._active_notes.discard(note)
+                else:
+                    self._active_notes.discard(note)
         # Control Change → queue for polling
         elif status == _CC:
             with self._lock:

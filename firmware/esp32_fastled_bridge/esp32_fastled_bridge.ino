@@ -11,10 +11,18 @@ extern "C" bool btInUse(void) { return true; }
 #define HAS_NIMBLE 1
 
 // ---------------- User Config ----------------
+// Strip 1: SK9822 (SPI — data + clock)
 #define DATA_PIN    33
 #define CLOCK_PIN   21
 #define LED_TYPE    SK9822
 #define COLOR_ORDER BGR
+
+// Strip 2: WS2812B (single-wire via RMT)
+// Change DATA_PIN_2 to whichever GPIO you wire the WS2812B data line to.
+#define DATA_PIN_2  18
+#define LED_TYPE_2  WS2812B
+#define COLOR_ORDER_2 GRB
+
 #define LED_COUNT   177
 #define BRIGHTNESS  128
 
@@ -27,7 +35,8 @@ static const char* BLE_DEVICE_NAME = "Piano-LED-Bridge";
 static const char* BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* BLE_WRITE_UUID   = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 
-CRGB leds[LED_COUNT];
+CRGB leds[LED_COUNT];   // SK9822 strip
+CRGB leds2[LED_COUNT];  // WS2812B strip (mirrors strip 1)
 char lineBuf[MAX_LINE_LEN];
 size_t lineLen = 0;
 
@@ -36,7 +45,8 @@ NimBLEServer* bleServer = nullptr;
 #endif
 
 void clearAll() {
-  fill_solid(leds, LED_COUNT, CRGB::Black);
+  fill_solid(leds,  LED_COUNT, CRGB::Black);
+  fill_solid(leds2, LED_COUNT, CRGB::Black);
   FastLED.show();
 }
 
@@ -74,12 +84,14 @@ bool applyFrame(char* line) {
     if (g < 0) g = 0; if (g > 255) g = 255;
     if (b < 0) b = 0; if (b > 255) b = 255;
 
-    leds[i] = CRGB((uint8_t)r, (uint8_t)g, (uint8_t)b);
+    leds[i]  = CRGB((uint8_t)r, (uint8_t)g, (uint8_t)b);
+    leds2[i] = leds[i];  // mirror to WS2812B strip
   }
 
   // If sender count is smaller, clear remainder.
   for (int i = count; i < LED_COUNT; ++i) {
-    leds[i] = CRGB::Black;
+    leds[i]  = CRGB::Black;
+    leds2[i] = CRGB::Black;
   }
 
   FastLED.show();
@@ -146,7 +158,6 @@ void setupBleReceiver() {
   service->start();
 
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
-  advertising->useLegacyAdvertising(true);  // BLE 4.x compatible — visible to phones + Windows
   advertising->addServiceUUID(BLE_SERVICE_UUID);
   advertising->setName(BLE_DEVICE_NAME);
   advertising->enableScanResponse(true);    // Name in scan response so Windows sees it
@@ -157,7 +168,8 @@ void setupBleReceiver() {
 void setup() {
   // Clear LEDs immediately on boot — before any delay — so a reset wipes
   // whatever noise/state the strip was showing.
-  FastLED.addLeds<LED_TYPE, DATA_PIN, CLOCK_PIN, COLOR_ORDER>(leds, LED_COUNT);
+  FastLED.addLeds<LED_TYPE,   DATA_PIN,  CLOCK_PIN, COLOR_ORDER >(leds,  LED_COUNT);
+  FastLED.addLeds<LED_TYPE_2, DATA_PIN_2, COLOR_ORDER_2          >(leds2, LED_COUNT);
   FastLED.setBrightness(BRIGHTNESS);
   clearAll();
 

@@ -1,10 +1,14 @@
-"""Display settings screen for projector scaling and background image."""
+"""Display settings screen for projector scaling and playback options.
+
+Note: Background image selection is now handled in Theme Settings.
+"""
 
 from __future__ import annotations
 
 import pathlib
 import pygame
 from src import config as cfg
+from src import file_limits
 from src.piano import Piano
 
 
@@ -33,29 +37,6 @@ KNOB_R = 9
 
 PANEL_MARGIN_X = 26
 PANEL_GAP = 16
-
-
-def _pick_images() -> list[str]:
-    """Open a file picker; returns a list of selected paths (may be 1 or many)."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.wm_attributes("-topmost", True)
-        paths = filedialog.askopenfilenames(
-            parent=root,
-            title="Select background image(s) / GIF",
-            filetypes=[
-                ("Image files", "*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif"),
-                ("All files", "*.*"),
-            ],
-        )
-        root.destroy()
-        return list(paths) if paths else []
-    except Exception:
-        return []
 
 
 class DisplaySettingsScreen:
@@ -90,10 +71,9 @@ class DisplaySettingsScreen:
         self._hover_back = False
         self._hover_slider: int = -1
         self._drag_slider: int = -1
-        self._hover_pick = False
-        self._hover_clear = False
-        self._hover_add = False
         self._hover_fullscreen = False
+        self._hover_blend_channels = False
+        self._cursor: int = 0
 
         self._title_pos = (0, 0)
         self._left_panel = pygame.Rect(0, 0, 0, 0)
@@ -101,16 +81,14 @@ class DisplaySettingsScreen:
         self._back_rect = pygame.Rect(0, 0, BACK_W, BACK_H)
         self._row_rects: list[pygame.Rect] = []
         self._slider_rects: list[pygame.Rect] = []
-
-        self._pick_rect = pygame.Rect(0, 0, 0, 0)
-        self._clear_rect = pygame.Rect(0, 0, 0, 0)
-        self._add_rect = pygame.Rect(0, 0, 0, 0)
         self._fullscreen_rect = pygame.Rect(0, 0, 0, 0)
+        self._blend_channels_rect = pygame.Rect(0, 0, 0, 0)
         self._preview_rect = pygame.Rect(0, 0, 0, 0)
 
         self._load()
         self._load_background_image()
         self._build_layout()
+        self._apply_cursor_hover()
 
     def handle_event(self, event: pygame.event.Event) -> str | None:
         if event.type == pygame.MOUSEMOTION:
@@ -119,50 +97,37 @@ class DisplaySettingsScreen:
             self._update_hover(event.pos)
             return None
 
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            return "back"
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                return "back"
+            _nav = len(self.FIELDS) + 3
+            if event.key == pygame.K_UP:
+                self._cursor = (self._cursor - 1) % _nav
+                self._apply_cursor_hover()
+                return None
+            if event.key == pygame.K_DOWN:
+                self._cursor = (self._cursor + 1) % _nav
+                self._apply_cursor_hover()
+                return None
+            if event.key == pygame.K_LEFT:
+                self._cursor_adjust(-1)
+                return None
+            if event.key == pygame.K_RIGHT:
+                self._cursor_adjust(1)
+                return None
+            if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                result = self._cursor_confirm()
+                if result is not None:
+                    return result
+                return None
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._back_rect.collidepoint(event.pos):
                 return "back"
 
-            if self._pick_rect.collidepoint(event.pos):
-                selected = _pick_images()
-                if selected:
-                    if len(selected) == 1:
-                        # Single file: set as single image / animated GIF, clear slideshow
-                        self._values["background_image"] = selected[0]
-                        self._values["background_slideshow_paths"] = []
-                    else:
-                        # Multiple files: slideshow mode, clear single image
-                        self._values["background_image"] = ""
-                        self._values["background_slideshow_paths"] = selected
-                    self._save()
-                    self._load_background_image()
-                return None
-
-            if self._add_rect.collidepoint(event.pos):
-                # Add more files to the existing slideshow
-                extra = _pick_images()
-                if extra:
-                    current_list: list[str] = list(self._values["background_slideshow_paths"])
-                    # If currently using a single image, bring it into the slideshow
-                    single = str(self._values.get("background_image", ""))
-                    if single and not current_list:
-                        current_list = [single]
-                    current_list.extend(extra)
-                    self._values["background_slideshow_paths"] = current_list
-                    self._values["background_image"] = ""
-                    self._save()
-                    self._load_background_image()
-                return None
-
-            if self._clear_rect.collidepoint(event.pos):
-                self._values["background_image"] = ""
-                self._values["background_slideshow_paths"] = []
+            if self._blend_channels_rect.collidepoint(event.pos):
+                self._values["blend_same_pitch_channels"] = not bool(self._values.get("blend_same_pitch_channels", False))
                 self._save()
-                self._bg_image = None
-                self._bg_first_frame = None
                 return None
 
             if self._fullscreen_rect.collidepoint(event.pos):
@@ -201,6 +166,7 @@ class DisplaySettingsScreen:
             "background_transition_percent": int(data.get("background_transition_percent", 35)),
             "gif_speed_percent": int(data.get("gif_speed_percent", 100)),
             "fullscreen": bool(data.get("fullscreen", True)),
+            "blend_same_pitch_channels": bool(conf.get("blend_same_pitch_channels", False)),
         }
         self._preview_keyboard_height = int(keyboard.get("height_percent", 18))
         self._preview_keyboard_brightness = int(keyboard.get("brightness", 100))
@@ -217,6 +183,7 @@ class DisplaySettingsScreen:
             "gif_speed_percent": int(self._values["gif_speed_percent"]),
             "fullscreen": bool(self._values["fullscreen"]),
         }
+        data["blend_same_pitch_channels"] = bool(self._values.get("blend_same_pitch_channels", False))
         cfg.save(data)
 
     def _load_background_image(self) -> None:
@@ -235,7 +202,26 @@ class DisplaySettingsScreen:
         p = pathlib.Path(preview_path_str)
         if not p.exists():
             return
+        if not file_limits.is_allowed_media_file(p):
+            return
+        _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
         try:
+            if p.suffix.lower() in _VIDEO_EXTS:
+                # Extract first frame via OpenCV for the preview thumbnail
+                try:
+                    import cv2  # type: ignore
+                    cap = cv2.VideoCapture(str(p))
+                    ret, bgr = cap.read()
+                    cap.release()
+                    if ret:
+                        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                        h, w = rgb.shape[:2]
+                        surf = pygame.image.fromstring(rgb.tobytes(), (w, h), "RGB").convert()
+                        self._bg_image = surf
+                        self._bg_first_frame = surf
+                        return
+                except Exception:
+                    pass
             if p.suffix.lower() == ".gif":
                 # Try to load first GIF frame via Pillow for preview
                 try:
@@ -281,9 +267,10 @@ class DisplaySettingsScreen:
         self._slider_rects = []
         y = self._left_panel.top + 12
         row_w = self._left_panel.width - 24
-        # Reserve space for 4 action buttons (min ~28px each) below sliders
-        _btn_reserve = 4 * 30 + 3 * 6 + 16
-        available_for_rows = self._left_panel.height - 24 - _btn_reserve
+        # Reserve room for blend toggle + fullscreen toggle buttons under sliders.
+        btn_h = 42
+        btn_gap = 8
+        available_for_rows = self._left_panel.height - 24 - (btn_h * 2) - btn_gap - 12
         row_h = max(40, min(ROW_H, (available_for_rows - ROW_GAP * (len(self.FIELDS) - 1)) // max(1, len(self.FIELDS))))
         for _ in self.FIELDS:
             row = pygame.Rect(self._left_panel.left + 12, y, row_w, row_h)
@@ -292,20 +279,13 @@ class DisplaySettingsScreen:
             self._slider_rects.append(slider)
             y += row_h + ROW_GAP
 
-        # Distribute the 4 action buttons evenly in the remaining left-panel space
-        btn_area_top = y + 8
-        btn_area_bottom = self._left_panel.bottom - 8
-        btn_h = min(44, max(28, (btn_area_bottom - btn_area_top - 3 * 8) // 4))
-        btn_gap = max(4, (btn_area_bottom - btn_area_top - 4 * btn_h) // 3)
-
-        def _btn(n: int) -> pygame.Rect:
-            by = btn_area_top + n * (btn_h + btn_gap)
-            return pygame.Rect(self._left_panel.left + 12, by, row_w, btn_h)
-
-        self._pick_rect = _btn(0)
-        self._add_rect = _btn(1)
-        self._clear_rect = _btn(2)
-        self._fullscreen_rect = _btn(3)
+        self._fullscreen_rect = pygame.Rect(self._left_panel.left + 12, self._left_panel.bottom - btn_h - 10, row_w, btn_h)
+        self._blend_channels_rect = pygame.Rect(
+            self._left_panel.left + 12,
+            self._fullscreen_rect.top - btn_gap - btn_h,
+            row_w,
+            btn_h,
+        )
 
         rp = self._right_panel
         self._preview_rect = pygame.Rect(rp.left + 12, rp.top + 12, rp.width - 24, rp.height - 24)
@@ -314,9 +294,7 @@ class DisplaySettingsScreen:
 
     def _update_hover(self, pos: tuple[int, int]) -> None:
         self._hover_back = self._back_rect.collidepoint(pos)
-        self._hover_pick = self._pick_rect.collidepoint(pos)
-        self._hover_add = self._add_rect.collidepoint(pos)
-        self._hover_clear = self._clear_rect.collidepoint(pos)
+        self._hover_blend_channels = self._blend_channels_rect.collidepoint(pos)
         self._hover_fullscreen = self._fullscreen_rect.collidepoint(pos)
         self._hover_slider = -1
         for i, rect in enumerate(self._slider_rects):
@@ -340,6 +318,37 @@ class DisplaySettingsScreen:
 
         self._values[key] = new_v
         self._save()
+
+    def _apply_cursor_hover(self) -> None:
+        n = len(self.FIELDS)
+        self._hover_slider = self._cursor if self._cursor < n else -1
+        self._hover_blend_channels = (self._cursor == n)
+        self._hover_fullscreen = (self._cursor == n + 1)
+        self._hover_back = (self._cursor == n + 2)
+
+    def _cursor_adjust(self, delta: int) -> None:
+        n = len(self.FIELDS)
+        if self._cursor < n:
+            key, _lbl, min_v, max_v, step, _sfx = self.FIELDS[self._cursor]
+            new_v = max(min_v, min(max_v, int(self._values[key]) + delta * step))
+            if new_v != self._values[key]:
+                self._values[key] = new_v
+                self._save()
+        elif self._cursor == n:
+            self._values["blend_same_pitch_channels"] = not bool(self._values.get("blend_same_pitch_channels", False))
+            self._save()
+
+    def _cursor_confirm(self) -> str | None:
+        n = len(self.FIELDS)
+        if self._cursor == n + 2:
+            return "back"
+        if self._cursor == n:
+            self._values["blend_same_pitch_channels"] = not bool(self._values.get("blend_same_pitch_channels", False))
+            self._save()
+            return None
+        if self._cursor == n + 1:
+            return "toggle_fullscreen"
+        return None
 
     def _draw_title(self) -> None:
         self.screen.blit(self._title_surf, self._title_pos)
@@ -376,44 +385,26 @@ class DisplaySettingsScreen:
             pygame.draw.circle(self.screen, (210, 210, 210), knob_center, KNOB_R)
             pygame.draw.circle(self.screen, BUTTON_BORDER_COLOR, knob_center, KNOB_R, width=1)
 
-        self._draw_action_button(self._pick_rect, self._hover_pick, "SELECT BACKGROUND(S) / GIF")
-        self._draw_action_button(self._add_rect, self._hover_add, "ADD MORE TO SLIDESHOW")
-        self._draw_action_button(self._clear_rect, self._hover_clear, "CLEAR BACKGROUND")
+        # Fullscreen/window mode toggle button
+        blend_enabled = bool(self._values.get("blend_same_pitch_channels", False))
+        blend_bg = BUTTON_HOVER_BG if self._hover_blend_channels else BUTTON_NORMAL_BG
+        blend_fg = BUTTON_HOVER_TEXT_COLOR if self._hover_blend_channels else BUTTON_TEXT_COLOR
+        blend_label = "SAME-PITCH BLEND: ON" if blend_enabled else "SAME-PITCH BLEND: OFF"
+        if blend_enabled and not self._hover_blend_channels:
+            blend_bg = (0, 90, 90)
+        pygame.draw.rect(self.screen, blend_bg, self._blend_channels_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._blend_channels_rect, width=1, border_radius=8)
+        blend_txt = self._value_font.render(blend_label, True, blend_fg)
+        self.screen.blit(blend_txt, blend_txt.get_rect(center=self._blend_channels_rect.center))
 
         fs = bool(self._values.get("fullscreen", True))
-        fs_label = "WINDOWED MODE" if fs else "FULLSCREEN MODE"
-        # Highlight the fullscreen button teal when active to show current state
-        fs_active_bg = (0, 80, 80) if not self._hover_fullscreen else (0, 110, 110)
-        fs_inactive_bg = BUTTON_HOVER_BG if self._hover_fullscreen else BUTTON_NORMAL_BG
-        fs_bg = fs_active_bg if not fs else fs_inactive_bg
-        pygame.draw.rect(self.screen, fs_bg, self._fullscreen_rect, border_radius=8)
+        label = "SWITCH TO WINDOWED MODE" if fs else "SWITCH TO FULLSCREEN"
+        bg = BUTTON_HOVER_BG if self._hover_fullscreen else BUTTON_NORMAL_BG
+        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_fullscreen else BUTTON_TEXT_COLOR
+        pygame.draw.rect(self.screen, bg, self._fullscreen_rect, border_radius=8)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._fullscreen_rect, width=1, border_radius=8)
-        fs_surf = self._value_font.render(fs_label, True, BUTTON_HOVER_TEXT_COLOR if self._hover_fullscreen else BUTTON_TEXT_COLOR)
-        self.screen.blit(fs_surf, fs_surf.get_rect(center=self._fullscreen_rect.center))
-
-        # Status line: show what's loaded
-        slideshow: list[str] = list(self._values.get("background_slideshow_paths", []))
-        single: str = str(self._values.get("background_image", "") or "")
-        if slideshow:
-            n = len(slideshow)
-            first_name = pathlib.Path(slideshow[0]).name
-            status = f"Slideshow: {n} image{'s' if n != 1 else ''}  (first: {first_name})"
-        elif single:
-            p = pathlib.Path(single)
-            tag = "  [animated GIF]" if p.suffix.lower() == ".gif" else ""
-            status = f"Image: {p.name}{tag}"
-        else:
-            status = "No background selected"
-        label = self._value_font.render(status, True, MUTED_TEXT_COLOR)
-        self.screen.blit(label, (self._left_panel.left + 14, self._clear_rect.bottom + 10))
-
-    def _draw_action_button(self, rect: pygame.Rect, hover: bool, text: str) -> None:
-        bg = BUTTON_HOVER_BG if hover else BUTTON_NORMAL_BG
-        fg = BUTTON_HOVER_TEXT_COLOR if hover else BUTTON_TEXT_COLOR
-        pygame.draw.rect(self.screen, bg, rect, border_radius=8)
-        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, rect, width=1, border_radius=8)
-        surf = self._value_font.render(text, True, fg)
-        self.screen.blit(surf, surf.get_rect(center=rect.center))
+        txt = self._value_font.render(label, True, fg)
+        self.screen.blit(txt, txt.get_rect(center=self._fullscreen_rect.center))
 
     def _draw_right_panel(self) -> None:
         pygame.draw.rect(self.screen, PANEL_BG, self._right_panel, border_radius=8)
