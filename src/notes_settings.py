@@ -18,6 +18,10 @@ BUTTON_TEXT_COLOR = (210, 210, 210)
 BUTTON_HOVER_TEXT_COLOR = (255, 255, 255)
 BUTTON_BORDER_COLOR = (80, 80, 110)
 ACCENT_COLOR = (0, 180, 180)
+DELETE_BUTTON_BG = (58, 25, 25)
+DELETE_BUTTON_HOVER_BG = (95, 38, 38)
+DELETE_BUTTON_TEXT_COLOR = (220, 140, 140)
+DELETE_BUTTON_HOVER_TEXT_COLOR = (255, 180, 180)
 KEY_COLOR = (220, 220, 220)
 KEY_BORDER = (60, 60, 60)
 
@@ -36,6 +40,8 @@ LAYER_BTN_H = 36
 LAYER_BTN_GAP = 10
 THEME_BTN_H = 52
 THEME_BTN_GAP = 12
+STYLE_ACTION_BTN_H = 44
+STYLE_ACTION_BTN_GAP = 10
 
 PANEL_MARGIN_X = 26
 PANEL_GAP = 16
@@ -92,7 +98,7 @@ class NotesSettingsScreen:
         ("shape", "SHAPE"),
         ("color", "COLOR"),
         ("effects", "EFFECTS"),
-        ("themes", "THEMES"),
+        ("styles", "STYLES"),
     ]
 
     # Slide palette for Claire De Lune: 5 moonlit colour scenes tied to slideshow slides.
@@ -125,112 +131,6 @@ class NotesSettingsScreen:
          "black_r": 10,  "black_g": 60,  "black_b": 175},
     ]
 
-    THEMES: list[tuple[str, str, dict[str, int | str]]] = [
-        (
-            "claire_de_lune",
-            "Claire De Lune",
-            {
-                "speed_px_per_sec": 300,
-                "width_px": 14,
-                "edge_roundness_px": 12,
-                "outer_edge_width_px": 2,
-                "glow_strength_percent": 62,
-                "decay_speed": 70,
-                "decay_value": 26,
-                "inner_blend_percent": 58,
-                "effect_glow_enabled": 1,
-                "effect_highlight_enabled": 1,
-                "effect_sparks_enabled": 1,
-                "effect_smoke_enabled": 1,
-                "effect_press_smoke_enabled": 1,
-                "effect_moon_dust_enabled": 1,
-                "effect_steam_smoke_enabled": 1,
-                "effect_halo_pulse_enabled": 1,
-                "highlight_strength_percent": 42,
-                "spark_amount_percent": 110,
-                "smoke_amount_percent": 170,
-                "press_smoke_amount_percent": 120,
-                "color_r": 86,
-                "color_g": 128,
-                "color_b": 220,
-                "interior_r": 205,
-                "interior_g": 223,
-                "interior_b": 255,
-                "active_theme_id": "claire_de_lune",
-                "experimental_claire_script_enabled": 1,
-                "_slide_palette": CLAIRE_DE_LUNE_PALETTE,
-            },
-        ),
-        (
-            "concert_cyan",
-            "Concert Cyan",
-            {
-                "speed_px_per_sec": 430,
-                "width_px": 18,
-                "edge_roundness_px": 9,
-                "outer_edge_width_px": 2,
-                "glow_strength_percent": 82,
-                "decay_speed": 95,
-                "decay_value": 22,
-                "inner_blend_percent": 32,
-                "effect_glow_enabled": 1,
-                "effect_highlight_enabled": 1,
-                "effect_sparks_enabled": 1,
-                "effect_smoke_enabled": 1,
-                "effect_press_smoke_enabled": 0,
-                "effect_moon_dust_enabled": 0,
-                "effect_steam_smoke_enabled": 0,
-                "effect_halo_pulse_enabled": 0,
-                "highlight_strength_percent": 70,
-                "spark_amount_percent": 100,
-                "smoke_amount_percent": 95,
-                "press_smoke_amount_percent": 90,
-                "color_r": 22,
-                "color_g": 180,
-                "color_b": 255,
-                "interior_r": 160,
-                "interior_g": 245,
-                "interior_b": 255,
-                "active_theme_id": "concert_cyan",
-                "experimental_claire_script_enabled": 0,
-            },
-        ),
-        (
-            "amber_stage",
-            "Amber Stage",
-            {
-                "speed_px_per_sec": 380,
-                "width_px": 17,
-                "edge_roundness_px": 8,
-                "outer_edge_width_px": 2,
-                "glow_strength_percent": 68,
-                "decay_speed": 105,
-                "decay_value": 20,
-                "inner_blend_percent": 28,
-                "effect_glow_enabled": 1,
-                "effect_highlight_enabled": 1,
-                "effect_sparks_enabled": 1,
-                "effect_smoke_enabled": 1,
-                "effect_press_smoke_enabled": 0,
-                "effect_moon_dust_enabled": 0,
-                "effect_steam_smoke_enabled": 0,
-                "effect_halo_pulse_enabled": 0,
-                "highlight_strength_percent": 62,
-                "spark_amount_percent": 90,
-                "smoke_amount_percent": 90,
-                "press_smoke_amount_percent": 80,
-                "color_r": 255,
-                "color_g": 135,
-                "color_b": 62,
-                "interior_r": 255,
-                "interior_g": 225,
-                "interior_b": 170,
-                "active_theme_id": "amber_stage",
-                "experimental_claire_script_enabled": 0,
-            },
-        ),
-    ]
-
     def __init__(self, screen: pygame.Surface) -> None:
         self.screen = screen
         self._title_font = pygame.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
@@ -246,7 +146,12 @@ class NotesSettingsScreen:
 
         self._active_layer = "motion"
         self._hover_layer: str | None = None
-        self._hover_theme: int = -1
+        self._hover_style: int = -1
+        self._hover_style_load: int = -1
+        self._hover_style_delete: int = -1
+        self._hover_save_style = False
+        self._editing_style_index: int = -1
+        self._editing_style_text: str = ""
 
         self._title_pos = (0, 0)
         self._left_panel = pygame.Rect(0, 0, 0, 0)
@@ -256,8 +161,13 @@ class NotesSettingsScreen:
         self._row_rects: list[pygame.Rect] = []
         self._slider_rects: list[pygame.Rect] = []
         self._layer_rects: dict[str, pygame.Rect] = {}
-        self._theme_rects: list[pygame.Rect] = []
+        self._style_row_rects: list[pygame.Rect] = []
+        self._style_load_rects: list[pygame.Rect] = []
+        self._style_delete_rects: list[pygame.Rect] = []
         self._effect_toggle_rects: list[pygame.Rect] = []
+        self._save_style_rect = pygame.Rect(0, 0, 0, 0)
+        self._saved_styles: list[dict[str, int | str]] = []
+        self._active_saved_style_index: int = -1
 
         self._preview_trails: list[dict[str, float | bool]] = []
         self._preview_active_trail: dict[str, float | bool] | None = None
@@ -281,10 +191,21 @@ class NotesSettingsScreen:
             self._update_hover(event.pos)
             return None
 
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-            return "back"
+        if event.type == pygame.KEYDOWN:
+            if self._editing_style_index >= 0:
+                return self._handle_style_edit_key(event)
+            if event.key == pygame.K_ESCAPE:
+                return "back"
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self._editing_style_index >= 0:
+                idx = self._editing_style_index
+                if (
+                    idx >= len(self._style_row_rects)
+                    or not self._style_row_rects[idx].collidepoint(event.pos)
+                ):
+                    self._commit_style_edit()
+
             if self._back_rect.collidepoint(event.pos):
                 return "back"
 
@@ -318,10 +239,21 @@ class NotesSettingsScreen:
                     self._set_slider_from_x(i, event.pos[0])
                 return None
 
-            if self._active_layer == "themes":
-                for i, rect in enumerate(self._theme_rects):
+            if self._active_layer == "styles":
+                if self._save_style_rect.collidepoint(event.pos):
+                    self._save_current_as_style()
+                    return None
+                for i, rect in enumerate(self._style_load_rects):
                     if rect.collidepoint(event.pos):
-                        self._apply_theme(i)
+                        self._apply_saved_style(i)
+                        return None
+                for i, rect in enumerate(self._style_delete_rects):
+                    if rect.collidepoint(event.pos):
+                        self._delete_saved_style(i)
+                        return None
+                for i, rect in enumerate(self._style_row_rects):
+                    if rect.collidepoint(event.pos):
+                        self._start_style_edit(i)
                         return None
 
             if self._active_layer == "effects":
@@ -336,6 +268,20 @@ class NotesSettingsScreen:
             self._drag_slider = -1
             self._drag_color = None
 
+        return None
+
+    def _handle_style_edit_key(self, event: pygame.event.Event) -> str | None:
+        if event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self._commit_style_edit()
+        elif event.key == pygame.K_ESCAPE:
+            self._editing_style_index = -1
+            self._editing_style_text = ""
+        elif event.key == pygame.K_BACKSPACE:
+            self._editing_style_text = self._editing_style_text[:-1]
+        else:
+            ch = event.unicode
+            if ch and ch.isprintable() and len(self._editing_style_text) < 36:
+                self._editing_style_text += ch
         return None
 
     def update(self, dt: int) -> None:
@@ -406,11 +352,44 @@ class NotesSettingsScreen:
             "active_theme_id": str(data.get("active_theme_id", "custom")),
             "experimental_claire_script_enabled": int(bool(data.get("experimental_claire_script_enabled", 0))),
         }
+        full = cfg.load()
+        raw_styles = full.get("note_styles", [])
+        self._saved_styles = []
+        for entry in raw_styles if isinstance(raw_styles, list) else []:
+            if isinstance(entry, dict):
+                self._saved_styles.append(dict(entry))
+        self._active_saved_style_index = int(full.get("active_note_style_index", -1))
 
     def _save(self) -> None:
         data = cfg.load()
         data["note_style"] = dict(self._values)
         cfg.save(data)
+
+    def _save_style_library(self) -> None:
+        data = cfg.load()
+        data["note_styles"] = [dict(entry) for entry in self._saved_styles]
+        data["active_note_style_index"] = int(self._active_saved_style_index)
+        cfg.save(data)
+
+    def _start_style_edit(self, style_index: int) -> None:
+        if not (0 <= style_index < len(self._saved_styles)):
+            return
+        self._editing_style_index = style_index
+        self._editing_style_text = str(
+            self._saved_styles[style_index].get("name", f"Style {style_index + 1}")
+        )
+
+    def _commit_style_edit(self) -> None:
+        idx = self._editing_style_index
+        if not (0 <= idx < len(self._saved_styles)):
+            self._editing_style_index = -1
+            self._editing_style_text = ""
+            return
+        new_name = self._editing_style_text.strip() or f"Style {idx + 1}"
+        self._saved_styles[idx]["name"] = new_name
+        self._save_style_library()
+        self._editing_style_index = -1
+        self._editing_style_text = ""
 
     def _build_layout(self) -> None:
         sr = self.screen.get_rect()
@@ -464,7 +443,7 @@ class NotesSettingsScreen:
             return list(self.SHAPE_FIELDS)
         if self._active_layer == "effects":
             return list(self.EFFECT_FIELDS)
-        if self._active_layer == "themes":
+        if self._active_layer == "styles":
             return []
         return (
             [(f"gradient_{c}", label, 0, 255, 5) for c, label in self.COLOR_CHANNELS]
@@ -474,7 +453,9 @@ class NotesSettingsScreen:
     def _build_layer_rows(self) -> None:
         self._row_rects = []
         self._slider_rects = []
-        self._theme_rects = []
+        self._style_row_rects = []
+        self._style_load_rects = []
+        self._style_delete_rects = []
         self._effect_toggle_rects = []
 
         fields = self._active_fields()
@@ -487,10 +468,21 @@ class NotesSettingsScreen:
         row_h = max(40, min(ROW_H, max_row_h))
         slider_bottom_pad = max(10, min(16, row_h // 3))
 
-        if self._active_layer == "themes":
-            for _id, _label, _values in self.THEMES:
-                rect = pygame.Rect(self._left_panel.left + 12, y, row_w, THEME_BTN_H)
-                self._theme_rects.append(rect)
+        if self._active_layer == "styles":
+            self._save_style_rect = pygame.Rect(self._left_panel.left + 12, y, row_w, STYLE_ACTION_BTN_H)
+            y += STYLE_ACTION_BTN_H + STYLE_ACTION_BTN_GAP
+            load_w = 90
+            del_w = 80
+            gap = 8
+            name_w = row_w - load_w - del_w - (gap * 2)
+            for _style in self._saved_styles:
+                row_rect = pygame.Rect(self._left_panel.left + 12, y, row_w, THEME_BTN_H)
+                load_rect = pygame.Rect(row_rect.right - del_w - gap - load_w, row_rect.top + 6, load_w, row_rect.height - 12)
+                delete_rect = pygame.Rect(row_rect.right - del_w, row_rect.top + 6, del_w, row_rect.height - 12)
+                name_rect = pygame.Rect(row_rect.left + 12, row_rect.top, name_w, row_rect.height)
+                self._style_row_rects.append(name_rect)
+                self._style_load_rects.append(load_rect)
+                self._style_delete_rects.append(delete_rect)
                 y += THEME_BTN_H + THEME_BTN_GAP
         elif self._active_layer == "effects":
             toggle_h = 38
@@ -541,11 +533,23 @@ class NotesSettingsScreen:
                 self._hover_layer = layer
                 break
 
-        self._hover_theme = -1
-        if self._active_layer == "themes":
-            for i, rect in enumerate(self._theme_rects):
+        self._hover_style = -1
+        self._hover_style_load = -1
+        self._hover_style_delete = -1
+        self._hover_save_style = False
+        if self._active_layer == "styles":
+            self._hover_save_style = self._save_style_rect.collidepoint(pos)
+            for i, rect in enumerate(self._style_row_rects):
                 if rect.collidepoint(pos):
-                    self._hover_theme = i
+                    self._hover_style = i
+                    break
+            for i, rect in enumerate(self._style_load_rects):
+                if rect.collidepoint(pos):
+                    self._hover_style_load = i
+                    break
+            for i, rect in enumerate(self._style_delete_rects):
+                if rect.collidepoint(pos):
+                    self._hover_style_delete = i
                     break
 
         if self._active_layer == "effects":
@@ -617,8 +621,8 @@ class NotesSettingsScreen:
 
         self._draw_layer_buttons()
 
-        if self._active_layer == "themes":
-            self._draw_theme_buttons()
+        if self._active_layer == "styles":
+            self._draw_style_buttons()
             return
 
         if self._active_layer == "effects":
@@ -771,46 +775,113 @@ class NotesSettingsScreen:
             pygame.draw.circle(self.screen, (210, 210, 210), knob_center, KNOB_R)
             pygame.draw.circle(self.screen, BUTTON_BORDER_COLOR, knob_center, KNOB_R, width=1)
 
-    def _draw_theme_buttons(self) -> None:
-        for i, (_theme_id, label, values) in enumerate(self.THEMES):
-            rect = self._theme_rects[i]
-            hovered = i == self._hover_theme
-            bg = BUTTON_HOVER_BG if hovered else BUTTON_NORMAL_BG
-            fg = BUTTON_HOVER_TEXT_COLOR if hovered else BUTTON_TEXT_COLOR
+    def _draw_style_buttons(self) -> None:
+        save_bg = BUTTON_HOVER_BG if self._hover_save_style else BUTTON_NORMAL_BG
+        save_fg = BUTTON_HOVER_TEXT_COLOR if self._hover_save_style else BUTTON_TEXT_COLOR
+        pygame.draw.rect(self.screen, save_bg, self._save_style_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._save_style_rect, width=1, border_radius=8)
+        save_label = self._value_font.render("SAVE CURRENT AS NEW STYLE", True, save_fg)
+        self.screen.blit(save_label, save_label.get_rect(center=self._save_style_rect.center))
 
-            pygame.draw.rect(self.screen, bg, rect, border_radius=8)
-            pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, rect, width=1, border_radius=8)
+        if not self._saved_styles:
+            msg = self._label_font.render("No saved styles yet.", True, MUTED_TEXT_COLOR)
+            self.screen.blit(msg, (self._left_panel.left + 24, self._save_style_rect.bottom + 20))
+            return
 
-            title = self._value_font.render(label, True, fg)
-            self.screen.blit(title, (rect.left + 12, rect.top + 7))
+        for i, style in enumerate(self._saved_styles):
+            row_rect = pygame.Rect(
+                self._left_panel.left + 12,
+                self._style_row_rects[i].top,
+                self._left_panel.width - 24,
+                THEME_BTN_H,
+            )
+            is_active = i == self._active_saved_style_index
+            hovered = i == self._hover_style
+            is_editing = i == self._editing_style_index
+            bg = BUTTON_HOVER_BG if (hovered or is_active) else BUTTON_NORMAL_BG
+            pygame.draw.rect(self.screen, bg, row_rect, border_radius=8)
+            border = ACCENT_COLOR if (is_active or is_editing) else BUTTON_BORDER_COLOR
+            pygame.draw.rect(self.screen, border, row_rect, width=2 if (is_active or is_editing) else 1, border_radius=8)
+
+            name = self._editing_style_text + "|" if is_editing else str(style.get("name", f"Style {i + 1}"))
+            title = self._value_font.render(name, True, BUTTON_TEXT_COLOR if not hovered else BUTTON_HOVER_TEXT_COLOR)
+            self.screen.blit(title, (row_rect.left + 12, row_rect.top + 7))
 
             detail = self._label_font.render(
-                f"W {values['width_px']}  Speed {values['speed_px_per_sec']}  Decay {values['decay_speed']}/{values['decay_value']}",
+                f"W {int(style.get('width_px', 12))}  Speed {int(style.get('speed_px_per_sec', 420))}  Glow {int(style.get('glow_strength_percent', 80))}",
                 True,
                 MUTED_TEXT_COLOR,
             )
-            self.screen.blit(detail, (rect.left + 12, rect.top + 28))
+            self.screen.blit(detail, (row_rect.left + 12, row_rect.top + 28))
 
-    def _apply_theme(self, theme_index: int) -> None:
-        _theme_id, _label, vals = self.THEMES[theme_index]
-        # Separate note_style fields from private meta keys (prefixed with _).
-        note_style_vals = {k: v for k, v in vals.items() if not k.startswith("_")}
-        self._values.update(note_style_vals)
+            self._draw_small_action_button(
+                self._style_load_rects[i],
+                "LOAD",
+                i == self._hover_style_load,
+            )
+            self._draw_small_action_button(
+                self._style_delete_rects[i],
+                "DEL",
+                i == self._hover_style_delete,
+                bg=DELETE_BUTTON_BG,
+                bg_hover=DELETE_BUTTON_HOVER_BG,
+                fg=DELETE_BUTTON_TEXT_COLOR,
+                fg_hover=DELETE_BUTTON_HOVER_TEXT_COLOR,
+            )
+
+    def _draw_small_action_button(
+        self,
+        rect: pygame.Rect,
+        label: str,
+        hovered: bool,
+        bg: tuple[int, int, int] = BUTTON_NORMAL_BG,
+        bg_hover: tuple[int, int, int] = BUTTON_HOVER_BG,
+        fg: tuple[int, int, int] = BUTTON_TEXT_COLOR,
+        fg_hover: tuple[int, int, int] = BUTTON_HOVER_TEXT_COLOR,
+    ) -> None:
+        pygame.draw.rect(self.screen, bg_hover if hovered else bg, rect, border_radius=6)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, rect, width=1, border_radius=6)
+        surf = self._label_font.render(label, True, fg_hover if hovered else fg)
+        self.screen.blit(surf, surf.get_rect(center=rect.center))
+
+    def _save_current_as_style(self) -> None:
+        style_name = f"Style {len(self._saved_styles) + 1}"
+        style = dict(self._values)
+        style["name"] = style_name
+        self._saved_styles.append(style)
+        self._active_saved_style_index = len(self._saved_styles) - 1
+        self._save_style_library()
+        self._build_layer_rows()
+
+    def _apply_saved_style(self, style_index: int) -> None:
+        if not (0 <= style_index < len(self._saved_styles)):
+            return
+        style = dict(self._saved_styles[style_index])
+        style.pop("name", None)
+        self._values.update(style)
+        self._active_saved_style_index = style_index
         self._save()
-        # If this theme carries a slide palette, enable it in config.
-        palette = vals.get("_slide_palette")
-        if palette is not None:
-            data = cfg.load()
-            sp = data.setdefault("slide_palette", {})
-            sp["enabled"] = True
-            sp["palette"] = [dict(entry) for entry in palette]
-            sp["palette_index"] = 0
-            cfg.save(data)
-        else:
-            # Applying a non-palette theme disables slide-palette cycling.
-            data = cfg.load()
-            data.setdefault("slide_palette", {})["enabled"] = False
-            cfg.save(data)
+        data = cfg.load()
+        data.setdefault("slide_palette", {})["enabled"] = False
+        data["active_note_style_index"] = style_index
+        cfg.save(data)
+        self._save_style_library()
+
+    def _delete_saved_style(self, style_index: int) -> None:
+        if not (0 <= style_index < len(self._saved_styles)):
+            return
+        self._saved_styles.pop(style_index)
+        if self._editing_style_index == style_index:
+            self._editing_style_index = -1
+            self._editing_style_text = ""
+        elif self._editing_style_index > style_index:
+            self._editing_style_index -= 1
+        if self._active_saved_style_index == style_index:
+            self._active_saved_style_index = -1
+        elif self._active_saved_style_index > style_index:
+            self._active_saved_style_index -= 1
+        self._save_style_library()
+        self._build_layer_rows()
 
     def _value_ratio(self, index: int) -> float:
         key, _label, min_v, max_v, _step = self._active_fields()[index]

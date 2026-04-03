@@ -1276,7 +1276,6 @@ class App:
             bratio = min(1.0, self._palette_blend_elapsed_ms / float(max(1, self._palette_blend_ms))) \
                 if self._palette_blend_ms > 0 else 1.0
             smooth = bratio * bratio * (3.0 - 2.0 * bratio)
-            # White-key LED colour
             pr = prev_entry.get("active_r", r)
             tr = entry.get("active_r", r)
             pg = prev_entry.get("active_g", g)
@@ -1287,17 +1286,6 @@ class App:
             ag = max(0, min(255, int(pg + (tg - pg) * smooth)))
             ab = max(0, min(255, int(pb + (tb - pb) * smooth)))
             self._led_output.set_active_color(ar, ag, ab)
-            # Black-key LED colour
-            pbkr = prev_entry.get("black_r", 0)
-            bkr = entry.get("black_r", 0)
-            pbkg = prev_entry.get("black_g", 60)
-            bkg = entry.get("black_g", 60)
-            pbkb = prev_entry.get("black_b", 180)
-            bkb = entry.get("black_b", 180)
-            fkr = max(0, min(255, int(pbkr + (bkr - pbkr) * smooth)))
-            fkg = max(0, min(255, int(pbkg + (bkg - pbkg) * smooth)))
-            fkb = max(0, min(255, int(pbkb + (bkb - pbkb) * smooth)))
-            self._led_output.set_black_key_color(fkr, fkg, fkb)
 
     def _load_background_slides(self) -> list[tuple[list[pygame.Surface], list[float]]]:
         """Build slide list from config. Slideshow paths take priority over single image."""

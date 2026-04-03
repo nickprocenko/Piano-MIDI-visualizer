@@ -45,18 +45,12 @@ _SWEEP_MS_PER_STEP = 8  # ms between LED steps (~1.4 s for 177 LEDs)
 
 
 class LedSettingsScreen:
-    """UI for LED serial port, baud, and color/mapping tuning."""
+    """UI for LED serial transport and key-to-LED mapping settings."""
 
     BAUD_OPTIONS = [115200, 230400, 460800, 921600]
     FIELDS = [
         ("fps_limit",      "LED FPS",          5,   120, 1),
         ("mirror_per_key", "LEDs Per Key",      1,     4, 1),
-        ("active_r",       "White Key Red",     0,   255, 5),
-        ("active_g",       "White Key Green",   0,   255, 5),
-        ("active_b",       "White Key Blue",    0,   255, 5),
-        ("black_r",        "Black Key Red",     0,   255, 5),
-        ("black_g",        "Black Key Green",   0,   255, 5),
-        ("black_b",        "Black Key Blue",    0,   255, 5),
     ]
 
     def __init__(self, screen: pygame.Surface) -> None:
@@ -177,12 +171,6 @@ class LedSettingsScreen:
             "led_count": int(data.get("led_count", 176)),
             "fps_limit": int(data.get("fps_limit", 30)),
             "mirror_per_key": int(data.get("mirror_per_key", 2)),
-            "active_r": int(data.get("active_r", 0)),
-            "active_g": int(data.get("active_g", 220)),
-            "active_b": int(data.get("active_b", 220)),
-            "black_r":  int(data.get("black_r",  0)),
-            "black_g":  int(data.get("black_g",  240)),
-            "black_b":  int(data.get("black_b",  255)),
         }
 
     def _save(self) -> None:
@@ -194,12 +182,6 @@ class LedSettingsScreen:
             "led_count": int(self._values["led_count"]),
             "mirror_per_key": int(self._values["mirror_per_key"]),
             "fps_limit": int(self._values["fps_limit"]),
-            "active_r": int(self._values["active_r"]),
-            "active_g": int(self._values["active_g"]),
-            "active_b": int(self._values["active_b"]),
-            "black_r":  int(self._values["black_r"]),
-            "black_g":  int(self._values["black_g"]),
-            "black_b":  int(self._values["black_b"]),
         })
         cfg.save(data)
 
@@ -276,7 +258,7 @@ class LedSettingsScreen:
 
         self._back_rect = pygame.Rect(cx - BACK_W // 2, sr.height - BACK_H - 24, BACK_W, BACK_H)
 
-        preview_y = self._refresh_rect.bottom + 90
+        preview_y = self._refresh_rect.bottom + 108
         self._preview_bar_rect = pygame.Rect(rp.left + 20, preview_y, rp.width - 40, 24)
         self._sweep_rect = pygame.Rect(rp.left + 20, self._preview_bar_rect.bottom + 14, rp.width - 40, 46)
         self._conn_dot_center = (rp.right - 18, rp.top + 18)
@@ -384,16 +366,21 @@ class LedSettingsScreen:
         count_txt = self._value_font.render(f"LED Count: {led_count}", True, TEXT_COLOR)
         self.screen.blit(count_txt, (self._right_panel.left + 20, self._refresh_rect.bottom + 54))
 
+        sync_title = self._label_font.render("Color Sync", True, TEXT_COLOR)
+        self.screen.blit(sync_title, (self._right_panel.left + 20, self._refresh_rect.bottom + 92))
+        sync_msg = self._value_font.render("LED color follows the current note color.", True, MUTED_TEXT_COLOR)
+        self.screen.blit(sync_msg, (self._right_panel.left + 20, self._refresh_rect.bottom + 122))
+
         pygame.draw.rect(self.screen, (20, 20, 24), self._preview_bar_rect, border_radius=6)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._preview_bar_rect, width=1, border_radius=6)
-        # Left half = white key color, right half = black key color
-        half_w = (self._preview_bar_rect.width - 6) // 2
-        white_c = (int(self._values["active_r"]), int(self._values["active_g"]), int(self._values["active_b"]))
-        black_c = (int(self._values["black_r"]),  int(self._values["black_g"]),  int(self._values["black_b"]))
-        white_bar = pygame.Rect(self._preview_bar_rect.left + 2, self._preview_bar_rect.top + 3, half_w, self._preview_bar_rect.height - 6)
-        black_bar = pygame.Rect(white_bar.right + 2, white_bar.top, self._preview_bar_rect.right - 2 - white_bar.right - 2, white_bar.height)
-        pygame.draw.rect(self.screen, white_c, white_bar, border_radius=4)
-        pygame.draw.rect(self.screen, black_c, black_bar, border_radius=4)
+        preview_fill = self._preview_bar_rect.inflate(-4, -6)
+        note_style = cfg.load().get("note_style", {})
+        preview_color = (
+            int(note_style.get("color_r", 0)),
+            int(note_style.get("color_g", 230)),
+            int(note_style.get("color_b", 230)),
+        )
+        pygame.draw.rect(self.screen, preview_color, preview_fill, border_radius=4)
 
         # Sweep test / connect button
         if bool(self._values.get("enabled", False)):

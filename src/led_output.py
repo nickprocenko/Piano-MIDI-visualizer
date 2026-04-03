@@ -9,7 +9,7 @@ Example for 4 LEDs:
 
     LEDS,4,0,0,0,0,220,220,0,220,220,0,0,0\n
 Default mapping for an 88-key keyboard and 176 LEDs is 2 LEDs per key.
-A pressed note lights both mapped LEDs with the configured active color.
+A pressed note lights both mapped LEDs with the current note color.
 """
 
 from __future__ import annotations
@@ -38,8 +38,6 @@ except Exception:
 PIANO_FIRST_NOTE = 21
 PIANO_LAST_NOTE = 108
 
-_BLACK_KEY_SEMITONES: frozenset[int] = frozenset({1, 3, 6, 8, 10})  # C# D# F# G# A#
-
 
 @dataclass
 class LedOutputConfig:
@@ -55,12 +53,9 @@ class LedOutputConfig:
     led_count: int
     mirror_per_key: int
     fps_limit: int
-    active_r: int
-    active_g: int
-    active_b: int
-    black_r: int
-    black_g: int
-    black_b: int
+    color_r: int
+    color_g: int
+    color_b: int
 
 
 class _BleLedSender:
@@ -201,15 +196,9 @@ class LedOutput:
         return self._send_frame(data)
 
     def set_active_color(self, r: int, g: int, b: int) -> None:
-        self._cfg.active_r = max(0, min(255, int(r)))
-        self._cfg.active_g = max(0, min(255, int(g)))
-        self._cfg.active_b = max(0, min(255, int(b)))
-        self._last_frame = b""
-
-    def set_black_key_color(self, r: int, g: int, b: int) -> None:
-        self._cfg.black_r = max(0, min(255, int(r)))
-        self._cfg.black_g = max(0, min(255, int(g)))
-        self._cfg.black_b = max(0, min(255, int(b)))
+        self._cfg.color_r = max(0, min(255, int(r)))
+        self._cfg.color_g = max(0, min(255, int(g)))
+        self._cfg.color_b = max(0, min(255, int(b)))
         self._last_frame = b""
 
     @staticmethod
@@ -233,13 +222,9 @@ class LedOutput:
             led_count=max(1, int(data.get("led_count", 176))),
             mirror_per_key=max(1, int(data.get("mirror_per_key", 2))),
             fps_limit=max(1, int(data.get("fps_limit", 30))),
-            # Active colour is driven by note colour — read from note_style, not led_output
-            active_r=max(0, min(255, int(full.get("note_style", {}).get("color_r", 0)))),
-            active_g=max(0, min(255, int(full.get("note_style", {}).get("color_g", 230)))),
-            active_b=max(0, min(255, int(full.get("note_style", {}).get("color_b", 230)))),
-            black_r=max(0, min(255, int(data.get("black_r", 0)))),
-            black_g=max(0, min(255, int(data.get("black_g", 240)))),
-            black_b=max(0, min(255, int(data.get("black_b", 255)))),
+            color_r=max(0, min(255, int(full.get("note_style", {}).get("color_r", 0)))),
+            color_g=max(0, min(255, int(full.get("note_style", {}).get("color_g", 230)))),
+            color_b=max(0, min(255, int(full.get("note_style", {}).get("color_b", 230)))),
         )
         return LedOutput(conf)
 
@@ -342,12 +327,7 @@ class LedOutput:
                 continue
             key_index = note - PIANO_FIRST_NOTE
             base = key_index * self._cfg.mirror_per_key
-            is_black = (note % 12) in _BLACK_KEY_SEMITONES
-            color = (
-                (self._cfg.black_r, self._cfg.black_g, self._cfg.black_b)
-                if is_black
-                else (self._cfg.active_r, self._cfg.active_g, self._cfg.active_b)
-            )
+            color = (self._cfg.color_r, self._cfg.color_g, self._cfg.color_b)
             for i in range(self._cfg.mirror_per_key):
                 led_idx = base + i
                 if 0 <= led_idx < led_count:
