@@ -10,6 +10,10 @@ _CONFIG_PATH = pathlib.Path(__file__).parent.parent / "config.json"
 
 _DEFAULTS: dict[str, Any] = {
     "search_folders": [],
+    "midi_settings": {
+        "selected_input_port": 0,
+        "hotkeys": [],
+    },
     "note_style": {
         "speed_px_per_sec": 420,
         "width_px": 12,
@@ -64,6 +68,8 @@ _DEFAULTS: dict[str, Any] = {
     },
     "user_themes": [],
     "active_user_theme_index": 0,
+    "performances": [],
+    "active_performance_id": "",
 }
 
 

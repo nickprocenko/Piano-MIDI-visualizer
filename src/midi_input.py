@@ -77,7 +77,7 @@ class MidiInput:
         self._sustained_notes: set[int] = set()  # notes held only by sustain pedal
         self._sustain_active: bool = False
         self.sustain_latch: bool = False          # settable from outside
-        self._cc_events: collections.deque[tuple[int, int]] = collections.deque(maxlen=64)
+        self._cc_events: collections.deque[tuple[int, int, int]] = collections.deque(maxlen=64)
         self._lock = threading.Lock()
         self._virtual_mode: bool = False
         self.port_name: str = ""
@@ -167,8 +167,8 @@ class MidiInput:
         with self._lock:
             return set(self._active_notes)
 
-    def drain_cc_events(self) -> list[tuple[int, int]]:
-        """Atomically drain and return all queued CC events as (cc_number, value) pairs."""
+    def drain_cc_events(self) -> list[tuple[int, int, int]]:
+        """Atomically drain and return queued CC events as (channel, cc_number, value)."""
         with self._lock:
             events = list(self._cc_events)
             self._cc_events.clear()
@@ -207,7 +207,9 @@ class MidiInput:
         if len(midi_bytes) < 3:
             return
 
-        status = midi_bytes[0] & _STATUS_MASK  # strip channel nibble
+        status_byte = midi_bytes[0]
+        status = status_byte & _STATUS_MASK  # strip channel nibble
+        midi_channel = status_byte & 0x0F
         note = midi_bytes[1]
         velocity = midi_bytes[2]
 
@@ -227,7 +229,7 @@ class MidiInput:
         # Control Change → queue for polling and handle sustain pedal latch
         elif status == _CC:
             with self._lock:
-                self._cc_events.append((note, velocity))  # note=cc number, velocity=cc value
+                self._cc_events.append((midi_channel, note, velocity))
             if note == _CC_SUSTAIN:
                 pedal_down = velocity >= 64
                 with self._lock:

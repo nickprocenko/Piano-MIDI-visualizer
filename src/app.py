@@ -1,7 +1,6 @@
 import queue
 import sys
 import pathlib
-import time
 import pygame
 from enum import Enum, auto
 from typing import Optional
@@ -18,6 +17,8 @@ from src.device_select import DeviceSelect
 from src.display_settings import DisplaySettingsScreen
 from src.keyboard_settings import KeyboardSettingsScreen
 from src.led_settings import LedSettingsScreen
+from src.midi_actions import get_action_def
+from src.midi_hotkeys import find_matching_actions
 from src.notes_settings import NotesSettingsScreen
 from src.settings import SettingsScreen
 from src.song_select import SongSelect
@@ -114,8 +115,9 @@ class App:
         self._last_dt_ms: int = 0
         self._smoothed_dt_ms: float = 16.67
         self._last_phase: str = "init"
-        self._sustain_tap_times: list[float] = []
+        self._midi_action_gate: dict[str, bool] = {}
         self._refresh_claire_script_state()
+        self._selected_port = self._load_selected_port()
 
         self._control_patches: queue.SimpleQueue = queue.SimpleQueue()
         self._control_server = ControlServer(self._control_patches, self._get_panel_state)
@@ -226,6 +228,26 @@ class App:
         themes_mod.apply_theme_to_config(user_themes[idx])
         self._apply_theme_to_live(user_themes[idx])
 
+    def _cycle_theme_previous(self) -> None:
+        """Move to the previous user theme (wraps around)."""
+        user_themes = themes_mod.load_user_themes()
+        if not user_themes:
+            return
+        idx = themes_mod.get_active_index()
+        idx = (idx - 1) % len(user_themes)
+        themes_mod.set_active_index(idx)
+        themes_mod.apply_theme_to_config(user_themes[idx])
+        self._apply_theme_to_live(user_themes[idx])
+
+    def _select_theme_index(self, index: int) -> None:
+        """Select a user theme by index if it exists."""
+        user_themes = themes_mod.load_user_themes()
+        if not (0 <= index < len(user_themes)):
+            return
+        themes_mod.set_active_index(index)
+        themes_mod.apply_theme_to_config(user_themes[index])
+        self._apply_theme_to_live(user_themes[index])
+
     def _apply_theme_to_live(self, theme: dict) -> None:
         """Immediately update in-memory note style and LED colors from a theme dict."""
         patch = themes_mod.build_live_note_style_patch(theme)
@@ -252,6 +274,16 @@ class App:
 
     def _enter_song_select(self) -> None:
         self._song_select = SongSelect(self.screen)
+
+    def _save_selected_port(self) -> None:
+        data = cfg.load()
+        midi_settings = data.setdefault("midi_settings", {})
+        midi_settings["selected_input_port"] = int(self._selected_port)
+        cfg.save(data)
+
+    def _load_selected_port(self) -> int:
+        midi_settings = cfg.load().get("midi_settings", {})
+        return int(midi_settings.get("selected_input_port", 0))
 
     def _enter_highway(self, midi_file: Optional[pathlib.Path] = None) -> None:
         """Set up MIDI and piano when entering the HIGHWAY state."""
@@ -378,6 +410,7 @@ class App:
                     result = self._device_select.handle_event(event)
                     if result == "select":
                         self._selected_port = self._device_select.selected_port
+                        self._save_selected_port()
                         self._device_select = None
                         self.state = State.MENU
                     elif result == "back":
@@ -584,17 +617,7 @@ class App:
             self._note_trails.clear()
             return
 
-        # --- Sustain-pedal triple-tap theme cycling ---
-        for cc_num, cc_val in self._midi.drain_cc_events():
-            if cc_num == 64 and cc_val > 0:  # sustain pedal pressed down
-                now = time.monotonic()
-                self._sustain_tap_times.append(now)
-                # Keep only taps within the last second
-                cutoff = now - 1.0
-                self._sustain_tap_times = [t for t in self._sustain_tap_times if t >= cutoff]
-                if len(self._sustain_tap_times) >= 3:
-                    self._cycle_theme()
-                    self._sustain_tap_times = []
+        self._process_midi_cc_events()
 
         active_notes = self._midi.get_active_notes()
         if self._led_output is not None:
@@ -913,6 +936,153 @@ class App:
             "interior_g": int(style.get("interior_g", 255)),
             "interior_b": int(style.get("interior_b", 255)),
         }
+
+    def _process_midi_cc_events(self) -> None:
+        """Resolve incoming MIDI CC events against the hotkey map."""
+        if self._midi is None:
+            return
+
+        seen_actions: set[str] = set()
+        for midi_channel, cc_number, value in self._midi.drain_cc_events():
+            for mapping in find_matching_actions(midi_channel, cc_number, value):
+                action_id = str(mapping.get("action_id", "")).strip()
+                if not action_id:
+                    continue
+                seen_actions.add(action_id)
+                self._perform_midi_action(action_id, int(value), int(midi_channel), mapping)
+
+        active_actions = {
+            action_id: gate
+            for action_id, gate in self._midi_action_gate.items()
+            if gate or action_id in seen_actions
+        }
+        self._midi_action_gate = active_actions
+
+    def _perform_midi_action(
+        self,
+        action_id: str,
+        value: int,
+        midi_channel: int,
+        mapping: dict[str, object] | None = None,
+    ) -> None:
+        """Dispatch one incoming MIDI hotkey event."""
+        _ = midi_channel
+        action_def = get_action_def(action_id)
+        if action_def is None:
+            return
+
+        mode = str((mapping or {}).get("mode", action_def.get("mode", "trigger")))
+        threshold = int((mapping or {}).get("threshold", action_def.get("threshold", 64)))
+        if bool((mapping or {}).get("invert", False)):
+            value = 127 - value
+        is_active = value >= threshold
+        was_active = bool(self._midi_action_gate.get(action_id, False))
+
+        if mode == "continuous":
+            self._apply_continuous_midi_action(action_id, value)
+            self._midi_action_gate[action_id] = is_active
+            return
+
+        if is_active and not was_active:
+            if mode == "toggle":
+                self._apply_toggle_midi_action(action_id)
+            else:
+                self._apply_trigger_midi_action(action_id)
+
+        self._midi_action_gate[action_id] = is_active
+
+    def _apply_trigger_midi_action(self, action_id: str) -> None:
+        if action_id == "performance.theme_next":
+            self._cycle_theme()
+        elif action_id == "performance.theme_previous":
+            self._cycle_theme_previous()
+        elif action_id == "performance.theme_select_1":
+            self._select_theme_index(0)
+        elif action_id == "performance.theme_select_2":
+            self._select_theme_index(1)
+        elif action_id == "performance.theme_select_3":
+            self._select_theme_index(2)
+        elif action_id == "performance.theme_select_4":
+            self._select_theme_index(3)
+
+    def _apply_toggle_midi_action(self, action_id: str) -> None:
+        if action_id == "effects.glow_toggle":
+            self._toggle_note_style_flag("effect_glow_enabled")
+        elif action_id == "effects.sparks_toggle":
+            self._toggle_note_style_flag("effect_sparks_enabled")
+        elif action_id == "effects.smoke_toggle":
+            self._toggle_note_style_flag("effect_smoke_enabled")
+        elif action_id == "keyboard.visible_toggle":
+            self._toggle_keyboard_visible()
+
+    def _apply_continuous_midi_action(self, action_id: str, value: int) -> None:
+        if action_id == "effects.glow_strength":
+            self._set_note_style_value_from_cc("glow_strength_percent", value, 0, 180)
+        elif action_id == "effects.spark_amount":
+            self._set_note_style_value_from_cc("spark_amount_percent", value, 0, 300)
+        elif action_id == "effects.smoke_amount":
+            self._set_note_style_value_from_cc("smoke_amount_percent", value, 0, 300)
+        elif action_id == "visual.note_speed":
+            self._set_note_style_value_from_cc("speed_px_per_sec", value, 80, 1200)
+        elif action_id == "visual.note_width":
+            self._set_note_style_value_from_cc("width_px", value, 4, 40)
+        elif action_id == "visual.background_alpha":
+            self._set_display_value_from_cc("background_alpha", value, 0, 255)
+
+    def _cc_to_range(self, value: int, min_v: int, max_v: int) -> int:
+        ratio = max(0.0, min(1.0, float(value) / 127.0))
+        return int(round(min_v + ratio * (max_v - min_v)))
+
+    def _toggle_note_style_flag(self, key: str) -> None:
+        new_value = 0 if int(self._note_style.get(key, 0)) else 1
+        self._note_style[key] = new_value
+        self._persist_note_style_patch({key: new_value})
+
+    def _set_note_style_value_from_cc(
+        self,
+        key: str,
+        value: int,
+        min_v: int,
+        max_v: int,
+    ) -> None:
+        new_value = self._cc_to_range(value, min_v, max_v)
+        if int(self._note_style.get(key, new_value)) == new_value:
+            return
+        self._note_style[key] = new_value
+        self._persist_note_style_patch({key: new_value})
+
+    def _persist_note_style_patch(self, patch: dict[str, int]) -> None:
+        data = cfg.load()
+        note_style = data.setdefault("note_style", {})
+        note_style.update(patch)
+        cfg.save(data)
+
+    def _set_display_value_from_cc(
+        self,
+        key: str,
+        value: int,
+        min_v: int,
+        max_v: int,
+    ) -> None:
+        new_value = self._cc_to_range(value, min_v, max_v)
+        if int(self._display_style.get(key, new_value)) == new_value:
+            return
+        self._display_style[key] = new_value
+        data = cfg.load()
+        display_style = data.setdefault("display_style", {})
+        display_style[key] = new_value
+        cfg.save(data)
+
+    def _toggle_keyboard_visible(self) -> None:
+        current = bool(self._keyboard_style.get("visible", True))
+        new_value = not current
+        self._keyboard_style["visible"] = new_value
+        data = cfg.load()
+        keyboard_style = data.setdefault("keyboard_style", {})
+        keyboard_style["visible"] = new_value
+        cfg.save(data)
+        if self._piano is not None:
+            self._piano.visible = new_value
 
     def _load_keyboard_style(self) -> dict[str, int | bool]:
         style = cfg.load().get("keyboard_style", {})
