@@ -38,6 +38,8 @@ except Exception:
 PIANO_FIRST_NOTE = 21
 PIANO_LAST_NOTE = 108
 
+_BLACK_KEY_SEMITONES: frozenset[int] = frozenset({1, 3, 6, 8, 10})  # C# D# F# G# A#
+
 
 @dataclass
 class LedOutputConfig:
@@ -56,6 +58,9 @@ class LedOutputConfig:
     active_r: int
     active_g: int
     active_b: int
+    black_r: int
+    black_g: int
+    black_b: int
 
 
 class _BleLedSender:
@@ -201,6 +206,10 @@ class LedOutput:
         self._cfg.active_b = max(0, min(255, int(b)))
         self._last_frame = b""
 
+    def set_black_key_color(self, r: int, g: int, b: int) -> None:
+        self._cfg.black_r = max(0, min(255, int(r)))
+        self._cfg.black_g = max(0, min(255, int(g)))
+        self._cfg.black_b = max(0, min(255, int(b)))
         self._last_frame = b""
 
     @staticmethod
@@ -228,6 +237,9 @@ class LedOutput:
             active_r=max(0, min(255, int(full.get("note_style", {}).get("color_r", 0)))),
             active_g=max(0, min(255, int(full.get("note_style", {}).get("color_g", 230)))),
             active_b=max(0, min(255, int(full.get("note_style", {}).get("color_b", 230)))),
+            black_r=max(0, min(255, int(data.get("black_r", 0)))),
+            black_g=max(0, min(255, int(data.get("black_g", 240)))),
+            black_b=max(0, min(255, int(data.get("black_b", 255)))),
         )
         return LedOutput(conf)
 
@@ -330,7 +342,12 @@ class LedOutput:
                 continue
             key_index = note - PIANO_FIRST_NOTE
             base = key_index * self._cfg.mirror_per_key
-            color = (self._cfg.active_r, self._cfg.active_g, self._cfg.active_b)
+            is_black = (note % 12) in _BLACK_KEY_SEMITONES
+            color = (
+                (self._cfg.black_r, self._cfg.black_g, self._cfg.black_b)
+                if is_black
+                else (self._cfg.active_r, self._cfg.active_g, self._cfg.active_b)
+            )
             for i in range(self._cfg.mirror_per_key):
                 led_idx = base + i
                 if 0 <= led_idx < led_count:
