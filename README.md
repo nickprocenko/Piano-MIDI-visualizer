@@ -116,6 +116,105 @@ Defaults in sketch:
 Arduino library requirement for BLE firmware:
 - Install `NimBLE-Arduino`
 
+## Future UX Ideas (Piano MIDI Visualizer)
+
+These are quick wins to revisit when the core app is stable:
+
+- **"Please wait" indicator** — show a loading/transition overlay whenever the app switches screens (e.g., menu → highway, settings open/close). A simple spinner or animated bar prevents the feeling that the app has frozen.
+- **QWERTYUIOP virtual keyboard** — map the top keyboard row (`Q W E R T Y U I O P`) to ten piano notes so users can play without a MIDI device. Lay them out left-to-right as a single octave (10 notes). This is useful for demos, testing, and casual play on a laptop.
+
+---
+
+## Brainstorming: Future App — Music Festival Calendar/Planner
+
+> *Notes captured 2026-04-04. Come back here to resume planning.*
+
+### What it is
+
+A personal planning tool that helps you discover music festivals near Toronto (≤ 50 km), filter them by month/genre/size, lock chosen festivals into a persistent plan, and instantly see scheduling conflicts — with a path to circle/group planning later.
+
+---
+
+### MVP Scope (single user, seeded database first)
+
+**Goal:** filters produce a relevant suggestion list → user locks festivals → conflicts are highlighted.
+
+#### Data model (minimal)
+
+| Table | Key fields |
+|---|---|
+| `FestivalOccurrence` | `id`, `name`, `start_date`, `end_date`, `lat`, `lng`, `genre_tags` (JSON list), `attendance_estimate` (int, nullable) |
+| `Plan` | `id`, `name`, `created_at` |
+| `PlanFestival` | `plan` (FK), `festival` (FK), `locked` (bool, default `true`), `status` (`going`/`maybe`/`no`) |
+
+Derived in code: `is_major = attendance_estimate is not None and attendance_estimate >= 10_000`
+
+#### Filter pipeline
+
+| Filter | Rule |
+|---|---|
+| Radius | Haversine distance from Toronto ≤ 50 km (requires `lat`/`lng` on every record) |
+| Month range | `start_date` month falls within selected range |
+| Genre | `genre_tags` intersects selected genres |
+| Major / Minor / Any | `is_major` threshold = 10,000 attendees |
+
+#### Locked-festival rule
+
+- Filters only affect the **suggestions list** — never auto-remove from the plan.
+- If a locked festival no longer matches filters, mark it `out_of_scope = True` (badge: "Outside filters") but keep it in the plan.
+
+#### Conflict detection (MVP)
+
+- Flag any two `PlanFestival` rows whose date ranges overlap (`festivalA.start_date <= festivalB.end_date and festivalA.end_date >= festivalB.start_date`).
+- Show a conflict badge on both; list all conflicts in a sidebar panel.
+- Only flag when both festivals have a valid `end_date`.
+
+---
+
+### Recommended stack
+
+| Layer | Choice | Reason |
+|---|---|---|
+| Language | Python | Familiar, great ecosystem |
+| Framework | Django | Free admin UI for seeding/editing festivals; migrations included |
+| Database | PostgreSQL | Future-proof (PostGIS for radius later); works with Django ORM |
+| API | Django REST Framework (add later) | Same models, adds JSON endpoints when needed |
+
+---
+
+### 7-day solo dev plan
+
+| Day | Task |
+|---|---|
+| 1 | Create Django project, Postgres DB, three models (`FestivalOccurrence`, `Plan`, `PlanFestival`) |
+| 2 | Use Django Admin to enter 20–30 seed festivals (realistic Toronto-area spread across months) |
+| 3 | Build `/api/festivals/` with filter params (radius, month, genre, major/minor) |
+| 4 | Build `/api/plan/` endpoints (add / lock / remove) |
+| 5 | Basic UI: filter inputs + suggestions list + "Add to plan" button |
+| 6 | Calendar view of the plan (month grid, locked items persist) |
+| 7 | Conflict detection + highlighting |
+
+---
+
+### Seed data notes
+
+- Use a **controlled genre list**: EDM, Hip-hop, Rock/Indie, Pop, Jazz, Classical, Folk/Country, Mixed, Other — avoid free-text.
+- Every festival **must** have `start_date`, `end_date`, `lat`, `lng` (even if `end_date = start_date`).
+- Use a unique slug (`veld-music-festival-2026`) to avoid duplicates.
+- Label the dataset clearly: *"Seed dataset — Toronto MVP, manually curated."*
+
+---
+
+### What to add after MVP works
+
+- Circle/group planning (shared plan, per-person `going/maybe/no` status)
+- "Review out-of-scope" view for locked festivals that drifted outside filters
+- Real external data source (API or scrape) behind the same filter interface
+- Travel conflict detection (same weekend, distance > 200 km)
+- PostGIS for true geospatial radius queries
+
+---
+
 ## Audience Color Control (App Side)
 
 The app can connect to your backend WebSocket and apply live audience colors.
