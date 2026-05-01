@@ -1,0 +1,51 @@
+flowchart LR
+    DIN[DC Input Jack 12V] --> CHG[Charger and Power-Path Board]
+    CHG --> BAT[Built-in Battery Pack with BMS]
+    CHG --> SYS[System Power Rail]
+    BAT --> SYS
+
+    SYS --> BUCK[5V Buck Converter 8-10A]
+    BUCK --> FMAIN[Main Fuse]
+    FMAIN --> TBP[+5V Bus]
+    BUCK --> TBG[GND Bus]
+
+    TBP --> ESPVIN[ESP32 VIN]
+    TBG --> ESPGND[ESP32 GND]
+    ESPVIN -.-> ESP[ESP32-S3 Mini]
+    ESPGND -.-> ESP
+
+    TBP --> FA[Strip A Fuse]
+    TBG --> GA[Strip A GND]
+    FA --> ACONN[OUT A 4-wire]
+
+    TBP --> FB[Strip B Fuse]
+    TBG --> GB[Strip B GND]
+    FB --> BCONN[OUT B 4-wire]
+
+    ESP -->|DATA A| RDA[330R]
+    ESP -->|CLK A| RCA[330R]
+    RDA --> LVL[5V Level Shifter]
+    RCA --> LVL
+    LVL --> ADA[DATA A]
+    LVL --> ACLK[CLK A]
+
+    ESP -->|DATA B| RDB[330R]
+    ESP -->|CLK B| RCB[330R]
+    RDB --> LVL
+    RCB --> LVL
+    LVL --> BDA[DATA B]
+    LVL --> BCLK[CLK B]
+
+    GA --> ACONN
+    ADA --> ACONN
+    ACLK --> ACONN
+
+    GB --> BCONN
+    BDA --> BCONN
+    BCLK --> BCONN
+
+    ACONN --> AHEAD[Strip A head input]
+    BCONN --> BHEAD[Strip B head input]
+
+    CAPA[1000-2200uF at Strip A head] --- AHEAD
+    CAPB[1000-2200uF at Strip B head] --- BHEAD

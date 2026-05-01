@@ -305,7 +305,7 @@ class NoteEffectRenderer:
             )
 
             edge_w = int(note_style.get("outer_edge_width_px", 2))
-            inset = max(1, min(edge_w, max(1, bar.width // 4)))
+            inset = max(0, min(edge_w, bar.width // 4))
             if bar.width > inset * 2 and bar.height > inset * 2:
                 inner = bar.inflate(-inset * 2, -inset * 2)
                 inner_top = (ir, ig, ib)

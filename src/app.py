@@ -1,6 +1,9 @@
 import queue
 import sys
 import pathlib
+import math
+import re
+from collections import deque
 import pygame
 from enum import Enum, auto
 from typing import Optional
@@ -9,6 +12,8 @@ from src import config as cfg
 from src.control_server import ControlServer
 from src.audience_color_client import AudienceColorClient
 from src.audience_settings import AudienceSettingsScreen
+from src.audio_device_select import AudioDeviceSelect
+from src.audio_mic_test import AudioMicTestScreen
 from src.led_output import LedOutput
 from src.midi_input import MidiInput
 from src.note_fx import NoteEffectRenderer
@@ -17,27 +22,45 @@ from src.device_select import DeviceSelect
 from src.display_settings import DisplaySettingsScreen
 from src.keyboard_settings import KeyboardSettingsScreen
 from src.led_settings import LedSettingsScreen
+from src.midi_hotkeys_settings import MidiHotkeysSettingsScreen
+from src.midi_settings import MidiSettingsScreen
 from src.midi_actions import get_action_def
 from src.midi_hotkeys import find_matching_actions
 from src.notes_settings import NotesSettingsScreen
+from src.performance_settings import PerformanceSettingsScreen
 from src.settings import SettingsScreen
 from src.song_select import SongSelect
 from src.theme_settings import ThemeSettingsScreen
-import src.themes as themes_mod
+from src.voice_controller import VoiceController, VoiceState
+from src.voice_settings import VoiceSettingsScreen
+import src.performance_store as perf_store
 
 
 FREEPLAY_PARTICLE_HEIGHT_PX = 32
+_VOICE_PREFIXES: tuple[str, ...] = (
+    "go to theme ",
+    "switch to theme ",
+    "theme ",
+    "go to ",
+    "switch to ",
+)
 
 
 class State(Enum):
     MENU = auto()
     DEVICE_SELECT = auto()
+    AUDIO_MIC_TEST = auto()
+    AUDIO_DEVICE_SELECT = auto()
     SETTINGS = auto()
+    PERFORMANCE_SETTINGS = auto()
+    MIDI_SETTINGS = auto()
+    MIDI_HOTKEYS_SETTINGS = auto()
     NOTES_SETTINGS = auto()
     KEYBOARD_SETTINGS = auto()
     LED_SETTINGS = auto()
     DISPLAY_SETTINGS = auto()
     AUDIENCE_SETTINGS = auto()
+    VOICE_SETTINGS = auto()
     THEME_SETTINGS = auto()
     SONG_SELECT = auto()
     HIGHWAY = auto()
@@ -46,7 +69,7 @@ class State(Enum):
 class App:
     """Main application state machine."""
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: pygame.Surface, gl_ctx=None) -> None:
         self.screen = screen
         self.state = State.MENU
         self.clock = pygame.time.Clock()
@@ -60,15 +83,22 @@ class App:
         self._midi: Optional[MidiInput] = None
         self._piano: Optional[Piano] = None
         self._device_select: Optional[DeviceSelect] = None
+        self._audio_mic_test_screen: Optional[AudioMicTestScreen] = None
+        self._audio_device_select: Optional[AudioDeviceSelect] = None
         self._settings_screen: Optional[SettingsScreen] = None
+        self._performance_settings_screen: Optional[PerformanceSettingsScreen] = None
+        self._midi_settings_screen: Optional[MidiSettingsScreen] = None
+        self._midi_hotkeys_settings_screen: Optional[MidiHotkeysSettingsScreen] = None
         self._notes_settings_screen: Optional[NotesSettingsScreen] = None
         self._keyboard_settings_screen: Optional[KeyboardSettingsScreen] = None
         self._led_settings_screen: Optional[LedSettingsScreen] = None
         self._display_settings_screen: Optional[DisplaySettingsScreen] = None
         self._audience_settings_screen: Optional[AudienceSettingsScreen] = None
+        self._voice_settings_screen: Optional[VoiceSettingsScreen] = None
         self._theme_settings_screen: Optional[ThemeSettingsScreen] = None
         self._song_select: Optional[SongSelect] = None
         self._selected_port: int = 0
+        self._selected_audio_input_device: int = -1
         self._selected_midi_file: Optional[pathlib.Path] = None
         self._note_style: dict[str, int] = self._load_note_style()
         self._note_style_meta: dict[str, str | bool] = self._load_note_style_meta()
@@ -79,6 +109,9 @@ class App:
         self._active_note_trails: dict[int, dict[str, float | bool]] = {}
         self._note_trails: list[dict[str, float | bool]] = []
         self._fx_renderer: Optional[NoteEffectRenderer] = None
+        self._gl_renderer = None
+        self._gl_bg_surf: Optional[pygame.Surface] = None
+        self._gl_overlay_surf: Optional[pygame.Surface] = None
         self._led_output: Optional[LedOutput] = None
         # Background animation: list of slides, each slide is (frames, durations_ms)
         self._bg_slides: list[tuple[list[pygame.Surface], list[float]]] = []
@@ -86,6 +119,8 @@ class App:
         self._bg_slide_ms: float = 0.0
         self._bg_frame_index: int = 0
         self._bg_frame_ms: float = 0.0
+        self._bg_scale_cache: dict[tuple[int, int, int], pygame.Surface] = {}
+        self._bg_scale_cache_screen_size: tuple[int, int] = (0, 0)
         self._audience_client: Optional[AudienceColorClient] = None
         self._color_current = [float(self._note_style["color_r"]), float(self._note_style["color_g"]), float(self._note_style["color_b"])]
         self._color_start = list(self._color_current)
@@ -112,16 +147,39 @@ class App:
         self._palette_interior_target: list[float] = list(self._palette_interior_current)
         self._palette_blend_ms: int = 0
         self._palette_blend_elapsed_ms: int = 0
+        self._active_style_cue_index: int = 0
         self._last_dt_ms: int = 0
         self._smoothed_dt_ms: float = 16.67
         self._last_phase: str = "init"
         self._midi_action_gate: dict[str, bool] = {}
+        self._notes_return_state: State = State.PERFORMANCE_SETTINGS
+        self._transition_overlay_until_ms: int = 0
+        self._transition_overlay_duration_ms: int = 420
+        self._pending_highway_entry: bool = False
+        self._pending_highway_midi_file: Optional[pathlib.Path] = None
+        self._voice_mode: bool = False
+        self._voice_continuous_listen: bool = False
+        self._voice_continuous_gap_ms: int = 220
+        self._voice_word_buffer: deque[str] = deque(maxlen=6)
+        self._voice_word_buffer_size: int = 6
+        self._voice_section_scoped_only: bool = False
+        self._voice_section_cues: dict[int, list[dict[str, object]]] = {}
+        self._voice_next_auto_listen_ms: int = 0
+        self._voice_controller: Optional[VoiceController] = None
         self._refresh_claire_script_state()
         self._selected_port = self._load_selected_port()
+        self._selected_audio_input_device = self._load_selected_audio_input_device()
 
         self._control_patches: queue.SimpleQueue = queue.SimpleQueue()
         self._control_server = ControlServer(self._control_patches, self._get_panel_state)
         self._control_server.start()
+
+        if gl_ctx is not None:
+            try:
+                from src.gl_renderer import GLEffectsRenderer
+                self._gl_renderer = GLEffectsRenderer(gl_ctx, screen.get_size())
+            except Exception as exc:
+                print(f"[gl] GLEffectsRenderer init failed, using CPU renderer: {exc}")
 
     def run(self) -> None:
         while self.running:
@@ -136,6 +194,8 @@ class App:
             self._last_phase = "draw"
             self._draw()
             self._last_phase = "flip"
+            if self._gl_renderer is not None and self.state != State.HIGHWAY:
+                self._gl_renderer.present_pygame(self.screen)
             pygame.display.flip()
         self._last_phase = "stopped"
 
@@ -182,8 +242,43 @@ class App:
     def _enter_settings(self) -> None:
         self._settings_screen = SettingsScreen(self.screen)
 
-    def _enter_notes_settings(self) -> None:
-        self._notes_settings_screen = NotesSettingsScreen(self.screen)
+    def _enter_audio_mic_test(self) -> None:
+        self._audio_mic_test_screen = AudioMicTestScreen(
+            self.screen,
+            selected_device=self._selected_audio_input_device,
+        )
+        self._audio_mic_test_screen.refresh()
+
+    def _enter_audio_device_select(self) -> None:
+        self._audio_device_select = AudioDeviceSelect(
+            self.screen,
+            selected_device=self._selected_audio_input_device,
+        )
+        self._audio_device_select.refresh()
+
+    def _enter_performance_settings(self) -> None:
+        self._performance_settings_screen = PerformanceSettingsScreen(self.screen)
+
+    def _enter_midi_settings(self) -> None:
+        self._midi_settings_screen = MidiSettingsScreen(self.screen)
+
+    def _enter_midi_hotkeys_settings(self) -> None:
+        self._midi_hotkeys_settings_screen = MidiHotkeysSettingsScreen(self.screen)
+
+    def _enter_notes_settings(
+        self,
+        performance_id: str = "",
+        theme_index: int = -1,
+        selected_channel: int = 0,
+        return_state: State = State.PERFORMANCE_SETTINGS,
+    ) -> None:
+        self._notes_return_state = return_state
+        self._notes_settings_screen = NotesSettingsScreen(
+            self.screen,
+            performance_id=performance_id,
+            theme_index=theme_index,
+            selected_channel=selected_channel,
+        )
 
     def _enter_keyboard_settings(self) -> None:
         self._keyboard_settings_screen = KeyboardSettingsScreen(self.screen)
@@ -210,50 +305,54 @@ class App:
             new_screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
         self.screen = new_screen
         self.menu = type(self.menu)(self.screen)
+        self._clear_background_scale_cache()
 
     def _enter_audience_settings(self) -> None:
         self._audience_settings_screen = AudienceSettingsScreen(self.screen)
+
+    def _enter_voice_settings(self) -> None:
+        self._voice_settings_screen = VoiceSettingsScreen(self.screen)
 
     def _enter_theme_settings(self) -> None:
         self._theme_settings_screen = ThemeSettingsScreen(self.screen)
 
     def _cycle_theme(self) -> None:
-        """Advance to the next user theme (wraps around).  Called on triple sustain-tap."""
-        user_themes = themes_mod.load_user_themes()
-        if not user_themes:
+        """Advance to the next theme in the active performance."""
+        performance_id = perf_store.get_active_performance_id()
+        themes = perf_store.load_themes(performance_id) if performance_id else []
+        if not themes:
             return
-        idx = themes_mod.get_active_index()
-        idx = (idx + 1) % len(user_themes)
-        themes_mod.set_active_index(idx)
-        themes_mod.apply_theme_to_config(user_themes[idx])
-        self._apply_theme_to_live(user_themes[idx])
+        idx = perf_store.get_active_theme_index(performance_id)
+        idx = (idx + 1) % len(themes)
+        self._apply_performance_theme_index(performance_id, idx)
 
     def _cycle_theme_previous(self) -> None:
-        """Move to the previous user theme (wraps around)."""
-        user_themes = themes_mod.load_user_themes()
-        if not user_themes:
+        """Move to the previous theme in the active performance."""
+        performance_id = perf_store.get_active_performance_id()
+        themes = perf_store.load_themes(performance_id) if performance_id else []
+        if not themes:
             return
-        idx = themes_mod.get_active_index()
-        idx = (idx - 1) % len(user_themes)
-        themes_mod.set_active_index(idx)
-        themes_mod.apply_theme_to_config(user_themes[idx])
-        self._apply_theme_to_live(user_themes[idx])
+        idx = perf_store.get_active_theme_index(performance_id)
+        idx = (idx - 1) % len(themes)
+        self._apply_performance_theme_index(performance_id, idx)
 
     def _select_theme_index(self, index: int) -> None:
-        """Select a user theme by index if it exists."""
-        user_themes = themes_mod.load_user_themes()
-        if not (0 <= index < len(user_themes)):
+        """Select a theme by index from the active performance."""
+        performance_id = perf_store.get_active_performance_id()
+        themes = perf_store.load_themes(performance_id) if performance_id else []
+        if not (0 <= index < len(themes)):
             return
-        themes_mod.set_active_index(index)
-        themes_mod.apply_theme_to_config(user_themes[index])
-        self._apply_theme_to_live(user_themes[index])
+        self._apply_performance_theme_index(performance_id, index)
 
-    def _apply_theme_to_live(self, theme: dict) -> None:
-        """Immediately update in-memory note style and LED colors from a theme dict."""
-        patch = themes_mod.build_live_note_style_patch(theme)
-        self._note_style.update(patch)
+    def _apply_performance_theme_index(self, performance_id: str, theme_index: int) -> None:
+        """Apply a performance theme to config and refresh live runtime state."""
+        if not performance_id:
+            return
+        perf_store.apply_theme_to_config(performance_id, theme_index)
+        self._note_style = self._load_note_style()
+        self._note_style_meta = self._load_note_style_meta()
+        self._display_style = self._load_display_style()
 
-        # Reset colour animation to the new note base colour
         new_r = float(self._note_style.get("color_r", 0))
         new_g = float(self._note_style.get("color_g", 230))
         new_b = float(self._note_style.get("color_b", 230))
@@ -263,17 +362,67 @@ class App:
         self._color_blend_ms = 0
         self._color_blend_elapsed_ms = 0
 
-        # Disable claire script so it can't override note colours each frame
-        self._note_style_meta["active_theme_id"] = "custom"
-        self._note_style_meta["experimental_claire_script_enabled"] = False
         self._refresh_claire_script_state()
+        self._bg_slides = self._load_background_slides()
 
-        # Apply LED colour immediately (don't wait for next _update_audience_color tick)
+    def _load_saved_note_styles(self) -> list[dict]:
+        data = cfg.load()
+        raw_styles = data.get("note_styles", [])
+        return [dict(entry) for entry in raw_styles if isinstance(entry, dict)]
+
+    def _apply_saved_note_style_index(self, style_index: int) -> None:
+        data = cfg.load()
+        raw_styles = data.get("note_styles", [])
+        if not isinstance(raw_styles, list) or not (0 <= style_index < len(raw_styles)):
+            return
+        style_entry = raw_styles[style_index]
+        if not isinstance(style_entry, dict):
+            return
+
+        style = dict(style_entry)
+        style.pop("name", None)
+        style["active_theme_id"] = "custom"
+        style["experimental_claire_script_enabled"] = 0
+        data["note_style"] = style
+        data["active_note_style_index"] = style_index
+        data.setdefault("slide_palette", {})["enabled"] = False
+        cfg.save(data)
+
+        self._note_style = self._load_note_style()
+        self._note_style_meta = self._load_note_style_meta()
+
+        new_r = float(self._note_style.get("color_r", 0))
+        new_g = float(self._note_style.get("color_g", 230))
+        new_b = float(self._note_style.get("color_b", 230))
+        self._color_current = [new_r, new_g, new_b]
+        self._color_start = [new_r, new_g, new_b]
+        self._color_target = [new_r, new_g, new_b]
+        self._color_blend_ms = 0
+        self._color_blend_elapsed_ms = 0
+
+        self._refresh_claire_script_state()
+        if self._led_output is not None:
+            self._led_output.set_active_color(int(new_r), int(new_g), int(new_b))
+        self._clear_background_scale_cache()
+        self._bg_slide_index = 0
+        self._bg_slide_ms = 0.0
+        self._bg_frame_index = 0
+        self._bg_frame_ms = 0.0
+        self._active_style_cue_index = 0
+        self._apply_active_style_cue()
+
         if self._led_output is not None:
             self._led_output.set_active_color(int(new_r), int(new_g), int(new_b))
 
     def _enter_song_select(self) -> None:
         self._song_select = SongSelect(self.screen)
+
+    def _begin_highway_transition(self, midi_file: Optional[pathlib.Path] = None) -> None:
+        self._pending_highway_entry = True
+        self._pending_highway_midi_file = midi_file
+        self._transition_overlay_until_ms = (
+            pygame.time.get_ticks() + self._transition_overlay_duration_ms
+        )
 
     def _save_selected_port(self) -> None:
         data = cfg.load()
@@ -285,8 +434,19 @@ class App:
         midi_settings = cfg.load().get("midi_settings", {})
         return int(midi_settings.get("selected_input_port", 0))
 
+    def _save_selected_audio_input_device(self) -> None:
+        data = cfg.load()
+        audio_settings = data.setdefault("audio_settings", {})
+        audio_settings["selected_input_device"] = int(self._selected_audio_input_device)
+        cfg.save(data)
+
+    def _load_selected_audio_input_device(self) -> int:
+        audio_settings = cfg.load().get("audio_settings", {})
+        return int(audio_settings.get("selected_input_device", -1))
+
     def _enter_highway(self, midi_file: Optional[pathlib.Path] = None) -> None:
         """Set up MIDI and piano when entering the HIGHWAY state."""
+        self._sanitize_legacy_note_automation()
         self._note_style = self._load_note_style()
         self._note_style_meta = self._load_note_style_meta()
         self._keyboard_style = self._load_keyboard_style()
@@ -307,10 +467,12 @@ class App:
         self._audience_client = AudienceColorClient.from_config()
         self._audience_client.start()
         self._bg_slides = self._load_background_slides()
+        self._clear_background_scale_cache()
         self._bg_slide_index = 0
         self._bg_slide_ms = 0.0
         self._bg_frame_index = 0
         self._bg_frame_ms = 0.0
+        self._active_style_cue_index = 0
         self._prev_active_notes.clear()
         self._active_note_trails.clear()
         self._note_trails.clear()
@@ -340,9 +502,50 @@ class App:
         self._palette_interior_target = list(self._palette_interior_current)
         self._palette_blend_ms = 0
         self._palette_blend_elapsed_ms = 0
+        self._apply_active_style_cue()
+
+        voice_cfg = cfg.load().get("voice_settings", {})
+
+        self._voice_continuous_listen = bool(voice_cfg.get("continuous_listen", False)) and self._voice_mode
+        self._voice_continuous_gap_ms = max(80, min(2000, int(voice_cfg.get("continuous_gap_ms", 220))))
+        self._voice_word_buffer_size = max(2, min(24, int(voice_cfg.get("word_buffer_size", 6))))
+        self._voice_word_buffer = deque(maxlen=self._voice_word_buffer_size)
+        self._voice_section_scoped_only = bool(voice_cfg.get("section_scoped_only", False))
+        self._voice_section_cues = self._load_voice_section_cues(voice_cfg.get("section_cues", []))
+        self._voice_next_auto_listen_ms = pygame.time.get_ticks() + 250
+
+        max_record_secs = float(voice_cfg.get("push_to_talk_record_secs", 6.0))
+        if self._voice_continuous_listen:
+            max_record_secs = float(voice_cfg.get("continuous_record_secs", 1.2))
+        result_display_secs = 0.6 if self._voice_continuous_listen else 3.0
+
+        self._voice_controller = VoiceController(
+            self._apply_voice_transcript,
+            input_device_index=self._selected_audio_input_device,
+            stt_backend=str(voice_cfg.get("backend", "vosk")),
+            vosk_model_path=str(voice_cfg.get("vosk_model_path", "")),
+            allow_google_fallback=bool(voice_cfg.get("allow_google_fallback", True)),
+            max_record_secs=max_record_secs,
+            result_display_secs=result_display_secs,
+        )
+
+        if self._gl_renderer is not None:
+            w, h = self.screen.get_size()
+            self._gl_bg_surf = pygame.Surface((w, h))
+            self._gl_overlay_surf = pygame.Surface((w, h), pygame.SRCALPHA)
+            self._gl_renderer.resize((w, h))
 
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
+        if self._voice_controller is not None:
+            self._voice_controller.stop()
+            self._voice_controller = None
+        self._voice_mode = False
+        self._voice_continuous_listen = False
+        self._voice_word_buffer = deque(maxlen=self._voice_word_buffer_size)
+        self._voice_section_scoped_only = False
+        self._voice_section_cues = {}
+        self._voice_next_auto_listen_ms = 0
         if self._midi is not None:
             self._midi.close()
             self._midi = None
@@ -353,6 +556,7 @@ class App:
             self._audience_client.stop()
             self._audience_client = None
         self._bg_slides = []
+        self._clear_background_scale_cache()
         self._piano = None
         self._highway_surface = None
         self._prev_active_notes.clear()
@@ -376,6 +580,14 @@ class App:
 
     def _sync_highway_targets(self) -> None:
         """Keep piano and note-fx geometry aligned with the active highway surface."""
+        if self._gl_renderer is not None:
+            # GL overlay is always full-screen — skip width-scaled surface
+            target = self._gl_overlay_surf if self._gl_overlay_surf is not None else self.screen
+            if self._piano is not None:
+                self._piano.set_target(target)
+            if self._fx_renderer is not None:
+                self._fx_renderer.set_target(target)
+            return
         target, _scaled = self._get_highway_draw_target()
         if self._piano is not None:
             self._piano.set_target(target)
@@ -389,16 +601,18 @@ class App:
                 return
 
             if self.state == State.MENU:
+                if self._pending_highway_entry:
+                    continue
                 action = self.menu.handle_event(event)
                 if action == "select_file":
                     self._enter_song_select()
                     self.state = State.SONG_SELECT
                 elif action == "freeplay":
-                    self._enter_highway()
-                    self.state = State.HIGHWAY
-                elif action == "midi_device":
-                    self._enter_device_select()
-                    self.state = State.DEVICE_SELECT
+                    self._voice_mode = True
+                    self._begin_highway_transition()
+                elif action == "voice_play":
+                    self._voice_mode = True
+                    self._begin_highway_transition()
                 elif action == "settings":
                     self._enter_settings()
                     self.state = State.SETTINGS
@@ -412,10 +626,36 @@ class App:
                         self._selected_port = self._device_select.selected_port
                         self._save_selected_port()
                         self._device_select = None
-                        self.state = State.MENU
+                        self.state = State.MIDI_SETTINGS
                     elif result == "back":
                         self._device_select = None
-                        self.state = State.MENU
+                        self.state = State.MIDI_SETTINGS
+
+            elif self.state == State.AUDIO_DEVICE_SELECT:
+                if self._audio_device_select is not None:
+                    result = self._audio_device_select.handle_event(event)
+                    if result == "select":
+                        self._selected_audio_input_device = self._audio_device_select.selected_device
+                        self._save_selected_audio_input_device()
+                        self._audio_device_select = None
+                        if self._audio_mic_test_screen is not None:
+                            self._audio_mic_test_screen.selected_device = self._selected_audio_input_device
+                        self.state = State.AUDIO_MIC_TEST
+                    elif result == "back":
+                        self._audio_device_select = None
+                        self.state = State.AUDIO_MIC_TEST
+
+            elif self.state == State.AUDIO_MIC_TEST:
+                if self._audio_mic_test_screen is not None:
+                    result = self._audio_mic_test_screen.handle_event(event)
+                    if result == "audio_device_select":
+                        self._audio_mic_test_screen.close()
+                        self._enter_audio_device_select()
+                        self.state = State.AUDIO_DEVICE_SELECT
+                    elif result == "back":
+                        self._audio_mic_test_screen.close()
+                        self._audio_mic_test_screen = None
+                        self.state = State.MIDI_SETTINGS
 
             elif self.state == State.SETTINGS:
                 if self._settings_screen is not None:
@@ -423,9 +663,12 @@ class App:
                     if result == "back":
                         self._settings_screen = None
                         self.state = State.MENU
-                    elif result == "notes_settings":
-                        self._enter_notes_settings()
-                        self.state = State.NOTES_SETTINGS
+                    elif result == "performance_settings":
+                        self._enter_performance_settings()
+                        self.state = State.PERFORMANCE_SETTINGS
+                    elif result == "midi_settings":
+                        self._enter_midi_settings()
+                        self.state = State.MIDI_SETTINGS
                     elif result == "keyboard_settings":
                         self._enter_keyboard_settings()
                         self.state = State.KEYBOARD_SETTINGS
@@ -438,16 +681,50 @@ class App:
                     elif result == "audience_settings":
                         self._enter_audience_settings()
                         self.state = State.AUDIENCE_SETTINGS
+                    elif result == "voice_settings":
+                        self._enter_voice_settings()
+                        self.state = State.VOICE_SETTINGS
+
+            elif self.state == State.PERFORMANCE_SETTINGS:
+                if self._performance_settings_screen is not None:
+                    result = self._performance_settings_screen.handle_event(event)
+                    if result == "back":
+                        self._performance_settings_screen = None
+                        self.state = State.SETTINGS
                     elif result == "theme_settings":
                         self._enter_theme_settings()
                         self.state = State.THEME_SETTINGS
+                    elif result == "notes_settings":
+                        self._enter_notes_settings(return_state=State.PERFORMANCE_SETTINGS)
+                        self.state = State.NOTES_SETTINGS
+
+            elif self.state == State.MIDI_SETTINGS:
+                if self._midi_settings_screen is not None:
+                    result = self._midi_settings_screen.handle_event(event)
+                    if result == "back":
+                        self._midi_settings_screen = None
+                        self.state = State.SETTINGS
+                    elif result == "device_select":
+                        self._enter_device_select()
+                        self.state = State.DEVICE_SELECT
+                    elif result == "midi_hotkeys":
+                        self._enter_midi_hotkeys_settings()
+                        self.state = State.MIDI_HOTKEYS_SETTINGS
+                    elif result == "audio_device_select":
+                        self._enter_audio_mic_test()
+                        self.state = State.AUDIO_MIC_TEST
 
             elif self.state == State.NOTES_SETTINGS:
                 if self._notes_settings_screen is not None:
                     result = self._notes_settings_screen.handle_event(event)
                     if result == "back":
                         self._notes_settings_screen = None
-                        self.state = State.SETTINGS
+                        if self._notes_return_state == State.THEME_SETTINGS:
+                            active_perf_id = perf_store.get_active_performance_id()
+                            active_theme_index = perf_store.get_active_theme_index(active_perf_id)
+                            if active_perf_id and active_theme_index >= 0:
+                                perf_store.apply_theme_to_config(active_perf_id, active_theme_index)
+                        self.state = self._notes_return_state
 
             elif self.state == State.KEYBOARD_SETTINGS:
                 if self._keyboard_settings_screen is not None:
@@ -484,12 +761,36 @@ class App:
                         self._audience_settings_screen = None
                         self.state = State.SETTINGS
 
+            elif self.state == State.VOICE_SETTINGS:
+                if self._voice_settings_screen is not None:
+                    result = self._voice_settings_screen.handle_event(event)
+                    if result == "back":
+                        self._voice_settings_screen = None
+                        self.state = State.SETTINGS
+
             elif self.state == State.THEME_SETTINGS:
                 if self._theme_settings_screen is not None:
                     result = self._theme_settings_screen.handle_event(event)
                     if result == "back":
                         self._theme_settings_screen = None
-                        self.state = State.SETTINGS
+                        self.state = State.PERFORMANCE_SETTINGS
+                    elif result == "notes_settings":
+                        active_perf_id = perf_store.get_active_performance_id()
+                        active_theme_index = perf_store.get_active_theme_index(active_perf_id)
+                        self._enter_notes_settings(
+                            performance_id=active_perf_id,
+                            theme_index=active_theme_index,
+                            selected_channel=0,
+                            return_state=State.THEME_SETTINGS,
+                        )
+                        self.state = State.NOTES_SETTINGS
+
+            elif self.state == State.MIDI_HOTKEYS_SETTINGS:
+                if self._midi_hotkeys_settings_screen is not None:
+                    result = self._midi_hotkeys_settings_screen.handle_event(event)
+                    if result == "back":
+                        self._midi_hotkeys_settings_screen = None
+                        self.state = State.MIDI_SETTINGS
 
             elif self.state == State.SONG_SELECT:
                 if self._song_select is not None:
@@ -512,10 +813,16 @@ class App:
                         # Retry MIDI connection
                         if self._midi is not None and not self._midi.connected:
                             self._midi.connect(self._selected_port)
+                    elif event.key == pygame.K_SPACE:
+                        if self._voice_controller is not None and not self._voice_continuous_listen:
+                            self._voice_controller.start_recording()
                     elif self._midi is not None:
                         self._midi.handle_keydown(event.key)
                 elif event.type == pygame.KEYUP:
-                    if self._midi is not None:
+                    if event.key == pygame.K_SPACE:
+                        if self._voice_controller is not None and not self._voice_continuous_listen:
+                            self._voice_controller.stop_recording()
+                    elif self._midi is not None:
                         self._midi.handle_keyup(event.key)
 
     def _get_panel_state(self) -> dict:
@@ -573,14 +880,22 @@ class App:
 
             elif ptype == "theme":
                 idx = int(patch.get("index", 0))
-                user_themes = themes_mod.load_user_themes()
-                if 0 <= idx < len(user_themes):
-                    themes_mod.set_active_index(idx)
-                    themes_mod.apply_theme_to_config(user_themes[idx])
-                    self._apply_theme_to_live(user_themes[idx])
+                performance_id = perf_store.get_active_performance_id()
+                themes = perf_store.load_themes(performance_id) if performance_id else []
+                if 0 <= idx < len(themes):
+                    self._apply_performance_theme_index(performance_id, idx)
 
     def _update(self, dt: int) -> None:
         self._drain_control_patches()
+        if self.state == State.MENU and self._pending_highway_entry:
+            if pygame.time.get_ticks() >= self._transition_overlay_until_ms:
+                self._pending_highway_entry = False
+                pending_file = self._pending_highway_midi_file
+                self._pending_highway_midi_file = None
+                self._enter_highway(midi_file=pending_file)
+                self.state = State.HIGHWAY
+            return
+
         if self.state == State.NOTES_SETTINGS and self._notes_settings_screen is not None:
             self._notes_settings_screen.update(dt)
             return
@@ -601,8 +916,16 @@ class App:
         if self.state == State.THEME_SETTINGS and self._theme_settings_screen is not None:
             return
 
+        if self.state == State.AUDIO_MIC_TEST and self._audio_mic_test_screen is not None:
+            self._audio_mic_test_screen.update(dt)
+            return
+
         if self.state != State.HIGHWAY:
             return
+
+        if self._voice_controller is not None:
+            self._voice_controller.tick()
+            self._update_continuous_voice()
 
         self._sync_highway_targets()
 
@@ -780,6 +1103,21 @@ class App:
         elif self.state == State.SETTINGS:
             if self._settings_screen is not None:
                 self._settings_screen.draw()
+        elif self.state == State.AUDIO_MIC_TEST:
+            if self._audio_mic_test_screen is not None:
+                self._audio_mic_test_screen.draw()
+        elif self.state == State.AUDIO_DEVICE_SELECT:
+            if self._audio_device_select is not None:
+                self._audio_device_select.draw()
+        elif self.state == State.PERFORMANCE_SETTINGS:
+            if self._performance_settings_screen is not None:
+                self._performance_settings_screen.draw()
+        elif self.state == State.MIDI_SETTINGS:
+            if self._midi_settings_screen is not None:
+                self._midi_settings_screen.draw()
+        elif self.state == State.MIDI_HOTKEYS_SETTINGS:
+            if self._midi_hotkeys_settings_screen is not None:
+                self._midi_hotkeys_settings_screen.draw()
         elif self.state == State.NOTES_SETTINGS:
             if self._notes_settings_screen is not None:
                 self._notes_settings_screen.draw()
@@ -795,6 +1133,9 @@ class App:
         elif self.state == State.AUDIENCE_SETTINGS:
             if self._audience_settings_screen is not None:
                 self._audience_settings_screen.draw()
+        elif self.state == State.VOICE_SETTINGS:
+            if self._voice_settings_screen is not None:
+                self._voice_settings_screen.draw()
         elif self.state == State.THEME_SETTINGS:
             if self._theme_settings_screen is not None:
                 self._theme_settings_screen.draw()
@@ -803,8 +1144,355 @@ class App:
                 self._song_select.draw()
         elif self.state == State.HIGHWAY:
             self._draw_highway()
+            self._draw_voice_hud()
+
+        self._draw_transition_overlay()
+
+    def _draw_voice_hud(self) -> None:
+        """Draw the push-to-talk status pill at the bottom of the screen."""
+        if self._voice_controller is None:
+            return
+
+        if self._small_font is None:
+            self._small_font = pygame.font.SysFont("Arial", 20)
+
+        state = self._voice_controller.state
+        now_ms = pygame.time.get_ticks()
+
+        if state == VoiceState.IDLE:
+            if self._voice_continuous_listen:
+                text = "Voice cue listening (continuous)"
+            else:
+                text = "Hold SPACE and say a theme name"
+            text_color = (160, 160, 180)
+            bg_alpha = 120
+        elif state == VoiceState.RECORDING:
+            pulse = int(abs(math.sin(now_ms / 300.0)) * 80 + 175)
+            text = "\u25CF  Listening..."
+            text_color = (pulse, 80, 80)
+            bg_alpha = 180
+        elif state == VoiceState.PROCESSING:
+            text = "Processing..."
+            text_color = (200, 200, 80)
+            bg_alpha = 180
+        elif state == VoiceState.MATCHED:
+            name = self._voice_controller.last_text
+            text = f"\u2713  {name}"
+            text_color = (80, 220, 120)
+            bg_alpha = 200
+        else:  # NO_MATCH
+            hw_err = self._voice_controller.last_hardware_error if self._voice_controller is not None else ""
+            if hw_err:
+                hw_lower = hw_err.lower()
+                if any(kw in hw_lower for kw in ("9999", "unanticipated", "unknown", "access")):
+                    text = "Mic blocked \u2014 check Windows Settings \u2192 Privacy \u2192 Microphone"
+                else:
+                    text = f"Mic error \u2014 {hw_err[:60]}"
+            else:
+                text = "Not recognized \u2014 try again"
+            text_color = (220, 80, 80)
+            bg_alpha = 200
+
+        surf = self._small_font.render(text, True, text_color)
+        pad_x, pad_y = 18, 8
+        pill_w = surf.get_width() + pad_x * 2
+        pill_h = surf.get_height() + pad_y * 2
+        sw, sh = self.screen.get_size()
+        pill_x = (sw - pill_w) // 2
+        pill_y = sh - pill_h - 16
+        pill = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
+        pill.fill((20, 20, 30, bg_alpha))
+        pygame.draw.rect(pill, (80, 80, 120, bg_alpha + 40), pill.get_rect(), width=1, border_radius=pill_h // 2)
+        self.screen.blit(pill, (pill_x, pill_y))
+        self.screen.blit(surf, (pill_x + pad_x, pill_y + pad_y))
+
+    def _apply_voice_transcript(self, transcript: str | None) -> None:
+        """Match a transcript against theme names and apply on hit (called from worker thread)."""
+        if not transcript:
+            return
+
+        normalized = self._normalize_voice_text(transcript)
+        if normalized:
+            for token in normalized.split():
+                self._voice_word_buffer.append(token)
+
+        performance_id = perf_store.get_active_performance_id()
+        themes = perf_store.load_themes(performance_id) if performance_id else []
+        saved_styles = self._load_saved_note_styles()
+
+        match = self._resolve_section_cue_command(transcript, themes, saved_styles)
+        if match is None and self._voice_word_buffer:
+            buffered_phrase = " ".join(self._voice_word_buffer)
+            if buffered_phrase and buffered_phrase != normalized:
+                match = self._resolve_section_cue_command(buffered_phrase, themes, saved_styles)
+
+        if match is None and not self._voice_section_scoped_only:
+            match = self._resolve_theme_command(transcript, themes, saved_styles)
+            if match is None and self._voice_word_buffer:
+                buffered_phrase = " ".join(self._voice_word_buffer)
+                if buffered_phrase and buffered_phrase != normalized:
+                    match = self._resolve_theme_command(buffered_phrase, themes, saved_styles)
+        if match is not None:
+            match_kind, idx, matched_name = match
+            if match_kind == "performance_theme":
+                self._apply_performance_theme_index(performance_id, idx)
+            elif match_kind == "saved_note_style":
+                self._apply_saved_note_style_index(idx)
+            if self._voice_controller is not None:
+                self._voice_controller.last_text = matched_name
+            return
+
+        if self._voice_controller is not None:
+            self._voice_controller.last_text = f'Heard "{transcript}" (no matching theme)'
+
+    def _update_continuous_voice(self) -> None:
+        """Auto-rearm short voice captures in continuous mode without blocking render."""
+        if not self._voice_continuous_listen or self._voice_controller is None:
+            return
+
+        now_ms = pygame.time.get_ticks()
+        if now_ms < self._voice_next_auto_listen_ms:
+            return
+
+        if self._voice_controller.state != VoiceState.IDLE:
+            return
+
+        if self._voice_controller.start_recording():
+            self._voice_next_auto_listen_ms = now_ms + self._voice_continuous_gap_ms
+
+    @staticmethod
+    def _normalize_voice_text(value: str) -> str:
+        lowered = value.lower()
+        lowered = re.sub(r"[^a-z0-9\s]", " ", lowered)
+        return " ".join(lowered.split())
+
+    def _strip_voice_prefix(self, normalized_text: str) -> str:
+        candidate = normalized_text
+        for prefix in _VOICE_PREFIXES:
+            if candidate.startswith(prefix):
+                candidate = candidate[len(prefix):].strip()
+                break
+        return candidate
+
+    def _load_voice_section_cues(self, raw_config: object) -> dict[int, list[dict[str, object]]]:
+        parsed: dict[int, list[dict[str, object]]] = {}
+        if not isinstance(raw_config, list):
+            return parsed
+
+        for section_cfg in raw_config:
+            if not isinstance(section_cfg, dict):
+                continue
+            try:
+                section_idx = int(section_cfg.get("section", section_cfg.get("cue_index", -1)))
+            except Exception:
+                section_idx = -1
+            if section_idx < 0:
+                continue
+
+            cues = section_cfg.get("cues", [])
+            if not isinstance(cues, list):
+                continue
+
+            for cue_cfg in cues:
+                if not isinstance(cue_cfg, dict):
+                    continue
+
+                phrase_cfg = cue_cfg.get("phrases", cue_cfg.get("words", []))
+                if isinstance(phrase_cfg, str):
+                    phrase_values = [phrase_cfg]
+                elif isinstance(phrase_cfg, list):
+                    phrase_values = [str(v) for v in phrase_cfg]
+                else:
+                    phrase_values = []
+
+                phrases: list[str] = []
+                for raw_phrase in phrase_values:
+                    phrase = self._normalize_voice_text(raw_phrase)
+                    if phrase:
+                        phrases.append(phrase)
+                if not phrases:
+                    continue
+
+                target_kind = str(cue_cfg.get("target_kind", "performance_theme")).strip().lower()
+                target_name_raw = str(cue_cfg.get("target", "")).strip()
+                if not target_name_raw:
+                    target_name_raw = str(cue_cfg.get("target_theme", cue_cfg.get("theme", ""))).strip()
+                    if target_name_raw:
+                        target_kind = "performance_theme"
+                if not target_name_raw:
+                    target_name_raw = str(cue_cfg.get("target_saved_style", cue_cfg.get("saved_style", ""))).strip()
+                    if target_name_raw:
+                        target_kind = "saved_note_style"
+
+                target_name = self._normalize_voice_text(target_name_raw)
+                target_index_raw = cue_cfg.get("target_index", None)
+                target_index: int | None = None
+                if target_index_raw is not None:
+                    try:
+                        target_index = int(target_index_raw)
+                    except Exception:
+                        target_index = None
+
+                if target_kind not in {"performance_theme", "saved_note_style"}:
+                    continue
+                if not target_name and target_index is None:
+                    continue
+
+                parsed.setdefault(section_idx, []).append(
+                    {
+                        "phrases": phrases,
+                        "target_kind": target_kind,
+                        "target_name": target_name,
+                        "target_index": target_index,
+                    }
+                )
+
+        return parsed
+
+    def _resolve_section_cue_command(
+        self,
+        transcript: str,
+        themes: list[dict],
+        saved_styles: list[dict],
+    ) -> tuple[str, int, str] | None:
+        if not self._voice_section_cues:
+            return None
+
+        section_cues = self._voice_section_cues.get(max(0, self._active_style_cue_index), [])
+        if not section_cues:
+            return None
+
+        normalized = self._normalize_voice_text(transcript)
+        if not normalized:
+            return None
+        candidate = self._strip_voice_prefix(normalized)
+        if not candidate:
+            return None
+        candidate_padded = f" {candidate} "
+
+        for cue in section_cues:
+            phrases = cue.get("phrases", [])
+            if not isinstance(phrases, list):
+                continue
+
+            matched_phrase = False
+            for phrase in phrases:
+                phrase_text = str(phrase).strip()
+                if not phrase_text:
+                    continue
+                if phrase_text == candidate or f" {phrase_text} " in candidate_padded:
+                    matched_phrase = True
+                    break
+            if not matched_phrase:
+                continue
+
+            target_kind = str(cue.get("target_kind", "performance_theme"))
+            target_name = str(cue.get("target_name", "")).strip()
+            target_index_raw = cue.get("target_index")
+            target_index: int | None
+            if isinstance(target_index_raw, int):
+                target_index = target_index_raw
+            else:
+                target_index = None
+
+            if target_kind == "performance_theme":
+                if target_index is not None and 0 <= target_index < len(themes):
+                    raw_name = str(themes[target_index].get("name", "")).strip() or f"Theme {target_index + 1}"
+                    return "performance_theme", target_index, raw_name
+                for i, theme in enumerate(themes):
+                    raw_name = str(theme.get("name", "")).strip()
+                    if self._normalize_voice_text(raw_name) == target_name:
+                        return "performance_theme", i, raw_name
+            elif target_kind == "saved_note_style":
+                if target_index is not None and 0 <= target_index < len(saved_styles):
+                    raw_name = str(saved_styles[target_index].get("name", "")).strip() or f"Style {target_index + 1}"
+                    return "saved_note_style", target_index, raw_name
+                for i, style in enumerate(saved_styles):
+                    raw_name = str(style.get("name", "")).strip()
+                    if self._normalize_voice_text(raw_name) == target_name:
+                        return "saved_note_style", i, raw_name
+
+        return None
+
+    def _resolve_theme_command(
+        self,
+        transcript: str,
+        themes: list[dict],
+        saved_styles: list[dict],
+    ) -> tuple[str, int, str] | None:
+        normalized = self._normalize_voice_text(transcript)
+        if not normalized:
+            return None
+        candidate = self._strip_voice_prefix(normalized)
+        if not candidate:
+            return None
+
+        normalized_theme_names: list[tuple[str, int, str, str]] = []
+        for i, theme in enumerate(themes):
+            raw_name = str(theme.get("name", "")).strip()
+            normalized_name = self._normalize_voice_text(raw_name)
+            if normalized_name:
+                normalized_theme_names.append(("performance_theme", i, raw_name, normalized_name))
+
+        for i, style in enumerate(saved_styles):
+            raw_name = str(style.get("name", "")).strip()
+            normalized_name = self._normalize_voice_text(raw_name)
+            if normalized_name:
+                normalized_theme_names.append(("saved_note_style", i, raw_name, normalized_name))
+
+        # Prefer exact theme-name matches first.
+        for match_kind, idx, raw_name, theme_name in normalized_theme_names:
+            if theme_name == candidate:
+                return match_kind, idx, raw_name
+
+        # Fallback: phrase contains a full theme name.
+        for match_kind, idx, raw_name, theme_name in normalized_theme_names:
+            if theme_name and theme_name in candidate:
+                return match_kind, idx, raw_name
+        return None
+
+    def _draw_transition_overlay(self) -> None:
+        now_ms = pygame.time.get_ticks()
+        if now_ms >= self._transition_overlay_until_ms:
+            return
+
+        if self._small_font is None:
+            self._small_font = pygame.font.SysFont("Arial", 20)
+
+        sr = self.screen.get_rect()
+        overlay = pygame.Surface((sr.width, sr.height), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 86))
+        self.screen.blit(overlay, (0, 0))
+
+        panel_w, panel_h = 270, 88
+        panel = pygame.Rect(0, 0, panel_w, panel_h)
+        panel.center = sr.center
+        pygame.draw.rect(self.screen, (22, 22, 30), panel, border_radius=10)
+        pygame.draw.rect(self.screen, (80, 80, 110), panel, width=1, border_radius=10)
+
+        # Spinner
+        spinner_cx = panel.left + 34
+        spinner_cy = panel.centery
+        spinner_r = 11
+        phase = (now_ms % 900) / 900.0
+        start_angle = phase * 2.0 * math.pi
+        end_angle = start_angle + (math.pi * 1.35)
+        spinner_rect = pygame.Rect(
+            spinner_cx - spinner_r,
+            spinner_cy - spinner_r,
+            spinner_r * 2,
+            spinner_r * 2,
+        )
+        pygame.draw.arc(self.screen, (0, 200, 200), spinner_rect, start_angle, end_angle, width=3)
+
+        label = "Loading Free Play..." if self._pending_highway_entry else "Please wait..."
+        text = self._small_font.render(label, True, (220, 220, 230))
+        self.screen.blit(text, text.get_rect(midleft=(spinner_cx + 20, panel.centery)))
 
     def _draw_highway(self) -> None:
+        if self._gl_renderer is not None:
+            self._draw_highway_gl()
+            return
         self.screen.fill((10, 10, 10))
 
         # Background always fills the full screen width.
@@ -812,13 +1500,13 @@ class App:
         if bg_frame is not None:
             base_alpha = int(self._display_style.get("background_alpha", 120))
             if bg_next_frame is None or bg_blend <= 0.0:
-                bg = pygame.transform.smoothscale(bg_frame, self.screen.get_size())
+                bg = self._get_scaled_background_surface(bg_frame).copy()
                 bg.set_alpha(base_alpha)
                 self.screen.blit(bg, (0, 0))
             else:
                 # Slow, soft dissolve with no directional motion.
-                bg_a = pygame.transform.smoothscale(bg_frame, self.screen.get_size())
-                bg_b = pygame.transform.smoothscale(bg_next_frame, self.screen.get_size())
+                bg_a = self._get_scaled_background_surface(bg_frame).copy()
+                bg_b = self._get_scaled_background_surface(bg_next_frame).copy()
                 bg_a.set_alpha(max(0, min(255, int(base_alpha * (1.0 - bg_blend)))))
                 bg_b.set_alpha(max(0, min(255, int(base_alpha * bg_blend))))
                 self.screen.blit(bg_a, (0, 0))
@@ -895,6 +1583,80 @@ class App:
                 self._small_font = pygame.font.SysFont("Arial", 20)
             live = self._small_font.render("Live", True, (90, 255, 140))
             self.screen.blit(live, (10, self.screen.get_height() - live.get_height() - 8))
+
+    def _draw_highway_gl(self) -> None:
+        """Highway rendering via GLEffectsRenderer (OpenGL path)."""
+        bg_surf = self._gl_bg_surf
+        overlay_surf = self._gl_overlay_surf
+        if bg_surf is None or overlay_surf is None:
+            return
+
+        # Background → bg_surf
+        bg_surf.fill((10, 10, 10))
+        bg_frame, bg_next_frame, bg_blend = self._advance_background(self._smoothed_dt_ms)
+        base_alpha = int(self._display_style.get("background_alpha", 120))
+        if bg_frame is not None:
+            if bg_next_frame is None or bg_blend <= 0.0:
+                scaled = self._get_scaled_background_surface(bg_frame).copy()
+                bg_surf.blit(scaled, (0, 0))
+            else:
+                bg_a = self._get_scaled_background_surface(bg_frame).copy()
+                bg_b = self._get_scaled_background_surface(bg_next_frame).copy()
+                bg_a.set_alpha(max(0, min(255, int(255 * (1.0 - bg_blend)))))
+                bg_b.set_alpha(max(0, min(255, int(255 * bg_blend))))
+                bg_surf.blit(bg_a, (0, 0))
+                bg_surf.blit(bg_b, (0, 0))
+
+        # Overlay → overlay_surf (piano + text on transparent surface)
+        overlay_surf.fill((0, 0, 0, 0))
+
+        if self._highway_font is None:
+            self._highway_font = pygame.font.SysFont("Arial", 28)
+        if self._small_font is None:
+            self._small_font = pygame.font.SysFont("Arial", 20)
+
+        screen_rect = self.screen.get_rect()
+
+        if self._midi is None or not self._midi.connected:
+            overlay_surf.fill((10, 10, 10))
+            if self._midi is not None and not self._midi.available:
+                msg = "python-rtmidi not installed. Run: pip install python-rtmidi"
+            else:
+                msg = "No MIDI device detected. Connect a MIDI device and press R to retry."
+            text = self._highway_font.render(msg, True, (220, 100, 100))
+            overlay_surf.blit(text, text.get_rect(center=screen_rect.center))
+            esc = self._small_font.render("Press ESC to return", True, (150, 150, 150))
+            overlay_surf.blit(esc, esc.get_rect(topright=(screen_rect.right - 16, 12)))
+            self._gl_renderer.end_frame(bg_surf, 0.0, overlay_surf)
+            return
+
+        if self._selected_midi_file is not None:
+            dev = self._small_font.render(f"MIDI: {self._midi.port_name}", True, (100, 200, 100))
+            overlay_surf.blit(dev, (16, 12))
+            song = self._small_font.render(f"Song: {self._selected_midi_file.name}", True, (180, 180, 100))
+            overlay_surf.blit(song, (16, 36))
+            esc = self._small_font.render("Press ESC to return", True, (150, 150, 150))
+            overlay_surf.blit(esc, esc.get_rect(topright=(screen_rect.right - 16, 12)))
+
+        # Piano drawn to overlay_surf
+        active_notes = self._midi.get_active_notes()
+        if self._piano is not None:
+            self._piano.set_target(overlay_surf)
+            self._piano.draw(active_notes)
+            self._piano.set_target(self.screen)
+
+        if self._audience_client is not None and self._audience_client.connected:
+            live = self._small_font.render("Live", True, (90, 255, 140))
+            overlay_surf.blit(live, (10, screen_rect.bottom - live.get_height() - 8))
+
+        # GL effects pass
+        self._gl_renderer.begin_frame()
+        if self._selected_midi_file is None:
+            for trail in self._note_trails:
+                self._gl_renderer.draw_trail(
+                    self._interpolated_trail_for_draw(trail), self._note_style
+                )
+        self._gl_renderer.end_frame(bg_surf, base_alpha / 255.0, overlay_surf)
 
     def _draw_freeplay_trails(self) -> None:
         if not self._note_trails or self._fx_renderer is None:
@@ -1055,7 +1817,71 @@ class App:
         data = cfg.load()
         note_style = data.setdefault("note_style", {})
         note_style.update(patch)
+        note_style["active_theme_id"] = "custom"
+        note_style["experimental_claire_script_enabled"] = 0
+        data.setdefault("slide_palette", {})["enabled"] = False
         cfg.save(data)
+
+    def _sanitize_legacy_note_automation(self) -> None:
+        """Clear stale Claire/palette metadata when timed sync is not enabled."""
+        data = cfg.load()
+        changed = False
+
+        if not bool(data.get("slide_palette", {}).get("enabled", False)):
+            note_style = data.setdefault("note_style", {})
+            if (
+                str(note_style.get("active_theme_id", "custom")) == "claire_de_lune"
+                or bool(note_style.get("experimental_claire_script_enabled", 0))
+            ):
+                note_style["active_theme_id"] = "custom"
+                note_style["experimental_claire_script_enabled"] = 0
+                changed = True
+
+            note_styles = data.get("note_styles", [])
+            if isinstance(note_styles, list):
+                for style in note_styles:
+                    if not isinstance(style, dict):
+                        continue
+                    if (
+                        str(style.get("active_theme_id", "custom")) == "claire_de_lune"
+                        or bool(style.get("experimental_claire_script_enabled", 0))
+                    ):
+                        style["active_theme_id"] = "custom"
+                        style["experimental_claire_script_enabled"] = 0
+                        changed = True
+
+            performances = data.get("performances", [])
+            if isinstance(performances, list):
+                for performance in performances:
+                    if not isinstance(performance, dict):
+                        continue
+                    for theme in performance.get("themes", []):
+                        if not isinstance(theme, dict):
+                            continue
+                        note_cfg = theme.get("note_style", {})
+                        if isinstance(note_cfg, dict) and (
+                            str(note_cfg.get("active_theme_id", "custom")) == "claire_de_lune"
+                            or bool(note_cfg.get("experimental_claire_script_enabled", 0))
+                        ):
+                            note_cfg["active_theme_id"] = "custom"
+                            note_cfg["experimental_claire_script_enabled"] = 0
+                            changed = True
+                        channels = theme.get("channels", {})
+                        if isinstance(channels, dict):
+                            for channel_entry in channels.values():
+                                if not isinstance(channel_entry, dict):
+                                    continue
+                                channel_style = channel_entry.get("note_style", {})
+                                if isinstance(channel_style, dict) and (
+                                    str(channel_style.get("active_theme_id", "custom")) == "claire_de_lune"
+                                    or bool(channel_style.get("experimental_claire_script_enabled", 0))
+                                ):
+                                    channel_style["active_theme_id"] = "custom"
+                                    channel_style["experimental_claire_script_enabled"] = 0
+                                    changed = True
+
+        if changed:
+            cfg.save(data)
 
     def _set_display_value_from_cc(
         self,
@@ -1209,6 +2035,8 @@ class App:
     def _on_slide_advance(self) -> None:
         """Called each time the background slideshow advances to the next slide.
         If a slide palette is active, cycle to the next palette colour entry."""
+        self._active_style_cue_index = self._bg_slide_index
+        self._apply_active_style_cue()
         sp = self._slide_palette_cfg
         if not sp.get("enabled", False):
             return
@@ -1287,6 +2115,68 @@ class App:
             ab = max(0, min(255, int(pb + (tb - pb) * smooth)))
             self._led_output.set_active_color(ar, ag, ab)
 
+    def _apply_live_note_style(self, note_style: dict[str, int]) -> None:
+        style_patch = dict(note_style)
+        style_patch.pop("speed_px_per_sec", None)
+        self._note_style.update(style_patch)
+        self._note_style["speed_px_per_sec"] = int(cfg.load().get("note_style", {}).get("speed_px_per_sec", 420))
+        new_r = float(self._note_style.get("color_r", 0))
+        new_g = float(self._note_style.get("color_g", 230))
+        new_b = float(self._note_style.get("color_b", 230))
+        self._color_current = [new_r, new_g, new_b]
+        self._color_start = [new_r, new_g, new_b]
+        self._color_target = [new_r, new_g, new_b]
+        self._color_blend_ms = 0
+        self._color_blend_elapsed_ms = 0
+        self._refresh_claire_script_state()
+        if self._led_output is not None:
+            self._led_output.set_active_color(int(new_r), int(new_g), int(new_b))
+
+    def _apply_active_style_cue(self) -> None:
+        performance_id = perf_store.get_active_performance_id()
+        theme_index = perf_store.get_active_theme_index(performance_id)
+        if not performance_id or theme_index < 0:
+            return
+        if not perf_store.is_theme_style_sync_enabled(performance_id, theme_index):
+            return
+        cue_count = perf_store.get_theme_style_cue_count(performance_id, theme_index)
+        if cue_count <= 0:
+            return
+        cue_index = max(0, min(cue_count - 1, self._active_style_cue_index))
+        cue_style = perf_store.get_theme_cue_note_style(performance_id, theme_index, cue_index, 0)
+        if cue_style:
+            self._apply_live_note_style(cue_style)
+
+    @staticmethod
+    def _blend_style_value(a: object, b: object, t: float) -> int:
+        # Treat bool-like toggles as a threshold flip, not a partial value.
+        a_int = int(a) if isinstance(a, (int, float, bool)) else 0
+        b_int = int(b) if isinstance(b, (int, float, bool)) else a_int
+        if (a_int in (0, 1)) and (b_int in (0, 1)):
+            return b_int if t >= 0.5 else a_int
+        return int(round(a_int + (b_int - a_int) * t))
+
+    def _apply_style_sync_transition_blend(
+        self,
+        performance_id: str,
+        theme_index: int,
+        cue_index: int,
+        next_cue_index: int,
+        blend: float,
+    ) -> None:
+        if not perf_store.is_theme_style_sync_enabled(performance_id, theme_index):
+            return
+        current_style = perf_store.get_theme_cue_note_style(performance_id, theme_index, cue_index, 0)
+        next_style = perf_store.get_theme_cue_note_style(performance_id, theme_index, next_cue_index, 0)
+        if not current_style or not next_style:
+            return
+
+        blended: dict[str, int] = {}
+        for key, cur_v in current_style.items():
+            nxt_v = next_style.get(key, cur_v)
+            blended[key] = self._blend_style_value(cur_v, nxt_v, blend)
+        self._apply_live_note_style(blended)
+
     def _load_background_slides(self) -> list[tuple[list[pygame.Surface], list[float]]]:
         """Build slide list from config. Slideshow paths take priority over single image."""
         slideshow_paths: list[str] = list(self._display_style.get("background_slideshow_paths", []))
@@ -1308,7 +2198,22 @@ class App:
             return None, None, 0.0
 
         slide_dur_ms = max(500.0, float(self._display_style.get("background_slide_duration_sec", 5)) * 1000.0)
-        transition_ratio = int(self._display_style.get("background_transition_percent", 35)) / 100.0
+        transition_pct = int(self._display_style.get("background_transition_percent", 35))
+        performance_id = perf_store.get_active_performance_id()
+        theme_index = perf_store.get_active_theme_index(performance_id)
+        if (
+            performance_id
+            and theme_index >= 0
+            and perf_store.is_theme_style_sync_enabled(performance_id, theme_index)
+        ):
+            cue_count = perf_store.get_theme_style_cue_count(performance_id, theme_index)
+            cue_index = max(0, min(cue_count - 1, self._active_style_cue_index))
+            transition_pct = perf_store.get_theme_cue_transition_percent(
+                performance_id,
+                theme_index,
+                cue_index,
+            )
+        transition_ratio = transition_pct / 100.0
         transition_ratio = max(0.10, min(0.90, transition_ratio))
         transition_ms = max(500.0, min(3000.0, slide_dur_ms * transition_ratio))
 
@@ -1350,8 +2255,40 @@ class App:
                 next_frames, _next_durations = self._bg_slides[next_idx]
                 if next_frames:
                     next_frame = next_frames[0]
+                if performance_id and theme_index >= 0:
+                    cue_count = perf_store.get_theme_style_cue_count(performance_id, theme_index)
+                    cue_index = max(0, min(cue_count - 1, self._bg_slide_index))
+                    next_cue_index = max(0, min(cue_count - 1, next_idx))
+                    self._apply_style_sync_transition_blend(
+                        performance_id,
+                        theme_index,
+                        cue_index,
+                        next_cue_index,
+                        blend,
+                    )
 
         return current_frame, next_frame, blend
+
+    def _clear_background_scale_cache(self) -> None:
+        self._bg_scale_cache.clear()
+        self._bg_scale_cache_screen_size = (0, 0)
+
+    def _get_scaled_background_surface(self, frame: pygame.Surface) -> pygame.Surface:
+        sw, sh = self.screen.get_size()
+        if self._bg_scale_cache_screen_size != (sw, sh):
+            self._bg_scale_cache.clear()
+            self._bg_scale_cache_screen_size = (sw, sh)
+
+        key = (id(frame), sw, sh)
+        cached = self._bg_scale_cache.get(key)
+        if cached is not None:
+            return cached
+
+        scaled = pygame.transform.smoothscale(frame, (sw, sh))
+        self._bg_scale_cache[key] = scaled
+        if len(self._bg_scale_cache) > 48:
+            self._bg_scale_cache.pop(next(iter(self._bg_scale_cache)))
+        return scaled
 
     def _quit(self) -> None:
         self._leave_highway()

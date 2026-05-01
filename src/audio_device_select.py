@@ -1,9 +1,8 @@
-"""MIDI device selection screen."""
+"""Audio input device selection screen."""
 
 from __future__ import annotations
 
 import pygame
-from src.midi_input import MidiInput
 
 # Colour palette (matches menu.py)
 BG_COLOR = (15, 15, 20)
@@ -18,7 +17,7 @@ NO_DEVICE_COLOR = (150, 150, 150)
 TITLE_FONT_SIZE = 42
 ITEM_FONT_SIZE = 26
 BACK_FONT_SIZE = 30
-ITEM_WIDTH = 520
+ITEM_WIDTH = 600
 ITEM_HEIGHT = 52
 ITEM_GAP = 14
 BACK_WIDTH = 160
@@ -26,29 +25,20 @@ BACK_HEIGHT = 52
 SCROLL_STEP = 48
 
 
-class DeviceSelect:
-    """
-    Full-screen MIDI device selection screen.
+class AudioDeviceSelect:
+    """Full-screen audio input device selection screen."""
 
-    After construction, call ``refresh()`` to scan for ports before the first
-    draw.  ``handle_event()`` returns:
-
-    * ``"select"`` — user chose a device (port index stored in
-      ``self.selected_port``).
-    * ``"back"``   — user pressed BACK or ESC.
-    * ``None``     — nothing actionable yet.
-    """
-
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: pygame.Surface, selected_device: int = -1) -> None:
         self.screen = screen
-        self.selected_port: int = 0
+        self.selected_device: int = int(selected_device)
+        self._scan_error: str = ""
 
         self._title_font = pygame.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
         self._item_font = pygame.font.SysFont("Arial", ITEM_FONT_SIZE)
         self._back_font = pygame.font.SysFont("Arial", BACK_FONT_SIZE)
 
-        self._ports: list[str] = []
-        self._item_rects: list[pygame.Rect] = []   # one per port
+        self._devices: list[tuple[int, str]] = []
+        self._item_rects: list[pygame.Rect] = []
         self._back_rect = pygame.Rect(0, 0, BACK_WIDTH, BACK_HEIGHT)
         self._list_view_rect = pygame.Rect(0, 0, 0, 0)
         self._title_surf: pygame.Surface | None = None
@@ -57,7 +47,7 @@ class DeviceSelect:
         self._scroll_offset: int = 0
         self._max_scroll: int = 0
 
-        self._hover_item: int = -1   # index of hovered port button, or -1
+        self._hover_item: int = -1
         self._hover_back: bool = False
 
     # ------------------------------------------------------------------
@@ -65,8 +55,8 @@ class DeviceSelect:
     # ------------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Re-scan available MIDI ports and rebuild the layout."""
-        self._ports = MidiInput().list_ports()
+        """Re-scan available audio input devices and rebuild the layout."""
+        self._devices = self._list_input_devices()
         self._scroll_offset = 0
         self._build_layout()
 
@@ -95,7 +85,7 @@ class DeviceSelect:
                 return "back"
             for i, rect in enumerate(self._item_rects):
                 if rect.collidepoint(event.pos):
-                    self.selected_port = i
+                    self.selected_device = self._devices[i][0]
                     return "select"
 
         return None
@@ -103,18 +93,66 @@ class DeviceSelect:
     def draw(self) -> None:
         self.screen.fill(BG_COLOR)
         self._draw_title()
-        self._draw_ports()
+        self._draw_devices()
         self._draw_back()
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 
+    def _list_input_devices(self) -> list[tuple[int, str]]:
+        devices: list[tuple[int, str]] = [(-1, "System Default Input Device")]
+        self._scan_error = ""
+        try:
+            import pyaudio  # noqa: PLC0415
+
+            pa = pyaudio.PyAudio()
+            try:
+                default_input_idx = -1
+                try:
+                    default_info = pa.get_default_input_device_info()
+                    default_input_idx = int(default_info.get("index", -1))
+                except Exception:
+                    default_input_idx = -1
+
+                host_api_names: dict[int, str] = {}
+                try:
+                    for host_idx in range(pa.get_host_api_count()):
+                        try:
+                            host_api_names[host_idx] = str(
+                                pa.get_host_api_info_by_index(host_idx).get("name", "Unknown API")
+                            )
+                        except Exception:
+                            host_api_names[host_idx] = "Unknown API"
+                except Exception:
+                    pass
+
+                device_count = int(pa.get_device_count())
+                for idx in range(device_count):
+                    try:
+                        info = pa.get_device_info_by_index(idx)
+                    except Exception:
+                        continue
+
+                    if int(info.get("maxInputChannels", 0) or 0) <= 0:
+                        continue
+
+                    host_api_idx = int(info.get("hostApi", -1))
+                    host_api_name = host_api_names.get(host_api_idx, "Unknown API")
+                    name = str(info.get("name", f"Input Device {idx}"))
+                    default_tag = " (default)" if idx == default_input_idx else ""
+                    devices.append((idx, f"{name}{default_tag}  [{host_api_name}]"))
+            finally:
+                pa.terminate()
+        except Exception:
+            self._scan_error = "PyAudio could not enumerate input devices."
+        return devices
+
     def _build_layout(self) -> None:
         sr = self.screen.get_rect()
         cx = sr.centerx
 
-        title_surf = self._title_font.render("Select MIDI Device", True, TITLE_COLOR)
+        title_surf = self._title_font.render("Select Audio Input", True, TITLE_COLOR)
         title_y = sr.height // 8
         self._title_surf = title_surf
         self._title_pos = (cx - title_surf.get_width() // 2, title_y)
@@ -131,16 +169,17 @@ class DeviceSelect:
             list_height,
         )
 
-        total_content_h = max(0, len(self._ports) * (ITEM_HEIGHT + ITEM_GAP) - ITEM_GAP)
+        total_content_h = max(0, len(self._devices) * (ITEM_HEIGHT + ITEM_GAP) - ITEM_GAP)
         self._max_scroll = max(0, total_content_h - self._list_view_rect.height)
         self._scroll_offset = max(0, min(self._max_scroll, self._scroll_offset))
 
         y = start_y - self._scroll_offset
         self._item_rects = []
-        for _ in self._ports:
+        for _ in self._devices:
             rect = pygame.Rect(cx - ITEM_WIDTH // 2, y, ITEM_WIDTH, ITEM_HEIGHT)
             self._item_rects.append(rect)
             y += ITEM_HEIGHT + ITEM_GAP
+
         self._back_rect = pygame.Rect(
             cx - BACK_WIDTH // 2, back_y, BACK_WIDTH, BACK_HEIGHT
         )
@@ -157,17 +196,24 @@ class DeviceSelect:
         if self._title_surf is not None:
             self.screen.blit(self._title_surf, self._title_pos)
 
-    def _draw_ports(self) -> None:
-        if not self._ports:
+    def _draw_devices(self) -> None:
+        if not self._devices:
             sr = self.screen.get_rect()
             msg = self._item_font.render(
-                "No MIDI devices found.  Connect a device and press BACK to retry.",
+                "No audio input devices found.",
                 True,
                 NO_DEVICE_COLOR,
             )
             title_bottom = self._title_pos[1] + (self._title_surf.get_height() if self._title_surf else 0)
             self.screen.blit(msg, (sr.centerx - msg.get_width() // 2, title_bottom + 50))
             return
+
+        if len(self._devices) == 1:
+            sr = self.screen.get_rect()
+            info_text = self._scan_error or "Only default device is available from current audio drivers."
+            info_surf = self._item_font.render(info_text, True, NO_DEVICE_COLOR)
+            title_bottom = self._title_pos[1] + (self._title_surf.get_height() if self._title_surf else 0)
+            self.screen.blit(info_surf, (sr.centerx - info_surf.get_width() // 2, title_bottom + 8))
 
         clip_prev = self.screen.get_clip()
         self.screen.set_clip(self._list_view_rect)
@@ -179,7 +225,9 @@ class DeviceSelect:
             fg = BUTTON_HOVER_TEXT_COLOR if hovered else BUTTON_TEXT_COLOR
             pygame.draw.rect(self.screen, bg, rect, border_radius=8)
             pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, rect, width=1, border_radius=8)
-            label = self._item_font.render(self._fit_label(self._ports[i], rect.width - 20), True, fg)
+            prefix = "* " if self._devices[i][0] == self.selected_device else ""
+            label_text = self._fit_label(prefix + self._devices[i][1], rect.width - 20)
+            label = self._item_font.render(label_text, True, fg)
             self.screen.blit(label, label.get_rect(center=rect.center))
         self.screen.set_clip(clip_prev)
 

@@ -66,9 +66,11 @@ def _make_handler(
         # ------------------------------------------------------------------
         def _serve_themes(self) -> None:
             try:
-                import src.themes as themes_mod
-                themes = themes_mod.load_user_themes()
-                active = themes_mod.get_active_index()
+                import src.performance_store as perf_store
+
+                performance_id = perf_store.get_active_performance_id()
+                themes = perf_store.load_themes(performance_id) if performance_id else []
+                active = perf_store.get_active_theme_index(performance_id) if performance_id else -1
             except Exception:
                 themes, active = [], 0
             self._json_ok({"themes": themes, "active_index": active})

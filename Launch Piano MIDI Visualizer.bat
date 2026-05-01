@@ -10,14 +10,15 @@ if not exist ".venv\Scripts\python.exe" (
         pause
         exit /b 1
     )
-    echo [Setup] Installing dependencies from requirements.txt...
-    ".venv\Scripts\pip.exe" install -r requirements.txt
-    if errorlevel 1 (
-        echo ERROR: Dependency installation failed. Check your internet connection.
-        pause
-        exit /b 1
-    )
-    echo [Setup] Done!
+)
+
+rem ── Always sync dependencies (fast no-op if already up to date) ───────────
+echo [Setup] Checking dependencies...
+".venv\Scripts\pip.exe" install -r requirements.txt --quiet
+if errorlevel 1 (
+    echo ERROR: Dependency installation failed. Check your internet connection.
+    pause
+    exit /b 1
 )
 
 rem ── Launch ───────────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ Designed to run locally on Windows with a dual-monitor setup (projector + PC).
 - Audience live colour control via WebSocket (Twitch channel-point integration)
 - Triple sustain-pedal tap to cycle through saved themes
 - Built-in theme manager — save, rename, load, and delete colour presets
+- Push-to-talk voice theme switching (offline via Vosk, optional Google fallback)
 - **Live web control panel** at `http://localhost:8181` — change notes, effects, keyboard, and themes from your browser while a song is playing
 - 60 fps game loop with crash diagnostics
 
@@ -70,6 +71,8 @@ The app can stream note activity to an ESP32-S3 over serial.
 		"led_count": 176,
 		"mirror_per_key": 2,
 		"fps_limit": 12,
+		"amp_limit_enabled": true,
+		"amp_limit_amps": 3.0,
 		"active_r": 0,
 		"active_g": 220,
 		"active_b": 220
@@ -99,7 +102,7 @@ From `Settings`, open `LED SETTINGS` to configure:
 - Enable/disable serial LED output
 - COM port cycling + port refresh
 - Baud rate cycling
-- LED FPS, LEDs-per-key mapping, and active RGB color
+- LED FPS, LEDs-per-key mapping, current limit toggle/target amps, and active RGB color
 
 ### FastLED Firmware
 
@@ -148,5 +151,91 @@ Behavior:
 - App smooths from current to target color over `transition_ms`
 - Updates note colors in real time
 - Updates LED active color in real time
+
+## Voice Commands (Theme Names)
+
+Hold `SPACE`, say a theme name (for example `red`), then release `SPACE`.
+The app transcribes your speech and matches it against theme names in the active performance.
+
+### Offline STT (Vosk)
+
+The app now uses Vosk by default. Download an English model and place it in one of:
+
+- `models/vosk-model-small-en-us-0.15`
+- `models/vosk-model-en-us-0.22`
+
+Optional config in `config.json`:
+
+```json
+{
+	"voice_settings": {
+		"backend": "vosk",
+		"vosk_model_path": "",
+		"allow_google_fallback": true
+	}
+}
+```
+
+Notes:
+- `backend: "vosk"` keeps recognition local/offline.
+- If no Vosk model is found and `allow_google_fallback` is true, the app will try Google STT (internet required).
+
+### Continuous Voice Cues (Optional)
+
+For short lyric cues (for example one-word triggers like `green`, `red`, `trees`), you can enable low-cost continuous listening:
+
+```json
+{
+	"voice_settings": {
+		"backend": "vosk",
+		"continuous_listen": true,
+		"continuous_record_secs": 1.2,
+		"continuous_gap_ms": 220,
+		"word_buffer_size": 6
+	}
+}
+```
+
+How this works:
+- The app records short windows, transcribes, then re-arms automatically.
+- A rolling `word_buffer_size` window helps catch one-word cues even when recognition splits words across adjacent windows.
+- This keeps CPU usage modest because capture/transcribe runs in a background worker and each chunk is short.
+
+Tuning tips:
+- Increase `continuous_record_secs` to 1.5-2.0 if words are frequently cut off.
+- Increase `continuous_gap_ms` if your machine is busy and you want lighter load.
+- Keep `word_buffer_size` small (4-8) to reduce accidental matches.
+
+### Section-Scoped Lyric Cues (Current Section Only)
+
+If you want voice matching to check only the current section (instead of all theme names), add section cues and enable strict section mode:
+
+```json
+{
+	"voice_settings": {
+		"section_scoped_only": true,
+		"section_cues": [
+			{
+				"section": 0,
+				"cues": [
+					{"phrases": ["trees", "green"], "target_theme": "Green"},
+					{"phrases": ["red", "roses"], "target_theme": "Rose"}
+				]
+			},
+			{
+				"section": 1,
+				"cues": [
+					{"phrases": ["blue"], "target_theme": "Blue Sky"}
+				]
+			}
+		]
+	}
+}
+```
+
+Notes:
+- The app uses the active cue/slide index as the section index.
+- `section_scoped_only: true` disables global fallback matching, so only cues in the active section can trigger changes.
+- You can still use continuous listening and the rolling word buffer with section cues.
 
 

@@ -1,0 +1,78 @@
+<mxfile host="app.diagrams.net" modified="2026-04-12T13:05:00.000Z" agent="Copilot" version="24.7.17" type="device">
+  <diagram id="single-enclosure-battery-dual-strip" name="Single Enclosure Battery Dual Strip">
+    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="2" value="DC Input Jack 12V" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="70" width="170" height="50" as="geometry"/></mxCell>
+        <mxCell id="3" value="Charger + Power-Path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="250" y="70" width="180" height="50" as="geometry"/></mxCell>
+        <mxCell id="4" value="Battery Pack + BMS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1"><mxGeometry x="470" y="30" width="180" height="50" as="geometry"/></mxCell>
+        <mxCell id="5" value="System Rail" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="470" y="100" width="180" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="6" value="5V Buck 8-10A" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="700" y="100" width="160" height="50" as="geometry"/></mxCell>
+        <mxCell id="7" value="Main Fuse" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="900" y="100" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="8" value="+5V Bus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="1070" y="100" width="130" height="50" as="geometry"/></mxCell>
+        <mxCell id="9" value="GND Bus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="1070" y="180" width="130" height="50" as="geometry"/></mxCell>
+
+        <mxCell id="10" value="ESP32-S3 Mini" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="700" y="240" width="160" height="50" as="geometry"/></mxCell>
+        <mxCell id="11" value="330R DATA A" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="900" y="240" width="120" height="36" as="geometry"/></mxCell>
+        <mxCell id="12" value="330R CLK A" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="900" y="284" width="120" height="36" as="geometry"/></mxCell>
+        <mxCell id="13" value="330R DATA B" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="900" y="328" width="120" height="36" as="geometry"/></mxCell>
+        <mxCell id="14" value="330R CLK B" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="900" y="372" width="120" height="36" as="geometry"/></mxCell>
+        <mxCell id="15" value="5V Level Shifter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="1060" y="292" width="170" height="60" as="geometry"/></mxCell>
+
+        <mxCell id="16" value="Strip A Fuse" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="1250" y="100" width="120" height="42" as="geometry"/></mxCell>
+        <mxCell id="17" value="OUT A 4-wire\n+5V GND DATA CLK" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="1400" y="95" width="180" height="52" as="geometry"/></mxCell>
+        <mxCell id="18" value="Strip A Head Input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="1610" y="95" width="170" height="52" as="geometry"/></mxCell>
+
+        <mxCell id="19" value="Strip B Fuse" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="1250" y="180" width="120" height="42" as="geometry"/></mxCell>
+        <mxCell id="20" value="OUT B 4-wire\n+5V GND DATA CLK" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="1400" y="175" width="180" height="52" as="geometry"/></mxCell>
+        <mxCell id="21" value="Strip B Head Input" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="1610" y="175" width="170" height="52" as="geometry"/></mxCell>
+
+        <mxCell id="22" value="1000-2200uF at Strip A head" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="1610" y="250" width="170" height="46" as="geometry"/></mxCell>
+        <mxCell id="23" value="1000-2200uF at Strip B head" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="1610" y="305" width="170" height="46" as="geometry"/></mxCell>
+
+        <mxCell id="30" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="2" target="3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="31" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="3" target="5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="32" value="charge" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="3" target="4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="33" value="discharge" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="4" target="5"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="34" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="5" target="6"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="35" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="6" target="7"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="36" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="7" target="8"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="37" value="GND" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="6" target="9"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="38" value="VIN" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="8" target="10"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="39" value="GND" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="9" target="10"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="40" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="8" target="16"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="41" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="16" target="17"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="42" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="17" target="18"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="43" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="8" target="19"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="44" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="19" target="20"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="45" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="20" target="21"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="46" value="GPIO DATA A" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="10" target="11"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="47" value="GPIO CLK A" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="10" target="12"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="48" value="GPIO DATA B" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="10" target="13"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="49" value="GPIO CLK B" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="10" target="14"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="50" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="11" target="15"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="51" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="12" target="15"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="52" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="13" target="15"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="53" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="14" target="15"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="54" value="DATA/CLK A" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="15" target="17"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="55" value="DATA/CLK B" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="15" target="20"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="56" value="GND" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;" edge="1" parent="1" source="9" target="17"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="57" value="GND" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;" edge="1" parent="1" source="9" target="20"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="58" value="Across +5V/GND" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;" edge="1" parent="1" source="22" target="18"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="59" value="Across +5V/GND" style="edgeStyle=orthogonalEdgeStyle;dashed=1;html=1;" edge="1" parent="1" source="23" target="21"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

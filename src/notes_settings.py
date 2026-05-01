@@ -5,6 +5,7 @@ from __future__ import annotations
 import pygame
 from src import config as cfg
 from src.note_fx import NoteEffectRenderer
+import src.performance_store as perf_store
 
 # Shared look
 BG_COLOR = (15, 15, 20)
@@ -51,6 +52,13 @@ _PREVIEW_OFF_MS = 1000
 _PREVIEW_PARTICLE_HEIGHT_PX = 32
 
 
+def _strip_legacy_note_automation(note_style: dict[str, int | str]) -> dict[str, int | str]:
+    cleaned = dict(note_style)
+    cleaned["active_theme_id"] = "custom"
+    cleaned["experimental_claire_script_enabled"] = 0
+    return cleaned
+
+
 class NotesSettingsScreen:
     """Settings UI for note particle style and rising-note preview."""
 
@@ -72,7 +80,7 @@ class NotesSettingsScreen:
     ]
 
     COLOR_BLEND_FIELD = ("inner_blend_percent", "Inner/Outer Blend", 0, 100, 5)
-    COLOR_EDGE_WIDTH_FIELD = ("outer_edge_width_px", "Outer Edge Width", 1, 8, 1)
+    COLOR_EDGE_WIDTH_FIELD = ("outer_edge_width_px", "Outer Edge Width", 0, 8, 1)
     COLOR_GLOW_FIELD = ("glow_strength_percent", "Glow Strength", 0, 180, 5)
 
     EFFECT_TOGGLES = [
@@ -131,7 +139,15 @@ class NotesSettingsScreen:
          "black_r": 10,  "black_g": 60,  "black_b": 175},
     ]
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    CHANNEL_LABELS = [f"Channel {i}" for i in range(1, 17)]
+
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        performance_id: str = "",
+        theme_index: int = -1,
+        selected_channel: int = 0,
+    ) -> None:
         self.screen = screen
         self._title_font = pygame.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
         self._label_font = pygame.font.SysFont("Arial", LABEL_FONT_SIZE)
@@ -144,6 +160,7 @@ class NotesSettingsScreen:
         self._drag_slider: int = -1
         self._drag_color: tuple[str, str] | None = None  # (channel, outer|inner)
 
+        self._left_content_scroll: int = 0
         self._active_layer = "motion"
         self._hover_layer: str | None = None
         self._hover_style: int = -1
@@ -177,6 +194,23 @@ class NotesSettingsScreen:
         # contained and never bleeds across the rest of the settings UI.
         self._preview_surf: pygame.Surface | None = None
         self._preview_fx_renderer: NoteEffectRenderer | None = None
+        self._performance_id = performance_id
+        self._theme_index = theme_index
+        self._selected_channel = max(0, min(15, selected_channel))
+        self._selected_cue = 0
+        self._channel_dropdown_open = False
+        self._cue_dropdown_open = False
+        self._hover_cue = False
+        self._hover_cue_option = -1
+        self._cue_rect = pygame.Rect(0, 0, 0, 0)
+        self._cue_option_rects: list[pygame.Rect] = []
+        self._hover_channel = False
+        self._hover_channel_option = -1
+        self._channel_rect = pygame.Rect(0, 0, 0, 0)
+        self._channel_option_rects: list[pygame.Rect] = []
+        self._status_text = ""
+        self._status_until_ms = 0
+        self._channel_status_text = ""
 
         self._load()
         self._build_layout()
@@ -197,6 +231,11 @@ class NotesSettingsScreen:
             if event.key == pygame.K_ESCAPE:
                 return "back"
 
+        if event.type == pygame.MOUSEWHEEL:
+            if self._left_panel.collidepoint(pygame.mouse.get_pos()):
+                self._do_left_scroll(-event.y * 30)
+            return None
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._editing_style_index >= 0:
                 idx = self._editing_style_index
@@ -209,10 +248,41 @@ class NotesSettingsScreen:
             if self._back_rect.collidepoint(event.pos):
                 return "back"
 
+            if self._has_theme_channel_context():
+                if self._has_style_sync_context() and self._cue_rect.collidepoint(event.pos):
+                    self._cue_dropdown_open = not self._cue_dropdown_open
+                    self._channel_dropdown_open = False
+                    return None
+                if self._cue_dropdown_open:
+                    for i, rect in enumerate(self._cue_option_rects):
+                        if rect.collidepoint(event.pos):
+                            self._selected_cue = i
+                            self._cue_dropdown_open = False
+                            self._load()
+                            self._build_layout()
+                            self._set_status(f"Loaded {self._cue_label(i)}")
+                            return None
+                    self._cue_dropdown_open = False
+                if self._channel_rect.collidepoint(event.pos):
+                    self._channel_dropdown_open = not self._channel_dropdown_open
+                    self._cue_dropdown_open = False
+                    return None
+                if self._channel_dropdown_open:
+                    for i, rect in enumerate(self._channel_option_rects):
+                        if rect.collidepoint(event.pos):
+                            self._selected_channel = i
+                            self._channel_dropdown_open = False
+                            self._load()
+                            self._build_layout()
+                            self._set_status(f"Loaded {self.CHANNEL_LABELS[i]}")
+                            return None
+                    self._channel_dropdown_open = False
+
             for layer, _label in self.LAYERS:
                 if self._layer_rects[layer].collidepoint(event.pos):
                     if self._active_layer != layer:
                         self._active_layer = layer
+                        self._left_content_scroll = 0
                         self._build_layer_rows()
                     return None
 
@@ -321,9 +391,45 @@ class NotesSettingsScreen:
         self._draw_back()
 
     def _load(self) -> None:
-        data = cfg.load().get("note_style", {})
+        global_note_style = cfg.load().get("note_style", {})
+        if self._has_theme_channel_context():
+            if self._has_style_sync_context():
+                data = perf_store.get_theme_cue_note_style(
+                    self._performance_id,
+                    self._theme_index,
+                    self._selected_cue,
+                    self._selected_channel,
+                )
+                self._channel_status_text = (
+                    "Cue Override"
+                    if perf_store.has_theme_cue_channel_override(
+                        self._performance_id,
+                        self._theme_index,
+                        self._selected_cue,
+                        self._selected_channel,
+                    )
+                    else "Cue Default"
+                )
+            else:
+                data = perf_store.get_theme_channel_note_style(
+                    self._performance_id,
+                    self._theme_index,
+                    self._selected_channel,
+                )
+                self._channel_status_text = (
+                    "Custom Override"
+                    if perf_store.has_theme_channel_override(
+                        self._performance_id,
+                        self._theme_index,
+                        self._selected_channel,
+                    )
+                    else "Theme Default"
+                )
+        else:
+            data = global_note_style
+            self._channel_status_text = ""
         self._values = {
-            "speed_px_per_sec": int(data.get("speed_px_per_sec", 420)),
+            "speed_px_per_sec": int(global_note_style.get("speed_px_per_sec", 420)),
             "width_px": int(data.get("width_px", 12)),
             "edge_roundness_px": int(data.get("edge_roundness_px", 4)),
             "outer_edge_width_px": int(data.get("outer_edge_width_px", 2)),
@@ -362,8 +468,31 @@ class NotesSettingsScreen:
 
     def _save(self) -> None:
         data = cfg.load()
-        data["note_style"] = dict(self._values)
+        note_style = _strip_legacy_note_automation(dict(self._values))
+        data["note_style"] = note_style
+        data.setdefault("slide_palette", {})["enabled"] = False
         cfg.save(data)
+        if self._has_theme_channel_context():
+            channel_note_style = dict(note_style)
+            channel_note_style.pop("speed_px_per_sec", None)
+            if self._has_style_sync_context():
+                perf_store.set_theme_cue_channel_note_style(
+                    self._performance_id,
+                    self._theme_index,
+                    self._selected_cue,
+                    self._selected_channel,
+                    channel_note_style,
+                )
+                self._channel_status_text = "Cue Override"
+            else:
+                perf_store.set_theme_channel_note_style(
+                    self._performance_id,
+                    self._theme_index,
+                    self._selected_channel,
+                    channel_note_style,
+                )
+                self._channel_status_text = "Custom Override"
+        self._set_status("Saved")
 
     def _save_style_library(self) -> None:
         data = cfg.load()
@@ -391,11 +520,33 @@ class NotesSettingsScreen:
         self._editing_style_index = -1
         self._editing_style_text = ""
 
+    def _do_left_scroll(self, delta: int) -> None:
+        avail = self._left_panel.height - (12 + LAYER_BTN_H + 14) - 12
+        if self._active_layer == "effects":
+            toggle_total = len(self.EFFECT_TOGGLES) * (38 + 8) + 8
+            content_h = toggle_total + len(self.EFFECT_FIELDS) * (ROW_H + ROW_GAP)
+        elif self._active_layer == "styles":
+            content_h = (
+                STYLE_ACTION_BTN_H + STYLE_ACTION_BTN_GAP
+                + len(self._saved_styles) * (THEME_BTN_H + THEME_BTN_GAP)
+            )
+        else:
+            content_h = len(self._active_fields()) * (ROW_H + ROW_GAP)
+        max_scroll = max(0, content_h - avail)
+        self._left_content_scroll = max(0, min(max_scroll, self._left_content_scroll + delta))
+        self._build_layer_rows()
+
     def _build_layout(self) -> None:
         sr = self.screen.get_rect()
         cx = sr.centerx
 
-        title_surf = self._title_font.render("Notes Settings", True, TITLE_COLOR)
+        if self._has_theme_channel_context():
+            title = f"Notes / {self.CHANNEL_LABELS[self._selected_channel]}"
+            if self._has_style_sync_context():
+                title = f"{self._cue_label(self._selected_cue)} / {self.CHANNEL_LABELS[self._selected_channel]}"
+        else:
+            title = "Notes Settings"
+        title_surf = self._title_font.render(title, True, TITLE_COLOR)
         title_y = sr.height // 14
         self._title_pos = (cx - title_surf.get_width() // 2, title_y)
         self._title_surf = title_surf
@@ -411,7 +562,55 @@ class NotesSettingsScreen:
         self._right_panel = pygame.Rect(
             self._left_panel.right + PANEL_GAP, content_top, half_w, content_h
         )
-        self._preview_rect = self._right_panel.inflate(-16, -16)
+        preview_top_pad = 70 if self._has_theme_channel_context() else 16
+        self._preview_rect = pygame.Rect(
+            self._right_panel.left + 8,
+            self._right_panel.top + preview_top_pad,
+            self._right_panel.width - 16,
+            self._right_panel.height - preview_top_pad - 8,
+        )
+        if self._has_theme_channel_context():
+            cue_width = min(240, self._right_panel.width - 32)
+            top_y = self._right_panel.top + 18
+            if self._has_style_sync_context():
+                self._cue_rect = pygame.Rect(
+                    self._right_panel.left + 16,
+                    top_y,
+                    cue_width,
+                    40,
+                )
+                self._cue_option_rects = []
+                for i in range(self._cue_count()):
+                    self._cue_option_rects.append(
+                        pygame.Rect(
+                            self._cue_rect.left,
+                            self._cue_rect.bottom + 4 + i * 34,
+                            self._cue_rect.width,
+                            32,
+                        )
+                    )
+                top_y = self._cue_rect.bottom + 12
+            else:
+                self._cue_option_rects = []
+            self._channel_rect = pygame.Rect(
+                self._right_panel.left + 16,
+                top_y,
+                min(250, self._right_panel.width - 32),
+                40,
+            )
+            self._channel_option_rects = []
+            for i in range(len(self.CHANNEL_LABELS)):
+                self._channel_option_rects.append(
+                    pygame.Rect(
+                        self._channel_rect.left,
+                        self._channel_rect.bottom + 4 + i * 34,
+                        self._channel_rect.width,
+                        32,
+                    )
+                )
+        else:
+            self._cue_option_rects = []
+            self._channel_option_rects = []
 
         # Create/resize the off-screen preview surface so bloom stays inside it.
         pw, ph = self._preview_rect.width, self._preview_rect.height
@@ -459,12 +658,18 @@ class NotesSettingsScreen:
         self._effect_toggle_rects = []
 
         fields = self._active_fields()
-        y = self._left_panel.top + 12 + LAYER_BTN_H + 14
+        y = self._left_panel.top + 12 + LAYER_BTN_H + 14 - self._left_content_scroll
         row_w = self._left_panel.width - 24
 
         total_gaps = ROW_GAP * max(0, len(fields) - 1)
         avail_h = self._left_panel.height - (12 + LAYER_BTN_H + 14) - 12
-        max_row_h = max(40, (avail_h - total_gaps) // max(1, len(fields)))
+        if self._active_layer == "effects":
+            _toggle_taken = len(self.EFFECT_TOGGLES) * (38 + 8) + 8
+            _avail_sliders = max(len(fields) * 40, avail_h - _toggle_taken)
+            _eff_gaps = ROW_GAP * max(0, len(fields) - 1)
+            max_row_h = max(40, (_avail_sliders - _eff_gaps) // max(1, len(fields)))
+        else:
+            max_row_h = max(40, (avail_h - total_gaps) // max(1, len(fields)))
         row_h = max(40, min(ROW_H, max_row_h))
         slider_bottom_pad = max(10, min(16, row_h // 3))
 
@@ -521,6 +726,20 @@ class NotesSettingsScreen:
 
     def _update_hover(self, pos: tuple[int, int]) -> None:
         self._hover_back = self._back_rect.collidepoint(pos)
+        self._hover_cue = self._has_style_sync_context() and self._cue_rect.collidepoint(pos)
+        self._hover_cue_option = -1
+        if self._cue_dropdown_open:
+            for i, rect in enumerate(self._cue_option_rects):
+                if rect.collidepoint(pos):
+                    self._hover_cue_option = i
+                    break
+        self._hover_channel = self._has_theme_channel_context() and self._channel_rect.collidepoint(pos)
+        self._hover_channel_option = -1
+        if self._channel_dropdown_open:
+            for i, rect in enumerate(self._channel_option_rects):
+                if rect.collidepoint(pos):
+                    self._hover_channel_option = i
+                    break
         self._hover_slider = -1
         for i, rect in enumerate(self._slider_rects):
             if rect.inflate(0, 18).collidepoint(pos):
@@ -621,12 +840,20 @@ class NotesSettingsScreen:
 
         self._draw_layer_buttons()
 
+        _cy = self._left_panel.top + 12 + LAYER_BTN_H + 8
+        self.screen.set_clip(pygame.Rect(
+            self._left_panel.left + 1, _cy,
+            self._left_panel.width - 2, max(0, self._left_panel.bottom - _cy - 1),
+        ))
+
         if self._active_layer == "styles":
             self._draw_style_buttons()
+            self.screen.set_clip(None)
             return
 
         if self._active_layer == "effects":
             self._draw_effect_rows()
+            self.screen.set_clip(None)
             return
 
         fields = self._active_fields()
@@ -723,6 +950,8 @@ class NotesSettingsScreen:
                 knob_center = (knob_x, slider.centery)
                 pygame.draw.circle(self.screen, (210, 210, 210), knob_center, KNOB_R)
                 pygame.draw.circle(self.screen, BUTTON_BORDER_COLOR, knob_center, KNOB_R, width=1)
+
+        self.screen.set_clip(None)
 
     def _draw_effect_rows(self) -> None:
         # Toggle rows
@@ -846,17 +1075,18 @@ class NotesSettingsScreen:
 
     def _save_current_as_style(self) -> None:
         style_name = f"Style {len(self._saved_styles) + 1}"
-        style = dict(self._values)
+        style = _strip_legacy_note_automation(dict(self._values))
         style["name"] = style_name
         self._saved_styles.append(style)
         self._active_saved_style_index = len(self._saved_styles) - 1
         self._save_style_library()
         self._build_layer_rows()
+        self._set_status(f"Saved {style_name}")
 
     def _apply_saved_style(self, style_index: int) -> None:
         if not (0 <= style_index < len(self._saved_styles)):
             return
-        style = dict(self._saved_styles[style_index])
+        style = _strip_legacy_note_automation(dict(self._saved_styles[style_index]))
         style.pop("name", None)
         self._values.update(style)
         self._active_saved_style_index = style_index
@@ -864,8 +1094,11 @@ class NotesSettingsScreen:
         data = cfg.load()
         data.setdefault("slide_palette", {})["enabled"] = False
         data["active_note_style_index"] = style_index
+        data.setdefault("note_style", {})["active_theme_id"] = "custom"
+        data.setdefault("note_style", {})["experimental_claire_script_enabled"] = 0
         cfg.save(data)
         self._save_style_library()
+        self._set_status(f"Loaded {self._saved_styles[style_index].get('name', f'Style {style_index + 1}')}")
 
     def _delete_saved_style(self, style_index: int) -> None:
         if not (0 <= style_index < len(self._saved_styles)):
@@ -882,6 +1115,7 @@ class NotesSettingsScreen:
             self._active_saved_style_index -= 1
         self._save_style_library()
         self._build_layer_rows()
+        self._set_status("Deleted style")
 
     def _value_ratio(self, index: int) -> float:
         key, _label, min_v, max_v, _step = self._active_fields()[index]
@@ -919,7 +1153,7 @@ class NotesSettingsScreen:
 
     def _preview_key_rect(self) -> pygame.Rect:
         """Return key rect in preview-surface–relative coordinates."""
-        key_w = 42
+        key_w = max(14, self.screen.get_width() // 52)  # match actual white-key width
         key_h = 88
         pw = self._preview_rect.width
         ph = self._preview_rect.height
@@ -990,6 +1224,18 @@ class NotesSettingsScreen:
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._right_panel, width=1, border_radius=8)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._preview_rect, width=1, border_radius=8)
 
+        if self._has_theme_channel_context():
+            if self._has_style_sync_context():
+                self._draw_cue_dropdown()
+            self._draw_channel_dropdown()
+            mode_surf = self._value_font.render(self._channel_status_text, True, MUTED_TEXT_COLOR)
+            self.screen.blit(mode_surf, (self._channel_rect.right + 16, self._channel_rect.top + 8))
+
+        now = pygame.time.get_ticks()
+        if self._status_text and now <= self._status_until_ms:
+            status_surf = self._value_font.render(self._status_text, True, ACCENT_COLOR)
+            self.screen.blit(status_surf, (self._preview_rect.left + 12, self._preview_rect.top + 64))
+
     def _draw_back(self) -> None:
         bg = BUTTON_HOVER_BG if self._hover_back else BUTTON_NORMAL_BG
         fg = BUTTON_HOVER_TEXT_COLOR if self._hover_back else BUTTON_TEXT_COLOR
@@ -997,3 +1243,108 @@ class NotesSettingsScreen:
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._back_rect, width=1, border_radius=8)
         surf = self._btn_font.render("BACK", True, fg)
         self.screen.blit(surf, surf.get_rect(center=self._back_rect.center))
+
+    def _has_theme_channel_context(self) -> bool:
+        return bool(self._performance_id) and self._theme_index >= 0
+
+    def _has_style_sync_context(self) -> bool:
+        return self._has_theme_channel_context() and perf_store.is_theme_style_sync_enabled(
+            self._performance_id,
+            self._theme_index,
+        )
+
+    def _cue_count(self) -> int:
+        if not self._has_theme_channel_context():
+            return 1
+        return perf_store.get_theme_style_cue_count(self._performance_id, self._theme_index)
+
+    def _cue_label(self, cue_index: int) -> str:
+        if not self._has_theme_channel_context():
+            return f"Cue {cue_index + 1}"
+        return perf_store.get_theme_style_cue_label(self._performance_id, self._theme_index, cue_index)
+
+    def _draw_cue_dropdown(self) -> None:
+        bg = BUTTON_HOVER_BG if self._hover_cue or self._cue_dropdown_open else BUTTON_NORMAL_BG
+        pygame.draw.rect(self.screen, bg, self._cue_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._cue_rect, width=1, border_radius=8)
+        label = self._value_font.render(
+            self._cue_label(self._selected_cue),
+            True,
+            BUTTON_HOVER_TEXT_COLOR if self._hover_cue else BUTTON_TEXT_COLOR,
+        )
+        self.screen.blit(label, (self._cue_rect.left + 12, self._cue_rect.top + 7))
+        caret = self._value_font.render("v", True, BUTTON_TEXT_COLOR)
+        self.screen.blit(caret, caret.get_rect(midright=(self._cue_rect.right - 12, self._cue_rect.centery)))
+
+        if not self._cue_dropdown_open:
+            return
+
+        max_rows = min(8, len(self._cue_option_rects))
+        panel_rect = pygame.Rect(
+            self._cue_rect.left,
+            self._cue_rect.bottom + 4,
+            self._cue_rect.width,
+            max_rows * 34 + 8,
+        )
+        pygame.draw.rect(self.screen, PANEL_BG, panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, panel_rect, width=1, border_radius=8)
+        clip = self.screen.get_clip()
+        self.screen.set_clip(panel_rect)
+        for i, rect in enumerate(self._cue_option_rects):
+            if rect.bottom > panel_rect.bottom - 4:
+                break
+            hovered = i == self._hover_cue_option
+            row_bg = BUTTON_HOVER_BG if hovered or i == self._selected_cue else BUTTON_NORMAL_BG
+            pygame.draw.rect(self.screen, row_bg, rect, border_radius=6)
+            text = self._label_font.render(
+                self._cue_label(i),
+                True,
+                BUTTON_HOVER_TEXT_COLOR if hovered else BUTTON_TEXT_COLOR,
+            )
+            self.screen.blit(text, (rect.left + 10, rect.top + 4))
+        self.screen.set_clip(clip)
+
+    def _draw_channel_dropdown(self) -> None:
+        bg = BUTTON_HOVER_BG if self._hover_channel or self._channel_dropdown_open else BUTTON_NORMAL_BG
+        pygame.draw.rect(self.screen, bg, self._channel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._channel_rect, width=1, border_radius=8)
+        label = self._value_font.render(
+            self.CHANNEL_LABELS[self._selected_channel],
+            True,
+            BUTTON_HOVER_TEXT_COLOR if self._hover_channel else BUTTON_TEXT_COLOR,
+        )
+        self.screen.blit(label, (self._channel_rect.left + 12, self._channel_rect.top + 7))
+        caret = self._value_font.render("v", True, BUTTON_TEXT_COLOR)
+        self.screen.blit(caret, caret.get_rect(midright=(self._channel_rect.right - 12, self._channel_rect.centery)))
+
+        if not self._channel_dropdown_open:
+            return
+
+        list_height = min(9, len(self._channel_option_rects)) * 34 + 8
+        panel_rect = pygame.Rect(
+            self._channel_rect.left,
+            self._channel_rect.bottom + 4,
+            self._channel_rect.width,
+            list_height,
+        )
+        pygame.draw.rect(self.screen, PANEL_BG, panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, panel_rect, width=1, border_radius=8)
+        clip = self.screen.get_clip()
+        self.screen.set_clip(panel_rect)
+        for i, rect in enumerate(self._channel_option_rects):
+            if rect.bottom > panel_rect.bottom - 4:
+                break
+            hovered = i == self._hover_channel_option
+            row_bg = BUTTON_HOVER_BG if hovered or i == self._selected_channel else BUTTON_NORMAL_BG
+            pygame.draw.rect(self.screen, row_bg, rect, border_radius=6)
+            text = self._label_font.render(
+                self.CHANNEL_LABELS[i],
+                True,
+                BUTTON_HOVER_TEXT_COLOR if hovered else BUTTON_TEXT_COLOR,
+            )
+            self.screen.blit(text, (rect.left + 10, rect.top + 4))
+        self.screen.set_clip(clip)
+
+    def _set_status(self, text: str, duration_ms: int = 1400) -> None:
+        self._status_text = text
+        self._status_until_ms = pygame.time.get_ticks() + duration_ms
