@@ -78,6 +78,7 @@ class NotesSettingsScreen:
         ("effect_moon_dust_enabled", "Moon Dust"),
         ("effect_steam_smoke_enabled", "Steam Wisps"),
         ("effect_halo_pulse_enabled", "Halo Pulse"),
+        ("effect_fluid_enabled", "GPU Fluid"),
     ]
 
     EFFECT_FIELDS = [
@@ -85,6 +86,7 @@ class NotesSettingsScreen:
         ("spark_amount_percent", "Spark Amount", 0, 300, 5),
         ("smoke_amount_percent", "Smoke Amount", 0, 300, 5),
         ("press_smoke_amount_percent", "Start Mist Amount", 0, 250, 5),
+        ("fluid_intensity", "Fluid Intensity", 0, 200, 5),
     ]
 
     LAYERS = [
@@ -374,6 +376,8 @@ class NotesSettingsScreen:
             "interior_b": int(data.get("interior_b", 255)),
             "active_theme_id": str(data.get("active_theme_id", "custom")),
             "experimental_claire_script_enabled": int(bool(data.get("experimental_claire_script_enabled", 0))),
+            "effect_fluid_enabled": int(bool(data.get("effect_fluid_enabled", 0))),
+            "fluid_intensity": int(data.get("fluid_intensity", 100)),
         }
 
     def _save(self) -> None:

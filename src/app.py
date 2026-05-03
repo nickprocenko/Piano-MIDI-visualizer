@@ -24,6 +24,13 @@ from src.song_select import SongSelect
 from src.theme_settings import ThemeSettingsScreen
 import src.themes as themes_mod
 
+try:
+    from src.fluid_renderer import FluidRenderer as _FluidRenderer
+    _FLUID_AVAILABLE = True
+except ImportError:
+    _FLUID_AVAILABLE = False
+    _FluidRenderer = None  # type: ignore
+
 
 FREEPLAY_PARTICLE_HEIGHT_PX = 32
 
@@ -78,6 +85,7 @@ class App:
         self._active_note_trails: dict[int, dict[str, float | bool]] = {}
         self._note_trails: list[dict[str, float | bool]] = []
         self._fx_renderer: Optional[NoteEffectRenderer] = None
+        self._fluid_renderer: Optional[object] = None
         self._led_output: Optional[LedOutput] = None
         # Background animation: list of slides, each slide is (frames, durations_ms)
         self._bg_slides: list[tuple[list[pygame.Surface], list[float]]] = []
@@ -269,6 +277,12 @@ class App:
         self._active_note_trails.clear()
         self._note_trails.clear()
         self._fx_renderer = NoteEffectRenderer(self.screen)
+        if _FLUID_AVAILABLE and self._note_style.get("effect_fluid_enabled", 0):
+            sw, sh = self.screen.get_size()
+            fr = _FluidRenderer(sw, sh, sim_scale=0.5)
+            self._fluid_renderer = fr if fr.available else None
+        else:
+            self._fluid_renderer = None
 
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
@@ -288,6 +302,9 @@ class App:
         self._active_note_trails.clear()
         self._note_trails.clear()
         self._fx_renderer = None
+        if self._fluid_renderer is not None:
+            self._fluid_renderer.destroy()
+            self._fluid_renderer = None
 
     def _get_highway_draw_target(self) -> tuple[pygame.Surface, bool]:
         """Return the active highway render surface and whether it is scaled."""
@@ -576,6 +593,28 @@ class App:
         self._prev_active_notes = active_notes
         self._update_note_trails(dt)
 
+        if self._fluid_renderer is not None:
+            self._fluid_renderer.step(dt / 1000.0)
+            # Continuously inject dye for each held note so fluid fills the bar length
+            if active_notes:
+                sw = float(self.screen.get_width())
+                sh = float(self.screen.get_height())
+                intensity = self._note_style.get("fluid_intensity", 100) / 100.0
+                r = self._note_style["color_r"] / 255.0
+                g = self._note_style["color_g"] / 255.0
+                b = self._note_style["color_b"] / 255.0
+                vel_y = -self._note_style["speed_px_per_sec"] * 0.55 * intensity
+                for note in active_notes:
+                    trail = self._active_note_trails.get(note)
+                    if trail is None:
+                        continue
+                    norm_x = float(trail["x"]) / sw
+                    norm_y = float(trail["bottom_y"]) / sh
+                    radius = max(0.006, float(trail["width"]) / sw * 1.8)
+                    self._fluid_renderer.add_splat(
+                        norm_x, norm_y, 0.0, vel_y, r, g, b, radius
+                    )
+
     def _update_audience_color(self, dt: int) -> None:
         if self._audience_client is None:
             return
@@ -837,6 +876,15 @@ class App:
         if not self._note_trails or self._fx_renderer is None:
             return
 
+        if self._fluid_renderer is not None:
+            fluid_surf = self._fluid_renderer.get_surface()
+            if fluid_surf is not None:
+                sw, sh = self.screen.get_size()
+                if fluid_surf.get_size() != (sw, sh):
+                    import pygame as _pg
+                    fluid_surf = _pg.transform.smoothscale(fluid_surf, (sw, sh))
+                self.screen.blit(fluid_surf, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
         self._fx_renderer.set_target(self.screen)
         self._fx_renderer.begin_frame()
         for trail in self._note_trails:
@@ -872,6 +920,8 @@ class App:
             "interior_r": int(style.get("interior_r", 120)),
             "interior_g": int(style.get("interior_g", 255)),
             "interior_b": int(style.get("interior_b", 255)),
+            "effect_fluid_enabled": int(bool(style.get("effect_fluid_enabled", 0))),
+            "fluid_intensity": int(style.get("fluid_intensity", 100)),
         }
 
     def _load_keyboard_style(self) -> dict[str, int | bool]:

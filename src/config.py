@@ -16,6 +16,8 @@ _DEFAULTS: dict[str, Any] = {
         "color_r": 0,
         "color_g": 230,
         "color_b": 230,
+        "effect_fluid_enabled": 0,
+        "fluid_intensity": 100,
     },
     "led_output": {
         "enabled": False,
