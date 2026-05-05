@@ -46,6 +46,11 @@ _DEFAULTS: dict[str, Any] = {
         "app_api_key": "",
         "reconnect_sec": 2.0,
     },
+    "kick_chat": {
+        "enabled": False,
+        "channel_slug": "",
+        "transition_ms": 600,
+    },
     "user_themes": [],
     "active_user_theme_index": 0,
 }

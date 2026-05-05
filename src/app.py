@@ -10,6 +10,7 @@ from src import config as cfg
 from src.control_server import ControlServer
 from src.audience_color_client import AudienceColorClient
 from src.audience_settings import AudienceSettingsScreen
+from src.kick_chat_client import KickChatClient
 from src.led_output import LedOutput
 from src.midi_input import MidiInput
 from src.note_fx import NoteEffectRenderer
@@ -94,6 +95,7 @@ class App:
         self._bg_frame_index: int = 0
         self._bg_frame_ms: float = 0.0
         self._audience_client: Optional[AudienceColorClient] = None
+        self._kick_client: Optional[KickChatClient] = None
         self._color_current = [float(self._note_style["color_r"]), float(self._note_style["color_g"]), float(self._note_style["color_b"])]
         self._color_start = list(self._color_current)
         self._color_target = list(self._color_current)
@@ -268,6 +270,8 @@ class App:
         self._led_output.connect()
         self._audience_client = AudienceColorClient.from_config()
         self._audience_client.start()
+        self._kick_client = KickChatClient.from_config()
+        self._kick_client.start()
         self._bg_slides = self._load_background_slides()
         self._bg_slide_index = 0
         self._bg_slide_ms = 0.0
@@ -295,6 +299,9 @@ class App:
         if self._audience_client is not None:
             self._audience_client.stop()
             self._audience_client = None
+        if self._kick_client is not None:
+            self._kick_client.stop()
+            self._kick_client = None
         self._bg_slides = []
         self._piano = None
         self._highway_surface = None
@@ -616,10 +623,15 @@ class App:
                     )
 
     def _update_audience_color(self, dt: int) -> None:
-        if self._audience_client is None:
+        all_events = []
+        if self._audience_client is not None:
+            all_events.extend(self._audience_client.drain_events())
+        if self._kick_client is not None:
+            all_events.extend(self._kick_client.drain_events())
+        if not all_events and self._audience_client is None and self._kick_client is None:
             return
 
-        for evt in self._audience_client.drain_events():
+        for evt in all_events:
             self._color_start = list(self._color_current)
             self._color_target = [float(evt.r), float(evt.g), float(evt.b)]
             self._color_blend_ms = max(20, evt.transition_ms)
