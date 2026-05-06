@@ -12,7 +12,8 @@ Designed to run locally on Windows with a dual-monitor setup (projector + PC).
 - Animated background image / GIF slideshow
 - ESP32 LED strip synchronisation over serial or BLE
 - Audience live colour control via WebSocket
-- **Kick.com chat bot** — viewers control colours and effects live via chat commands
+- **Kick.com chat bot + FastAPI relay** — viewers control colours and effects live via chat; state is broadcast to an OBS overlay in real time
+- **OBS audience overlay** — corner widget showing current colour, last viewer, and recent picks palette (`overlay/audience_overlay.html`)
 - Triple sustain-pedal tap to cycle through saved themes
 - Built-in theme manager — save, rename, load, and delete colour presets
 - **Live web control panel** at `http://localhost:8181` — change notes, effects, keyboard, and themes from your browser while a song is playing
@@ -150,9 +151,13 @@ Expected incoming WebSocket message:
 
 The app smooths from the current to the target colour over `transition_ms` milliseconds, updating note colours and LED active colour in real time.
 
-## Kick.com Chat Bot
+## Kick.com Chat Bot + Relay Overlay
 
-Run `tools/kick_chat.py` alongside the visualizer to let viewers control the visuals from Kick chat. Commands are forwarded to the local control server — no extra relay needed.
+There are two ways to run the Kick integration, depending on whether you want the OBS overlay:
+
+### Simple mode (no overlay)
+
+`tools/kick_chat.py` posts commands directly to the visualizer's control server — nothing else required.
 
 Add credentials to `config.json`:
 
@@ -167,11 +172,30 @@ Add credentials to `config.json`:
 }
 ```
 
-Start the bot:
+Start the bot (simple mode):
 
 ```bash
 python tools/kick_chat.py
 ```
+
+### Relay mode (with OBS overlay)
+
+1. Start the FastAPI relay:
+   ```bash
+   uvicorn relay.main:app --host 0.0.0.0 --port 8000
+   ```
+2. Start the Kick listener (posts to relay instead of directly to visualizer):
+   ```bash
+   python -m relay.kick_listener
+   ```
+3. In OBS, add a **Browser Source** pointing to `overlay/audience_overlay.html` at 1920×1080. The widget appears in the bottom-right corner.
+
+The relay exposes:
+- `POST /control` — receives commands from the listener
+- `POST /vote` — direct REST color vote (for external integrations)
+- `WS /ws/state` — live state broadcast (overlay subscribes here)
+- `WS /ws/vote` — WebSocket color votes (for future web voting UI)
+- `GET /state` — current state snapshot
 
 **Available chat commands:**
 
@@ -184,13 +208,16 @@ python tools/kick_chat.py
 | `!sparks` | `!sparks on` / `!sparks off` | Toggle sparks effect |
 | `!smoke` | `!smoke on` / `!smoke off` | Toggle smoke effect |
 
-## Tools
+## Tools & Scripts
 
 | Script | Description |
 |---|---|
-| `tools/kick_chat.py` | Kick.com chat bot — forwards chat commands to the visualizer |
+| `tools/kick_chat.py` | Kick.com chat bot (simple mode) — posts commands directly to the visualizer |
 | `tools/ble_scan.py` | Scan for nearby BLE devices to find your ESP32 address |
 | `tools/stress_test_renderer.py` | Benchmark the note renderer with synthetic load |
+| `relay/main.py` | FastAPI relay — state management, WebSocket broadcast, visualizer bridge |
+| `relay/kick_listener.py` | Kick.com chat bot (relay mode) — posts to relay for overlay support |
+| `overlay/audience_overlay.html` | OBS browser source overlay (1920×1080, bottom-right corner widget) |
 
 ## Web Control Panel
 

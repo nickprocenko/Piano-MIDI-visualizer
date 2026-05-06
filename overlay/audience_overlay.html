@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920, height=1080">
+<title>Audience Overlay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    background: transparent;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+  }
+
+  /* ── widget container ── */
+  #widget {
+    position: absolute;
+    bottom: 32px;
+    right: 32px;
+    width: 320px;
+    background: rgba(8, 8, 12, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 16px 18px 14px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    pointer-events: none;
+  }
+  #widget.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* ── header row ── */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+
+  /* big color swatch */
+  #swatch {
+    flex-shrink: 0;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgb(0, 220, 255);
+    transition: background 0.6s ease, box-shadow 0.6s ease;
+    box-shadow:
+      0 0 0 3px rgba(255,255,255,0.12),
+      0 0 18px 6px rgba(0,220,255,0.55),
+      0 0 40px 12px rgba(0,220,255,0.22);
+  }
+
+  /* label stack */
+  .labels {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  #username {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: 0.01em;
+  }
+  #username span {
+    color: rgba(255,255,255,0.45);
+    font-weight: 400;
+    font-size: 13px;
+  }
+
+  #color-hex {
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'Consolas', 'Courier New', monospace;
+    color: rgba(255, 255, 255, 0.55);
+    transition: color 0.6s ease;
+    letter-spacing: 0.04em;
+  }
+
+  #cmd-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.35);
+    background: rgba(255,255,255,0.07);
+    border-radius: 4px;
+    padding: 1px 6px;
+    letter-spacing: 0.03em;
+    margin-top: 2px;
+    align-self: flex-start;
+  }
+
+  /* ── divider ── */
+  .divider {
+    height: 1px;
+    background: rgba(255,255,255,0.07);
+    margin: 10px 0;
+  }
+
+  /* ── recent picks row ── */
+  .picks-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.25);
+    margin-bottom: 8px;
+  }
+
+  #picks {
+    display: flex;
+    gap: 8px;
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  .pick {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.12);
+    position: relative;
+    transition: transform 0.2s ease, box-shadow 0.4s ease;
+    cursor: default;
+  }
+  .pick:hover {
+    transform: scale(1.18);
+    z-index: 10;
+  }
+  .pick::after {
+    content: attr(data-user);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.85);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    letter-spacing: 0.02em;
+  }
+  .pick:hover::after {
+    opacity: 1;
+  }
+
+  /* ── connection dot ── */
+  #conn-dot {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #555;
+    transition: background 0.4s ease;
+  }
+  #conn-dot.connected    { background: #22dd66; box-shadow: 0 0 6px #22dd66; }
+  #conn-dot.disconnected { background: #dd4444; }
+  #conn-dot.connecting   { background: #ddaa22; }
+</style>
+</head>
+<body>
+
+<div id="widget">
+  <div id="conn-dot" class="connecting" title="WebSocket status"></div>
+
+  <div class="header">
+    <div id="swatch"></div>
+    <div class="labels">
+      <div id="username"><span>waiting for chat…</span></div>
+      <div id="color-hex">#00dcff</div>
+      <div id="cmd-badge">—</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="picks-label">Recent picks</div>
+  <div id="picks"></div>
+</div>
+
+<script>
+// ── config ───────────────────────────────────────────────────────────────────
+const WS_URL      = 'ws://localhost:8000/ws/state';
+const RECONNECT_BASE_MS = 1500;
+const RECONNECT_MAX_MS  = 30000;
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+function toHex(c) {
+  const r = (c.r ?? 0).toString(16).padStart(2,'0');
+  const g = (c.g ?? 0).toString(16).padStart(2,'0');
+  const b = (c.b ?? 0).toString(16).padStart(2,'0');
+  return `#${r}${g}${b}`;
+}
+
+function rgbStr(c) {
+  return `rgb(${c.r ?? 0},${c.g ?? 0},${c.b ?? 0})`;
+}
+
+function glowShadow(c) {
+  const hex = toHex(c);
+  return [
+    `0 0 0 3px rgba(255,255,255,0.12)`,
+    `0 0 18px 6px ${hex}88`,
+    `0 0 44px 14px ${hex}44`,
+  ].join(',');
+}
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const widget   = document.getElementById('widget');
+const swatch   = document.getElementById('swatch');
+const username = document.getElementById('username');
+const colorHex = document.getElementById('color-hex');
+const cmdBadge = document.getElementById('cmd-badge');
+const picksEl  = document.getElementById('picks');
+const connDot  = document.getElementById('conn-dot');
+
+// ── render ───────────────────────────────────────────────────────────────────
+function renderState(state) {
+  const c = state.color ?? {r:0,g:220,b:255};
+  const hex = toHex(c);
+
+  // swatch
+  swatch.style.background  = rgbStr(c);
+  swatch.style.boxShadow   = glowShadow(c);
+
+  // labels
+  if (state.last_user) {
+    username.innerHTML = `<b>${escHtml(state.last_user)}</b>`;
+  } else {
+    username.innerHTML = `<span>waiting for chat…</span>`;
+  }
+  colorHex.textContent = hex;
+  colorHex.style.color = `color-mix(in srgb, ${hex} 80%, #fff)`;
+
+  const cmd = state.last_command;
+  cmdBadge.textContent = cmd ? `!${cmd}` : '—';
+
+  // recent picks
+  renderPicks(state.recent_picks ?? []);
+
+  // show widget once we have data
+  widget.classList.add('visible');
+}
+
+function renderPicks(picks) {
+  picksEl.innerHTML = '';
+  if (!picks.length) {
+    picksEl.innerHTML = '<span style="color:rgba(255,255,255,0.2);font-size:12px">none yet</span>';
+    return;
+  }
+  picks.slice(0, 8).forEach(p => {
+    const div = document.createElement('div');
+    div.className   = 'pick';
+    div.style.background = rgbStr(p.color);
+    div.style.boxShadow  = `0 0 8px 2px ${toHex(p.color)}66`;
+    div.setAttribute('data-user', p.user ?? '?');
+    div.title = `${p.user}: ${toHex(p.color)}`;
+    picksEl.appendChild(div);
+  });
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
+let ws = null;
+let reconnectDelay = RECONNECT_BASE_MS;
+let reconnectTimer = null;
+
+function connect() {
+  connDot.className = 'connecting';
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    connDot.className = 'connected';
+    reconnectDelay = RECONNECT_BASE_MS;
+    console.log('[overlay] connected');
+  };
+
+  ws.onmessage = (evt) => {
+    try {
+      const data = JSON.parse(evt.data);
+      if (data.type === 'state_update') renderState(data);
+    } catch (e) {
+      console.warn('[overlay] bad message', e);
+    }
+  };
+
+  ws.onclose = () => {
+    connDot.className = 'disconnected';
+    console.log(`[overlay] disconnected — retrying in ${reconnectDelay}ms`);
+    reconnectTimer = setTimeout(() => {
+      reconnectDelay = Math.min(reconnectDelay * 1.6, RECONNECT_MAX_MS);
+      connect();
+    }, reconnectDelay);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
