@@ -67,5 +67,11 @@
     "channel_id": "YOUR_CHANNEL_ID",
     "app_api_key": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
     "reconnect_sec": 2.0
+  },
+  "kick_chat": {
+    "client_id": "YOUR_CLIENT_ID",
+    "client_secret": "YOUR_CLIENT_SECRET",
+    "redirect_uri": "http://localhost:8080/callback",
+    "channel": "YOUR_KICK_USERNAME"
   }
 }
