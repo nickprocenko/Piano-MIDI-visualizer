@@ -48,6 +48,7 @@ _state: dict[str, Any] = {
     "glow": 80,
     "sparks": True,
     "smoke": True,
+    "drip": False,
 }
 
 _ws_clients: set[WebSocket] = set()
@@ -170,6 +171,11 @@ async def control(req: ControlRequest) -> dict:
         enabled = req.value.lower() == "on"
         _state["smoke"] = enabled
         patch = {"type": "note_style", "patch": {"effect_smoke_enabled": int(enabled)}}
+
+    elif req.param == "drip":
+        enabled = req.value.lower() == "on"
+        _state["drip"] = enabled
+        patch = {"type": "note_style", "patch": {"effect_liquid_drip_enabled": int(enabled)}}
 
     if patch:
         await _forward(patch)

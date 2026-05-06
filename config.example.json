@@ -19,6 +19,8 @@
     "effect_moon_dust_enabled": 1,
     "effect_steam_smoke_enabled": 1,
     "effect_halo_pulse_enabled": 1,
+    "effect_liquid_drip_enabled": 0,
+    "liquid_drip_amount_percent": 100,
     "highlight_strength_percent": 95,
     "spark_amount_percent": 150,
     "smoke_amount_percent": 140,

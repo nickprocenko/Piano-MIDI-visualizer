@@ -28,6 +28,10 @@ _SPARK_LIFE_MS: float = 460.0
 _SMOKE_LIFE_MS: float = 1080.0  # longer life lets wisps drift further
 _SPARK_GRAVITY: float = 240.0   # px/s² downward pull on sparks
 _BLOOM_DOWNSCALE: int = 6    # lower resolution bloom buffer for cheap blur
+_DRIP_LIFE_MS: float = 1100.0
+_DRIP_GRAVITY: float = 520.0   # px/s² downward pull on liquid drips
+_DRIP_EMIT_INTERVAL_MS: float = 220.0  # base emission cadence at 100% strength
+_MAX_DRIPS_PER_TRAIL: int = 10
 
 
 class NoteEffectRenderer:
@@ -195,6 +199,7 @@ class NoteEffectRenderer:
         press_smoke_enabled = bool(note_style.get("effect_press_smoke_enabled", 0))
         moon_dust_enabled = bool(note_style.get("effect_moon_dust_enabled", 0))
         halo_pulse_enabled = bool(note_style.get("effect_halo_pulse_enabled", 0))
+        liquid_drip_enabled = bool(note_style.get("effect_liquid_drip_enabled", 0))
         roundness = max(0, int(note_style.get("edge_roundness_px", 4)))
         decay_speed = max(0.0, float(note_style.get("decay_speed", 80)))
         decay_floor = max(0.0, min(1.0, float(note_style.get("decay_value", 20)) / 100.0))
@@ -413,6 +418,45 @@ class NoteEffectRenderer:
             )
             pygame.draw.circle(self._fx_surf, sc, (sx, sy), rad)
 
+        # ── Liquid drips (continuous fluid stream while held) ─────────────
+        if liquid_drip_enabled and self._fx_surf is not None:
+            drip_strength = max(0.0, min(2.5, float(note_style.get("liquid_drip_amount_percent", 100)) / 100.0))
+            for dr in trail.get("drips", ()):
+                if drip_strength <= 0.0:
+                    break
+                life_frac = dr["life"] / dr["max_life"]
+                if life_frac <= 0:
+                    continue
+                # Quick fade-in, slow fade-out — looks like a falling teardrop catching light.
+                a = 235 * (life_frac ** 1.4) * min(1.3, drip_strength)
+                alpha = max(0, min(255, int(a)))
+                if alpha <= 0:
+                    continue
+                dx, dy = int(dr["x"]), int(dr["y"])
+                if clip_rect and not clip_rect.collidepoint(dx, dy):
+                    continue
+
+                # Capsule stretches with downward speed → capillary-style elongation.
+                speed = abs(dr["vy"])
+                length = max(4, min(28, int(4 + speed * 0.05)))
+                width_px = max(2, min(6, int(dr.get("radius", 3.0))))
+                body_rect = pygame.Rect(dx - width_px // 2, dy - length // 2, width_px, length)
+                head_color = (
+                    min(255, int(0.55 * ir + 110)),
+                    min(255, int(0.55 * ig + 110)),
+                    min(255, int(0.55 * ib + 110)),
+                    alpha,
+                )
+                pygame.draw.rect(
+                    self._fx_surf, head_color, body_rect, border_radius=width_px // 2
+                )
+
+                # Soft halo around the head sells the "wet/glowing" look.
+                halo_alpha = max(0, alpha // 3)
+                if halo_alpha > 0:
+                    halo_color = (r, g, b, halo_alpha)
+                    pygame.draw.circle(self._fx_surf, halo_color, (dx, dy - length // 4), width_px + 3)
+
     # ── Particle lifecycle (static so callers don't need a renderer instance) ─
 
     @staticmethod
@@ -533,13 +577,47 @@ class NoteEffectRenderer:
         trail["smoke"] = smoke
 
     @staticmethod
-    def update_particles(trails: list[dict], dt: int) -> None:
-        """Advance spark and smoke particles for all trails.
+    def update_particles(
+        trails: list[dict],
+        dt: int,
+        note_style: dict[str, int] | None = None,
+    ) -> None:
+        """Advance spark, smoke, mist and drip particles for all trails.
 
         Should be called once per frame before drawing.
         ``dt`` is the frame delta in milliseconds.
+        ``note_style`` is optional; when provided, liquid drips are emitted from
+        held (non-released) trails using the configured strength.
         """
         dt_s = dt / 1000.0
+
+        # Drip emission for held notes — uses an accumulator stored on each trail
+        # so emit cadence is independent of frame rate.
+        if note_style is not None and bool(note_style.get("effect_liquid_drip_enabled", 0)):
+            drip_strength = max(0.0, min(2.5, float(note_style.get("liquid_drip_amount_percent", 100)) / 100.0))
+            if drip_strength > 0.0:
+                emit_interval = _DRIP_EMIT_INTERVAL_MS / max(0.25, drip_strength)
+                for trail in trails:
+                    if bool(trail.get("released", False)):
+                        continue
+                    accum = float(trail.get("_drip_accum", 0.0)) + dt
+                    drips_list = trail.get("drips") or []
+                    while accum >= emit_interval and len(drips_list) < _MAX_DRIPS_PER_TRAIL:
+                        cx = float(trail["x"])
+                        w = float(trail.get("width", 8))
+                        drips_list.append({
+                            "x":        cx + random.uniform(-w * 0.30, w * 0.30),
+                            "y":        float(trail["bottom_y"]),
+                            "vx":       random.uniform(-12.0, 12.0),
+                            "vy":       random.uniform(20.0, 55.0),
+                            "life":     _DRIP_LIFE_MS,
+                            "max_life": _DRIP_LIFE_MS,
+                            "radius":   random.uniform(2.4, 4.4),
+                        })
+                        accum -= emit_interval
+                    trail["drips"] = drips_list
+                    trail["_drip_accum"] = accum
+
         for trail in trails:
             sparks = trail.get("sparks")
             if sparks:
@@ -584,3 +662,16 @@ class NoteEffectRenderer:
                         ms["vx"] = ms.get("vx", 0) * 0.986
                         alive_mist.append(ms)
                 trail["mist"] = alive_mist
+
+            drips = trail.get("drips")
+            if drips:
+                alive_dr: list[dict] = []
+                for dr in drips:
+                    dr["life"] -= dt
+                    if dr["life"] > 0:
+                        dr["x"]  += dr.get("vx", 0.0) * dt_s
+                        dr["y"]  += dr["vy"] * dt_s
+                        dr["vy"] += _DRIP_GRAVITY * dt_s
+                        dr["vx"] = dr.get("vx", 0.0) * 0.985
+                        alive_dr.append(dr)
+                trail["drips"] = alive_dr

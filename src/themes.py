@@ -28,6 +28,8 @@ _NOTE_FIELDS: list[str] = [
     "effect_moon_dust_enabled",
     "effect_steam_smoke_enabled",
     "effect_halo_pulse_enabled",
+    "effect_liquid_drip_enabled",
+    "liquid_drip_amount_percent",
 ]
 
 # -----------------------------------------------------------------
@@ -53,6 +55,8 @@ _NOTE_DEFAULTS: dict[str, int] = {
     "effect_moon_dust_enabled": 0,
     "effect_steam_smoke_enabled": 0,
     "effect_halo_pulse_enabled": 0,
+    "effect_liquid_drip_enabled": 0,
+    "liquid_drip_amount_percent": 100,
 }
 
 _LED_DEFAULTS: dict[str, int] = {}

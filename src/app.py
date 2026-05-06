@@ -664,7 +664,7 @@ class App:
         if not self._note_trails:
             return
 
-        NoteEffectRenderer.update_particles(self._note_trails, dt)
+        NoteEffectRenderer.update_particles(self._note_trails, dt, self._note_style)
 
         sim_dt_ms = max(1.0, min(33.0, self._smoothed_dt_ms))
         dy = float(self._note_style["speed_px_per_sec"]) * (sim_dt_ms / 1000.0)

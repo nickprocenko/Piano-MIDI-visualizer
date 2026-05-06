@@ -57,8 +57,9 @@ All effects are togglable and tunable from the in-app **Notes Settings** screen 
 | Moon Dust | `effect_moon_dust_enabled` | Floating ambient dust particles |
 | Steam Smoke | `effect_steam_smoke_enabled` | Denser upward steam mode for smoke |
 | Halo Pulse | `effect_halo_pulse_enabled` | Expanding halo ring on key press |
+| Liquid Drip | `effect_liquid_drip_enabled` | Glowing teardrops fall from held notes under gravity, stretching as they accelerate — fluid leaking onto the keyboard |
 
-Strength sliders: `glow_strength_percent`, `highlight_strength_percent`, `spark_amount_percent`, `smoke_amount_percent`, `press_smoke_amount_percent`.  
+Strength sliders: `glow_strength_percent`, `highlight_strength_percent`, `spark_amount_percent`, `smoke_amount_percent`, `press_smoke_amount_percent`, `liquid_drip_amount_percent`.  
 Decay controls: `decay_speed`, `decay_value` — tune how quickly notes fade as they rise.
 
 ## Crash Diagnostics
@@ -207,6 +208,7 @@ The relay exposes:
 | `!glow` | `!glow 60` | Set glow strength (0–100) |
 | `!sparks` | `!sparks on` / `!sparks off` | Toggle sparks effect |
 | `!smoke` | `!smoke on` / `!smoke off` | Toggle smoke effect |
+| `!drip` | `!drip on` / `!drip off` | Toggle liquid drip effect |
 
 ## Tools & Scripts
 

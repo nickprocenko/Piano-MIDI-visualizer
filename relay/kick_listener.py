@@ -43,6 +43,7 @@ _COMMANDS: dict[str, str] = {
     "!glow":   "glow",
     "!sparks": "sparks",
     "!smoke":  "smoke",
+    "!drip":   "drip",
 }
 # ---------------------------------------------------------------------------
 

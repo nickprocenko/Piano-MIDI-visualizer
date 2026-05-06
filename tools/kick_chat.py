@@ -155,6 +155,17 @@ async def message_handler(message: dict) -> None:
                 print(f"[Kick] {username} → smoke {arg}")
             return
 
+        if lower.startswith("!drip "):
+            arg = content[6:].strip().lower()
+            if arg in ("on", "off"):
+                enabled = 1 if arg == "on" else 0
+                await _patch(client, {
+                    "type": "note_style",
+                    "patch": {"effect_liquid_drip_enabled": enabled},
+                })
+                print(f"[Kick] {username} → drip {arg}")
+            return
+
 
 async def main() -> None:
     conf = _load_kick_config()
