@@ -1003,24 +1003,21 @@ class App:
             "x": float(rect.centerx),
             "top_y": float(self._note_anchor_y(note)),
             "bottom_y": float(self._note_anchor_y(note)),
-            "width": float(max(3, min(rect.width - 2, self._note_style["width_px"]))),
+            "width": self._note_trail_width(),
             "render_x": float(rect.centerx),
             "render_top_y": float(self._note_anchor_y(note)),
             "render_bottom_y": float(self._note_anchor_y(note)),
-            "render_width": float(max(3, min(rect.width - 2, self._note_style["width_px"]))),
+            "render_width": self._note_trail_width(),
             "released": False,
             "age_ms": 0.0,
         }
         self._active_note_trails[note] = trail
         self._note_trails.append(trail)
-        NoteEffectRenderer.spawn_sparks(trail, self._note_style)
-        NoteEffectRenderer.spawn_press_smoke(trail, self._note_style)
 
     def _release_note_trail(self, note: int) -> None:
         trail = self._active_note_trails.pop(note, None)
         if trail is not None:
             trail["released"] = True
-            NoteEffectRenderer.spawn_smoke(trail, self._note_style)
 
     def _anchor_note_trail(self, note: int) -> None:
         if self._piano is None:
@@ -1034,7 +1031,11 @@ class App:
 
         trail["x"] = float(rect.centerx)
         trail["bottom_y"] = float(self._note_anchor_y(note))
-        trail["width"] = float(max(3, min(rect.width - 2, self._note_style["width_px"])))
+        trail["width"] = self._note_trail_width()
+
+    def _note_trail_width(self) -> float:
+        """Return the configured live note width in render pixels."""
+        return float(max(3, int(self._note_style.get("width_px", 12))))
 
     def _note_anchor_y(self, note: int) -> float:
         if self._piano is None:
@@ -1050,6 +1051,8 @@ class App:
         if not self._note_trails:
             return
 
+        for trail in self._active_note_trails.values():
+            NoteEffectRenderer.spawn_steam(trail, self._note_style, dt)
         NoteEffectRenderer.update_particles(self._note_trails, dt)
 
         sim_dt_ms = max(1.0, min(33.0, self._smoothed_dt_ms))
@@ -1651,18 +1654,17 @@ class App:
 
         # GL effects pass
         self._gl_renderer.begin_frame()
-        if self._selected_midi_file is None:
-            for trail in self._note_trails:
-                self._gl_renderer.draw_trail(
-                    self._interpolated_trail_for_draw(trail), self._note_style
-                )
+        for trail in self._note_trails:
+            self._gl_renderer.draw_trail(
+                self._interpolated_trail_for_draw(trail), self._note_style
+            )
         self._gl_renderer.end_frame(bg_surf, base_alpha / 255.0, overlay_surf)
 
-    def _draw_freeplay_trails(self) -> None:
+    def _draw_freeplay_trails(self, target: Optional[pygame.Surface] = None) -> None:
         if not self._note_trails or self._fx_renderer is None:
             return
 
-        self._fx_renderer.set_target(self.screen)
+        self._fx_renderer.set_target(target if target is not None else self.screen)
         self._fx_renderer.begin_frame()
         for trail in self._note_trails:
             self._fx_renderer.draw_trail(self._interpolated_trail_for_draw(trail), self._note_style)
@@ -1679,14 +1681,14 @@ class App:
             "decay_value": int(style.get("decay_value", 20)),
             "inner_blend_percent": int(style.get("inner_blend_percent", 35)),
             "glow_strength_percent": int(style.get("glow_strength_percent", 80)),
-            "effect_glow_enabled": int(bool(style.get("effect_glow_enabled", 1))),
-            "effect_highlight_enabled": int(bool(style.get("effect_highlight_enabled", 1))),
-            "effect_sparks_enabled": int(bool(style.get("effect_sparks_enabled", 1))),
-            "effect_smoke_enabled": int(bool(style.get("effect_smoke_enabled", 1))),
-            "effect_press_smoke_enabled": int(bool(style.get("effect_press_smoke_enabled", 0))),
+            "effect_glow_enabled": 0,
+            "effect_highlight_enabled": 0,
+            "effect_sparks_enabled": 0,
+            "effect_smoke_enabled": 0,
+            "effect_press_smoke_enabled": 0,
             "effect_moon_dust_enabled": int(bool(style.get("effect_moon_dust_enabled", 0))),
             "effect_steam_smoke_enabled": int(bool(style.get("effect_steam_smoke_enabled", 0))),
-            "effect_halo_pulse_enabled": int(bool(style.get("effect_halo_pulse_enabled", 0))),
+            "effect_halo_pulse_enabled": 0,
             "highlight_strength_percent": int(style.get("highlight_strength_percent", 70)),
             "spark_amount_percent": int(style.get("spark_amount_percent", 100)),
             "smoke_amount_percent": int(style.get("smoke_amount_percent", 100)),
@@ -1769,19 +1771,19 @@ class App:
 
     def _apply_toggle_midi_action(self, action_id: str) -> None:
         if action_id == "effects.glow_toggle":
-            self._toggle_note_style_flag("effect_glow_enabled")
+            self._toggle_note_style_flag("effect_moon_dust_enabled")
         elif action_id == "effects.sparks_toggle":
-            self._toggle_note_style_flag("effect_sparks_enabled")
+            self._toggle_note_style_flag("effect_steam_smoke_enabled")
         elif action_id == "effects.smoke_toggle":
-            self._toggle_note_style_flag("effect_smoke_enabled")
+            self._toggle_note_style_flag("effect_steam_smoke_enabled")
         elif action_id == "keyboard.visible_toggle":
             self._toggle_keyboard_visible()
 
     def _apply_continuous_midi_action(self, action_id: str, value: int) -> None:
         if action_id == "effects.glow_strength":
-            self._set_note_style_value_from_cc("glow_strength_percent", value, 0, 180)
+            self._set_note_style_value_from_cc("smoke_amount_percent", value, 0, 300)
         elif action_id == "effects.spark_amount":
-            self._set_note_style_value_from_cc("spark_amount_percent", value, 0, 300)
+            self._set_note_style_value_from_cc("smoke_amount_percent", value, 0, 300)
         elif action_id == "effects.smoke_amount":
             self._set_note_style_value_from_cc("smoke_amount_percent", value, 0, 300)
         elif action_id == "visual.note_speed":
@@ -1989,8 +1991,8 @@ class App:
 
     def _load_display_style(self) -> dict[str, int | str]:
         style = cfg.load().get("display_style", {})
-        width_scale = int(style.get("width_scale_percent", 66))
-        width_scale = max(60, min(80, width_scale))
+        width_scale = int(style.get("width_scale_percent", 100))
+        width_scale = max(60, min(100, width_scale))
         return {
             "width_scale_percent": width_scale,
             "background_alpha": int(style.get("background_alpha", 120)),

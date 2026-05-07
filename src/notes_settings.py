@@ -81,24 +81,14 @@ class NotesSettingsScreen:
 
     COLOR_BLEND_FIELD = ("inner_blend_percent", "Inner/Outer Blend", 0, 100, 5)
     COLOR_EDGE_WIDTH_FIELD = ("outer_edge_width_px", "Outer Edge Width", 0, 8, 1)
-    COLOR_GLOW_FIELD = ("glow_strength_percent", "Glow Strength", 0, 180, 5)
 
     EFFECT_TOGGLES = [
-        ("effect_glow_enabled", "Glow"),
-        ("effect_highlight_enabled", "Edge Highlight"),
-        ("effect_sparks_enabled", "Sparks"),
-        ("effect_smoke_enabled", "Smoke"),
-        ("effect_press_smoke_enabled", "Start Mist"),
-        ("effect_moon_dust_enabled", "Moon Dust"),
-        ("effect_steam_smoke_enabled", "Steam Wisps"),
-        ("effect_halo_pulse_enabled", "Halo Pulse"),
+        ("effect_moon_dust_enabled", "Fireflies"),
+        ("effect_steam_smoke_enabled", "Fluid Plumes"),
     ]
 
     EFFECT_FIELDS = [
-        ("highlight_strength_percent", "Highlight Strength", 0, 170, 5),
-        ("spark_amount_percent", "Spark Amount", 0, 300, 5),
-        ("smoke_amount_percent", "Smoke Amount", 0, 300, 5),
-        ("press_smoke_amount_percent", "Start Mist Amount", 0, 250, 5),
+        ("smoke_amount_percent", "Fluid Intensity", 0, 300, 5),
     ]
 
     LAYERS = [
@@ -368,10 +358,16 @@ class NotesSettingsScreen:
 
         if preview_on:
             self._anchor_preview_trail()
+            if self._preview_active_trail is not None:
+                NoteEffectRenderer.spawn_steam(self._preview_active_trail, self._values, dt)
 
         NoteEffectRenderer.update_particles(self._preview_trails, dt)
 
-        speed = float(max(1, self._values["speed_px_per_sec"]))
+        # Scale speed so 1 note-crossing looks the same duration as on the full screen.
+        screen_h = max(1, self.screen.get_height())
+        preview_h = max(1, self._preview_rect.height) if self._preview_rect.height > 0 else screen_h
+        speed_scale = preview_h / screen_h
+        speed = float(max(1, self._values["speed_px_per_sec"])) * speed_scale
         dy = speed * (dt / 1000.0)
         survivors: list[dict[str, float | bool]] = []
         for trail in self._preview_trails:
@@ -437,14 +433,14 @@ class NotesSettingsScreen:
             "decay_value": int(data.get("decay_value", 20)),
             "inner_blend_percent": int(data.get("inner_blend_percent", 35)),
             "glow_strength_percent": int(data.get("glow_strength_percent", 80)),
-            "effect_glow_enabled": int(bool(data.get("effect_glow_enabled", 1))),
-            "effect_highlight_enabled": int(bool(data.get("effect_highlight_enabled", 1))),
-            "effect_sparks_enabled": int(bool(data.get("effect_sparks_enabled", 1))),
-            "effect_smoke_enabled": int(bool(data.get("effect_smoke_enabled", 1))),
-            "effect_press_smoke_enabled": int(bool(data.get("effect_press_smoke_enabled", 0))),
+            "effect_glow_enabled": 0,
+            "effect_highlight_enabled": 0,
+            "effect_sparks_enabled": 0,
+            "effect_smoke_enabled": 0,
+            "effect_press_smoke_enabled": 0,
             "effect_moon_dust_enabled": int(bool(data.get("effect_moon_dust_enabled", 0))),
             "effect_steam_smoke_enabled": int(bool(data.get("effect_steam_smoke_enabled", 0))),
-            "effect_halo_pulse_enabled": int(bool(data.get("effect_halo_pulse_enabled", 0))),
+            "effect_halo_pulse_enabled": 0,
             "highlight_strength_percent": int(data.get("highlight_strength_percent", 70)),
             "spark_amount_percent": int(data.get("spark_amount_percent", 100)),
             "smoke_amount_percent": int(data.get("smoke_amount_percent", 100)),
@@ -646,7 +642,7 @@ class NotesSettingsScreen:
             return []
         return (
             [(f"gradient_{c}", label, 0, 255, 5) for c, label in self.COLOR_CHANNELS]
-            + [self.COLOR_BLEND_FIELD, self.COLOR_EDGE_WIDTH_FIELD, self.COLOR_GLOW_FIELD]
+            + [self.COLOR_BLEND_FIELD, self.COLOR_EDGE_WIDTH_FIELD]
         )
 
     def _build_layer_rows(self) -> None:
@@ -1037,7 +1033,7 @@ class NotesSettingsScreen:
             self.screen.blit(title, (row_rect.left + 12, row_rect.top + 7))
 
             detail = self._label_font.render(
-                f"W {int(style.get('width_px', 12))}  Speed {int(style.get('speed_px_per_sec', 420))}  Glow {int(style.get('glow_strength_percent', 80))}",
+                f"W {int(style.get('width_px', 12))}  Speed {int(style.get('speed_px_per_sec', 420))}  Fluid {int(style.get('smoke_amount_percent', 100))}",
                 True,
                 MUTED_TEXT_COLOR,
             )
@@ -1134,13 +1130,10 @@ class NotesSettingsScreen:
         }
         self._preview_active_trail = trail
         self._preview_trails.append(trail)
-        NoteEffectRenderer.spawn_sparks(trail, self._values)
-        NoteEffectRenderer.spawn_press_smoke(trail, self._values)
 
     def _release_preview_trail(self) -> None:
         if self._preview_active_trail is not None:
             self._preview_active_trail["released"] = True
-            NoteEffectRenderer.spawn_smoke(self._preview_active_trail, self._values)
             self._preview_active_trail = None
 
     def _anchor_preview_trail(self) -> None:
@@ -1152,17 +1145,22 @@ class NotesSettingsScreen:
         self._preview_active_trail["width"] = float(self._values["width_px"])
 
     def _preview_key_rect(self) -> pygame.Rect:
-        """Return key rect in preview-surface–relative coordinates."""
-        key_w = max(14, self.screen.get_width() // 52)  # match actual white-key width
-        key_h = 88
+        """Return key rect in preview-surface–relative coordinates.
+
+        Position the key at the same fractional distance from the bottom as the
+        Piano widget occupies on the real screen (~15 % of height), so the trail
+        start point and visible travel distance match the freeplay proportions.
+        """
+        screen_h = max(1, self.screen.get_height())
+        screen_w = max(1, self.screen.get_width())
         pw = self._preview_rect.width
         ph = self._preview_rect.height
-        return pygame.Rect(
-            pw // 2 - key_w // 2,
-            ph - key_h - 14,
-            key_w,
-            key_h,
-        )
+        # Scale key dimensions by preview/screen ratio so one note looks the same size
+        scale = ph / screen_h
+        key_w = max(8, int((screen_w // 52) * scale))
+        key_h = max(20, int(screen_h * 0.15 * scale))   # piano is ~15 % of screen height
+        key_top = ph - key_h - max(4, int(14 * scale))
+        return pygame.Rect(pw // 2 - key_w // 2, key_top, key_w, key_h)
 
     def _draw_preview(self) -> None:
         pygame.draw.rect(self.screen, PANEL_BG, self._right_panel, border_radius=8)

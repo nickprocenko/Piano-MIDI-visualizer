@@ -14,6 +14,7 @@ and are called unchanged from app.py — this renderer only handles drawing.
 
 from __future__ import annotations
 
+import math
 import numpy as np
 import moderngl
 import pygame
@@ -190,11 +191,13 @@ _FS_COMPOSITE = """
 in vec2 vUV;
 uniform sampler2D uScene;
 uniform sampler2D uBloom;
+uniform sampler2D uFluid;
 uniform float uBloomStr;
 uniform float uCAShift;
 out vec4 fragColor;
 void main() {
     vec3 scene = texture(uScene, vUV).rgb;
+    vec4 fluid = texture(uFluid, vUV);
     vec3 bloom;
     if (uCAShift > 0.0) {
         float r = texture(uBloom, vUV + vec2( uCAShift, 0.0)).r;
@@ -206,8 +209,146 @@ void main() {
     }
     // Tone-map only the bloom so base note colors are not darkened
     vec3 bloom_contrib = bloom * uBloomStr;
-    vec3 hdr = scene + bloom_contrib / (bloom_contrib + vec3(1.0));
+    // Dobryakov-style: display raw dye additively, scaled so adjacent note blobs blend
+    // smoothly rather than each saturating to white independently.
+    // Reinhard denominator 0.15 keeps mid-level dye vivid; * 0.55 leaves room for scene + bloom.
+    vec3 fluid_show = fluid.rgb / (fluid.rgb + vec3(0.15)) * 0.55;
+    vec3 hdr = scene + fluid_show + bloom_contrib / (bloom_contrib + vec3(1.0));
     fragColor = vec4(clamp(hdr, 0.0, 1.0), 1.0);
+}
+"""
+
+_FS_FLUID_COPY = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uTex;
+uniform float uDissipation;
+out vec4 fragColor;
+void main() {
+    fragColor = texture(uTex, vUV) * uDissipation;
+}
+"""
+
+_FS_FLUID_SPLAT = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uTarget;
+uniform vec2 uPoint;
+uniform vec3 uColor;
+uniform float uRadius;
+uniform float uAspect;
+out vec4 fragColor;
+void main() {
+    vec2 p = vUV - uPoint;
+    p.x *= uAspect;
+    vec4 base = texture(uTarget, vUV);
+    float splat = exp(-dot(p, p) / max(0.00001, uRadius));
+    fragColor = base + vec4(uColor * splat, splat);
+}
+"""
+
+_FS_FLUID_ADVECT = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uVelocity;
+uniform sampler2D uSource;
+uniform vec2 uTexelSize;
+uniform float uDt;
+uniform float uDissipation;
+out vec4 fragColor;
+void main() {
+    vec2 coord = vUV - uDt * texture(uVelocity, vUV).xy * uTexelSize;
+    fragColor = texture(uSource, coord) * uDissipation;
+}
+"""
+
+_FS_FLUID_DIVERGENCE = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uVelocity;
+uniform vec2 uTexelSize;
+out vec4 fragColor;
+void main() {
+    float L = texture(uVelocity, vUV - vec2(uTexelSize.x, 0.0)).x;
+    float R = texture(uVelocity, vUV + vec2(uTexelSize.x, 0.0)).x;
+    float B = texture(uVelocity, vUV - vec2(0.0, uTexelSize.y)).y;
+    float T = texture(uVelocity, vUV + vec2(0.0, uTexelSize.y)).y;
+    float div = 0.5 * (R - L + T - B);
+    fragColor = vec4(div, 0.0, 0.0, 1.0);
+}
+"""
+
+_FS_FLUID_CURL = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uVelocity;
+uniform vec2 uTexelSize;
+out vec4 fragColor;
+void main() {
+    float L = texture(uVelocity, vUV - vec2(uTexelSize.x, 0.0)).y;
+    float R = texture(uVelocity, vUV + vec2(uTexelSize.x, 0.0)).y;
+    float B = texture(uVelocity, vUV - vec2(0.0, uTexelSize.y)).x;
+    float T = texture(uVelocity, vUV + vec2(0.0, uTexelSize.y)).x;
+    float curl = R - L - T + B;
+    fragColor = vec4(curl, 0.0, 0.0, 1.0);
+}
+"""
+
+_FS_FLUID_VORTICITY = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uVelocity;
+uniform sampler2D uCurl;
+uniform vec2 uTexelSize;
+uniform float uDt;
+uniform float uCurlStrength;
+out vec4 fragColor;
+void main() {
+    float L = abs(texture(uCurl, vUV - vec2(uTexelSize.x, 0.0)).x);
+    float R = abs(texture(uCurl, vUV + vec2(uTexelSize.x, 0.0)).x);
+    float B = abs(texture(uCurl, vUV - vec2(0.0, uTexelSize.y)).x);
+    float T = abs(texture(uCurl, vUV + vec2(0.0, uTexelSize.y)).x);
+    float C = texture(uCurl, vUV).x;
+    vec2 force = 0.5 * vec2(T - B, R - L);
+    force /= length(force) + 0.0001;
+    force *= uCurlStrength * C;
+    vec2 vel = texture(uVelocity, vUV).xy;
+    fragColor = vec4(vel + force * uDt, 0.0, 1.0);
+}
+"""
+
+_FS_FLUID_PRESSURE = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uPressure;
+uniform sampler2D uDivergence;
+uniform vec2 uTexelSize;
+out vec4 fragColor;
+void main() {
+    float L = texture(uPressure, vUV - vec2(uTexelSize.x, 0.0)).x;
+    float R = texture(uPressure, vUV + vec2(uTexelSize.x, 0.0)).x;
+    float B = texture(uPressure, vUV - vec2(0.0, uTexelSize.y)).x;
+    float T = texture(uPressure, vUV + vec2(0.0, uTexelSize.y)).x;
+    float div = texture(uDivergence, vUV).x;
+    float p = (L + R + B + T - div) * 0.25;
+    fragColor = vec4(p, 0.0, 0.0, 1.0);
+}
+"""
+
+_FS_FLUID_GRADIENT = """
+#version 330 core
+in vec2 vUV;
+uniform sampler2D uPressure;
+uniform sampler2D uVelocity;
+uniform vec2 uTexelSize;
+out vec4 fragColor;
+void main() {
+    float L = texture(uPressure, vUV - vec2(uTexelSize.x, 0.0)).x;
+    float R = texture(uPressure, vUV + vec2(uTexelSize.x, 0.0)).x;
+    float B = texture(uPressure, vUV - vec2(0.0, uTexelSize.y)).x;
+    float T = texture(uPressure, vUV + vec2(0.0, uTexelSize.y)).x;
+    vec2 vel = texture(uVelocity, vUV).xy - vec2(R - L, T - B);
+    fragColor = vec4(vel, 0.0, 1.0);
 }
 """
 
@@ -225,6 +366,27 @@ _QUAD_VERTS = np.array([
 # ---------------------------------------------------------------------------
 # Renderer class
 # ---------------------------------------------------------------------------
+
+class _DoubleFBO:
+    def __init__(self, ctx: moderngl.Context, size: tuple[int, int], components: int = 4, dtype: str = "f2") -> None:
+        self.read_tex = ctx.texture(size, components, dtype=dtype)
+        self.write_tex = ctx.texture(size, components, dtype=dtype)
+        self.read_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self.write_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self.read_tex.repeat_x = self.read_tex.repeat_y = False
+        self.write_tex.repeat_x = self.write_tex.repeat_y = False
+        self.read_fbo = ctx.framebuffer(color_attachments=[self.read_tex])
+        self.write_fbo = ctx.framebuffer(color_attachments=[self.write_tex])
+
+    def swap(self) -> None:
+        self.read_tex, self.write_tex = self.write_tex, self.read_tex
+        self.read_fbo, self.write_fbo = self.write_fbo, self.read_fbo
+
+    def release(self) -> None:
+        self.read_tex.release()
+        self.write_tex.release()
+        self.read_fbo.release()
+        self.write_fbo.release()
 
 class GLEffectsRenderer:
     """GPU-accelerated note trail renderer.
@@ -252,12 +414,28 @@ class GLEffectsRenderer:
         self._prog_note = ctx.program(vertex_shader=_VS_NOTE,  fragment_shader=_FS_NOTE)
         self._prog_glow = ctx.program(vertex_shader=_VS_NOTE,  fragment_shader=_FS_GLOW)
         self._prog_part = ctx.program(vertex_shader=_VS_PART,  fragment_shader=_FS_PART)
+        self._prog_fluid_copy = ctx.program(vertex_shader=_VS_QUAD, fragment_shader=_FS_FLUID_COPY)
+        self._prog_fluid_splat = ctx.program(vertex_shader=_VS_QUAD, fragment_shader=_FS_FLUID_SPLAT)
+        self._prog_fluid_advect = ctx.program(vertex_shader=_VS_QUAD, fragment_shader=_FS_FLUID_ADVECT)
+        self._prog_fluid_div = ctx.program(vertex_shader=_VS_QUAD, fragment_shader=_FS_FLUID_DIVERGENCE)
+        self._prog_fluid_curl = ctx.program(vertex_shader=_VS_QUAD, fragment_shader=_FS_FLUID_CURL)
+        self._prog_fluid_vorticity = ctx.program(vertex_shader=_VS_QUAD, fragment_shader=_FS_FLUID_VORTICITY)
+        self._prog_fluid_pressure = ctx.program(vertex_shader=_VS_QUAD, fragment_shader=_FS_FLUID_PRESSURE)
+        self._prog_fluid_gradient = ctx.program(vertex_shader=_VS_QUAD, fragment_shader=_FS_FLUID_GRADIENT)
 
         # Full-screen quad VAOs (one per program that uses it)
         quad_buf = ctx.buffer(data=_QUAD_VERTS.tobytes())
         self._quad_blit = ctx.vertex_array(self._prog_blit, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
         self._quad_blur = ctx.vertex_array(self._prog_blur, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
         self._quad_comp = ctx.vertex_array(self._prog_comp, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
+        self._quad_fluid_copy = ctx.vertex_array(self._prog_fluid_copy, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
+        self._quad_fluid_splat = ctx.vertex_array(self._prog_fluid_splat, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
+        self._quad_fluid_advect = ctx.vertex_array(self._prog_fluid_advect, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
+        self._quad_fluid_div = ctx.vertex_array(self._prog_fluid_div, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
+        self._quad_fluid_curl = ctx.vertex_array(self._prog_fluid_curl, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
+        self._quad_fluid_vorticity = ctx.vertex_array(self._prog_fluid_vorticity, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
+        self._quad_fluid_pressure = ctx.vertex_array(self._prog_fluid_pressure, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
+        self._quad_fluid_gradient = ctx.vertex_array(self._prog_fluid_gradient, [(quad_buf, "2f 2f", "in_pos", "in_uv")])
 
         # Dynamic VBOs/VAOs for batched geometry (populated each frame)
         self._bar_vbo:  moderngl.Buffer | None = None
@@ -278,11 +456,22 @@ class GLEffectsRenderer:
         self._scene_tex: moderngl.Texture | None = None
         self._glow_tex:  moderngl.Texture | None = None
         self._blur_tex:  moderngl.Texture | None = None
+        self._fluid_velocity: _DoubleFBO | None = None
+        self._fluid_dye: _DoubleFBO | None = None
+        self._fluid_pressure: _DoubleFBO | None = None
+        self._fluid_divergence_fbo: moderngl.Framebuffer | None = None
+        self._fluid_divergence_tex: moderngl.Texture | None = None
+        self._fluid_curl_fbo: moderngl.Framebuffer | None = None
+        self._fluid_curl_tex: moderngl.Texture | None = None
+        self._fluid_size: tuple[int, int] = (1, 1)
 
         # Batch lists — filled by draw_trail, consumed by end_frame
         self._bar_verts:  list[float] = []
         self._glow_verts: list[float] = []
         self._part_verts: list[float] = []
+        self._fluid_splats: list[tuple[float, float, float, float, float, float, float, float]] = []
+        self._trail_heads: dict[object, tuple[float, float]] = {}
+        self._fluid_enabled_this_frame = False
 
         self.resize(screen_size)
 
@@ -317,9 +506,52 @@ class GLEffectsRenderer:
         self._blur_fbo = ctx.framebuffer(color_attachments=[blur_tex])
         self._blur_tex = blur_tex
 
+        fw = max(96, min(512, w // 2))
+        fh = max(54, min(288, h // 2))
+        self._fluid_size = (fw, fh)
+        for obj in (
+            self._fluid_velocity,
+            self._fluid_dye,
+            self._fluid_pressure,
+        ):
+            if obj is not None:
+                obj.release()
+        if self._fluid_divergence_fbo is not None:
+            self._fluid_divergence_fbo.release()
+        if self._fluid_divergence_tex is not None:
+            self._fluid_divergence_tex.release()
+        if self._fluid_curl_fbo is not None:
+            self._fluid_curl_fbo.release()
+        if self._fluid_curl_tex is not None:
+            self._fluid_curl_tex.release()
+        self._fluid_velocity = _DoubleFBO(ctx, (fw, fh), 4, "f2")
+        self._fluid_dye = _DoubleFBO(ctx, (fw, fh), 4, "f2")
+        self._fluid_pressure = _DoubleFBO(ctx, (fw, fh), 4, "f2")
+        self._fluid_divergence_tex = ctx.texture((fw, fh), 4, dtype="f2")
+        self._fluid_divergence_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._fluid_divergence_tex.repeat_x = self._fluid_divergence_tex.repeat_y = False
+        self._fluid_divergence_fbo = ctx.framebuffer(color_attachments=[self._fluid_divergence_tex])
+        self._fluid_curl_tex = ctx.texture((fw, fh), 4, dtype="f2")
+        self._fluid_curl_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._fluid_curl_tex.repeat_x = self._fluid_curl_tex.repeat_y = False
+        self._fluid_curl_fbo = ctx.framebuffer(color_attachments=[self._fluid_curl_tex])
+        for fbo in (
+            self._fluid_velocity.read_fbo,
+            self._fluid_velocity.write_fbo,
+            self._fluid_dye.read_fbo,
+            self._fluid_dye.write_fbo,
+            self._fluid_pressure.read_fbo,
+            self._fluid_pressure.write_fbo,
+            self._fluid_divergence_fbo,
+            self._fluid_curl_fbo,
+        ):
+            fbo.use()
+            ctx.clear(0.0, 0.0, 0.0, 0.0)
+
         # Invalidate cached surface textures (size may have changed)
         self._bg_tex = None
         self._ui_tex = None
+        self._trail_heads.clear()
 
     # ------------------------------------------------------------------
     # Surface → texture upload
@@ -347,6 +579,7 @@ class GLEffectsRenderer:
         """Blit a full-screen pygame surface to the GL default framebuffer."""
         ctx = self._ctx
         ctx.screen.use()
+        ctx.viewport = (0, 0, self._w, self._h)
         ctx.clear(0.0, 0.0, 0.0, 1.0)
         ctx.enable(moderngl.BLEND)
         ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
@@ -365,6 +598,8 @@ class GLEffectsRenderer:
         self._bar_verts.clear()
         self._glow_verts.clear()
         self._part_verts.clear()
+        self._fluid_splats.clear()
+        self._fluid_enabled_this_frame = False
 
     # ------------------------------------------------------------------
     # Vertex emitters
@@ -418,6 +653,57 @@ class GLEffectsRenderer:
         _v(x1, y1, 1.0, 1.0)
         _v(x0, y1, 0.0, 1.0)
 
+    def _queue_fluid_splat(
+        self,
+        trail: dict,
+        x: float,
+        y: float,
+        r: float,
+        g: float,
+        b: float,
+        strength: float,
+    ) -> None:
+        key = trail.get("note", id(trail))
+        prev = self._trail_heads.get(key)
+        if prev is None:
+            dx = 0.0
+            dy = -90.0
+        else:
+            dx = x - prev[0]
+            dy = y - prev[1]
+        self._trail_heads[key] = (x, y)
+        nx = max(0.0, min(1.0, x / max(1.0, float(self._w))))
+        ny = max(0.0, min(1.0, 1.0 - y / max(1.0, float(self._h))))
+        # vel in UV-space units/sec (uDt=1/60 applied in advect shader)
+        vel_scale = 280.0 * strength
+        upward = 300.0 * strength   # +vy = upward in UV space (ny=1 is top)
+        vx = max(-700.0, min(700.0, dx * vel_scale))
+        vy = max(-700.0, min(700.0, -dy * vel_scale + upward))
+        # Dobryakov uses 0.25; keep smaller so adjacent piano notes stay distinct
+        radius = max(0.030, min(0.060, 0.040 + 0.020 * strength))
+        # Low per-frame color so blobs blend rather than saturate to white individually
+        cr = r * 0.06 * strength
+        cg = g * 0.06 * strength
+        cb = b * 0.06 * strength
+        # Fade splats near screen edges to prevent clamp-to-edge boundary accumulation.
+        # A splat whose center is within one radius of the border gets attenuated so
+        # the Gaussian tail never "piles up" at the rightmost/leftmost texture column.
+        aspect = float(self._w) / max(1.0, float(self._h))
+        h_margin = radius / aspect  # horizontal extent in UV units
+        v_margin = radius            # vertical extent in UV units
+        edge_fade = min(
+            max(0.0, min(1.0, nx / max(0.001, h_margin))),          # left edge
+            max(0.0, min(1.0, (1.0 - nx) / max(0.001, h_margin))),  # right edge
+            max(0.0, min(1.0, ny / max(0.001, v_margin))),           # bottom edge
+            max(0.0, min(1.0, (1.0 - ny) / max(0.001, v_margin))),  # top edge
+        )
+        cr *= edge_fade
+        cg *= edge_fade
+        cb *= edge_fade
+        vx *= edge_fade
+        vy *= edge_fade
+        self._fluid_splats.append((nx, ny, vx, vy, cr, cg, cb, radius))
+
     # ------------------------------------------------------------------
     # draw_trail — mirrors NoteEffectRenderer.draw_trail but emits to lists
     # ------------------------------------------------------------------
@@ -446,12 +732,14 @@ class GLEffectsRenderer:
         roundness = float(max(0, int(note_style.get("edge_roundness_px", 4))))
         edge_w    = int(note_style.get("outer_edge_width_px", 2))
 
-        glow_on  = bool(note_style.get("effect_glow_enabled",      1))
-        hl_on    = bool(note_style.get("effect_highlight_enabled",  1))
-        sp_on    = bool(note_style.get("effect_sparks_enabled",     1))
-        sm_on    = bool(note_style.get("effect_smoke_enabled",      1))
-        mist_on  = bool(note_style.get("effect_press_smoke_enabled", 0))
-        pulse_on = bool(note_style.get("effect_halo_pulse_enabled",  0))
+        glow_on  = False
+        hl_on    = False
+        sp_on    = False
+        sm_on    = False
+        mist_on  = False
+        moon_on  = bool(note_style.get("effect_moon_dust_enabled", 0))
+        steam_on = bool(note_style.get("effect_steam_smoke_enabled", 0))
+        pulse_on = False
 
         top_y = float(trail["top_y"])
         bot_y = float(trail["bottom_y"])
@@ -462,11 +750,16 @@ class GLEffectsRenderer:
             return
 
         bot_bright = max(decay_flr, 1.0 - decay_spd / 100.0)
+        # Always feed active note heads into the fluid sim — this IS the primary effect
+        if not bool(trail.get("released", False)):
+            self._fluid_enabled_this_frame = True
+            head_y = top_y
+            head_boost = min(1.0, max(0.20, (bot_y - top_y) / 140.0))
+            self._queue_fluid_splat(trail, cx, head_y, max(r, ir * 0.92), max(g, ig * 0.92), max(b, ib * 0.92), head_boost)
 
         # Halo pulse
         if pulse_on and glow_on:
-            import math, pygame as _pg
-            phase = (_pg.time.get_ticks() * 0.004) + (cx * 0.012)
+            phase = (pygame.time.get_ticks() * 0.004) + (cx * 0.012)
             glow_str = max(0.08, glow_str * (0.80 + 0.26 * math.sin(phase)))
 
         # ── Note bar quads → _bar_verts ────────────────────────────────
@@ -549,6 +842,24 @@ class GLEffectsRenderer:
                 )
 
         # ── Sparks → _part_verts ───────────────────────────────────────
+        if moon_on:
+            age_ms = float(trail.get("age_ms", 0.0))
+            stem_len = max(1.0, bot_y - top_y)
+            count = max(5, min(18, int(5 + stem_len // 58)))
+            span = max(10.0, stem_len - 10.0)
+            base_phase = (age_ms * 0.0048) + (cx * 0.014)
+            for i in range(count):
+                t = i / float(max(1, count - 1))
+                y_anchor = bot_y - t * span
+                ang = base_phase + i * 1.51
+                orbit = w * (0.65 + 0.95 * t) + 8.0 + (i % 3) * 4.0
+                px = cx + math.sin(ang) * orbit
+                py = y_anchor + math.cos(ang * 1.18 + t * 2.7) * (5.0 + 10.0 * t)
+                tw = 0.50 + 0.50 * math.sin((ang * 2.8) + i * 0.65)
+                a = min(0.90, 0.16 + 0.44 * max(0.0, tw) + t * 0.13)
+                size = 1.4 if (i % 4) else 2.4
+                self._emit_particle_quad(px, py, 1.0, 0.88, 0.34, a, size)
+
         if sp_on and sp_str > 0.0:
             for sp in trail.get("sparks", ()):
                 lf = sp["life"] / sp["max_life"]
@@ -581,6 +892,7 @@ class GLEffectsRenderer:
                 self._emit_particle_quad(sm["x"], sm["y"], sr, sg, sb, a, rad)
 
         # ── Press mist → _part_verts ───────────────────────────────────
+        # Fluid plumes: colorful splats that diffuse, curl, and bloom outward.
         if mist_on:
             for ms in trail.get("mist", ()):
                 lf = ms["life"] / ms["max_life"]
@@ -596,6 +908,113 @@ class GLEffectsRenderer:
     # ------------------------------------------------------------------
     # end_frame — all GPU work for one frame
     # ------------------------------------------------------------------
+
+    def _copy_fluid(self, tex: moderngl.Texture, target: _DoubleFBO, dissipation: float) -> None:
+        target.write_fbo.use()
+        tex.use(0)
+        self._prog_fluid_copy["uTex"] = 0
+        self._prog_fluid_copy["uDissipation"] = dissipation
+        self._quad_fluid_copy.render(moderngl.TRIANGLES)
+        target.swap()
+
+    def _splat_fluid(self, target: _DoubleFBO, point: tuple[float, float], color: tuple[float, float, float], radius: float) -> None:
+        target.write_fbo.use()
+        target.read_tex.use(0)
+        self._prog_fluid_splat["uTarget"] = 0
+        self._prog_fluid_splat["uPoint"] = point
+        self._prog_fluid_splat["uColor"] = color
+        self._prog_fluid_splat["uRadius"] = radius
+        self._prog_fluid_splat["uAspect"] = float(self._w) / float(max(1, self._h))
+        self._quad_fluid_splat.render(moderngl.TRIANGLES)
+        target.swap()
+
+    def _step_fluid(self) -> bool:
+        if self._fluid_velocity is None or self._fluid_dye is None or self._fluid_pressure is None:
+            return False
+        if self._fluid_divergence_fbo is None or self._fluid_divergence_tex is None:
+            return False
+        if self._fluid_curl_fbo is None or self._fluid_curl_tex is None:
+            return False
+
+        ctx = self._ctx
+        fw, fh = self._fluid_size
+        old_viewport = ctx.viewport
+        ctx.viewport = (0, 0, fw, fh)
+        ctx.disable(moderngl.BLEND)
+        texel = (1.0 / float(fw), 1.0 / float(fh))
+        dt = 1.0 / 60.0
+
+        self._prog_fluid_curl["uVelocity"] = 0
+        self._prog_fluid_curl["uTexelSize"] = texel
+        self._fluid_velocity.read_tex.use(0)
+        self._fluid_curl_fbo.use()
+        self._quad_fluid_curl.render(moderngl.TRIANGLES)
+
+        self._prog_fluid_vorticity["uVelocity"] = 0
+        self._prog_fluid_vorticity["uCurl"] = 1
+        self._prog_fluid_vorticity["uTexelSize"] = texel
+        self._prog_fluid_vorticity["uDt"] = dt
+        self._prog_fluid_vorticity["uCurlStrength"] = 45.0
+        self._fluid_velocity.read_tex.use(0)
+        self._fluid_curl_tex.use(1)
+        self._fluid_velocity.write_fbo.use()
+        self._quad_fluid_vorticity.render(moderngl.TRIANGLES)
+        self._fluid_velocity.swap()
+
+        self._prog_fluid_div["uVelocity"] = 0
+        self._prog_fluid_div["uTexelSize"] = texel
+        self._fluid_velocity.read_tex.use(0)
+        self._fluid_divergence_fbo.use()
+        self._quad_fluid_div.render(moderngl.TRIANGLES)
+
+        self._copy_fluid(self._fluid_pressure.read_tex, self._fluid_pressure, 0.80)
+        for _ in range(20):
+            self._prog_fluid_pressure["uPressure"] = 0
+            self._prog_fluid_pressure["uDivergence"] = 1
+            self._prog_fluid_pressure["uTexelSize"] = texel
+            self._fluid_pressure.read_tex.use(0)
+            self._fluid_divergence_tex.use(1)
+            self._fluid_pressure.write_fbo.use()
+            self._quad_fluid_pressure.render(moderngl.TRIANGLES)
+            self._fluid_pressure.swap()
+
+        self._prog_fluid_gradient["uPressure"] = 0
+        self._prog_fluid_gradient["uVelocity"] = 1
+        self._prog_fluid_gradient["uTexelSize"] = texel
+        self._fluid_pressure.read_tex.use(0)
+        self._fluid_velocity.read_tex.use(1)
+        self._fluid_velocity.write_fbo.use()
+        self._quad_fluid_gradient.render(moderngl.TRIANGLES)
+        self._fluid_velocity.swap()
+
+        self._prog_fluid_advect["uVelocity"] = 0
+        self._prog_fluid_advect["uSource"] = 1
+        self._prog_fluid_advect["uTexelSize"] = texel
+        self._prog_fluid_advect["uDt"] = dt
+        self._prog_fluid_advect["uDissipation"] = 0.992
+        self._fluid_velocity.read_tex.use(0)
+        self._fluid_velocity.read_tex.use(1)
+        self._fluid_velocity.write_fbo.use()
+        self._quad_fluid_advect.render(moderngl.TRIANGLES)
+        self._fluid_velocity.swap()
+
+        self._prog_fluid_advect["uVelocity"] = 0
+        self._prog_fluid_advect["uSource"] = 1
+        self._prog_fluid_advect["uTexelSize"] = texel
+        self._prog_fluid_advect["uDt"] = dt
+        self._prog_fluid_advect["uDissipation"] = 0.975
+        self._fluid_velocity.read_tex.use(0)
+        self._fluid_dye.read_tex.use(1)
+        self._fluid_dye.write_fbo.use()
+        self._quad_fluid_advect.render(moderngl.TRIANGLES)
+        self._fluid_dye.swap()
+
+        for nx, ny, vx, vy, cr, cg, cb, radius in self._fluid_splats:
+            self._splat_fluid(self._fluid_velocity, (nx, ny), (vx, vy, 0.0), radius)
+            self._splat_fluid(self._fluid_dye, (nx, ny), (cr, cg, cb), radius * 1.55)
+
+        ctx.viewport = old_viewport
+        return True
 
     def end_frame(
         self,
@@ -649,12 +1068,19 @@ class GLEffectsRenderer:
         n_bar_verts  = n_bar  // self._BAR_FPV
         n_glow_verts = n_glow // self._BAR_FPV
         n_part_verts = n_part // self._PART_FPV
+        has_scene_geometry = n_bar_verts > 0 or n_part_verts > 0
+        fluid_active = self._step_fluid()
 
         # ── 1. Note bars → scene FBO ───────────────────────────────────
+        # Explicit viewport on every pass: moderngl's fbo.use() sets ctx.viewport to
+        # the FBO size, so without explicit resets the glow/blur half-res passes would
+        # leave the viewport at (0,0,w/2,h/2) for the final screen composite.
         self._scene_fbo.use()
-        ctx.clear(0.039, 0.039, 0.039, 1.0)
-        ctx.enable(moderngl.BLEND)
-        ctx.blend_func = moderngl.ONE, moderngl.ONE_MINUS_SRC_ALPHA  # premultiplied alpha
+        ctx.viewport = (0, 0, w, h)
+        ctx.clear(0.0, 0.0, 0.0, 0.0)
+        if has_scene_geometry:
+            ctx.enable(moderngl.BLEND)
+            ctx.blend_func = moderngl.ONE, moderngl.ONE_MINUS_SRC_ALPHA  # premultiplied alpha
 
         if n_bar_verts > 0:
             self._prog_note["uScreen"] = (float(w), float(h))
@@ -669,20 +1095,20 @@ class GLEffectsRenderer:
 
         # ── 2. Glow quads → glow FBO (half-res, additive) ─────────────
         self._glow_fbo.use()
+        ctx.viewport = (0, 0, bw, bh)
         ctx.clear(0.0, 0.0, 0.0, 1.0)
         ctx.blend_func = moderngl.ONE, moderngl.ONE
 
         if n_glow_verts > 0:
-            ctx.viewport = (0, 0, bw, bh)
             self._prog_glow["uScreen"] = (float(w), float(h))
             self._glow_vao.render(moderngl.TRIANGLES, vertices=n_glow_verts)
-            ctx.viewport = (0, 0, w, h)
 
         ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
 
         # ── 3. Bloom: 2× separable Gaussian blur (ping-pong) ──────────
         def _blur_pass(src_tex, src_fbo, dst_fbo, direction):
             dst_fbo.use()
+            ctx.viewport = (0, 0, bw, bh)
             ctx.clear(0.0, 0.0, 0.0, 1.0)
             src_tex.use(0)
             self._prog_blur["uTex"] = 0
@@ -700,6 +1126,7 @@ class GLEffectsRenderer:
 
         # ── 4. Composite → default framebuffer ────────────────────────
         ctx.screen.use()
+        ctx.viewport = (0, 0, w, h)
         ctx.clear(0.039, 0.039, 0.039, 1.0)
         ctx.enable(moderngl.BLEND)
         ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
@@ -712,14 +1139,20 @@ class GLEffectsRenderer:
         self._quad_blit.render(moderngl.TRIANGLES)
 
         # Scene + bloom composite (Reinhard + chromatic aberration)
-        ctx.disable(moderngl.BLEND)
-        self._scene_tex.use(0)
-        self._glow_tex.use(1)
-        self._prog_comp["uScene"]    = 0
-        self._prog_comp["uBloom"]    = 1
-        self._prog_comp["uBloomStr"] = 1.8
-        self._prog_comp["uCAShift"]  = 0.0015
-        self._quad_comp.render(moderngl.TRIANGLES)
+        if has_scene_geometry or n_glow_verts > 0 or fluid_active:
+            ctx.disable(moderngl.BLEND)
+            self._scene_tex.use(0)
+            self._glow_tex.use(1)
+            if self._fluid_dye is not None:
+                self._fluid_dye.read_tex.use(2)
+            else:
+                self._glow_tex.use(2)
+            self._prog_comp["uScene"]    = 0
+            self._prog_comp["uBloom"]    = 1
+            self._prog_comp["uFluid"]    = 2
+            self._prog_comp["uBloomStr"] = 1.8
+            self._prog_comp["uCAShift"]  = 0.0015
+            self._quad_comp.render(moderngl.TRIANGLES)
 
         # UI overlay (piano + text) — SRCALPHA surface on top
         ctx.enable(moderngl.BLEND)
