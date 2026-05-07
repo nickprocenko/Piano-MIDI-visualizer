@@ -51,6 +51,11 @@ _DEFAULTS: dict[str, Any] = {
         "channel_slug": "",
         "transition_ms": 600,
     },
+    "live_mode": {
+        "pattern": "jets",
+        "midi_splats_enabled": True,
+        "sim_scale_percent": 50,
+    },
     "user_themes": [],
     "active_user_theme_index": 0,
 }

@@ -125,6 +125,26 @@ Behaviour:
 - If a MIDI device is connected, each note-on adds a one-off splat at the screen-x position of that note (key 21 → far left, key 108 → far right).
 - ESC returns to the main menu.
 
+### Live Mode config
+
+Optional `live_mode` block in `config.json`:
+
+```json
+{
+  "live_mode": {
+    "pattern": "jets",
+    "midi_splats_enabled": true,
+    "sim_scale_percent": 50
+  }
+}
+```
+
+- `pattern` — `"jets"` (default; bottom-edge upward jets + swirls), `"orbs"` (a swarm of wandering emitters), or `"pulse"` (centre radial pulses).
+- `midi_splats_enabled` — when `true`, note-on from a connected MIDI device adds an extra splat at the note's screen-x position. Set `false` for a pure ambient look.
+- `sim_scale_percent` — fluid simulation resolution as a percentage of screen size. Drop to `40` (or even `30`) on lower-end streaming machines if you see frame drops; raise to `60`+ for sharper detail.
+
+Remote colour control via Twitch / WebSocket is the same as for normal play — enable `audience_control` (or `kick_chat`) in `config.json` and live-mode colour will follow.
+
 ### OBS colour-wheel overlay
 
 While the app is running, the local control server hosts a colour-wheel page at:

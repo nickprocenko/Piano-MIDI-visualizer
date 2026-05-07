@@ -91,6 +91,7 @@ class App:
         self._fx_renderer: Optional[NoteEffectRenderer] = None
         self._fluid_renderer: Optional[object] = None
         self._live_driver: Optional[LiveModeDriver] = None
+        self._live_midi_splats_enabled: bool = True
         self._led_output: Optional[LedOutput] = None
         # Background animation: list of slides, each slide is (frames, durations_ms)
         self._bg_slides: list[tuple[list[pygame.Surface], list[float]]] = []
@@ -297,6 +298,7 @@ class App:
         self._note_style = self._load_note_style()
         self._note_style_meta = self._load_note_style_meta()
         self._refresh_claire_script_state()
+        live_cfg = self._load_live_mode_settings()
         # MIDI is optional — if present, note-on triggers an extra splat.
         self._midi = MidiInput()
         self._midi.connect(self._selected_port)
@@ -310,11 +312,15 @@ class App:
 
         if _FLUID_AVAILABLE:
             sw, sh = self.screen.get_size()
-            fr = _FluidRenderer(sw, sh, sim_scale=0.5)
+            sim_scale = max(0.20, min(1.0, int(live_cfg["sim_scale_percent"]) / 100.0))
+            fr = _FluidRenderer(sw, sh, sim_scale=sim_scale)
             self._fluid_renderer = fr if fr.available else None
         else:
             self._fluid_renderer = None
-        self._live_driver = LiveModeDriver(self._fluid_renderer)
+        self._live_driver = LiveModeDriver(
+            self._fluid_renderer, pattern=str(live_cfg["pattern"])
+        )
+        self._live_midi_splats_enabled = bool(live_cfg["midi_splats_enabled"])
 
     def _leave_live(self) -> None:
         if self._midi is not None:
@@ -351,7 +357,11 @@ class App:
                 self._led_output.update(active_notes, dt)
             newly_pressed = active_notes - self._prev_active_notes
             self._prev_active_notes = active_notes
-            if self._live_driver is not None and newly_pressed:
+            if (
+                self._live_driver is not None
+                and newly_pressed
+                and self._live_midi_splats_enabled
+            ):
                 # Map MIDI note 21..108 → x ∈ [0.05, 0.95].
                 for note in newly_pressed:
                     n = max(21, min(108, int(note)))
@@ -1148,6 +1158,17 @@ class App:
         self._note_style["interior_r"] = max(r, min(255, r + 86))
         self._note_style["interior_g"] = max(g, min(255, g + 74))
         self._note_style["interior_b"] = max(b, min(255, b + 48))
+
+    def _load_live_mode_settings(self) -> dict[str, object]:
+        live = cfg.load().get("live_mode", {})
+        pattern = str(live.get("pattern", "jets"))
+        if pattern not in ("jets", "orbs", "pulse"):
+            pattern = "jets"
+        return {
+            "pattern": pattern,
+            "midi_splats_enabled": bool(live.get("midi_splats_enabled", True)),
+            "sim_scale_percent": max(20, min(100, int(live.get("sim_scale_percent", 50)))),
+        }
 
     def _load_display_style(self) -> dict[str, int | str]:
         style = cfg.load().get("display_style", {})
