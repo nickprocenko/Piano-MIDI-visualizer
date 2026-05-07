@@ -22,6 +22,7 @@ from src.notes_settings import NotesSettingsScreen
 from src.settings import SettingsScreen
 from src.song_select import SongSelect
 from src.theme_settings import ThemeSettingsScreen
+from src.trail_constants import TRAIL_KEY_EDGE_INSET_PX, TRAIL_MIN_WIDTH_PX
 import src.themes as themes_mod
 
 
@@ -652,7 +653,7 @@ class App:
         trail["width"] = self._trail_width_for_rect(rect)
 
     def _trail_width_for_rect(self, rect: pygame.Rect) -> float:
-        return float(max(3, min(rect.width - 2, self._note_style["width_px"])))
+        return float(max(TRAIL_MIN_WIDTH_PX, min(rect.width - TRAIL_KEY_EDGE_INSET_PX, self._note_style["width_px"])))
 
     def _note_anchor_y(self, note: int) -> float:
         if self._piano is None:

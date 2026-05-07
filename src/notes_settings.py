@@ -5,6 +5,7 @@ from __future__ import annotations
 import pygame
 from src import config as cfg
 from src.note_fx import NoteEffectRenderer
+from src.trail_constants import TRAIL_KEY_EDGE_INSET_PX, TRAIL_MIN_WIDTH_PX
 
 # Shared look
 BG_COLOR = (15, 15, 20)
@@ -800,7 +801,12 @@ class NotesSettingsScreen:
         self._preview_active_trail["width"] = self._preview_trail_width(key_rect)
 
     def _preview_trail_width(self, key_rect: pygame.Rect) -> float:
-        return float(max(3, min(key_rect.width - 2, int(self._values["width_px"]))))
+        return float(
+            max(
+                TRAIL_MIN_WIDTH_PX,
+                min(key_rect.width - TRAIL_KEY_EDGE_INSET_PX, int(self._values["width_px"])),
+            )
+        )
 
     def _preview_key_rect(self) -> pygame.Rect:
         """Return key rect in preview-surface–relative coordinates."""
