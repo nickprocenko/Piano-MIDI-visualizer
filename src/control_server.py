@@ -66,9 +66,11 @@ def _make_handler(
         # ------------------------------------------------------------------
         def _serve_themes(self) -> None:
             try:
-                import src.themes as themes_mod
-                themes = themes_mod.load_user_themes()
-                active = themes_mod.get_active_index()
+                import src.performance_store as perf_store
+
+                performance_id = perf_store.get_active_performance_id()
+                themes = perf_store.load_themes(performance_id) if performance_id else []
+                active = perf_store.get_active_theme_index(performance_id) if performance_id else -1
             except Exception:
                 themes, active = [], 0
             self._json_ok({"themes": themes, "active_index": active})
@@ -236,11 +238,6 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
       <input type="range" id="s-outer_edge_width_px" min="1" max="8" step="1" data-ns="outer_edge_width_px">
       <span class="val" id="v-outer_edge_width_px"></span>
     </div>
-    <div class="row">
-      <label>Glow Strength %</label>
-      <input type="range" id="s-glow_strength_percent" min="0" max="180" step="5" data-ns="glow_strength_percent">
-      <span class="val" id="v-glow_strength_percent"></span>
-    </div>
   </div>
 
   <!-- Motion & Shape -->
@@ -277,35 +274,14 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
   <div class="section full">
     <h2>Effects</h2>
     <div class="effects-grid">
-      <div class="toggle-btn" data-ns-toggle="effect_glow_enabled">Glow</div>
-      <div class="toggle-btn" data-ns-toggle="effect_highlight_enabled">Edge Highlight</div>
-      <div class="toggle-btn" data-ns-toggle="effect_sparks_enabled">Sparks</div>
-      <div class="toggle-btn" data-ns-toggle="effect_smoke_enabled">Smoke</div>
-      <div class="toggle-btn" data-ns-toggle="effect_press_smoke_enabled">Start Mist</div>
-      <div class="toggle-btn" data-ns-toggle="effect_moon_dust_enabled">Moon Dust</div>
-      <div class="toggle-btn" data-ns-toggle="effect_steam_smoke_enabled">Steam Wisps</div>
-      <div class="toggle-btn" data-ns-toggle="effect_halo_pulse_enabled">Halo Pulse</div>
+      <div class="toggle-btn" data-ns-toggle="effect_moon_dust_enabled">Fireflies</div>
+      <div class="toggle-btn" data-ns-toggle="effect_steam_smoke_enabled">Fluid Plumes</div>
     </div>
     <div class="effects-sliders">
       <div class="row" style="margin-bottom:0">
-        <label>Highlight Strength %</label>
-        <input type="range" id="s-highlight_strength_percent" min="0" max="170" step="5" data-ns="highlight_strength_percent">
-        <span class="val" id="v-highlight_strength_percent"></span>
-      </div>
-      <div class="row" style="margin-bottom:0">
-        <label>Spark Amount %</label>
-        <input type="range" id="s-spark_amount_percent" min="0" max="300" step="5" data-ns="spark_amount_percent">
-        <span class="val" id="v-spark_amount_percent"></span>
-      </div>
-      <div class="row" style="margin-bottom:0">
-        <label>Smoke Amount %</label>
+        <label>Fluid Intensity %</label>
         <input type="range" id="s-smoke_amount_percent" min="0" max="300" step="5" data-ns="smoke_amount_percent">
         <span class="val" id="v-smoke_amount_percent"></span>
-      </div>
-      <div class="row" style="margin-bottom:0">
-        <label>Start Mist Amount %</label>
-        <input type="range" id="s-press_smoke_amount_percent" min="0" max="250" step="5" data-ns="press_smoke_amount_percent">
-        <span class="val" id="v-press_smoke_amount_percent"></span>
       </div>
     </div>
   </div>

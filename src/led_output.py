@@ -9,7 +9,7 @@ Example for 4 LEDs:
 
     LEDS,4,0,0,0,0,220,220,0,220,220,0,0,0\n
 Default mapping for an 88-key keyboard and 176 LEDs is 2 LEDs per key.
-A pressed note lights both mapped LEDs with the configured active color.
+A pressed note lights both mapped LEDs with the current note color.
 """
 
 from __future__ import annotations
@@ -29,14 +29,17 @@ except Exception:
     _SERIAL_AVAILABLE = False
 
 try:
-    from bleak import BleakClient  # type: ignore
+    from bleak import BleakClient, BleakScanner  # type: ignore
     _BLE_AVAILABLE = True
 except Exception:
     BleakClient = None  # type: ignore
+    BleakScanner = None  # type: ignore
     _BLE_AVAILABLE = False
 
 PIANO_FIRST_NOTE = 21
 PIANO_LAST_NOTE = 108
+MAX_LED_AMPS_PER_PIXEL = 0.06
+CONTROLLER_BASELINE_AMPS = 0.20
 
 
 @dataclass
@@ -53,9 +56,11 @@ class LedOutputConfig:
     led_count: int
     mirror_per_key: int
     fps_limit: int
-    active_r: int
-    active_g: int
-    active_b: int
+    amp_limit_enabled: bool
+    amp_limit_amps: float
+    color_r: int
+    color_g: int
+    color_b: int
 
 
 class _BleLedSender:
@@ -64,14 +69,20 @@ class _BleLedSender:
     def __init__(
         self,
         address: str,
+        service_uuid: str,
         char_uuid: str,
         write_with_response: bool,
         chunk_size: int,
+        preferred_name: str = "Piano-LED-Bridge",
+        scan_timeout_sec: float = 5.0,
         reconnect_sec: float = 2.0,
     ) -> None:
         self._address = address
+        self._service_uuid = str(service_uuid).strip().lower()
         self._char_uuid = char_uuid
         self._write_with_response = write_with_response
+        self._preferred_name = str(preferred_name).strip()
+        self._scan_timeout_sec = max(1.0, float(scan_timeout_sec))
         self._chunk_size = max(20, min(512, int(chunk_size)))
         self._reconnect_sec = max(0.2, float(reconnect_sec))
 
@@ -87,16 +98,24 @@ class _BleLedSender:
         return self._connected
 
     def start(self, timeout_sec: float = 8.0) -> bool:
-        if not _BLE_AVAILABLE or BleakClient is None or not self._address or not self._char_uuid:
+        if (
+            not _BLE_AVAILABLE
+            or BleakClient is None
+            or BleakScanner is None
+            or not self._char_uuid
+            or not self._service_uuid
+        ):
             return False
         if self._thread is not None and self._thread.is_alive():
-            return self._connected
+            return True
 
         self._stop.clear()
         self._connected_event.clear()
         self._thread = threading.Thread(target=self._thread_main, daemon=True)
         self._thread.start()
-        return self._connected_event.wait(timeout=max(0.5, timeout_sec))
+        self._connected_event.wait(timeout=max(0.5, timeout_sec))
+        # Keep background auto-reconnect alive even if first connect attempt times out.
+        return True
 
     def close(self) -> None:
         self._stop.set()
@@ -135,7 +154,13 @@ class _BleLedSender:
         while not self._stop.is_set():
             try:
                 assert BleakClient is not None
-                async with BleakClient(self._address, timeout=10.0) as client:
+                address = await self._resolve_address()
+                if not address:
+                    await asyncio.sleep(self._reconnect_sec)
+                    continue
+
+                self._address = address
+                async with BleakClient(address, timeout=10.0) as client:
                     self._client = client
                     self._connected = bool(client.is_connected)
                     if self._connected:
@@ -152,6 +177,31 @@ class _BleLedSender:
             if self._stop.is_set():
                 break
             await asyncio.sleep(self._reconnect_sec)
+
+    async def _resolve_address(self) -> str:
+        # Prefer the configured address if present; it is the fastest path.
+        if self._address:
+            return self._address
+
+        if BleakScanner is None:
+            return ""
+
+        try:
+            devices = await BleakScanner.discover(timeout=self._scan_timeout_sec, return_adv=True)
+        except Exception:
+            return ""
+
+        preferred_name = self._preferred_name.lower()
+        service_uuid = self._service_uuid
+
+        for address, (device, adv) in devices.items():
+            name = (device.name or "").strip().lower()
+            adv_uuids = [str(u).strip().lower() for u in (adv.service_uuids or [])]
+            if preferred_name and preferred_name in name:
+                return address
+            if service_uuid and service_uuid in adv_uuids:
+                return address
+        return ""
 
     async def _send_chunks(self, data: bytes) -> bool:
         client = self._client
@@ -186,7 +236,7 @@ class LedOutput:
     @property
     def connected(self) -> bool:
         if self._cfg.transport == "ble":
-            return self._connected and self._ble is not None and bool(self._ble.connected)
+            return self._ble is not None and bool(self._ble.connected)
         return self._connected
 
     def send_raw(self, data: bytes) -> bool:
@@ -196,11 +246,9 @@ class LedOutput:
         return self._send_frame(data)
 
     def set_active_color(self, r: int, g: int, b: int) -> None:
-        self._cfg.active_r = max(0, min(255, int(r)))
-        self._cfg.active_g = max(0, min(255, int(g)))
-        self._cfg.active_b = max(0, min(255, int(b)))
-        self._last_frame = b""
-
+        self._cfg.color_r = max(0, min(255, int(r)))
+        self._cfg.color_g = max(0, min(255, int(g)))
+        self._cfg.color_b = max(0, min(255, int(b)))
         self._last_frame = b""
 
     @staticmethod
@@ -224,10 +272,11 @@ class LedOutput:
             led_count=max(1, int(data.get("led_count", 176))),
             mirror_per_key=max(1, int(data.get("mirror_per_key", 2))),
             fps_limit=max(1, int(data.get("fps_limit", 30))),
-            # Active colour is driven by note colour — read from note_style, not led_output
-            active_r=max(0, min(255, int(full.get("note_style", {}).get("color_r", 0)))),
-            active_g=max(0, min(255, int(full.get("note_style", {}).get("color_g", 230)))),
-            active_b=max(0, min(255, int(full.get("note_style", {}).get("color_b", 230)))),
+            amp_limit_enabled=bool(data.get("amp_limit_enabled", False)),
+            amp_limit_amps=max(0.5, float(data.get("amp_limit_amps", 3.0))),
+            color_r=max(0, min(255, int(full.get("note_style", {}).get("color_r", 0)))),
+            color_g=max(0, min(255, int(full.get("note_style", {}).get("color_g", 230)))),
+            color_b=max(0, min(255, int(full.get("note_style", {}).get("color_b", 230)))),
         )
         return LedOutput(conf)
 
@@ -239,13 +288,12 @@ class LedOutput:
         if self._cfg.transport == "ble":
             self._ble = _BleLedSender(
                 address=self._cfg.ble_address,
+                service_uuid=self._cfg.ble_service_uuid,
                 char_uuid=self._cfg.ble_char_uuid,
                 write_with_response=self._cfg.ble_write_with_response,
                 chunk_size=self._cfg.ble_chunk_size,
             )
             self._connected = self._ble.start(timeout_sec=8.0)
-            if not self._connected:
-                self._ble = None
             return self._connected
 
         if not _SERIAL_AVAILABLE or serial is None:
@@ -285,8 +333,11 @@ class LedOutput:
             return
 
         if self._cfg.transport == "ble":
-            if self._ble is None or not self._ble.connected:
+            if self._ble is None:
                 self._connected = False
+                return
+            if not self._ble.connected:
+                # Keep trying in the background; connection may come up later.
                 return
         elif self._ser is None:
             self._connected = False
@@ -330,11 +381,14 @@ class LedOutput:
                 continue
             key_index = note - PIANO_FIRST_NOTE
             base = key_index * self._cfg.mirror_per_key
-            color = (self._cfg.active_r, self._cfg.active_g, self._cfg.active_b)
+            color = (self._cfg.color_r, self._cfg.color_g, self._cfg.color_b)
             for i in range(self._cfg.mirror_per_key):
                 led_idx = base + i
                 if 0 <= led_idx < led_count:
                     leds[led_idx] = color
+
+        if self._cfg.amp_limit_enabled:
+            leds = self._apply_amp_limit(leds)
 
         flat = [str(led_count)]
         for r, g, b in leds:
@@ -342,3 +396,19 @@ class LedOutput:
             flat.append(str(g))
             flat.append(str(b))
         return ("LEDS," + ",".join(flat) + "\n").encode("ascii")
+
+    def _apply_amp_limit(self, leds: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+        total_channel_ratio = 0.0
+        for r, g, b in leds:
+            total_channel_ratio += (r + g + b) / 765.0
+
+        estimated_led_amps = total_channel_ratio * MAX_LED_AMPS_PER_PIXEL
+        led_budget_amps = max(0.1, float(self._cfg.amp_limit_amps) - CONTROLLER_BASELINE_AMPS)
+        if estimated_led_amps <= led_budget_amps or estimated_led_amps <= 0.0:
+            return leds
+
+        scale = led_budget_amps / estimated_led_amps
+        scaled: list[tuple[int, int, int]] = []
+        for r, g, b in leds:
+            scaled.append((int(r * scale), int(g * scale), int(b * scale)))
+        return scaled

@@ -43,6 +43,8 @@
     "led_count": 177,
     "mirror_per_key": 2,
     "fps_limit": 12,
+    "amp_limit_enabled": true,
+    "amp_limit_amps": 3.0,
     "active_r": 0,
     "active_g": 220,
     "active_b": 220
@@ -67,5 +69,25 @@
     "channel_id": "YOUR_CHANNEL_ID",
     "app_api_key": "CHANGE_ME_TO_A_LONG_RANDOM_SECRET",
     "reconnect_sec": 2.0
+  },
+  "voice_settings": {
+    "backend": "vosk",
+    "vosk_model_path": "",
+    "allow_google_fallback": true,
+    "continuous_listen": false,
+    "continuous_record_secs": 1.2,
+    "continuous_gap_ms": 220,
+    "word_buffer_size": 6,
+    "push_to_talk_record_secs": 6.0,
+    "section_scoped_only": false,
+    "section_cues": [
+      {
+        "section": 0,
+        "cues": [
+          {"phrases": ["trees", "green"], "target_theme": "Green"},
+          {"phrases": ["red", "roses"], "target_theme": "Rose"}
+        ]
+      }
+    ]
   }
 }

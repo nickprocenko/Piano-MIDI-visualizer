@@ -24,9 +24,12 @@ import pygame
 _GLOW_PAD: int = 20          # px glow extends beyond each edge of the bar
 _MAX_SPARKS: int = 7         # sparks spawned per note press
 _MAX_SMOKE: int = 8          # smoke puffs spawned per note release
+_MAX_STEAM: int = 56         # continuous fluid splats per active note
 _SPARK_LIFE_MS: float = 460.0
 _SMOKE_LIFE_MS: float = 1080.0  # longer life lets wisps drift further
+_STEAM_LIFE_MS: float = 2100.0
 _SPARK_GRAVITY: float = 240.0   # px/s² downward pull on sparks
+_STEAM_GRAVITY: float = 18.0    # subtle plume drift rather than smoke lift
 _BLOOM_DOWNSCALE: int = 6    # lower resolution bloom buffer for cheap blur
 
 
@@ -188,13 +191,14 @@ class NoteEffectRenderer:
         highlight_strength = max(0.0, min(1.7, float(note_style.get("highlight_strength_percent", 70)) / 100.0))
         spark_strength = max(0.0, min(3.0, float(note_style.get("spark_amount_percent", 100)) / 100.0))
         smoke_strength = max(0.0, min(3.0, float(note_style.get("smoke_amount_percent", 100)) / 100.0))
-        glow_enabled = bool(note_style.get("effect_glow_enabled", 1))
-        highlight_enabled = bool(note_style.get("effect_highlight_enabled", 1))
-        sparks_enabled = bool(note_style.get("effect_sparks_enabled", 1))
-        smoke_enabled = bool(note_style.get("effect_smoke_enabled", 1))
-        press_smoke_enabled = bool(note_style.get("effect_press_smoke_enabled", 0))
+        glow_enabled = False
+        highlight_enabled = False
+        sparks_enabled = False
+        smoke_enabled = False
+        press_smoke_enabled = False
         moon_dust_enabled = bool(note_style.get("effect_moon_dust_enabled", 0))
-        halo_pulse_enabled = bool(note_style.get("effect_halo_pulse_enabled", 0))
+        steam_enabled = bool(note_style.get("effect_steam_smoke_enabled", 0))
+        halo_pulse_enabled = False
         roundness = max(0, int(note_style.get("edge_roundness_px", 4)))
         decay_speed = max(0.0, float(note_style.get("decay_speed", 80)))
         decay_floor = max(0.0, min(1.0, float(note_style.get("decay_value", 20)) / 100.0))
@@ -261,28 +265,30 @@ class NoteEffectRenderer:
             age_ms = float(trail.get("age_ms", 0.0))
             stem_len = max(1, height)
             # Longer notes get a denser field of fireflies along the stem.
-            swarm_count = max(4, min(14, 4 + stem_len // 70))
+            swarm_count = max(5, min(18, 5 + stem_len // 58))
             span = max(10, stem_len - 10)
-            base_phase = (age_ms * 0.0058) + (cx * 0.014)
+            base_phase = (age_ms * 0.0048) + (cx * 0.014)
             for i in range(swarm_count):
                 t = i / float(max(1, swarm_count - 1))
                 y_anchor = bottom_y - int(t * span)
-                ang = base_phase + i * 1.37
-                orbit = w * (0.55 + 0.75 * t) + 7 + (i % 3) * 3
+                ang = base_phase + i * 1.51
+                orbit = w * (0.65 + 0.95 * t) + 8 + (i % 3) * 4
                 px = cx + int(math.sin(ang) * orbit)
-                py = y_anchor + int(math.cos(ang * 1.24 + t * 2.7) * (4 + int(8 * t)))
+                py = y_anchor + int(math.cos(ang * 1.18 + t * 2.7) * (5 + int(10 * t)))
                 if clip_rect and not clip_rect.collidepoint(px, py):
                     continue
-                tw = 0.52 + 0.48 * math.sin((ang * 2.5) + i * 0.65)
-                alpha = max(0, min(255, int(40 + 90 * max(0.0, tw) + t * 38)))
+                tw = 0.50 + 0.50 * math.sin((ang * 2.8) + i * 0.65)
+                alpha = max(0, min(255, int(42 + 112 * max(0.0, tw) + t * 34)))
                 size = 1 if (i % 4) else 2
                 sc = (
-                    min(255, int(0.55 * ir + 120)),
-                    min(255, int(0.55 * ig + 120)),
-                    min(255, int(0.60 * ib + 128)),
+                    min(255, int(0.35 * ir + 198)),
+                    min(255, int(0.36 * ig + 174)),
+                    min(255, int(0.18 * ib + 72)),
                     alpha,
                 )
                 pygame.draw.circle(self._fx_surf, sc, (px, py), size)
+                if size > 1:
+                    pygame.draw.circle(self._fx_surf, (255, 244, 176, min(190, alpha)), (px, py), 1)
 
         # ── Core bar (main surface) ─────────────────────────────────────────
         bar = pygame.Rect(cx - half_w, top_y, w, height)
@@ -305,7 +311,7 @@ class NoteEffectRenderer:
             )
 
             edge_w = int(note_style.get("outer_edge_width_px", 2))
-            inset = max(1, min(edge_w, max(1, bar.width // 4)))
+            inset = max(0, min(edge_w, bar.width // 4))
             if bar.width > inset * 2 and bar.height > inset * 2:
                 inner = bar.inflate(-inset * 2, -inset * 2)
                 inner_top = (ir, ig, ib)
@@ -393,6 +399,52 @@ class NoteEffectRenderer:
             pygame.draw.circle(self._fx_surf, sc, (sx, sy), rad)
 
         # ── Start mist (note-on atmospheric smoke) ────────────────────────
+        # Fluid plumes: colorful splats that diffuse, curl, and bloom outward.
+        for st in trail.get("steam", ()):
+            if not steam_enabled or smoke_strength <= 0.0:
+                continue
+            life_frac = st["life"] / st["max_life"]
+            age_frac = 1.0 - life_frac
+            alpha = int((96 * life_frac * life_frac + 26 * life_frac) * min(1.35, smoke_strength))
+            alpha = max(0, min(190, alpha))
+            if alpha <= 0:
+                continue
+            sx, sy = int(st["x"]), int(st["y"])
+            if clip_rect and not clip_rect.collidepoint(sx, sy):
+                continue
+            rad = max(3, int(st["radius"] * (1.0 + 1.75 * age_frac)))
+            side = float(st.get("side", 1.0))
+            hue_shift = float(st.get("hue", 0.0))
+            outer = (
+                min(255, int(r * (0.45 + 0.25 * hue_shift) + ir * 0.18 + 72)),
+                min(255, int(g * 0.50 + ig * (0.20 + 0.18 * (1.0 - hue_shift)) + 62)),
+                min(255, int(b * 0.58 + ib * 0.28 + 84)),
+                alpha,
+            )
+            inner = (
+                min(255, int(ir * 0.48 + 115 + 42 * hue_shift)),
+                min(255, int(ig * 0.48 + 108)),
+                min(255, int(ib * 0.52 + 124)),
+                max(0, min(150, int(alpha * 0.62))),
+            )
+            pygame.draw.circle(self._fx_surf, outer, (sx, sy), rad)
+            pygame.draw.circle(
+                self._fx_surf,
+                inner,
+                (sx + int(side * rad * 0.34), sy + int(math.sin(age_frac * math.pi) * rad * 0.25)),
+                max(1, int(rad * 0.54)),
+            )
+            if self._bloom_downsample is not None and alpha > 42:
+                bw = self._bloom_downsample.get_width() / max(1, self._screen.get_width())
+                bh = self._bloom_downsample.get_height() / max(1, self._screen.get_height())
+                pygame.draw.circle(
+                    self._bloom_downsample,
+                    (outer[0], outer[1], outer[2], min(255, alpha)),
+                    (int(sx * bw), int(sy * bh)),
+                    max(1, int(rad * 0.75 * min(bw, bh))),
+                )
+                self._frame_bloom_strength = max(self._frame_bloom_strength, 0.55)
+
         for ms in trail.get("mist", ()):
             if not press_smoke_enabled:
                 continue
@@ -483,6 +535,59 @@ class NoteEffectRenderer:
         trail["mist"] = mist
 
     @staticmethod
+    def spawn_steam(trail: dict, note_style: dict[str, int] | None = None, dt: int = 16) -> None:
+        """Continuously emit colorful fluid splats from both sides of an active ribbon."""
+        if note_style is not None:
+            if not bool(note_style.get("effect_steam_smoke_enabled", 0)):
+                trail["steam"] = []
+                trail["_steam_emit_ms"] = 0.0
+                return
+            steam_strength = max(0.0, min(2.5, float(note_style.get("smoke_amount_percent", 100)) / 100.0))
+        else:
+            steam_strength = 1.0
+
+        if steam_strength <= 0.0 or bool(trail.get("released", False)):
+            return
+
+        steam = trail.setdefault("steam", [])
+        if len(steam) >= _MAX_STEAM:
+            return
+
+        top_y = float(trail.get("top_y", trail.get("bottom_y", 0.0)))
+        bottom_y = float(trail.get("bottom_y", top_y))
+        height = max(1.0, bottom_y - top_y)
+        width = max(3.0, float(trail.get("width", 12.0)))
+        cx = float(trail.get("x", 0.0))
+
+        length_bonus = min(1.0, height / 260.0)
+        rate_per_sec = (14.0 + 18.0 * length_bonus) * steam_strength
+        interval_ms = 1000.0 / max(1.0, rate_per_sec)
+        emit_ms = float(trail.get("_steam_emit_ms", random.uniform(0.0, interval_ms)))
+        emit_ms += max(1, dt)
+
+        while emit_ms >= interval_ms and len(steam) < _MAX_STEAM:
+            emit_ms -= interval_ms
+            side = -1.0 if random.random() < 0.5 else 1.0
+            y_bias = random.random()
+            y = top_y + height * (0.12 + 0.82 * (y_bias * y_bias))
+            edge_x = cx + side * (width * 0.5 + random.uniform(0.0, 4.5))
+            life = _STEAM_LIFE_MS * random.uniform(0.62, 1.18)
+            steam.append({
+                "x": edge_x,
+                "y": y,
+                "vx": random.uniform(26.0, 68.0) * side,
+                "vy": random.uniform(-22.0, 42.0),
+                "life": life,
+                "max_life": life,
+                "radius": random.uniform(5.5, 13.5),
+                "side": side,
+                "hue": random.random(),
+                "phase": random.uniform(0.0, math.pi * 2.0),
+            })
+
+        trail["_steam_emit_ms"] = emit_ms
+
+    @staticmethod
     def spawn_smoke(trail: dict, note_style: dict[str, int] | None = None) -> None:
         """Emit wispy smoke tendrils from the bottom of a ribbon.  Call on note release."""
         if note_style is not None:
@@ -490,12 +595,12 @@ class NoteEffectRenderer:
                 trail["smoke"] = []
                 return
             smoke_strength = max(0.0, min(2.0, float(note_style.get("smoke_amount_percent", 100)) / 100.0))
-            steam_mode = bool(note_style.get("effect_steam_smoke_enabled", 0))
+            steam_mode = False
         else:
             smoke_strength = 1.0
             steam_mode = False
 
-        smoke_cap = _MAX_SMOKE + 3 if steam_mode else _MAX_SMOKE
+        smoke_cap = _MAX_SMOKE
         count = max(0, int(round(smoke_cap * smoke_strength)))
         if count <= 0:
             trail["smoke"] = []
@@ -584,3 +689,23 @@ class NoteEffectRenderer:
                         ms["vx"] = ms.get("vx", 0) * 0.986
                         alive_mist.append(ms)
                 trail["mist"] = alive_mist
+
+            steam = trail.get("steam")
+            if steam:
+                alive_steam: list[dict] = []
+                for st in steam:
+                    st["life"] -= dt
+                    if st["life"] > 0:
+                        age = st["max_life"] - st["life"]
+                        phase = float(st.get("phase", 0.0))
+                        side = float(st.get("side", 1.0))
+                        curl = math.sin(age * 0.010 + phase) * 18.0
+                        sway = math.sin(age * 0.0042 + phase * 0.7) * 9.0
+                        st["x"] += (st.get("vx", 0.0) + curl + sway) * dt_s
+                        st["y"] += st.get("vy", 0.0) * dt_s
+                        st["vx"] = st.get("vx", 0.0) * (0.976 - min(0.012, dt_s * 0.20))
+                        st["vy"] = min(88.0, st.get("vy", 0.0) + _STEAM_GRAVITY * dt_s)
+                        if abs(st["vx"]) < 9.0:
+                            st["vx"] += side * 6.5 * dt_s
+                        alive_steam.append(st)
+                trail["steam"] = alive_steam

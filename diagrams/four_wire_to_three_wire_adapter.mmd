@@ -1,0 +1,10 @@
+flowchart LR
+    ENC[Enclosure 4-wire output<br/>Pin1 +5V<br/>Pin2 GND<br/>Pin3 DATA<br/>Pin4 CLK] --> ADP[Adapter harness]
+
+    ADP --> S3[3-wire strip input<br/>+5V]
+    ADP --> G3[GND]
+    ADP --> D3[DATA]
+    ADP -. CLK not connected .-> NC[(NC)]
+
+    NOTE[Label on adapter: 3-wire strip, CLK unused]
+    NOTE -.-> ADP

@@ -45,12 +45,13 @@ _SWEEP_MS_PER_STEP = 8  # ms between LED steps (~1.4 s for 177 LEDs)
 
 
 class LedSettingsScreen:
-    """UI for LED serial port, baud, and color/mapping tuning."""
+    """UI for LED serial transport and key-to-LED mapping settings."""
 
     BAUD_OPTIONS = [115200, 230400, 460800, 921600]
     FIELDS = [
         ("fps_limit",      "LED FPS",          5,   120, 1),
         ("mirror_per_key", "LEDs Per Key",      1,     4, 1),
+        ("amp_limit_amps_x10", "Amp Limit (A)", 10,   100, 1),
     ]
 
     def __init__(self, screen: pygame.Surface) -> None:
@@ -70,6 +71,7 @@ class LedSettingsScreen:
         self._hover_port = False
         self._hover_baud = False
         self._hover_refresh = False
+        self._hover_amp_limit = False
 
         self._title_pos = (0, 0)
         self._left_panel = pygame.Rect(0, 0, 0, 0)
@@ -79,6 +81,7 @@ class LedSettingsScreen:
         self._slider_rects: list[pygame.Rect] = []
 
         self._enable_rect = pygame.Rect(0, 0, 28, 28)
+        self._amp_limit_rect = pygame.Rect(0, 0, 28, 28)
         self._port_rect = pygame.Rect(0, 0, 0, 0)
         self._baud_rect = pygame.Rect(0, 0, 0, 0)
         self._refresh_rect = pygame.Rect(0, 0, 0, 0)
@@ -118,15 +121,24 @@ class LedSettingsScreen:
                 self._save()
                 return None
 
+            if self._amp_limit_rect.collidepoint(event.pos):
+                self._values["amp_limit_enabled"] = not bool(self._values.get("amp_limit_enabled", False))
+                self._save()
+                return None
+
             if self._refresh_rect.collidepoint(event.pos):
                 self._refresh_ports()
                 return None
 
             if self._port_rect.collidepoint(event.pos):
+                if str(self._values.get("transport", "serial")) == "ble":
+                    return None
                 self._cycle_port()
                 return None
 
             if self._baud_rect.collidepoint(event.pos):
+                if str(self._values.get("transport", "serial")) == "ble":
+                    return None
                 self._cycle_baud()
                 return None
 
@@ -164,24 +176,21 @@ class LedSettingsScreen:
     def _load(self) -> None:
         full = cfg.load()
         data = full.get("led_output", {})
-        note = full.get("note_style", {})
         self._values = {
             "enabled": bool(data.get("enabled", False)),
+            "transport": str(data.get("transport", "serial")).strip().lower(),
             "port": str(data.get("port", "COM5")),
             "baudrate": int(data.get("baudrate", 115200)),
+            "ble_address": str(data.get("ble_address", "")).strip(),
             "led_count": int(data.get("led_count", 176)),
             "fps_limit": int(data.get("fps_limit", 30)),
             "mirror_per_key": int(data.get("mirror_per_key", 2)),
-            # Active colour tracks note colour — not stored separately
-            "active_r": int(note.get("color_r", 0)),
-            "active_g": int(note.get("color_g", 230)),
-            "active_b": int(note.get("color_b", 230)),
+            "amp_limit_enabled": bool(data.get("amp_limit_enabled", False)),
+            "amp_limit_amps_x10": max(10, min(100, int(round(float(data.get("amp_limit_amps", 3.0)) * 10.0)))),
         }
 
     def _save(self) -> None:
         data = cfg.load()
-        # Merge — only overwrite fields this screen owns; preserve transport/ble_* etc.
-        # active_r/g/b are NOT saved here — they track note colour at runtime.
         data.setdefault("led_output", {}).update({
             "enabled": bool(self._values["enabled"]),
             "port": str(self._values["port"]),
@@ -189,6 +198,8 @@ class LedSettingsScreen:
             "led_count": int(self._values["led_count"]),
             "mirror_per_key": int(self._values["mirror_per_key"]),
             "fps_limit": int(self._values["fps_limit"]),
+            "amp_limit_enabled": bool(self._values.get("amp_limit_enabled", False)),
+            "amp_limit_amps": float(int(self._values.get("amp_limit_amps_x10", 30))) / 10.0,
         })
         cfg.save(data)
 
@@ -259,13 +270,14 @@ class LedSettingsScreen:
 
         rp = self._right_panel
         self._enable_rect = pygame.Rect(rp.left + 20, rp.top + 26, 28, 28)
-        self._port_rect = pygame.Rect(rp.left + 20, rp.top + 78, rp.width - 40, 46)
-        self._baud_rect = pygame.Rect(rp.left + 20, rp.top + 134, rp.width - 40, 46)
-        self._refresh_rect = pygame.Rect(rp.left + 20, rp.top + 190, rp.width - 40, 46)
+        self._amp_limit_rect = pygame.Rect(rp.left + 20, rp.top + 58, 28, 28)
+        self._port_rect = pygame.Rect(rp.left + 20, rp.top + 98, rp.width - 40, 46)
+        self._baud_rect = pygame.Rect(rp.left + 20, rp.top + 154, rp.width - 40, 46)
+        self._refresh_rect = pygame.Rect(rp.left + 20, rp.top + 210, rp.width - 40, 46)
 
         self._back_rect = pygame.Rect(cx - BACK_W // 2, sr.height - BACK_H - 24, BACK_W, BACK_H)
 
-        preview_y = self._refresh_rect.bottom + 90
+        preview_y = self._refresh_rect.bottom + 108
         self._preview_bar_rect = pygame.Rect(rp.left + 20, preview_y, rp.width - 40, 24)
         self._sweep_rect = pygame.Rect(rp.left + 20, self._preview_bar_rect.bottom + 14, rp.width - 40, 46)
         self._conn_dot_center = (rp.right - 18, rp.top + 18)
@@ -273,6 +285,7 @@ class LedSettingsScreen:
     def _update_hover(self, pos: tuple[int, int]) -> None:
         self._hover_back = self._back_rect.collidepoint(pos)
         self._hover_enable = self._enable_rect.collidepoint(pos)
+        self._hover_amp_limit = self._amp_limit_rect.collidepoint(pos)
         self._hover_port = self._port_rect.collidepoint(pos)
         self._hover_baud = self._baud_rect.collidepoint(pos)
         self._hover_refresh = self._refresh_rect.collidepoint(pos)
@@ -317,7 +330,8 @@ class LedSettingsScreen:
             label_surf = self._label_font.render(label, True, TEXT_COLOR)
             self.screen.blit(label_surf, (row.left + 10, row.top + 6))
 
-            value_surf = self._value_font.render(str(int(self._values[key])), True, MUTED_TEXT_COLOR)
+            value_text = self._field_value_text(key)
+            value_surf = self._value_font.render(value_text, True, MUTED_TEXT_COLOR)
             self.screen.blit(value_surf, value_surf.get_rect(topright=(row.right - 10, row.top + 8)))
 
             track_color = BUTTON_HOVER_BG if i == self._hover_slider or i == self._drag_slider else BUTTON_NORMAL_BG
@@ -361,8 +375,23 @@ class LedSettingsScreen:
         enabled_txt = self._value_font.render("Enable LED Serial Output", True, MUTED_TEXT_COLOR)
         self.screen.blit(enabled_txt, (self._enable_rect.right + 10, self._enable_rect.top + 2))
 
-        self._draw_action_row(self._port_rect, self._hover_port, f"Port: {self._values['port']}")
-        self._draw_action_row(self._baud_rect, self._hover_baud, f"Baud: {self._values['baudrate']}")
+        amp_cb_bg = (45, 45, 60) if self._hover_amp_limit else (35, 35, 45)
+        pygame.draw.rect(self.screen, amp_cb_bg, self._amp_limit_rect, border_radius=5)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._amp_limit_rect, width=1, border_radius=5)
+        if bool(self._values.get("amp_limit_enabled", False)):
+            pygame.draw.rect(self.screen, CHECK_ON_COLOR, self._amp_limit_rect.inflate(-8, -8), border_radius=3)
+        amp_txt = self._value_font.render("Enable current limit", True, MUTED_TEXT_COLOR)
+        self.screen.blit(amp_txt, (self._amp_limit_rect.right + 10, self._amp_limit_rect.top + 2))
+
+        is_ble = str(self._values.get("transport", "serial")) == "ble"
+        if is_ble:
+            ble_addr = str(self._values.get("ble_address", "")).strip()
+            ble_target = ble_addr if ble_addr else "auto-discover"
+            self._draw_action_row(self._port_rect, self._hover_port, f"Bluetooth: {ble_target}")
+            self._draw_action_row(self._baud_rect, self._hover_baud, "Baud: n/a in BLE mode")
+        else:
+            self._draw_action_row(self._port_rect, self._hover_port, f"Port: {self._values['port']}")
+            self._draw_action_row(self._baud_rect, self._hover_baud, f"Baud: {self._values['baudrate']}")
         ports_label = f"Refresh Ports ({len(self._ports)})"
         self._draw_action_row(self._refresh_rect, self._hover_refresh, ports_label)
 
@@ -373,11 +402,21 @@ class LedSettingsScreen:
         count_txt = self._value_font.render(f"LED Count: {led_count}", True, TEXT_COLOR)
         self.screen.blit(count_txt, (self._right_panel.left + 20, self._refresh_rect.bottom + 54))
 
+        sync_title = self._label_font.render("Color Sync", True, TEXT_COLOR)
+        self.screen.blit(sync_title, (self._right_panel.left + 20, self._refresh_rect.bottom + 92))
+        sync_msg = self._value_font.render("LED color follows the current note color.", True, MUTED_TEXT_COLOR)
+        self.screen.blit(sync_msg, (self._right_panel.left + 20, self._refresh_rect.bottom + 122))
+
         pygame.draw.rect(self.screen, (20, 20, 24), self._preview_bar_rect, border_radius=6)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._preview_bar_rect, width=1, border_radius=6)
-        note_c = (int(self._values["active_r"]), int(self._values["active_g"]), int(self._values["active_b"]))
-        note_bar = pygame.Rect(self._preview_bar_rect.left + 2, self._preview_bar_rect.top + 3, self._preview_bar_rect.width - 4, self._preview_bar_rect.height - 6)
-        pygame.draw.rect(self.screen, note_c, note_bar, border_radius=4)
+        preview_fill = self._preview_bar_rect.inflate(-4, -6)
+        note_style = cfg.load().get("note_style", {})
+        preview_color = (
+            int(note_style.get("color_r", 0)),
+            int(note_style.get("color_g", 230)),
+            int(note_style.get("color_b", 230)),
+        )
+        pygame.draw.rect(self.screen, preview_color, preview_fill, border_radius=4)
 
         # Sweep test / connect button
         if bool(self._values.get("enabled", False)):
@@ -404,6 +443,11 @@ class LedSettingsScreen:
         key, _label, min_v, max_v, _step = self.FIELDS[index]
         span = max(1, max_v - min_v)
         return (int(self._values[key]) - min_v) / float(span)
+
+    def _field_value_text(self, key: str) -> str:
+        if key == "amp_limit_amps_x10":
+            return f"{int(self._values[key]) / 10.0:.1f}"
+        return str(int(self._values[key]))
 
     # ------------------------------------------------------------------
     # BLE/Serial test connection

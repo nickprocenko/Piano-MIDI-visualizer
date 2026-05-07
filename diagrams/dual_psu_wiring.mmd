@@ -1,0 +1,20 @@
+flowchart LR
+    CPSU[Controller PSU 5V] --> ESP[ESP32-S3 Mini]
+    EPSU[LED PSU 5V 10A] --> FMAIN[Main Fuse 10A]
+    FMAIN --> TBP[TB1 +5V Feed]
+    EPSU --> TBG[TB2 GND Star]
+
+    TBP --> INJ1[Strip Head +5V]
+
+    TBG --> G1[Strip Head GND]
+
+    ESP -->|GPIO33 DATA| RDATA[330R]
+    ESP -->|GPIO21 CLK| RCLK[330R]
+    RDATA --> LVL[5V Level Shifter]
+    RCLK --> LVL
+    LVL --> DIN[LED DATA IN]
+    LVL --> CIN[LED CLK IN]
+
+    ESP ---|Ground Bridge| TBG
+    CAP[1000-2200uF at strip head] --- INJ1
+    CAP --- G1
