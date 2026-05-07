@@ -610,14 +610,14 @@ class App:
                 r = self._note_style["color_r"] / 255.0
                 g = self._note_style["color_g"] / 255.0
                 b = self._note_style["color_b"] / 255.0
-                vel_y = -self._note_style["speed_px_per_sec"] * 0.55 * intensity
+                vel_y = -self._note_style["speed_px_per_sec"] * 0.30 * intensity
                 for note in active_notes:
                     trail = self._active_note_trails.get(note)
                     if trail is None:
                         continue
                     norm_x = float(trail["x"]) / sw
                     norm_y = float(trail["bottom_y"]) / sh
-                    radius = max(0.006, float(trail["width"]) / sw * 1.8)
+                    radius = max(0.025, float(trail["width"]) / sw * 4.5)
                     self._fluid_renderer.add_splat(
                         norm_x, norm_y, 0.0, vel_y, r, g, b, radius
                     )
