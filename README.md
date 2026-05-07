@@ -116,6 +116,35 @@ Defaults in sketch:
 Arduino library requirement for BLE firmware:
 - Install `NimBLE-Arduino`
 
+## Live Mode (for streams)
+
+`LIVE MODE` on the main menu opens a full-screen ambient fluid effect (port of [PavelDoGreat/WebGL-Fluid-Simulation](https://paveldogreat.github.io/WebGL-Fluid-Simulation/)) tinted to the current colour. No piano, no falling notes — just colour. Designed to be captured by OBS as a Window or Display source.
+
+Behaviour:
+- Continuously auto-emits upward "jets" from the bottom edge plus occasional swirls, so motion never settles.
+- If a MIDI device is connected, each note-on adds a one-off splat at the screen-x position of that note (key 21 → far left, key 108 → far right).
+- ESC returns to the main menu.
+
+### OBS colour-wheel overlay
+
+While the app is running, the local control server hosts a colour-wheel page at:
+
+```
+http://localhost:8181/obs
+```
+
+Add it as an **OBS → Browser Source** (recommended size 540×620, transparent background). Click or drag the wheel to recolour the live fluid in real time. The page POSTs `{r,g,b,transition_ms}` to `/api/color` on each move, throttled to ~16 Hz; the app blends smoothly between values.
+
+Need to send a colour from somewhere else (script, hotkey, Stream Deck)? POST directly:
+
+```bash
+curl -X POST http://localhost:8181/api/color \
+     -H 'Content-Type: application/json' \
+     -d '{"r":255,"g":80,"b":40,"transition_ms":300}'
+```
+
+The same colour is applied to LED output and any other consumers of the active colour.
+
 ## Audience Color Control (App Side)
 
 The app can connect to your backend WebSocket and apply live audience colors.

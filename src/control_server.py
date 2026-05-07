@@ -41,6 +41,8 @@ def _make_handler(
         def do_GET(self) -> None:
             if self.path == "/":
                 self._serve_html()
+            elif self.path == "/obs":
+                self._serve_obs_overlay()
             elif self.path == "/api/settings":
                 self._json_ok(self._gs())
             elif self.path == "/api/themes":
@@ -59,6 +61,23 @@ def _make_handler(
 
             if self.path == "/api/patch":
                 self._pq.put(data)
+                self._json_ok({"ok": True})
+            elif self.path == "/api/color":
+                # Convenience endpoint for the OBS colour-wheel overlay.
+                # Body: {"r":0..255,"g":0..255,"b":0..255,"transition_ms":int?}
+                try:
+                    r = max(0, min(255, int(data.get("r", 0))))
+                    g = max(0, min(255, int(data.get("g", 0))))
+                    b = max(0, min(255, int(data.get("b", 0))))
+                    tr = max(20, min(3000, int(data.get("transition_ms", 220))))
+                except Exception:
+                    self.send_error(400)
+                    return
+                self._pq.put({
+                    "type": "color_set",
+                    "rgb": {"r": r, "g": g, "b": b},
+                    "transition_ms": tr,
+                })
                 self._json_ok({"ok": True})
             else:
                 self.send_error(404)
@@ -87,6 +106,14 @@ def _make_handler(
 
         def _serve_html(self) -> None:
             body = _HTML.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _serve_obs_overlay(self) -> None:
+            body = _OBS_HTML.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -467,6 +494,193 @@ function loadSettings(){
 
 loadSettings();
 loadThemes();
+</script>
+</body>
+</html>
+"""
+
+
+# ---------------------------------------------------------------------------
+# OBS colour-wheel overlay
+# ---------------------------------------------------------------------------
+#
+# Drop http://localhost:8181/obs into an OBS Browser Source.  The page is a
+# transparent HSV colour wheel that POSTs {r,g,b,transition_ms} to /api/color
+# whenever the user clicks/drags.  Designed to overlay on top of the stream
+# preview so the streamer can recolour the live fluid in real time.
+#
+_OBS_HTML = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Colour</title>
+<style>
+html, body { margin:0; padding:0; background:transparent; height:100%; overflow:hidden;
+  font-family:'Segoe UI', Arial, sans-serif; color:#eee; user-select:none; }
+#wrap { position:fixed; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:14px; }
+#wheelbox { position:relative; width:min(78vmin, 520px); aspect-ratio:1/1;
+  border-radius:50%; box-shadow:0 0 30px rgba(0,0,0,0.6); }
+canvas { width:100%; height:100%; display:block; border-radius:50%; cursor:crosshair;
+  touch-action:none; }
+#cursor { position:absolute; width:18px; height:18px; border:2px solid #fff;
+  border-radius:50%; transform:translate(-50%, -50%); pointer-events:none;
+  box-shadow:0 0 6px rgba(0,0,0,0.8); }
+#bar { display:flex; align-items:center; gap:10px;
+  background:rgba(20,20,28,0.65); padding:8px 14px; border-radius:24px;
+  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+#swatch { width:28px; height:28px; border-radius:50%;
+  border:2px solid rgba(255,255,255,0.6); }
+#hex { font-variant-numeric:tabular-nums; letter-spacing:1px; font-size:14px; }
+#bri-wrap { display:flex; align-items:center; gap:8px; }
+#bri { width:140px; accent-color:#fff; }
+#status { font-size:11px; color:#9aa; min-width:48px; text-align:right; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="wheelbox">
+    <canvas id="wheel" width="520" height="520"></canvas>
+    <div id="cursor"></div>
+  </div>
+  <div id="bar">
+    <div id="swatch"></div>
+    <span id="hex">#00E6E6</span>
+    <div id="bri-wrap">
+      <span style="font-size:11px;color:#9aa">V</span>
+      <input id="bri" type="range" min="20" max="100" value="100">
+    </div>
+    <span id="status">idle</span>
+  </div>
+</div>
+<script>
+(function(){
+  var canvas = document.getElementById('wheel');
+  var ctx = canvas.getContext('2d');
+  var size = canvas.width;
+  var radius = size/2;
+  var cursor = document.getElementById('cursor');
+  var swatch = document.getElementById('swatch');
+  var hexEl = document.getElementById('hex');
+  var briEl = document.getElementById('bri');
+  var statusEl = document.getElementById('status');
+
+  // Draw HSV wheel: hue = angle, saturation = radius.
+  var img = ctx.createImageData(size, size);
+  for (var y=0; y<size; y++){
+    for (var x=0; x<size; x++){
+      var dx = x - radius, dy = y - radius;
+      var dist = Math.sqrt(dx*dx + dy*dy);
+      var i = (y*size + x) * 4;
+      if (dist > radius){
+        img.data[i+3] = 0;
+        continue;
+      }
+      var hue = (Math.atan2(dy, dx) * 180/Math.PI + 360) % 360;
+      var sat = Math.min(1, dist/radius);
+      var rgb = hsv2rgb(hue/360, sat, 1.0);
+      img.data[i]   = rgb[0];
+      img.data[i+1] = rgb[1];
+      img.data[i+2] = rgb[2];
+      // Soft edge anti-alias on the outer 2px ring.
+      var edge = Math.max(0, Math.min(1, (radius - dist)));
+      img.data[i+3] = Math.round(255 * Math.min(1, edge));
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  function hsv2rgb(h, s, v){
+    var r,g,b;
+    var i = Math.floor(h*6);
+    var f = h*6 - i;
+    var p = v*(1-s), q = v*(1-f*s), t = v*(1-(1-f)*s);
+    switch(i % 6){
+      case 0: r=v; g=t; b=p; break;
+      case 1: r=q; g=v; b=p; break;
+      case 2: r=p; g=v; b=t; break;
+      case 3: r=p; g=q; b=v; break;
+      case 4: r=t; g=p; b=v; break;
+      case 5: r=v; g=p; b=q; break;
+    }
+    return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+  }
+
+  function hex(r,g,b){
+    return '#' + [r,g,b].map(function(v){
+      return v.toString(16).padStart(2,'0').toUpperCase();
+    }).join('');
+  }
+
+  var lastSent = 0, pending = null;
+  function send(r, g, b){
+    var now = Date.now();
+    pending = {r:r, g:g, b:b};
+    if (now - lastSent < 60) return;  // throttle
+    lastSent = now;
+    var p = pending; pending = null;
+    fetch('/api/color', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({r:p.r, g:p.g, b:p.b, transition_ms:160}),
+    }).then(function(){ statusEl.textContent='ok'; })
+      .catch(function(){ statusEl.textContent='err'; });
+  }
+  // Flush trailing throttled value.
+  setInterval(function(){
+    if (pending){
+      var p = pending; pending = null; lastSent = Date.now();
+      fetch('/api/color', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({r:p.r, g:p.g, b:p.b, transition_ms:160})})
+        .then(function(){ statusEl.textContent='ok'; })
+        .catch(function(){ statusEl.textContent='err'; });
+    }
+  }, 90);
+
+  function pick(evt){
+    var rect = canvas.getBoundingClientRect();
+    var cx = (evt.clientX !== undefined ? evt.clientX : evt.touches[0].clientX) - rect.left;
+    var cy = (evt.clientY !== undefined ? evt.clientY : evt.touches[0].clientY) - rect.top;
+    var px = cx / rect.width  * size;
+    var py = cy / rect.height * size;
+    var dx = px - radius, dy = py - radius;
+    var dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist > radius) {
+      // Snap to edge
+      var k = radius / dist;
+      dx *= k; dy *= k; dist = radius;
+      px = radius + dx; py = radius + dy;
+    }
+    var hue = (Math.atan2(dy, dx) * 180/Math.PI + 360) % 360;
+    var sat = Math.min(1, dist/radius);
+    var v = parseInt(briEl.value,10) / 100;
+    var rgb = hsv2rgb(hue/360, sat, v);
+    swatch.style.background = 'rgb(' + rgb.join(',') + ')';
+    hexEl.textContent = hex(rgb[0], rgb[1], rgb[2]);
+    cursor.style.left = (px / size * 100) + '%';
+    cursor.style.top  = (py / size * 100) + '%';
+    send(rgb[0], rgb[1], rgb[2]);
+  }
+
+  var dragging = false;
+  canvas.addEventListener('pointerdown', function(e){ dragging = true; canvas.setPointerCapture(e.pointerId); pick(e); });
+  canvas.addEventListener('pointermove', function(e){ if(dragging) pick(e); });
+  canvas.addEventListener('pointerup',   function(e){ dragging = false; });
+  briEl.addEventListener('input', function(){
+    // Re-send last hue/sat at new brightness.
+    var fakeEvt = { clientX:0, clientY:0 };
+    // Use cursor's current % to recompute.
+    var rect = canvas.getBoundingClientRect();
+    fakeEvt.clientX = rect.left + parseFloat(cursor.style.left || '50%')/100 * rect.width;
+    fakeEvt.clientY = rect.top  + parseFloat(cursor.style.top  || '50%')/100 * rect.height;
+    pick(fakeEvt);
+  });
+
+  // Initial position: top of the wheel, full sat → cyan-ish.
+  cursor.style.left = '50%';
+  cursor.style.top  = '50%';
+  swatch.style.background = '#00E6E6';
+})();
 </script>
 </body>
 </html>

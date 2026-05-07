@@ -12,6 +12,7 @@ from src.audience_color_client import AudienceColorClient
 from src.audience_settings import AudienceSettingsScreen
 from src.kick_chat_client import KickChatClient
 from src.led_output import LedOutput
+from src.live_mode import LiveModeDriver
 from src.midi_input import MidiInput
 from src.note_fx import NoteEffectRenderer
 from src.piano import Piano
@@ -49,6 +50,7 @@ class State(Enum):
     THEME_SETTINGS = auto()
     SONG_SELECT = auto()
     HIGHWAY = auto()
+    LIVE = auto()
 
 
 class App:
@@ -88,6 +90,7 @@ class App:
         self._note_trails: list[dict[str, float | bool]] = []
         self._fx_renderer: Optional[NoteEffectRenderer] = None
         self._fluid_renderer: Optional[object] = None
+        self._live_driver: Optional[LiveModeDriver] = None
         self._led_output: Optional[LedOutput] = None
         # Background animation: list of slides, each slide is (frames, durations_ms)
         self._bg_slides: list[tuple[list[pygame.Surface], list[float]]] = []
@@ -289,6 +292,103 @@ class App:
         else:
             self._fluid_renderer = None
 
+    def _enter_live(self) -> None:
+        """Set up the streaming live-mode visualizer (fluid only, no piano)."""
+        self._note_style = self._load_note_style()
+        self._note_style_meta = self._load_note_style_meta()
+        self._refresh_claire_script_state()
+        # MIDI is optional — if present, note-on triggers an extra splat.
+        self._midi = MidiInput()
+        self._midi.connect(self._selected_port)
+        self._led_output = LedOutput.from_config()
+        self._led_output.connect()
+        self._audience_client = AudienceColorClient.from_config()
+        self._audience_client.start()
+        self._kick_client = KickChatClient.from_config()
+        self._kick_client.start()
+        self._prev_active_notes.clear()
+
+        if _FLUID_AVAILABLE:
+            sw, sh = self.screen.get_size()
+            fr = _FluidRenderer(sw, sh, sim_scale=0.5)
+            self._fluid_renderer = fr if fr.available else None
+        else:
+            self._fluid_renderer = None
+        self._live_driver = LiveModeDriver(self._fluid_renderer)
+
+    def _leave_live(self) -> None:
+        if self._midi is not None:
+            self._midi.close()
+            self._midi = None
+        if self._led_output is not None:
+            self._led_output.close()
+            self._led_output = None
+        if self._audience_client is not None:
+            self._audience_client.stop()
+            self._audience_client = None
+        if self._kick_client is not None:
+            self._kick_client.stop()
+            self._kick_client = None
+        if self._fluid_renderer is not None:
+            self._fluid_renderer.destroy()
+            self._fluid_renderer = None
+        self._live_driver = None
+        self._prev_active_notes.clear()
+
+    def _update_live(self, dt: int) -> None:
+        self._update_audience_color(dt)
+
+        color = (
+            float(self._note_style["color_r"]),
+            float(self._note_style["color_g"]),
+            float(self._note_style["color_b"]),
+        )
+
+        # Optional MIDI keypress → splat from screen-x position of that note.
+        if self._midi is not None and self._midi.connected:
+            active_notes = self._midi.get_active_notes()
+            if self._led_output is not None:
+                self._led_output.update(active_notes, dt)
+            newly_pressed = active_notes - self._prev_active_notes
+            self._prev_active_notes = active_notes
+            if self._live_driver is not None and newly_pressed:
+                # Map MIDI note 21..108 → x ∈ [0.05, 0.95].
+                for note in newly_pressed:
+                    n = max(21, min(108, int(note)))
+                    norm_x = 0.05 + ((n - 21) / 87.0) * 0.90
+                    self._live_driver.emit_note_splat(norm_x, color)
+
+        if self._live_driver is not None:
+            self._live_driver.step(float(dt), color)
+
+    def _draw_live(self) -> None:
+        self.screen.fill((0, 0, 0))
+        if self._fluid_renderer is None:
+            if self._small_font is None:
+                self._small_font = pygame.font.SysFont("Arial", 20)
+            msg = self._small_font.render(
+                "Fluid renderer unavailable (install moderngl & numpy).",
+                True, (220, 120, 120),
+            )
+            rect = msg.get_rect(center=self.screen.get_rect().center)
+            self.screen.blit(msg, rect)
+            esc = self._small_font.render("Press ESC to return", True, (150, 150, 150))
+            self.screen.blit(esc, (16, 12))
+            return
+
+        fluid_surf = self._fluid_renderer.get_surface()
+        if fluid_surf is not None:
+            sw, sh = self.screen.get_size()
+            if fluid_surf.get_size() != (sw, sh):
+                fluid_surf = pygame.transform.smoothscale(fluid_surf, (sw, sh))
+            self.screen.blit(fluid_surf, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
+        # Tiny ESC hint, easy to crop out in OBS.
+        if self._small_font is None:
+            self._small_font = pygame.font.SysFont("Arial", 18)
+        hint = self._small_font.render("ESC", True, (90, 90, 90))
+        self.screen.blit(hint, (8, 6))
+
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
         if self._midi is not None:
@@ -350,6 +450,9 @@ class App:
                 elif action == "freeplay":
                     self._enter_highway()
                     self.state = State.HIGHWAY
+                elif action == "live_mode":
+                    self._enter_live()
+                    self.state = State.LIVE
                 elif action == "midi_device":
                     self._enter_device_select()
                     self.state = State.DEVICE_SELECT
@@ -471,6 +574,20 @@ class App:
                     if self._midi is not None:
                         self._midi.handle_keyup(event.key)
 
+            elif self.state == State.LIVE:
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self._leave_live()
+                        self.state = State.MENU
+                    elif event.key == pygame.K_r:
+                        if self._midi is not None and not self._midi.connected:
+                            self._midi.connect(self._selected_port)
+                    elif self._midi is not None:
+                        self._midi.handle_keydown(event.key)
+                elif event.type == pygame.KEYUP:
+                    if self._midi is not None:
+                        self._midi.handle_keyup(event.key)
+
     def _get_panel_state(self) -> dict:
         """Return current config for the web control panel (called from background thread)."""
         data = cfg.load()
@@ -532,6 +649,22 @@ class App:
                     themes_mod.apply_theme_to_config(user_themes[idx])
                     self._apply_theme_to_live(user_themes[idx])
 
+            elif ptype == "color_set":
+                # Live colour push from /api/color (OBS overlay).
+                # Routes through the same blend pipeline as the audience client.
+                rgb = patch.get("rgb", {})
+                try:
+                    r = max(0, min(255, int(rgb.get("r", 0))))
+                    g = max(0, min(255, int(rgb.get("g", 0))))
+                    b = max(0, min(255, int(rgb.get("b", 0))))
+                    tr = max(20, min(3000, int(patch.get("transition_ms", 220))))
+                except Exception:
+                    continue
+                self._color_start = list(self._color_current)
+                self._color_target = [float(r), float(g), float(b)]
+                self._color_blend_ms = tr
+                self._color_blend_elapsed_ms = 0
+
     def _update(self, dt: int) -> None:
         self._drain_control_patches()
         if self.state == State.NOTES_SETTINGS and self._notes_settings_screen is not None:
@@ -552,6 +685,10 @@ class App:
             return
 
         if self.state == State.THEME_SETTINGS and self._theme_settings_screen is not None:
+            return
+
+        if self.state == State.LIVE:
+            self._update_live(dt)
             return
 
         if self.state != State.HIGHWAY:
@@ -797,6 +934,8 @@ class App:
                 self._song_select.draw()
         elif self.state == State.HIGHWAY:
             self._draw_highway()
+        elif self.state == State.LIVE:
+            self._draw_live()
 
     def _draw_highway(self) -> None:
         self.screen.fill((10, 10, 10))
@@ -1122,6 +1261,7 @@ class App:
 
     def _quit(self) -> None:
         self._leave_highway()
+        self._leave_live()
         self.running = False
         pygame.quit()
         sys.exit()
