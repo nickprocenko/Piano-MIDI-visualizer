@@ -193,7 +193,7 @@ void main() {
 # ---------------------------------------------------------------------------
 
 _PRESSURE_ITERS = 20
-_CURL_STRENGTH  = 28.0
+_CURL_STRENGTH  = 18.0
 _VEL_DISSIPATION = 0.98
 _DYE_DISSIPATION = 0.987
 
