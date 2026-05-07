@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import math as _math
+
 import pygame
 from src import config as cfg
 from src.note_fx import NoteEffectRenderer
 from src.trail_constants import TRAIL_KEY_EDGE_INSET_PX, TRAIL_MIN_WIDTH_PX
+
+try:
+    from src.fluid_renderer import FluidRenderer as _FluidRenderer
+    _FLUID_PREVIEW_AVAILABLE = True
+except ImportError:
+    _FluidRenderer = None  # type: ignore
+    _FLUID_PREVIEW_AVAILABLE = False
 
 # Shared look
 BG_COLOR = (15, 15, 20)
@@ -239,6 +248,8 @@ class NotesSettingsScreen:
         # contained and never bleeds across the rest of the settings UI.
         self._preview_surf: pygame.Surface | None = None
         self._preview_fx_renderer: NoteEffectRenderer | None = None
+        self._preview_fluid: object | None = None
+        self._preview_fluid_idle_t: float = 0.0
 
         self._load()
         self._build_layout()
@@ -339,12 +350,49 @@ class NotesSettingsScreen:
                 survivors.append(trail)
         self._preview_trails = survivors
 
+        # Step fluid preview simulation and inject splats
+        if self._preview_fluid is not None and self._preview_surf is not None:
+            self._preview_fluid.step(dt / 1000.0)
+            self._preview_fluid_idle_t += dt / 1000.0
+            if int(self._values.get("effect_fluid_enabled", 0)):
+                pw = float(self._preview_surf.get_width())
+                ph = float(self._preview_surf.get_height())
+                r = self._values["color_r"] / 255.0
+                g = self._values["color_g"] / 255.0
+                b = self._values["color_b"] / 255.0
+                intensity = self._values.get("fluid_intensity", 100) / 100.0
+                vel_y = -float(self._values["speed_px_per_sec"]) * 0.30 * intensity
+                has_active = False
+                for trail in self._preview_trails:
+                    if not bool(trail.get("released", False)):
+                        has_active = True
+                        norm_x = float(trail["x"]) / pw
+                        norm_y = float(trail["top_y"]) / ph
+                        radius = max(0.04, float(trail["width"]) / pw * 4.5)
+                        self._preview_fluid.add_splat(norm_x, norm_y, 0.0, vel_y, r, g, b, radius)
+                if not has_active:
+                    # Idle autonomous splat — wave pattern so the sim always looks alive
+                    t = self._preview_fluid_idle_t
+                    cx = 0.5 + 0.12 * _math.sin(t * 0.8)
+                    cy = 0.50 + 0.08 * _math.sin(t * 1.3)
+                    vx = _math.cos(t * 0.8) * 0.096
+                    self._preview_fluid.add_splat(cx, cy, vx, -0.28, r, g, b, 0.05)
+
     def draw(self) -> None:
         self.screen.fill(BG_COLOR)
         self._draw_title()
         self._draw_rows()
         self._draw_preview()
         self._draw_back()
+
+    def destroy(self) -> None:
+        """Release GPU resources held by the preview fluid renderer."""
+        if self._preview_fluid is not None:
+            try:
+                self._preview_fluid.destroy()
+            except Exception:
+                pass
+            self._preview_fluid = None
 
     def _load(self) -> None:
         data = cfg.load().get("note_style", {})
@@ -415,6 +463,20 @@ class NotesSettingsScreen:
             # bloom_downscale=0 disables the full-surface bloom pass in the preview;
             # the glow rings in _fx_surf look correct without it on a small surface.
             self._preview_fx_renderer = NoteEffectRenderer(self._preview_surf, bloom_downscale=0)
+
+        # Fluid renderer for the effects preview panel
+        if self._preview_fluid is not None:
+            try:
+                self._preview_fluid.destroy()
+            except Exception:
+                pass
+            self._preview_fluid = None
+        if _FLUID_PREVIEW_AVAILABLE and pw > 0 and ph > 0:
+            try:
+                fr = _FluidRenderer(pw, ph, sim_scale=0.5)
+                self._preview_fluid = fr if fr.available else None
+            except Exception:
+                self._preview_fluid = None
 
         # Layer buttons
         layers_count = len(self.LAYERS)
@@ -813,7 +875,7 @@ class NotesSettingsScreen:
         )
 
     def _preview_key_rect(self) -> pygame.Rect:
-        """Return key rect in preview-surface–relative coordinates."""
+        """Return key rect in preview-surface-relative coordinates."""
         key_w = 42
         key_h = 88
         pw = self._preview_rect.width
@@ -834,7 +896,11 @@ class NotesSettingsScreen:
         label = self._label_font.render("Live Preview", True, TEXT_COLOR)
         self.screen.blit(label, (self._preview_rect.left + 12, self._preview_rect.top + 10))
 
-        hint = self._value_font.render("1s on, 1s off preview loop", True, MUTED_TEXT_COLOR)
+        fluid_on = int(self._values.get("effect_fluid_enabled", 0))
+        if fluid_on and self._preview_fluid is not None:
+            hint = self._value_font.render("GPU Fluid ON — idle wave shows effect without a note", True, MUTED_TEXT_COLOR)
+        else:
+            hint = self._value_font.render("1s on, 1s off preview loop", True, MUTED_TEXT_COLOR)
         self.screen.blit(hint, (self._preview_rect.left + 12, self._preview_rect.top + 38))
 
         if self._preview_surf is None or self._preview_fx_renderer is None:
@@ -845,6 +911,16 @@ class NotesSettingsScreen:
         key_rect = self._preview_key_rect()  # surface-relative
         pygame.draw.rect(self._preview_surf, KEY_COLOR, key_rect, border_radius=4)
         pygame.draw.rect(self._preview_surf, KEY_BORDER, key_rect, width=1, border_radius=4)
+
+        # Fluid effect layer — composited behind note trails with additive blending
+        if fluid_on and self._preview_fluid is not None:
+            fluid_surf = self._preview_fluid.get_surface()
+            if fluid_surf is not None:
+                fs = fluid_surf
+                target_size = self._preview_surf.get_size()
+                if fs.get_size() != target_size:
+                    fs = pygame.transform.smoothscale(fs, target_size)
+                self._preview_surf.blit(fs, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
 
         note_style = {
             "color_r": self._values["color_r"],

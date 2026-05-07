@@ -112,7 +112,6 @@ class App:
         self._last_dt_ms: int = 0
         self._smoothed_dt_ms: float = 16.67
         self._last_phase: str = "init"
-        self._sustain_tap_times: list[float] = []
         self._refresh_claire_script_state()
 
         self._control_patches: queue.SimpleQueue = queue.SimpleQueue()
@@ -214,7 +213,7 @@ class App:
         self._theme_settings_screen = ThemeSettingsScreen(self.screen)
 
     def _cycle_theme(self) -> None:
-        """Advance to the next user theme (wraps around).  Called on triple sustain-tap."""
+        """Advance to the next user theme (wraps around)."""
         user_themes = themes_mod.load_user_themes()
         if not user_themes:
             return
@@ -399,6 +398,7 @@ class App:
                 if self._notes_settings_screen is not None:
                     result = self._notes_settings_screen.handle_event(event)
                     if result == "back":
+                        self._notes_settings_screen.destroy()
                         self._notes_settings_screen = None
                         self.state = State.SETTINGS
 
@@ -569,18 +569,6 @@ class App:
             self._note_trails.clear()
             return
 
-        # --- Sustain-pedal triple-tap theme cycling ---
-        for cc_num, cc_val in self._midi.drain_cc_events():
-            if cc_num == 64 and cc_val > 0:  # sustain pedal pressed down
-                now = time.monotonic()
-                self._sustain_tap_times.append(now)
-                # Keep only taps within the last second
-                cutoff = now - 1.0
-                self._sustain_tap_times = [t for t in self._sustain_tap_times if t >= cutoff]
-                if len(self._sustain_tap_times) >= 3:
-                    self._cycle_theme()
-                    self._sustain_tap_times = []
-
         active_notes = self._midi.get_active_notes()
         if self._led_output is not None:
             self._led_output.update(active_notes, dt)
@@ -603,7 +591,8 @@ class App:
 
         if self._fluid_renderer is not None:
             self._fluid_renderer.step(dt / 1000.0)
-            # Continuously inject dye for each held note so fluid fills the bar length
+            # Splat at the rising head (top_y) of each held note — mimics the sim
+            # cursor being dragged upward by the note tip as it rises.
             if active_notes:
                 render_target, _scaled = self._get_highway_draw_target()
                 sw = float(render_target.get_width())
@@ -618,7 +607,7 @@ class App:
                     if trail is None:
                         continue
                     norm_x = float(trail["x"]) / sw
-                    norm_y = float(trail["bottom_y"]) / sh
+                    norm_y = float(trail["top_y"]) / sh
                     radius = max(0.025, float(trail["width"]) / sw * 4.5)
                     self._fluid_renderer.add_splat(
                         norm_x, norm_y, 0.0, vel_y, r, g, b, radius
