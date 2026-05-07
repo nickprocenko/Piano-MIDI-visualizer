@@ -23,6 +23,7 @@ from src.notes_settings import NotesSettingsScreen
 from src.settings import SettingsScreen
 from src.song_select import SongSelect
 from src.theme_settings import ThemeSettingsScreen
+from src.trail_constants import TRAIL_KEY_EDGE_INSET_PX, TRAIL_MIN_WIDTH_PX
 import src.themes as themes_mod
 
 try:
@@ -604,8 +605,9 @@ class App:
             self._fluid_renderer.step(dt / 1000.0)
             # Continuously inject dye for each held note so fluid fills the bar length
             if active_notes:
-                sw = float(self.screen.get_width())
-                sh = float(self.screen.get_height())
+                render_target, _scaled = self._get_highway_draw_target()
+                sw = float(render_target.get_width())
+                sh = float(render_target.get_height())
                 intensity = self._note_style.get("fluid_intensity", 100) / 100.0
                 r = self._note_style["color_r"] / 255.0
                 g = self._note_style["color_g"] / 255.0
@@ -662,17 +664,18 @@ class App:
         rect = self._piano.get_note_rect(note)
         if rect is None:
             return
+        trail_width = self._trail_width_for_rect(rect)
 
         trail = {
             "note": float(note),
             "x": float(rect.centerx),
             "top_y": float(self._note_anchor_y(note)),
             "bottom_y": float(self._note_anchor_y(note)),
-            "width": float(max(3, min(rect.width - 2, self._note_style["width_px"]))),
+            "width": trail_width,
             "render_x": float(rect.centerx),
             "render_top_y": float(self._note_anchor_y(note)),
             "render_bottom_y": float(self._note_anchor_y(note)),
-            "render_width": float(max(3, min(rect.width - 2, self._note_style["width_px"]))),
+            "render_width": trail_width,
             "released": False,
             "age_ms": 0.0,
         }
@@ -699,7 +702,10 @@ class App:
 
         trail["x"] = float(rect.centerx)
         trail["bottom_y"] = float(self._note_anchor_y(note))
-        trail["width"] = float(max(3, min(rect.width - 2, self._note_style["width_px"])))
+        trail["width"] = self._trail_width_for_rect(rect)
+
+    def _trail_width_for_rect(self, rect: pygame.Rect) -> float:
+        return float(max(TRAIL_MIN_WIDTH_PX, min(rect.width - TRAIL_KEY_EDGE_INSET_PX, self._note_style["width_px"])))
 
     def _note_anchor_y(self, note: int) -> float:
         if self._piano is None:
@@ -851,32 +857,23 @@ class App:
             esc_rect = esc_text.get_rect(topright=(screen_rect.right - 16, 12))
             self.screen.blit(esc_text, esc_rect)
 
-        # If scaling, draw highway content (trails + piano) onto the scaled surface
-        # then blit it centred over the background.  Background is never included.
-        orig_screen = self.screen
-
+        render_target = _highway_surf if scaled_mode else self.screen
         if scaled_mode:
-            _highway_surf.fill((0, 0, 0, 0))
-            self.screen = _highway_surf
-            if self._piano is not None:
-                self._piano.set_target(_highway_surf)
+            render_target.fill((0, 0, 0, 0))
 
         if self._selected_midi_file is None:
-            self._draw_freeplay_trails()
+            self._draw_freeplay_trails(render_target)
 
         # Draw piano with active notes highlighted
         active_notes = self._midi.get_active_notes()
         if self._piano is not None:
+            self._piano.set_target(render_target)
             self._piano.draw(active_notes)
 
         if scaled_mode:
-            # Restore all screen references then blit the highway centred.
-            self.screen = orig_screen
-            if self._piano is not None:
-                self._piano.set_target(_highway_surf)
-            sw, sh = orig_screen.get_size()
-            scaled_w = _highway_surf.get_width()
-            orig_screen.blit(_highway_surf, ((sw - scaled_w) // 2, 0))
+            sw, _sh = self.screen.get_size()
+            scaled_w = render_target.get_width()
+            self.screen.blit(render_target, ((sw - scaled_w) // 2, 0))
 
         if self._audience_client is not None and self._audience_client.connected:
             if self._small_font is None:
@@ -884,20 +881,20 @@ class App:
             live = self._small_font.render("Live", True, (90, 255, 140))
             self.screen.blit(live, (10, self.screen.get_height() - live.get_height() - 8))
 
-    def _draw_freeplay_trails(self) -> None:
+    def _draw_freeplay_trails(self, target: pygame.Surface) -> None:
         if not self._note_trails or self._fx_renderer is None:
             return
 
         if self._fluid_renderer is not None:
             fluid_surf = self._fluid_renderer.get_surface()
             if fluid_surf is not None:
-                sw, sh = self.screen.get_size()
-                if fluid_surf.get_size() != (sw, sh):
+                tw, th = target.get_size()
+                if fluid_surf.get_size() != (tw, th):
                     import pygame as _pg
-                    fluid_surf = _pg.transform.smoothscale(fluid_surf, (sw, sh))
-                self.screen.blit(fluid_surf, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+                    fluid_surf = _pg.transform.smoothscale(fluid_surf, (tw, th))
+                target.blit(fluid_surf, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
 
-        self._fx_renderer.set_target(self.screen)
+        self._fx_renderer.set_target(target)
         self._fx_renderer.begin_frame()
         for trail in self._note_trails:
             self._fx_renderer.draw_trail(self._interpolated_trail_for_draw(trail), self._note_style)
