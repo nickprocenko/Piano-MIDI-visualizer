@@ -66,9 +66,9 @@ class NotesSettingsScreen:
         ("b", "Blue"),
     ]
 
-    COLOR_BLEND_FIELD = ("inner_blend_percent", "Inner/Outer Blend", 0, 100, 5)
-    COLOR_EDGE_WIDTH_FIELD = ("outer_edge_width_px", "Outer Edge Width", 1, 8, 1)
-    COLOR_GLOW_FIELD = ("glow_strength_percent", "Glow Strength", 0, 180, 5)
+    COLOR_BLEND_FIELD      = ("inner_blend_percent",  "Inner/Outer Blend", 0, 100, 5, "%")
+    COLOR_EDGE_WIDTH_FIELD = ("outer_edge_width_px",  "Outer Edge Width",  1,   8, 1, "")
+    COLOR_GLOW_FIELD       = ("glow_strength_percent","Glow Strength",     0, 180, 5, "%")
 
     EFFECT_TOGGLES = [
         ("effect_glow_enabled", "Glow"),
@@ -449,11 +449,10 @@ class NotesSettingsScreen:
             return list(self.EFFECT_FIELDS)
         if self._active_layer == "themes":
             return []
+        # color layer: gradient channels (no unit) + 6-tuple constant fields
         return (
             [(f"gradient_{c}", label, 0, 255, 5, "") for c, label in self.COLOR_CHANNELS]
-            + [(k, l, mn, mx, st, "%") for k, l, mn, mx, st in [
-                self.COLOR_BLEND_FIELD, self.COLOR_EDGE_WIDTH_FIELD, self.COLOR_GLOW_FIELD
-            ]]
+            + [self.COLOR_BLEND_FIELD, self.COLOR_EDGE_WIDTH_FIELD, self.COLOR_GLOW_FIELD]
         )
 
     def _build_layer_rows(self) -> None:

@@ -33,6 +33,12 @@ except ImportError:
     _FLUID_AVAILABLE = False
     _FluidRenderer = None  # type: ignore
 
+# Fluid UI params are stored as integers; dividing by this scale gives the
+# float value passed to the shader (e.g. stored 22 → shader 2.2).
+_FLUID_DISSIPATION_SCALE = 10.0
+# Fluid pressure is stored 0–100 and maps to shader range 0.0–1.0.
+_FLUID_PRESSURE_SCALE = 100.0
+
 
 FREEPLAY_PARTICLE_HEIGHT_PX = 32
 
@@ -288,9 +294,9 @@ class App:
                 sw, sh,
                 sim_scale=0.5,
                 curl_strength=float(self._note_style.get("fluid_curl", 30)),
-                vel_dissipation=float(self._note_style.get("fluid_velocity_dissipation", 7)) / 10.0,
-                dye_dissipation=float(self._note_style.get("fluid_density_dissipation", 22)) / 10.0,
-                pressure=float(self._note_style.get("fluid_pressure", 80)) / 100.0,
+                vel_dissipation=float(self._note_style.get("fluid_velocity_dissipation", 7)) / _FLUID_DISSIPATION_SCALE,
+                dye_dissipation=float(self._note_style.get("fluid_density_dissipation", 22)) / _FLUID_DISSIPATION_SCALE,
+                pressure=float(self._note_style.get("fluid_pressure", 80)) / _FLUID_PRESSURE_SCALE,
             )
             self._fluid_renderer = fr if fr.available else None
         else:

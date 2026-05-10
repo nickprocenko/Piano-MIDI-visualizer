@@ -272,11 +272,22 @@ void main() {
 # Defaults (can be overridden via FluidRenderer constructor)
 # ---------------------------------------------------------------------------
 
-_PRESSURE_ITERS      = 20
-_DEFAULT_CURL        = 30.0
-_DEFAULT_VEL_DISS    = 0.7
-_DEFAULT_DYE_DISS    = 2.2
-_DEFAULT_PRESSURE    = 0.8
+_PRESSURE_ITERS = 20
+
+# Vorticity confinement coefficient (0 = off, higher = tighter swirls).
+_DEFAULT_CURL = 30.0
+
+# Advection uses decay = 1 / (1 + dissipation * dt).
+# At dt ≈ 0.0167 s (60 fps):
+#   vel_diss=0.7  → per-frame retention ≈ 0.988 (1.2 % loss/frame)
+#   dye_diss=2.2  → per-frame retention ≈ 0.966 (3.4 % loss/frame)
+# These match the defaults in nickprocenko/WebGL-Fluid-Simulation settings.js.
+_DEFAULT_VEL_DISS = 0.7
+_DEFAULT_DYE_DISS = 2.2
+
+# How much of the previous pressure field to retain each step (0–1).
+# 0.8 = 80 % retained → converges faster while preserving pressure history.
+_DEFAULT_PRESSURE = 0.8
 
 
 # ---------------------------------------------------------------------------
