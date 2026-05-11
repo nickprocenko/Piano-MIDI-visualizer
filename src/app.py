@@ -33,6 +33,12 @@ except ImportError:
     _FLUID_AVAILABLE = False
     _FluidRenderer = None  # type: ignore
 
+# Fluid UI params are stored as integers; dividing by this scale gives the
+# float value passed to the shader (e.g. stored 22 → shader 2.2).
+_FLUID_DISSIPATION_SCALE = 10.0
+# Fluid pressure is stored 0–100 and maps to shader range 0.0–1.0.
+_FLUID_PRESSURE_SCALE = 100.0
+
 
 FREEPLAY_PARTICLE_HEIGHT_PX = 32
 
@@ -284,7 +290,14 @@ class App:
         self._fx_renderer = NoteEffectRenderer(self.screen)
         if _FLUID_AVAILABLE and self._note_style.get("effect_fluid_enabled", 0):
             sw, sh = self.screen.get_size()
-            fr = _FluidRenderer(sw, sh, sim_scale=0.5)
+            fr = _FluidRenderer(
+                sw, sh,
+                sim_scale=0.5,
+                curl_strength=float(self._note_style.get("fluid_curl", 30)),
+                vel_dissipation=float(self._note_style.get("fluid_velocity_dissipation", 7)) / _FLUID_DISSIPATION_SCALE,
+                dye_dissipation=float(self._note_style.get("fluid_density_dissipation", 22)) / _FLUID_DISSIPATION_SCALE,
+                pressure=float(self._note_style.get("fluid_pressure", 80)) / _FLUID_PRESSURE_SCALE,
+            )
             self._fluid_renderer = fr if fr.available else None
         else:
             self._fluid_renderer = None
@@ -931,6 +944,10 @@ class App:
             "interior_b": int(style.get("interior_b", 255)),
             "effect_fluid_enabled": int(bool(style.get("effect_fluid_enabled", 0))),
             "fluid_intensity": int(style.get("fluid_intensity", 100)),
+            "fluid_curl": int(style.get("fluid_curl", 30)),
+            "fluid_density_dissipation": int(style.get("fluid_density_dissipation", 22)),
+            "fluid_velocity_dissipation": int(style.get("fluid_velocity_dissipation", 7)),
+            "fluid_pressure": int(style.get("fluid_pressure", 80)),
         }
 
     def _load_keyboard_style(self) -> dict[str, int | bool]:
