@@ -213,16 +213,16 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
 </header>
 
 <!-- Tab navigation -->
-<div class="tab-bar">
-  <button class="active" data-tab="notes">Notes</button>
-  <button data-tab="effects">Effects</button>
-  <button data-tab="fluid">Fluid</button>
-  <button data-tab="keyboard">Keyboard</button>
-  <button data-tab="themes">Themes</button>
+<div class="tab-bar" role="tablist" aria-label="Settings tabs">
+  <button class="active" data-tab="notes" role="tab" aria-selected="true" aria-controls="tab-notes" id="tabbtn-notes">Notes</button>
+  <button data-tab="effects" role="tab" aria-selected="false" aria-controls="tab-effects" id="tabbtn-effects">Effects</button>
+  <button data-tab="fluid" role="tab" aria-selected="false" aria-controls="tab-fluid" id="tabbtn-fluid">Fluid</button>
+  <button data-tab="keyboard" role="tab" aria-selected="false" aria-controls="tab-keyboard" id="tabbtn-keyboard">Keyboard</button>
+  <button data-tab="themes" role="tab" aria-selected="false" aria-controls="tab-themes" id="tabbtn-themes">Themes</button>
 </div>
 
 <!-- ── NOTES tab ── -->
-<div class="tab-panel active" id="tab-notes">
+<div class="tab-panel active" id="tab-notes" role="tabpanel" aria-labelledby="tabbtn-notes">
   <div class="grid">
 
     <!-- Color -->
@@ -297,7 +297,7 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
 </div>
 
 <!-- ── EFFECTS tab ── -->
-<div class="tab-panel" id="tab-effects">
+<div class="tab-panel" id="tab-effects" role="tabpanel" aria-labelledby="tabbtn-effects">
   <div class="section">
     <h2>Effect Toggles</h2>
     <div class="effects-grid">
@@ -337,7 +337,7 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
 </div>
 
 <!-- ── FLUID tab ── -->
-<div class="tab-panel" id="tab-fluid">
+<div class="tab-panel" id="tab-fluid" role="tabpanel" aria-labelledby="tabbtn-fluid">
   <div class="section">
     <h2>GPU Fluid Simulation</h2>
     <div class="effects-grid" style="grid-template-columns: 1fr; margin-bottom:16px">
@@ -374,7 +374,7 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
 </div>
 
 <!-- ── KEYBOARD tab ── -->
-<div class="tab-panel" id="tab-keyboard">
+<div class="tab-panel" id="tab-keyboard" role="tabpanel" aria-labelledby="tabbtn-keyboard">
   <div class="section">
     <h2>Keyboard</h2>
     <div class="row">
@@ -395,7 +395,7 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
 </div>
 
 <!-- ── THEMES tab ── -->
-<div class="tab-panel" id="tab-themes">
+<div class="tab-panel" id="tab-themes" role="tabpanel" aria-labelledby="tabbtn-themes">
   <div class="section">
     <h2>Themes</h2>
     <div class="theme-grid" id="theme-btns">
@@ -413,9 +413,13 @@ function setStatus(m){ document.getElementById('status').textContent = m; }
 // Tab switching
 document.querySelectorAll('.tab-bar button').forEach(function(btn){
   btn.addEventListener('click', function(){
-    document.querySelectorAll('.tab-bar button').forEach(function(b){ b.classList.remove('active'); });
+    document.querySelectorAll('.tab-bar button').forEach(function(b){
+      b.classList.remove('active');
+      b.setAttribute('aria-selected', 'false');
+    });
     document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.remove('active'); });
     btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
     document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
   });
 });
