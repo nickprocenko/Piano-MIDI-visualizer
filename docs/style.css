@@ -1,0 +1,362 @@
+/* Piano MIDI Visualizer — Web Effects Editor */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #000;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #ccc;
+  font-size: 13px;
+}
+
+/* ── Canvas layers ─────────────────────────────────────────── */
+
+canvas {
+  position: fixed;
+  top: 0; left: 0;
+  display: block;
+}
+
+#fluid-canvas   { z-index: 1; }
+#highway-canvas { z-index: 2; pointer-events: none; }
+#piano-canvas   { z-index: 3; touch-action: none; }
+
+/* ── Header overlay ──────────────────────────────────────── */
+
+#ui {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+#header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  pointer-events: auto;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dot {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: #444;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.dot.connected { background: #2d2; }
+
+.pill-btn, .gear-btn {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: #bbb;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 12px;
+  transition: background 0.15s;
+}
+.pill-btn:hover, .gear-btn:hover { background: rgba(255,255,255,0.16); }
+
+.gear-btn {
+  font-size: 18px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  line-height: 1;
+}
+
+/* ── Settings panel ─────────────────────────────────────── */
+
+#settings-panel {
+  position: fixed;
+  top: 0; right: 0;
+  width: 300px;
+  height: 100%;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: rgba(10,10,16,0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-left: 1px solid rgba(255,255,255,0.07);
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+  overflow: hidden;
+}
+#settings-panel.open { transform: translateX(0); }
+
+#panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+#settings-close {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+#settings-close:hover { color: #ccc; }
+
+#panel-body {
+  overflow-y: auto;
+  flex: 1;
+  padding-bottom: 20px;
+  scrollbar-width: thin;
+  scrollbar-color: #333 transparent;
+}
+
+/* ── Section (details/summary) ────────────────────────────── */
+
+details {
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+summary {
+  list-style: none;
+  padding: 10px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #666;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: '▶';
+  font-size: 8px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+details[open] > summary::before { transform: rotate(90deg); }
+summary:hover { color: #aaa; }
+details[open] > summary { color: #8be; }
+
+/* Section content shorthand class */
+.sc {
+  padding: 6px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Labels, selects, colour pickers ────────────────────────── */
+
+label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: #999;
+  gap: 8px;
+  cursor: default;
+}
+
+select {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #ccc;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  max-width: 120px;
+  outline: none;
+}
+
+input[type="color"] {
+  width: 34px; height: 22px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 1px;
+  background: none;
+}
+
+/* ── Slider rows ──────────────────────────────────────────── */
+
+.sr {
+  display: grid;
+  grid-template-columns: 96px 1fr 30px;
+  align-items: center;
+  gap: 6px;
+}
+.sr label { font-size: 11px; color: #777; justify-content: flex-start; }
+.sr span  { font-size: 10px; color: #555; text-align: right; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 2px;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #5ad;
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(85,170,220,0.4);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: #5ad;
+  border: none;
+  cursor: pointer;
+}
+
+/* ── Effect rows (toggle + slider) ─────────────────────────── */
+
+.er {
+  display: grid;
+  grid-template-columns: 106px 1fr 30px;
+  align-items: center;
+  gap: 6px;
+}
+
+.tl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #999;
+  cursor: pointer;
+  justify-content: flex-start;
+}
+
+.bl { margin-top: 2px; }
+
+input[type="checkbox"] {
+  accent-color: #5ad;
+  width: 14px; height: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── MIDI section ──────────────────────────────────────────── */
+
+.midi-list { font-size: 11px; color: #555; line-height: 1.8; }
+.hint { font-size: 10px; color: #444; line-height: 1.6; margin-top: 4px; }
+
+/* ── Presets ──────────────────────────────────────────────── */
+
+.preset-row {
+  display: flex;
+  gap: 6px;
+}
+
+.preset-row input {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #ccc;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  outline: none;
+}
+
+.preset-row input:focus {
+  border-color: rgba(85,170,220,0.5);
+}
+
+#preset-save {
+  background: rgba(85,170,220,0.18);
+  border: 1px solid rgba(85,170,220,0.3);
+  color: #5ad;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#preset-save:hover { background: rgba(85,170,220,0.28); }
+
+.preset-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.preset-name-label {
+  flex: 1;
+  font-size: 12px;
+  color: #aaa;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-load {
+  background: rgba(85,170,220,0.14);
+  border: 1px solid rgba(85,170,220,0.25);
+  color: #5ad;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.preset-load:hover { background: rgba(85,170,220,0.24); }
+
+.preset-del {
+  background: rgba(220,80,80,0.12);
+  border: 1px solid rgba(220,80,80,0.22);
+  color: #e66;
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.preset-del:hover { background: rgba(220,80,80,0.22); }
+
+/* ── Export button ────────────────────────────────────────── */
+
+.export-btn {
+  width: 100%;
+  padding: 10px;
+  background: rgba(80,220,120,0.1);
+  border: 1px solid rgba(80,220,120,0.22);
+  color: #5d9;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: background 0.15s;
+}
+.export-btn:hover { background: rgba(80,220,120,0.2); }
+
+/* ── Mobile ──────────────────────────────────────────────── */
+
+@media (max-width: 420px) {
+  #settings-panel { width: 100%; border-left: none; }
+}
