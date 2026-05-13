@@ -27,16 +27,16 @@ from src.trail_constants import TRAIL_KEY_EDGE_INSET_PX, TRAIL_MIN_WIDTH_PX
 import src.themes as themes_mod
 
 try:
-    from src.fluid_renderer import FluidRenderer as _FluidRenderer
+    from src.fluid_web_bridge import FluidWebBridge as _FluidWebBridge
     _FLUID_AVAILABLE = True
 except ImportError:
     _FLUID_AVAILABLE = False
-    _FluidRenderer = None  # type: ignore
+    _FluidWebBridge = None  # type: ignore
 
 # Fluid UI params are stored as integers; dividing by this scale gives the
-# float value passed to the shader (e.g. stored 22 → shader 2.2).
+# float value passed to the simulation (e.g. stored 22 → sim 2.2).
 _FLUID_DISSIPATION_SCALE = 10.0
-# Fluid pressure is stored 0–100 and maps to shader range 0.0–1.0.
+# Fluid pressure is stored 0–100 and maps to sim range 0.0–1.0.
 _FLUID_PRESSURE_SCALE = 100.0
 
 
@@ -290,15 +290,15 @@ class App:
         self._fx_renderer = NoteEffectRenderer(self.screen)
         if _FLUID_AVAILABLE and self._note_style.get("effect_fluid_enabled", 0):
             sw, sh = self.screen.get_size()
-            fr = _FluidRenderer(
-                sw, sh,
-                sim_scale=0.5,
+            wx, wy = self._get_window_position()
+            bridge = _FluidWebBridge(
+                wx, wy, sw, sh,
                 curl_strength=float(self._note_style.get("fluid_curl", 30)),
                 vel_dissipation=float(self._note_style.get("fluid_velocity_dissipation", 7)) / _FLUID_DISSIPATION_SCALE,
                 dye_dissipation=float(self._note_style.get("fluid_density_dissipation", 22)) / _FLUID_DISSIPATION_SCALE,
                 pressure=float(self._note_style.get("fluid_pressure", 80)) / _FLUID_PRESSURE_SCALE,
             )
-            self._fluid_renderer = fr if fr.available else None
+            self._fluid_renderer = bridge if bridge.available else None
         else:
             self._fluid_renderer = None
 
@@ -326,6 +326,30 @@ class App:
         if self._fluid_renderer is not None:
             self._fluid_renderer.destroy()
             self._fluid_renderer = None
+
+    def _get_window_position(self) -> tuple[int, int]:
+        """Return the top-left screen position of the pygame window.
+
+        Used to position the WebGL fluid overlay on top of the pygame window.
+        Falls back to (0, 0) when the position cannot be determined (e.g.
+        fullscreen mode or unsupported platform).
+        """
+        try:
+            if hasattr(pygame.display, "get_wm_info"):
+                info = pygame.display.get_wm_info()
+                # Windows: info contains "window" (HWND); use GetWindowRect.
+                # Check that the handle is integer-like before passing to ctypes.
+                if "window" in info and isinstance(info["window"], int):
+                    import ctypes
+                    import ctypes.wintypes
+                    rect = ctypes.wintypes.RECT()
+                    if ctypes.windll.user32.GetWindowRect(
+                        info["window"], ctypes.byref(rect)
+                    ):
+                        return int(rect.left), int(rect.top)
+        except Exception:
+            pass
+        return 0, 0
 
     def _get_highway_draw_target(self) -> tuple[pygame.Surface, bool]:
         """Return the active highway render surface and whether it is scaled."""
@@ -898,14 +922,8 @@ class App:
         if not self._note_trails or self._fx_renderer is None:
             return
 
-        if self._fluid_renderer is not None:
-            fluid_surf = self._fluid_renderer.get_surface()
-            if fluid_surf is not None:
-                tw, th = target.get_size()
-                if fluid_surf.get_size() != (tw, th):
-                    import pygame as _pg
-                    fluid_surf = _pg.transform.smoothscale(fluid_surf, (tw, th))
-                target.blit(fluid_surf, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+        # The WebGL fluid overlay renders directly in its own window on top of
+        # the pygame display; no pixel read-back or blitting is needed here.
 
         self._fx_renderer.set_target(target)
         self._fx_renderer.begin_frame()
