@@ -37,6 +37,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
+### Standalone fluid prototype
+
+Use the standalone pywebview fluid prototype to validate the desktop runtime before integrating changes into the keyboard app:
+
+```bash
+python tools/fluid_prototype.py --duration 30
+```
+
 Press **ESC** during a song to return to the main menu.  
 Click **QUIT** or close the window to exit.
 
