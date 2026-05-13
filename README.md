@@ -38,6 +38,21 @@ python main.py
 Press **ESC** during a song to return to the main menu.  
 Click **QUIT** or close the window to exit.
 
+## Live Local Web Control Panel
+
+Yes — the app includes a built-in local control webpage served by `src/control_server.py`.
+
+How to use it:
+1. Start the app (`python main.py` or the `.bat` launcher).
+2. Keep the app running.
+3. Open `http://localhost:8181` in your browser on the same machine.
+4. Adjust tabs like **Notes**, **Effects**, **Fluid**, **Keyboard**, and **Themes**.
+5. Changes apply live while the visualizer is running and are saved to `config.json`.
+
+Notes:
+- The panel is local-only (`127.0.0.1`) and is not exposed to your network.
+- If the page does not open, another process may already be using port `8181`.
+
 ## Crash Diagnostics
 
 If the app crashes, a JSON crash report is written to `crash_logs/` with:
@@ -148,5 +163,4 @@ Behavior:
 - App smooths from current to target color over `transition_ms`
 - Updates note colors in real time
 - Updates LED active color in real time
-
 
