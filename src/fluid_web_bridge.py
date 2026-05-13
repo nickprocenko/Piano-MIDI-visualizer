@@ -26,7 +26,6 @@ the rest of the app continues as if fluid is disabled.
 from __future__ import annotations
 
 import multiprocessing
-import os
 import pathlib
 from typing import Optional
 
@@ -47,7 +46,7 @@ _HTML_PATH = pathlib.Path(__file__).parent / "static" / "fluid.html"
 
 def _fluid_subprocess_main(
     queue: multiprocessing.Queue,  # type: ignore[type-arg]
-    html_path: str,
+    html_url: str,
     x: int,
     y: int,
     width: int,
@@ -65,8 +64,7 @@ def _fluid_subprocess_main(
 
         window = webview.create_window(
             title="",
-            url=f"file:///{html_path}" if os.name == "nt" else f"file://{html_path}",
-            x=x,
+            url=html_url,
             y=y,
             width=width,
             height=height,
@@ -150,12 +148,14 @@ class FluidWebBridge:
         if not _HTML_PATH.exists():
             return
 
+        # 256 slots is enough to buffer ~4 seconds of splat commands at 60 fps
+        # without blocking the pygame main loop if the webview falls behind.
         self._queue = multiprocessing.Queue(maxsize=256)
         self._process = multiprocessing.Process(
             target=_fluid_subprocess_main,
             args=(
                 self._queue,
-                str(_HTML_PATH),
+                _HTML_PATH.as_uri(),
                 screen_x,
                 screen_y,
                 screen_width,

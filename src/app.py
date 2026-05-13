@@ -338,7 +338,8 @@ class App:
             if hasattr(pygame.display, "get_wm_info"):
                 info = pygame.display.get_wm_info()
                 # Windows: info contains "window" (HWND); use GetWindowRect.
-                if "window" in info and hasattr(info["window"], "__index__"):
+                # Check that the handle is integer-like before passing to ctypes.
+                if "window" in info and isinstance(info["window"], int):
                     import ctypes
                     import ctypes.wintypes
                     rect = ctypes.wintypes.RECT()
