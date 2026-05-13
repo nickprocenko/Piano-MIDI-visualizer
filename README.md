@@ -3,6 +3,8 @@
 A full-screen, real-time piano MIDI visualizer for live performances.  
 Designed to run locally on Windows with a large screen or projector.
 
+Current deployed website: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/" target="_blank" rel="noopener noreferrer">https://nickprocenko.github.io/Piano-MIDI-visualizer/</a>
+
 ## Features
 - Borderless fullscreen on a second monitor — clicking your PC monitor won't minimise the window
 - Real-time MIDI input (USB MIDI devices — tested with Roland JUNO-DS)
@@ -163,4 +165,3 @@ Behavior:
 - App smooths from current to target color over `transition_ms`
 - Updates note colors in real time
 - Updates LED active color in real time
-
