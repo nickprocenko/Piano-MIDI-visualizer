@@ -38,6 +38,13 @@ except ImportError:
 _FLUID_DISSIPATION_SCALE = 10.0
 # Fluid pressure is stored 0–100 and maps to sim range 0.0–1.0.
 _FLUID_PRESSURE_SCALE = 100.0
+_LIVE_FLUID_NOTE_STYLE_KEYS = frozenset({
+    "effect_fluid_enabled",
+    "fluid_curl",
+    "fluid_density_dissipation",
+    "fluid_velocity_dissipation",
+    "fluid_pressure",
+})
 
 
 FREEPLAY_PARTICLE_HEIGHT_PX = 32
@@ -337,7 +344,10 @@ class App:
     def _sync_fluid_renderer(self, force_recreate: bool = False) -> None:
         """Keep the live fluid overlay aligned with current note-style settings."""
         fluid_enabled = bool(self._note_style.get("effect_fluid_enabled", 0))
-        if not _FLUID_AVAILABLE or not fluid_enabled or self.state != State.HIGHWAY:
+        if not _FLUID_AVAILABLE or not fluid_enabled:
+            self._destroy_fluid_renderer()
+            return
+        if self.state != State.HIGHWAY:
             self._destroy_fluid_renderer()
             return
         if self._fluid_renderer is None or force_recreate:
@@ -570,14 +580,7 @@ class App:
                     self._color_blend_elapsed_ms = 0
                     if self._led_output is not None:
                         self._led_output.set_active_color(int(nr), int(ng), int(nb))
-                fluid_keys = {
-                    "effect_fluid_enabled",
-                    "fluid_curl",
-                    "fluid_density_dissipation",
-                    "fluid_velocity_dissipation",
-                    "fluid_pressure",
-                }
-                if any(k in data for k in fluid_keys):
+                if any(k in data for k in _LIVE_FLUID_NOTE_STYLE_KEYS):
                     self._sync_fluid_renderer(
                         force_recreate="effect_fluid_enabled" in data
                     )
