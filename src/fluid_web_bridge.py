@@ -65,6 +65,7 @@ def _fluid_subprocess_main(
         window = webview.create_window(
             title="",
             url=html_url,
+            x=x,
             y=y,
             width=width,
             height=height,
