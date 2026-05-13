@@ -27,12 +27,20 @@
     lastFrameReportMs: 0,
   };
 
+  function getHostApi() {
+    return window.pywebview && window.pywebview.api ? window.pywebview.api : null;
+  }
+
   function callHost(method, ...args) {
-    const api = window.pywebview && window.pywebview.api;
+    const api = getHostApi();
     if (!api || typeof api[method] !== 'function') return;
     try {
       const result = api[method](...args);
-      if (result && typeof result.catch === 'function') result.catch(() => {});
+      if (result && typeof result.catch === 'function') {
+        // These hooks are optional diagnostics for the standalone prototype,
+        // so failed host calls must never break the shared fluid page.
+        result.catch(() => {});
+      }
     } catch (_) {}
   }
 
@@ -44,7 +52,7 @@
 
   function enablePrototypeInput() {
     if (hostState.inputEnabled) return;
-    const api = window.pywebview && window.pywebview.api;
+    const api = getHostApi();
     if (!api || typeof api.trigger_input_splat !== 'function') return;
     hostState.inputEnabled = true;
 
@@ -73,7 +81,7 @@
   }
 
   window.addEventListener('pywebviewready', activateHostBridge);
-  if (window.pywebview && window.pywebview.api) {
+  if (getHostApi()) {
     activateHostBridge();
   }
 

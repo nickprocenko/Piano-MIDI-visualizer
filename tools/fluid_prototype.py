@@ -230,7 +230,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--duration", type=float, default=30.0, help="Seconds before auto-close.")
     parser.add_argument(
-        "--interval",
+        "--splat-interval",
         type=float,
         default=1.0,
         help="Seconds between synthetic splats.",
@@ -247,7 +247,7 @@ def main() -> None:
 
     runtime = FluidPrototypeRuntime(
         duration_sec=max(1.0, args.duration),
-        splat_interval_sec=max(0.1, args.interval),
+        splat_interval_sec=max(0.1, args.splat_interval),
     )
 
     window = webview.create_window(
