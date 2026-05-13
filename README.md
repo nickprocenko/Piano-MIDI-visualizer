@@ -1,17 +1,17 @@
 # Piano MIDI Visualizer
 
 A full-screen, real-time piano MIDI visualizer for live performances.  
-Designed to run locally on Windows with a dual-monitor setup (projector + PC).
+Designed to run locally on Windows with a large screen or projector.
 
 ## Features
 - Borderless fullscreen on a second monitor — clicking your PC monitor won't minimise the window
 - Real-time MIDI input (USB MIDI devices — tested with Roland JUNO-DS)
-- 88-key piano rendering with brightness and height controls
+- 88-key piano rendering with animation controls
 - Falling-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
 - Animated background image / GIF slideshow
-- ESP32 LED strip synchronisation over serial or BLE
+- ESP32 LED strip(s) synchronisation over serial or BLE
 - Audience live colour control via WebSocket (Twitch channel-point integration)
-- Triple sustain-pedal tap to cycle through saved themes
+- Mappable midi CCs for various controls
 - Built-in theme manager — save, rename, load, and delete colour presets
 - **Live web control panel** at `http://localhost:8181` — change notes, effects, keyboard, and themes from your browser while a song is playing
 - 60 fps game loop with crash diagnostics
