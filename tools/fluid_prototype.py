@@ -225,7 +225,7 @@ def _on_window_closed(runtime: FluidPrototypeRuntime) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Standalone pywebview fluid prototype.")
+    parser = argparse.ArgumentParser(description="Standalone PyWebView fluid prototype.")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--duration", type=float, default=30.0, help="Seconds before auto-close.")
