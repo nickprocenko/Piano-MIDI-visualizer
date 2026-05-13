@@ -1,139 +1,4 @@
-"""Local HTTP control panel — runs in a background daemon thread.
-
-Opens on http://localhost:8181/ while the app is running.
-The main thread queues patches via App._control_patches; the HTTP handler
-only writes to that queue so there are no cross-thread mutations.
-"""
-
-from __future__ import annotations
-
-import json
-import queue
-import socketserver
-import threading
-from http.server import BaseHTTPRequestHandler
-from typing import Any, Callable
-
-PORT = 8181
-
-
-def _make_handler(
-    patch_queue: queue.SimpleQueue,
-    get_state: Callable[[], dict],
-) -> type:
-    """Return a handler class bound to the given queue and state reader."""
-
-    class Handler(BaseHTTPRequestHandler):
-        _pq = patch_queue
-        _gs = get_state
-
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A002
-            pass  # suppress access-log spam
-
-        # ------------------------------------------------------------------
-        def do_OPTIONS(self) -> None:
-            self.send_response(200)
-            self._cors()
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
-            self.end_headers()
-
-        def do_GET(self) -> None:
-            if self.path == "/":
-                self._serve_html()
-            elif self.path == "/api/settings":
-                self._json_ok(self._gs())
-            elif self.path == "/api/themes":
-                self._serve_themes()
-            else:
-                self.send_error(404)
-
-        def do_POST(self) -> None:
-            length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(length)
-            try:
-                data = json.loads(body)
-            except Exception:
-                self.send_error(400)
-                return
-
-            if self.path == "/api/patch":
-                self._pq.put(data)
-                self._json_ok({"ok": True})
-            else:
-                self.send_error(404)
-
-        # ------------------------------------------------------------------
-        def _serve_themes(self) -> None:
-            try:
-                import src.themes as themes_mod
-                themes = themes_mod.load_user_themes()
-                active = themes_mod.get_active_index()
-            except Exception:
-                themes, active = [], 0
-            self._json_ok({"themes": themes, "active_index": active})
-
-        def _json_ok(self, data: Any) -> None:
-            body = json.dumps(data).encode()
-            self.send_response(200)
-            self._cors()
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _cors(self) -> None:
-            self.send_header("Access-Control-Allow-Origin", "*")
-
-        def _serve_html(self) -> None:
-            body = _HTML.encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-    return Handler
-
-
-class ControlServer:
-    """Starts the background HTTP control panel on localhost:8181."""
-
-    def __init__(
-        self,
-        patch_queue: queue.SimpleQueue,
-        get_state: Callable[[], dict],
-    ) -> None:
-        self._patch_queue = patch_queue
-        self._get_state = get_state
-        self._server: socketserver.TCPServer | None = None
-        self._thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        handler_cls = _make_handler(self._patch_queue, self._get_state)
-
-        class _TCPServer(socketserver.TCPServer):
-            allow_reuse_address = True
-
-        try:
-            server = _TCPServer(("127.0.0.1", PORT), handler_cls)
-        except OSError:
-            # Port already in use — skip silently rather than crashing the app.
-            return
-        self._server = server
-        self._thread = threading.Thread(target=server.serve_forever, daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        if self._server is not None:
-            self._server.shutdown()
-
-
-# ---------------------------------------------------------------------------
-# Embedded HTML control panel
-# ---------------------------------------------------------------------------
-
-_HTML = r"""<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -405,6 +270,7 @@ header h1 { font-size: 17px; font-weight: 700; color: var(--accent); letter-spac
 </div>
 
 <script>
+var API = 'http://localhost:8181';
 var timers = {}, settings = {};
 
 function hex(r,g,b){ return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); }
@@ -451,8 +317,9 @@ function populate(s){
 }
 
 function send(type, patch){
-  fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:type,patch:patch})})
-    .then(function(){ setStatus('Saved'); }).catch(function(){ setStatus('Send failed'); });
+  fetch(API+'/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:type,patch:patch})})
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); setStatus('Saved'); })
+    .catch(function(e){ setStatus('Send failed — is the app running? ('+e.message+')'); });
 }
 function debSend(key, type, patch, ms){
   clearTimeout(timers[key]);
@@ -529,7 +396,7 @@ document.getElementById('btn-visible').addEventListener('click', function(){
 
 // Themes
 function loadThemes(){
-  fetch('/api/themes').then(function(r){ return r.json(); }).then(function(d){
+  fetch(API+'/api/themes').then(function(r){ return r.json(); }).then(function(d){
     var cont=document.getElementById('theme-btns');
     if(!d.themes||!d.themes.length){
       cont.innerHTML='<span class="no-themes">No user themes found.</span>';
@@ -541,19 +408,19 @@ function loadThemes(){
       btn.className='theme-btn'+(i===d.active_index?' active':'');
       btn.textContent=t.name||('Theme '+(i+1));
       btn.onclick=function(){
-        fetch('/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},
+        fetch(API+'/api/patch',{method:'POST',headers:{'Content-Type':'application/json'},
           body:JSON.stringify({type:'theme',index:i})})
           .then(function(){ setStatus('Theme applied'); setTimeout(function(){loadSettings();loadThemes();},350); });
       };
       cont.appendChild(btn);
     });
-  }).catch(function(){});
+  }).catch(function(e){ setStatus('Could not load themes ('+e.message+')'); });
 }
 
 function loadSettings(){
-  fetch('/api/settings').then(function(r){ return r.json(); }).then(function(d){
+  fetch(API+'/api/settings').then(function(r){ return r.json(); }).then(function(d){
     populate(d); setStatus('Ready');
-  }).catch(function(){ setStatus('Cannot connect to app'); });
+  }).catch(function(e){ setStatus('Cannot connect to app — is it running? ('+e.message+')'); });
 }
 
 loadSettings();
@@ -561,4 +428,3 @@ loadThemes();
 </script>
 </body>
 </html>
-"""

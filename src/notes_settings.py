@@ -5,6 +5,7 @@ from __future__ import annotations
 import pygame
 from src import config as cfg
 from src.note_fx import NoteEffectRenderer
+from src.trail_constants import TRAIL_KEY_EDGE_INSET_PX, TRAIL_MIN_WIDTH_PX
 
 # Shared look
 BG_COLOR = (15, 15, 20)
@@ -65,9 +66,9 @@ class NotesSettingsScreen:
         ("b", "Blue"),
     ]
 
-    COLOR_BLEND_FIELD = ("inner_blend_percent", "Inner/Outer Blend", 0, 100, 5)
-    COLOR_EDGE_WIDTH_FIELD = ("outer_edge_width_px", "Outer Edge Width", 1, 8, 1)
-    COLOR_GLOW_FIELD = ("glow_strength_percent", "Glow Strength", 0, 180, 5)
+    COLOR_BLEND_FIELD      = ("inner_blend_percent",  "Inner/Outer Blend", 0, 100, 5, "%")
+    COLOR_EDGE_WIDTH_FIELD = ("outer_edge_width_px",  "Outer Edge Width",  1,   8, 1, "")
+    COLOR_GLOW_FIELD       = ("glow_strength_percent","Glow Strength",     0, 180, 5, "%")
 
     EFFECT_TOGGLES = [
         ("effect_glow_enabled", "Glow"),
@@ -78,13 +79,20 @@ class NotesSettingsScreen:
         ("effect_moon_dust_enabled", "Moon Dust"),
         ("effect_steam_smoke_enabled", "Steam Wisps"),
         ("effect_halo_pulse_enabled", "Halo Pulse"),
+        ("effect_fluid_enabled", "GPU Fluid"),
     ]
 
+    # 6-tuple: (key, label, min, max, step, unit_suffix)
     EFFECT_FIELDS = [
-        ("highlight_strength_percent", "Highlight Strength", 0, 170, 5),
-        ("spark_amount_percent", "Spark Amount", 0, 300, 5),
-        ("smoke_amount_percent", "Smoke Amount", 0, 300, 5),
-        ("press_smoke_amount_percent", "Start Mist Amount", 0, 250, 5),
+        ("highlight_strength_percent", "Highlight Strength",  0, 170,  5, "%"),
+        ("spark_amount_percent",       "Spark Amount",         0, 300,  5, "%"),
+        ("smoke_amount_percent",       "Smoke Amount",         0, 300,  5, "%"),
+        ("press_smoke_amount_percent", "Start Mist Amount",    0, 250,  5, "%"),
+        ("fluid_intensity",            "Fluid Intensity",      0, 200,  5, "%"),
+        ("fluid_curl",                 "Fluid Curl",           0, 100,  5, ""),
+        ("fluid_density_dissipation",  "Density Dissipation",  1, 100,  1, ""),
+        ("fluid_velocity_dissipation", "Velocity Dissipation", 1,  40,  1, ""),
+        ("fluid_pressure",             "Fluid Pressure",       0, 100,  5, "%"),
     ]
 
     LAYERS = [
@@ -374,6 +382,12 @@ class NotesSettingsScreen:
             "interior_b": int(data.get("interior_b", 255)),
             "active_theme_id": str(data.get("active_theme_id", "custom")),
             "experimental_claire_script_enabled": int(bool(data.get("experimental_claire_script_enabled", 0))),
+            "effect_fluid_enabled": int(bool(data.get("effect_fluid_enabled", 0))),
+            "fluid_intensity": int(data.get("fluid_intensity", 100)),
+            "fluid_curl": int(data.get("fluid_curl", 30)),
+            "fluid_density_dissipation": int(data.get("fluid_density_dissipation", 22)),
+            "fluid_velocity_dissipation": int(data.get("fluid_velocity_dissipation", 7)),
+            "fluid_pressure": int(data.get("fluid_pressure", 80)),
         }
 
     def _save(self) -> None:
@@ -426,17 +440,18 @@ class NotesSettingsScreen:
 
         self._back_rect = pygame.Rect(cx - BACK_W // 2, sr.height - BACK_H - 24, BACK_W, BACK_H)
 
-    def _active_fields(self) -> list[tuple[str, str, int, int, int]]:
+    def _active_fields(self) -> list[tuple]:
         if self._active_layer == "motion":
-            return list(self.MOTION_FIELDS)
+            return [(k, l, mn, mx, st, "") for k, l, mn, mx, st in self.MOTION_FIELDS]
         if self._active_layer == "shape":
-            return list(self.SHAPE_FIELDS)
+            return [(k, l, mn, mx, st, "") for k, l, mn, mx, st in self.SHAPE_FIELDS]
         if self._active_layer == "effects":
             return list(self.EFFECT_FIELDS)
         if self._active_layer == "themes":
             return []
+        # color layer: gradient channels (no unit) + 6-tuple constant fields
         return (
-            [(f"gradient_{c}", label, 0, 255, 5) for c, label in self.COLOR_CHANNELS]
+            [(f"gradient_{c}", label, 0, 255, 5, "") for c, label in self.COLOR_CHANNELS]
             + [self.COLOR_BLEND_FIELD, self.COLOR_EDGE_WIDTH_FIELD, self.COLOR_GLOW_FIELD]
         )
 
@@ -525,7 +540,7 @@ class NotesSettingsScreen:
 
     def _set_slider_from_x(self, index: int, mouse_x: int) -> None:
         rect = self._slider_rects[index]
-        key, _label, min_v, max_v, step = self._active_fields()[index]
+        key, _label, min_v, max_v, step, *_ = self._active_fields()[index]
         if rect.width <= 1:
             return
 
@@ -595,7 +610,7 @@ class NotesSettingsScreen:
             return
 
         fields = self._active_fields()
-        for i, (key, label, _min_v, _max_v, _step) in enumerate(fields):
+        for i, (key, label, _min_v, _max_v, _step, *rest) in enumerate(fields):
             row = self._row_rects[i]
             slider = self._slider_rects[i]
 
@@ -651,8 +666,8 @@ class NotesSettingsScreen:
                     label_surf = self._label_font.render(label, True, TEXT_COLOR)
                     self.screen.blit(label_surf, (row.left + 10, row.top + 6))
 
-                    suffix = "%" if key in ("inner_blend_percent", "glow_strength_percent") else ""
-                    value_surf = self._value_font.render(f"{val}{suffix}", True, MUTED_TEXT_COLOR)
+                    unit = rest[0] if rest else "%"
+                    value_surf = self._value_font.render(f"{val}{unit}", True, MUTED_TEXT_COLOR)
                     self.screen.blit(value_surf, value_surf.get_rect(topright=(row.right - 10, row.top + 8)))
 
                     track_color = BUTTON_HOVER_BG if i == self._hover_slider or i == self._drag_slider else BUTTON_NORMAL_BG
@@ -712,7 +727,7 @@ class NotesSettingsScreen:
             self.screen.blit(state_surf, state_surf.get_rect(topright=(rect.right - 10, rect.top + 7)))
 
         # Slider rows
-        for i, (key, label, _min_v, _max_v, _step) in enumerate(self.EFFECT_FIELDS):
+        for i, (key, label, _min_v, _max_v, _step, unit) in enumerate(self.EFFECT_FIELDS):
             row = self._row_rects[i]
             slider = self._slider_rects[i]
 
@@ -723,7 +738,7 @@ class NotesSettingsScreen:
             self.screen.blit(label_surf, (row.left + 10, row.top + 6))
 
             val = int(self._values[key])
-            value_surf = self._value_font.render(f"{val}%", True, MUTED_TEXT_COLOR)
+            value_surf = self._value_font.render(f"{val}{unit}", True, MUTED_TEXT_COLOR)
             self.screen.blit(value_surf, value_surf.get_rect(topright=(row.right - 10, row.top + 8)))
 
             track_color = BUTTON_HOVER_BG if i == self._hover_slider or i == self._drag_slider else BUTTON_NORMAL_BG
@@ -766,7 +781,7 @@ class NotesSettingsScreen:
         self._save()
 
     def _value_ratio(self, index: int) -> float:
-        key, _label, min_v, max_v, _step = self._active_fields()[index]
+        key, _label, min_v, max_v, _step, *_ = self._active_fields()[index]
         span = max(1, max_v - min_v)
         return (self._values[key] - min_v) / float(span)
 
@@ -776,7 +791,7 @@ class NotesSettingsScreen:
             "x": float(key_rect.centerx),
             "top_y": float(key_rect.top),
             "bottom_y": float(key_rect.top),
-            "width": float(self._values["width_px"]),
+            "width": self._preview_trail_width(key_rect),
             "released": False,
             "age_ms": 0.0,
         }
@@ -797,7 +812,15 @@ class NotesSettingsScreen:
         key_rect = self._preview_key_rect()
         self._preview_active_trail["x"] = float(key_rect.centerx)
         self._preview_active_trail["bottom_y"] = float(key_rect.top)
-        self._preview_active_trail["width"] = float(self._values["width_px"])
+        self._preview_active_trail["width"] = self._preview_trail_width(key_rect)
+
+    def _preview_trail_width(self, key_rect: pygame.Rect) -> float:
+        return float(
+            max(
+                TRAIL_MIN_WIDTH_PX,
+                min(key_rect.width - TRAIL_KEY_EDGE_INSET_PX, int(self._values["width_px"])),
+            )
+        )
 
     def _preview_key_rect(self) -> pygame.Rect:
         """Return key rect in preview-surface–relative coordinates."""
