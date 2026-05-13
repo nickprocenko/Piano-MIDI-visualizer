@@ -288,19 +288,7 @@ class App:
         self._active_note_trails.clear()
         self._note_trails.clear()
         self._fx_renderer = NoteEffectRenderer(self.screen)
-        if _FLUID_AVAILABLE and self._note_style.get("effect_fluid_enabled", 0):
-            sw, sh = self.screen.get_size()
-            wx, wy = self._get_window_position()
-            bridge = _FluidWebBridge(
-                wx, wy, sw, sh,
-                curl_strength=float(self._note_style.get("fluid_curl", 30)),
-                vel_dissipation=float(self._note_style.get("fluid_velocity_dissipation", 7)) / _FLUID_DISSIPATION_SCALE,
-                dye_dissipation=float(self._note_style.get("fluid_density_dissipation", 22)) / _FLUID_DISSIPATION_SCALE,
-                pressure=float(self._note_style.get("fluid_pressure", 80)) / _FLUID_PRESSURE_SCALE,
-            )
-            self._fluid_renderer = bridge if bridge.available else None
-        else:
-            self._fluid_renderer = None
+        self._sync_fluid_renderer(force_recreate=True)
 
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
@@ -323,9 +311,45 @@ class App:
         self._active_note_trails.clear()
         self._note_trails.clear()
         self._fx_renderer = None
+        self._destroy_fluid_renderer()
+
+    def _create_fluid_renderer(self) -> None:
+        """Create the WebGL fluid overlay for the current display."""
+        if not _FLUID_AVAILABLE:
+            return
+        sw, sh = self.screen.get_size()
+        wx, wy = self._get_window_position()
+        bridge = _FluidWebBridge(
+            wx, wy, sw, sh,
+            curl_strength=float(self._note_style.get("fluid_curl", 30)),
+            vel_dissipation=float(self._note_style.get("fluid_velocity_dissipation", 7)) / _FLUID_DISSIPATION_SCALE,
+            dye_dissipation=float(self._note_style.get("fluid_density_dissipation", 22)) / _FLUID_DISSIPATION_SCALE,
+            pressure=float(self._note_style.get("fluid_pressure", 80)) / _FLUID_PRESSURE_SCALE,
+        )
+        self._fluid_renderer = bridge if bridge.available else None
+
+    def _destroy_fluid_renderer(self) -> None:
+        """Tear down the WebGL fluid overlay if it exists."""
         if self._fluid_renderer is not None:
             self._fluid_renderer.destroy()
             self._fluid_renderer = None
+
+    def _sync_fluid_renderer(self, force_recreate: bool = False) -> None:
+        """Keep the live fluid overlay aligned with current note-style settings."""
+        fluid_enabled = bool(self._note_style.get("effect_fluid_enabled", 0))
+        if not _FLUID_AVAILABLE or not fluid_enabled or self.state != State.HIGHWAY:
+            self._destroy_fluid_renderer()
+            return
+        if self._fluid_renderer is None or force_recreate:
+            self._destroy_fluid_renderer()
+            self._create_fluid_renderer()
+            return
+        self._fluid_renderer.update_config(
+            curl_strength=float(self._note_style.get("fluid_curl", 30)),
+            vel_dissipation=float(self._note_style.get("fluid_velocity_dissipation", 7)) / _FLUID_DISSIPATION_SCALE,
+            dye_dissipation=float(self._note_style.get("fluid_density_dissipation", 22)) / _FLUID_DISSIPATION_SCALE,
+            pressure=float(self._note_style.get("fluid_pressure", 80)) / _FLUID_PRESSURE_SCALE,
+        )
 
     def _get_window_position(self) -> tuple[int, int]:
         """Return the top-left screen position of the pygame window.
@@ -546,6 +570,17 @@ class App:
                     self._color_blend_elapsed_ms = 0
                     if self._led_output is not None:
                         self._led_output.set_active_color(int(nr), int(ng), int(nb))
+                fluid_keys = {
+                    "effect_fluid_enabled",
+                    "fluid_curl",
+                    "fluid_density_dissipation",
+                    "fluid_velocity_dissipation",
+                    "fluid_pressure",
+                }
+                if any(k in data for k in fluid_keys):
+                    self._sync_fluid_renderer(
+                        force_recreate="effect_fluid_enabled" in data
+                    )
 
             elif ptype == "keyboard_style":
                 data = patch.get("patch", {})
