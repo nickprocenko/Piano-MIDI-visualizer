@@ -1172,6 +1172,9 @@ class App{
     this.audience=new AudienceColorClient();
     this._synth=new AudioSynth();
     this.prevNotes=new Set();
+    this._activeNotes=new Set();  // swap buffer — never allocate in frame loop
+    this._newly=[];               // reused arrays — no per-frame allocation
+    this._released=[];
     this.smoothedDt=16.67;
     this.lastTime=0;
     this.fpsTime=0; this.fpsCount=0; this.fps=0;
@@ -1182,6 +1185,12 @@ class App{
     this._panelOpen=false;
     this._selectedPortId='keyboard';
     this._saveTimer=null;
+    this._boundFrame=null;
+    // Cached HUD element refs — avoid getElementById every frame
+    this._hudFps=document.getElementById('hud-fps');
+    this._hudSong=document.getElementById('hud-song');
+    this._hudDevice=document.getElementById('hud-device');
+    this._hudNotes=document.getElementById('hud-notes');
   }
 
   async start(){
@@ -1192,15 +1201,16 @@ class App{
     this._buildSettingsScreens();
     document.getElementById('main-canvas').addEventListener('keydown',e=>{if(e.key==='Escape')this.showMenu();});
     this._setupKeyboardMouse();
-    requestAnimationFrame(t=>this._frame(t));
+    this._boundFrame=this._frame.bind(this);
+    requestAnimationFrame(this._boundFrame);
   }
 
   _frame(now){
-    requestAnimationFrame(t=>this._frame(t));
+    requestAnimationFrame(this._boundFrame);
     const rawDt=now-this.lastTime; this.lastTime=now;
     const dt=Math.max(1,Math.min(33,rawDt));
     this.smoothedDt=this.smoothedDt*.85+dt*.15;
-    this.fpsCount++; if(now-this.fpsTime>=1000){this.fps=this.fpsCount;this.fpsCount=0;this.fpsTime=now;document.getElementById('hud-fps').textContent=this.fps+' fps';}
+    this.fpsCount++; if(now-this.fpsTime>=1000){this.fps=this.fpsCount;this.fpsCount=0;this.fpsTime=now;this._hudFps.textContent=this.fps+' fps';}
     if(this.rebuildLayout){this.layout=buildLayout(this.mainCanvas.width,this.mainCanvas.height,Config.ks.height_percent);this.rebuildLayout=false;}
     if(this._vizActive)this._update(dt);
     this._draw();
@@ -1210,36 +1220,41 @@ class App{
     const ns=Config.ns, ks=Config.ks;
     // Audience color
     this.audience.update(dt,ns);
-    // Get active notes
-    let activeNotes;
+    // Reuse pre-allocated Set — clear and refill in place (zero allocation)
+    const activeNotes=this._activeNotes;
+    activeNotes.clear();
     if(this._mode==='file'){
       this.midiFile.update();
-      activeNotes=new Set(this.midiFile.activeNotes);
-      document.getElementById('hud-song').textContent=this.midiFile.filename+(this.midiFile.playing?' ▶':'');
+      for(const n of this.midiFile.activeNotes) activeNotes.add(n);
+      this._hudSong.textContent=this.midiFile.filename+(this.midiFile.playing?' ▶':'');
     }else{
-      activeNotes=new Set(this.midi.activeNotes);
+      for(const n of this.midi.activeNotes) activeNotes.add(n);
     }
     // LED
     this.led.update(activeNotes,Config.lo,ns,this.lastTime);
-    // Trails
+    // Trails — compute diff with pre-allocated arrays, no Set spreads
     const W=this.mainCanvas.width,H=this.mainCanvas.height;
-    const newly=new Set([...activeNotes].filter(n=>!this.prevNotes.has(n)));
-    const released=new Set([...this.prevNotes].filter(n=>!activeNotes.has(n)));
-    for(const n of newly){
-      const t=this.trails.start(n,this.layout,ns,ks,H);
+    const newly=this._newly; newly.length=0;
+    const released=this._released; released.length=0;
+    for(const n of activeNotes) if(!this.prevNotes.has(n)) newly.push(n);
+    for(const n of this.prevNotes) if(!activeNotes.has(n)) released.push(n);
+    for(let i=0;i<newly.length;i++){
+      const t=this.trails.start(newly[i],this.layout,ns,ks,H);
       if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
     }
-    for(const n of released) this.trails.release(n,ns);
+    for(let i=0;i<released.length;i++) this.trails.release(released[i],ns);
     for(const n of activeNotes){
       this.trails.anchor(n,this.layout,ns,ks,H);
       const t=this.trails.active.get(n);
       if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
     }
+    // Swap buffers so prevNotes holds current notes, _activeNotes gets old buffer for next frame
+    this._activeNotes=this.prevNotes;
     this.prevNotes=activeNotes;
     this.trails.update(this.smoothedDt,ns);
     // HUD
-    if(this._mode==='freeplay') document.getElementById('hud-device').textContent=this.midi.portName||'No device';
-    document.getElementById('hud-notes').textContent=activeNotes.size+' notes';
+    if(this._mode==='freeplay') this._hudDevice.textContent=this.midi.portName||'No device';
+    this._hudNotes.textContent=activeNotes.size+' notes';
   }
 
   _draw(){
@@ -1369,8 +1384,8 @@ class App{
       item.onclick=async()=>{
         this._selectedPortId=p.id;
         await this.midi.init(p.id);
-        this.prevNotes=new Set();
-        document.getElementById('hud-device').textContent=this.midi.portName;
+        this.prevNotes.clear();this._activeNotes.clear();
+        this._hudDevice.textContent=this.midi.portName;
         if(this._mode==='freeplay')this.showVisualizer();
         else this.showVisualizer();
       };
