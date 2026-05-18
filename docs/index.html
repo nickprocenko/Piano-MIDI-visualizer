@@ -13,6 +13,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;font-size:14px;overflow:hidden;width:100vw;height:100vh;user-select:none}
 #bg-canvas,#fluid-canvas,#main-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none}
+#main-canvas{pointer-events:auto}
 #bg-canvas{z-index:0}
 #fluid-canvas{z-index:1;display:none}
 #main-canvas{z-index:2}
@@ -1110,6 +1111,44 @@ function buildPanel(container, tabBar, tabs, app){
 }
 
 // ═══════════════════════════════════════════════════════
+// AUDIO SYNTH
+// ═══════════════════════════════════════════════════════
+class AudioSynth{
+  constructor(){this._ctx=null;this._active=new Map();}
+  _ac(){
+    if(!this._ctx)this._ctx=new(window.AudioContext||window.webkitAudioContext)();
+    if(this._ctx.state==='suspended')this._ctx.resume();
+    return this._ctx;
+  }
+  noteOn(note){
+    const ac=this._ac();
+    this.noteOff(note);
+    const freq=440*Math.pow(2,(note-69)/12);
+    const gain=ac.createGain();
+    gain.connect(ac.destination);
+    gain.gain.setValueAtTime(0,ac.currentTime);
+    gain.gain.linearRampToValueAtTime(0.18,ac.currentTime+0.006);
+    gain.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+2.0);
+    const o1=ac.createOscillator(),o2=ac.createOscillator();
+    o1.type='triangle';o1.frequency.value=freq;
+    o2.type='triangle';o2.frequency.value=freq*2;
+    const g2=ac.createGain();g2.gain.value=0.25;o2.connect(g2);g2.connect(gain);
+    o1.connect(gain);
+    o1.start();o2.start();
+    o1.stop(ac.currentTime+2.0);o2.stop(ac.currentTime+2.0);
+    this._active.set(note,{gain});
+  }
+  noteOff(note){
+    const n=this._active.get(note);if(!n)return;
+    const{gain}=n,ac=this._ctx;
+    gain.gain.cancelScheduledValues(ac.currentTime);
+    gain.gain.setValueAtTime(gain.gain.value,ac.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+0.08);
+    this._active.delete(note);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 // APP
 // ═══════════════════════════════════════════════════════
 class App{
@@ -1126,6 +1165,7 @@ class App{
     this.fluid=new FluidController();
     this.led=new LedOutput();
     this.audience=new AudienceColorClient();
+    this._synth=new AudioSynth();
     this.prevNotes=new Set();
     this.smoothedDt=16.67;
     this.lastTime=0;
@@ -1146,6 +1186,7 @@ class App{
     this._setupHUD();
     this._buildSettingsScreens();
     document.getElementById('main-canvas').addEventListener('keydown',e=>{if(e.key==='Escape')this.showMenu();});
+    this._setupKeyboardMouse();
     requestAnimationFrame(t=>this._frame(t));
   }
 
@@ -1207,10 +1248,8 @@ class App{
     }else{
       this.bgCtx.fillStyle=bgColor; this.bgCtx.fillRect(0,0,W,H);
     }
-    // Main canvas
+    // Main canvas — transparent; bg-canvas handles the background fill
     ctx.clearRect(0,0,W,H);
-    ctx.fillStyle=this._bgImg?'rgba(0,0,0,0)':bgColor;
-    if(!this._bgImg){ctx.fillStyle=bgColor;ctx.fillRect(0,0,W,H);}
     if(!this._vizActive||!this.layout){return;}
     const ns=Config.ns;
     this.fx.beginFrame(this.smoothedDt);
@@ -1220,6 +1259,47 @@ class App{
     }
     this.fx.endFrame(ctx);
     drawPiano(ctx,this.layout,this.prevNotes,Config.ks);
+  }
+
+  _setupKeyboardMouse(){
+    const canvas=this.mainCanvas;
+    let _mouseNote=null;
+    const toCanvas=e=>{
+      const r=canvas.getBoundingClientRect();
+      return{x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height};
+    };
+    const hitTest=(cx,cy)=>{
+      if(!this.layout)return null;
+      const{bkeys,wkeys,pianoY}=this.layout;
+      if(cy<pianoY)return null;
+      for(const[n,k]of bkeys)if(cx>=k.x&&cx<k.x+k.w&&cy>=k.y&&cy<k.y+k.h)return n;
+      for(const[n,k]of wkeys)if(cx>=k.x&&cx<k.x+k.w&&cy>=k.y&&cy<k.y+k.h)return n;
+      return null;
+    };
+    canvas.addEventListener('pointerdown',e=>{
+      const{x,y}=toCanvas(e);
+      const note=hitTest(x,y);
+      if(note==null)return;
+      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._synth.noteOff(_mouseNote);}
+      _mouseNote=note;
+      this.midi.activeNotes.add(note);
+      this._synth.noteOn(note);
+      canvas.setPointerCapture(e.pointerId);
+    });
+    canvas.addEventListener('pointermove',e=>{
+      if(_mouseNote==null)return;
+      const{x,y}=toCanvas(e);
+      const note=hitTest(x,y);
+      if(note===_mouseNote)return;
+      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._synth.noteOff(_mouseNote);}
+      _mouseNote=note;
+      if(note!=null){this.midi.activeNotes.add(note);this._synth.noteOn(note);}
+    });
+    const release=()=>{
+      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._synth.noteOff(_mouseNote);_mouseNote=null;}
+    };
+    canvas.addEventListener('pointerup',release);
+    canvas.addEventListener('pointercancel',release);
   }
 
   _resize(){
