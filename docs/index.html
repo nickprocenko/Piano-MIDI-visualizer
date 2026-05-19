@@ -795,7 +795,7 @@ class FluidController{
 // LED OUTPUT
 // ═══════════════════════════════════════════════════════
 class LedOutput{
-  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;this._lastError='';}
+  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;}
   async connectSerial(){
     if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
       this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
@@ -804,6 +804,15 @@ class LedOutput{
       const p=await navigator.serial.requestPort();
       await p.open({baudRate:115200});
       this._ser=p; this._writer=p.writable.getWriter();
+      this._reader=p.readable.getReader();
+      const dec=new TextDecoder(); let partial='';
+      (async()=>{
+        try{while(true){const{value,done}=await this._reader.read();if(done)break;
+          partial+=dec.decode(value,{stream:true});
+          const lines=partial.split('\n');partial=lines.pop();
+          for(const ln of lines)if(this._consoleCb)this._consoleCb(ln);
+        }}catch(e){}
+      })();
       this.connected=true; this._lastError=''; return true;
     }catch(e){this._lastError=e.message||String(e);return false;}
   }
@@ -821,6 +830,8 @@ class LedOutput{
   }
   disconnect(){
     this.stopSweep();
+    this._consoleCb=null;
+    if(this._reader){try{this._reader.cancel();}catch(e){} this._reader=null;}
     if(this._writer){try{this._writer.releaseLock();}catch(e){} this._writer=null;}
     if(this._ser){try{this._ser.close();}catch(e){} this._ser=null;}
     this._ble=null;this._char=null;this.connected=false;
@@ -1175,6 +1186,13 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 </div>
 <div class="row"><label></label>
 <button class="action-btn" id="btn-led-sweep">Sweep LEDs</button>
+</div>
+<div id="led-console-wrap" style="display:none;margin-top:8px">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+<span style="font-size:11px;color:var(--muted)">Serial Console</span>
+<button class="action-btn" id="btn-led-console-clear" style="padding:2px 8px;font-size:11px">Clear</button>
+</div>
+<pre id="led-console" style="width:100%;height:120px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:monospace;font-size:10px;margin:0;white-space:pre-wrap;word-break:break-all"></pre>
 </div></div>`,
     audience:`<div class="section"><h2>Audience Color Control</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Connect to a WebSocket that sends <code>color_set</code> events to change note color live.</p>
@@ -1450,15 +1468,34 @@ function wireSettings(root, app){
   if(ledCnt) ledCnt.addEventListener('change',()=>{Config.lo.led_count=+ledCnt.value;schedSave();});
   const ledFps=root.querySelector('#led-fps');
   if(ledFps) ledFps.addEventListener('change',()=>{Config.lo.fps_limit=+ledFps.value;schedSave();});
+  const ledConsoleEl=root.querySelector('#led-console');
+  const ledConsoleWrap=root.querySelector('#led-console-wrap');
+  function attachConsole(){
+    if(!ledConsoleEl)return;
+    app.led._consoleCb=(ln)=>{
+      ledConsoleEl.textContent+=ln+'\n';
+      const lines=ledConsoleEl.textContent.split('\n');
+      if(lines.length>202)ledConsoleEl.textContent=lines.slice(-200).join('\n');
+      ledConsoleEl.scrollTop=ledConsoleEl.scrollHeight;
+    };
+    if(ledConsoleWrap)ledConsoleWrap.style.display='';
+  }
+  function detachConsole(){
+    app.led._consoleCb=null;
+    if(ledConsoleWrap)ledConsoleWrap.style.display='none';
+  }
+  const btnConsoleClear=root.querySelector('#btn-led-console-clear');
+  if(btnConsoleClear)btnConsoleClear.addEventListener('click',()=>{if(ledConsoleEl)ledConsoleEl.textContent='';});
   const btnConnect=root.querySelector('#btn-led-connect');
   if(btnConnect) btnConnect.addEventListener('click',async()=>{
     const t=Config.lo.transport;
     if(t==='serial')await app.led.connectSerial();
     else if(t==='bluetooth')await app.led.connectBluetooth(Config.lo.ble_service_uuid,Config.lo.ble_char_uuid);
     updateLedStatus(root,app);
+    if(Config.lo.transport==='serial'&&app.led.connected)attachConsole(); else detachConsole();
   });
   const btnDisc=root.querySelector('#btn-led-disconnect');
-  if(btnDisc) btnDisc.addEventListener('click',()=>{app.led.disconnect();updateLedStatus(root,app);});
+  if(btnDisc) btnDisc.addEventListener('click',()=>{app.led.disconnect();updateLedStatus(root,app);detachConsole();});
   const btnSweep=root.querySelector('#btn-led-sweep');
   if(btnSweep) btnSweep.addEventListener('click',()=>{
     if(app.led._sweepTimer){app.led.stopSweep(Config.lo);btnSweep.textContent='Sweep LEDs';}
