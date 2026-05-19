@@ -200,6 +200,7 @@ const Config = {
       effect_glow_enabled:1, effect_highlight_enabled:1,
       effect_sparks_enabled:1, effect_smoke_enabled:1,
       effect_press_smoke_enabled:0, effect_moon_dust_enabled:0,
+      moon_dust_amount_percent:100, moon_dust_opacity_percent:100,
       effect_steam_smoke_enabled:0, effect_halo_pulse_enabled:0,
       effect_fluid_enabled:0,
       fluid_intensity:80, fluid_curl:30,
@@ -507,14 +508,14 @@ class FXRenderer{
     }
     // Moon dust
     if(ns.effect_moon_dust_enabled){
-      const stemLen=Math.max(1,h),swarm=Math.max(4,Math.min(14,4+(stemLen/70|0)));
+      const stemLen=Math.max(1,h),swarm=Math.max(0,Math.min(14,(4+(stemLen/70|0))*(ns.moon_dust_amount_percent??100)/100|0));
       const span=Math.max(10,stemLen-10),base=(t.ageMs*.0058)+(cx*.014);
       for(let i=0;i<swarm;i++){
         const f=i/Math.max(1,swarm-1), ang=base+i*1.37;
         const orbit=w*(.55+.75*f)+7+(i%3)*3;
         const px=cx+Math.sin(ang)*orbit, py=by-f*span+Math.cos(ang*1.24+f*2.7)*(4+(8*f|0));
         const tw2=.52+.48*Math.sin(ang*2.5+i*.65);
-        const al=Math.max(0,Math.min(255,40+90*Math.max(0,tw2)+f*38|0));
+        const al=Math.max(0,Math.min(255,(40+90*Math.max(0,tw2)+f*38)*(ns.moon_dust_opacity_percent??100)/100|0));
         this.octx.fillStyle=rgba(Math.min(255,ir*.55+120|0),Math.min(255,ig*.55+120|0),Math.min(255,ib*.60+128|0),al/255);
         this.octx.beginPath();this.octx.arc(px,py,i%4?1:2,0,Math.PI*2);this.octx.fill();
       }
@@ -895,6 +896,7 @@ class AudienceColorClient{
 const THEME_FIELDS=['color_r','color_g','color_b','interior_r','interior_g','interior_b',
   'inner_blend_percent','glow_strength_percent','highlight_strength_percent',
   'spark_amount_percent','smoke_amount_percent','press_smoke_amount_percent',
+  'moon_dust_amount_percent','moon_dust_opacity_percent',
   'effect_glow_enabled','effect_highlight_enabled','effect_sparks_enabled','effect_smoke_enabled',
   'effect_press_smoke_enabled','effect_moon_dust_enabled','effect_steam_smoke_enabled','effect_halo_pulse_enabled'];
 
@@ -1075,6 +1077,8 @@ ${row('Highlight %','r-hlst',0,170,5,'highlight_strength_percent')}
 ${row('Spark %','r-spkst',0,300,5,'spark_amount_percent')}
 ${row('Smoke %','r-smkst',0,300,5,'smoke_amount_percent')}
 ${row('Mist %','r-mstst',0,250,5,'press_smoke_amount_percent')}
+${row('Moon Dust %','r-mdamt',0,300,5,'moon_dust_amount_percent')}
+${row('Moon Dust Opacity %','r-mdop',0,200,5,'moon_dust_opacity_percent')}
 </div></div>`,
     fluid:ncSel('fluid')+fluidSel()+`<div class="section"><h2>Fluid Settings</h2>
 <div class="toggle-btn${ns.effect_fluid_enabled?' on':''}" data-ns-tog="effect_fluid_enabled" style="max-width:180px;margin-bottom:12px">GPU Fluid</div>
