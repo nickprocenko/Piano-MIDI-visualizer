@@ -201,8 +201,9 @@ const Config = {
       effect_press_smoke_enabled:0, effect_moon_dust_enabled:0,
       effect_steam_smoke_enabled:0, effect_halo_pulse_enabled:0,
       effect_fluid_enabled:0,
-      fluid_intensity:100, fluid_curl:30,
-      fluid_density_dissipation:22, fluid_velocity_dissipation:7, fluid_pressure:80,
+      fluid_intensity:80, fluid_curl:30,
+      fluid_density_dissipation:15, fluid_velocity_dissipation:7, fluid_pressure:80,
+      fluid_splat_size:20, fluid_opacity:80, fluid_color_strength:100,
     },
     keyboard_style:{height_percent:18, brightness:100, visible:1},
     display_style:{background_color:'#0f0f14', background_image:''},
@@ -729,27 +730,37 @@ class MidiFilePlayer{
 // FLUID CONTROLLER
 // ═══════════════════════════════════════════════════════
 class FluidController{
-  constructor(){this._enabled=false;}
+  constructor(){
+    this._enabled=false;
+    this._canvas=document.getElementById('fluid-canvas');
+  }
   setEnabled(v){
     this._enabled=!!v;
-    document.getElementById('fluid-canvas').style.display=v?'block':'none';
+    this._canvas.style.display=v?'block':'none';
   }
   updateConfig(ns){
+    this._canvas.style.opacity=(ns.fluid_opacity??80)/100;
     if(!window.fluidSim)return;
     window.fluidSim.updateConfig({
       CURL:ns.fluid_curl,
       DENSITY_DISSIPATION:ns.fluid_density_dissipation/10,
       VELOCITY_DISSIPATION:ns.fluid_velocity_dissipation/10,
       PRESSURE:ns.fluid_pressure/100,
+      INTENSITY:(ns.fluid_color_strength??100)/100,
     });
   }
   splat(t,ns,W,H){
     if(!this._enabled||!window.fluidSim)return;
     const normX=t.x/W, normY=t.bottomY/H;
-    const r=ns.color_r/255*5, g=ns.color_g/255*5, b=ns.color_b/255*5;
-    const velY=-(ns.fluid_intensity/100)*0.001;
-    const radius=Math.max(0.004,t.width/W*0.6);
-    window.fluidSim.addSplat(normX,normY,0,velY,r,g,b,radius,radius*2);
+    // Small per-splat colour value; Reinhard tonemapper in the display shader
+    // prevents saturation even when dye accumulates over many held frames.
+    const scale=0.04;
+    const r=ns.color_r/255*scale, g=ns.color_g/255*scale, b=ns.color_b/255*scale;
+    // Rise speed: factor 0.0025 gives ~15 % canvas height per second at 100 %
+    const velY=-(ns.fluid_intensity/100)*0.0025;
+    // Radius: linear map 1-100 → 0.0002-0.006 (before aspect-ratio correction)
+    const velRadius=Math.max(0.0002,(ns.fluid_splat_size??20)/100*0.006);
+    window.fluidSim.addSplat(normX,normY,0,velY,r,g,b,velRadius,velRadius*1.4);
   }
 }
 
@@ -915,7 +926,10 @@ ${row('Mist %','r-mstst',0,250,5,'press_smoke_amount_percent')}
 </div></div>`,
     fluid:`<div class="section"><h2>GPU Fluid Simulation</h2>
 <div class="toggle-btn${ns.effect_fluid_enabled?' on':''}" data-ns-tog="effect_fluid_enabled" style="max-width:180px;margin-bottom:12px">GPU Fluid</div>
-${row('Intensity %','r-fi',0,200,5,'fluid_intensity')}
+${row('Rise Speed %','r-fi',0,200,5,'fluid_intensity')}
+${row('Splat Size','r-fss',1,100,1,'fluid_splat_size')}
+${row('Color Strength %','r-fcs',0,200,5,'fluid_color_strength')}
+${row('Opacity %','r-fo',0,100,5,'fluid_opacity')}
 ${row('Curl','r-fc',0,100,5,'fluid_curl')}
 ${row('Density Diss.','r-fdd',1,100,1,'fluid_density_dissipation')}
 ${row('Velocity Diss.','r-fvd',1,40,1,'fluid_velocity_dissipation')}
@@ -1508,6 +1522,7 @@ class FluidSimulation{
       CURL:options.CURL??30,
       SPLAT_RADIUS:options.SPLAT_RADIUS??0.25,
       SPLAT_FORCE:options.SPLAT_FORCE??6000,
+      INTENSITY:options.INTENSITY??1.0,
       SHADING:false,BLOOM:false,SUNRAYS:false,TRANSPARENT:true,
     };
     const{gl,ext}=this._getWebGLContext(canvas);
@@ -1573,7 +1588,7 @@ class FluidSimulation{
     this._baseVertexShader=this._compileShader(gl.VERTEX_SHADER,`precision highp float;attribute vec2 aPosition;varying vec2 vUv;varying vec2 vL;varying vec2 vR;varying vec2 vT;varying vec2 vB;uniform vec2 texelSize;void main(){vUv=aPosition*0.5+0.5;vL=vUv-vec2(texelSize.x,0.0);vR=vUv+vec2(texelSize.x,0.0);vT=vUv+vec2(0.0,texelSize.y);vB=vUv-vec2(0.0,texelSize.y);gl_Position=vec4(aPosition,0.0,1.0);}`);
     const copyShader=this._compileShader(gl.FRAGMENT_SHADER,`precision mediump float;precision mediump sampler2D;varying highp vec2 vUv;uniform sampler2D uTexture;void main(){gl_FragColor=texture2D(uTexture,vUv);}`);
     const clearShader=this._compileShader(gl.FRAGMENT_SHADER,`precision mediump float;precision mediump sampler2D;varying highp vec2 vUv;uniform sampler2D uTexture;uniform float value;void main(){gl_FragColor=value*texture2D(uTexture,vUv);}`);
-    const displayShaderSource=`precision highp float;precision highp sampler2D;varying vec2 vUv;varying vec2 vL;varying vec2 vR;varying vec2 vT;varying vec2 vB;uniform sampler2D uTexture;uniform vec2 texelSize;void main(){vec3 c=texture2D(uTexture,vUv).rgb;float a=max(c.r,max(c.g,c.b));gl_FragColor=vec4(c,a);}`;
+    const displayShaderSource=`precision highp float;precision highp sampler2D;varying vec2 vUv;uniform sampler2D uTexture;uniform float uIntensity;void main(){vec3 c=texture2D(uTexture,vUv).rgb*uIntensity;c=c/(c+vec3(1.0));float a=max(c.r,max(c.g,c.b));gl_FragColor=vec4(c,a);}`;
     const splatShader=this._compileShader(gl.FRAGMENT_SHADER,`precision highp float;precision highp sampler2D;varying vec2 vUv;uniform sampler2D uTarget;uniform float aspectRatio;uniform vec3 color;uniform vec2 point;uniform float radius;void main(){vec2 p=vUv-point.xy;p.x*=aspectRatio;vec3 splat=exp(-dot(p,p)/radius)*color;vec3 base=texture2D(uTarget,vUv).xyz;gl_FragColor=vec4(base+splat,1.0);}`);
     const advectionShader=this._compileShader(gl.FRAGMENT_SHADER,`precision highp float;precision highp sampler2D;varying vec2 vUv;uniform sampler2D uVelocity;uniform sampler2D uSource;uniform vec2 texelSize;uniform vec2 dyeTexelSize;uniform float dt;uniform float dissipation;vec4 bilerp(sampler2D sam,vec2 uv,vec2 tsize){vec2 st=uv/tsize-0.5;vec2 iuv=floor(st);vec2 fuv=fract(st);vec4 a=texture2D(sam,(iuv+vec2(0.5,0.5))*tsize);vec4 b=texture2D(sam,(iuv+vec2(1.5,0.5))*tsize);vec4 c=texture2D(sam,(iuv+vec2(0.5,1.5))*tsize);vec4 d=texture2D(sam,(iuv+vec2(1.5,1.5))*tsize);return mix(mix(a,b,fuv.x),mix(c,d,fuv.x),fuv.y);}void main(){`+(ext.supportLinearFiltering?`vec2 coord=vUv-dt*texture2D(uVelocity,vUv).xy*texelSize;vec4 result=texture2D(uSource,coord);`:`vec2 coord=vUv-dt*bilerp(uVelocity,vUv,texelSize).xy*texelSize;vec4 result=bilerp(uSource,coord,dyeTexelSize);`)+`float decay=1.0+dissipation*dt;gl_FragColor=result/decay;}`);
     const divergenceShader=this._compileShader(gl.FRAGMENT_SHADER,`precision mediump float;precision mediump sampler2D;varying highp vec2 vUv;varying highp vec2 vL;varying highp vec2 vR;varying highp vec2 vT;varying highp vec2 vB;uniform sampler2D uVelocity;void main(){float L=texture2D(uVelocity,vL).x,R=texture2D(uVelocity,vR).x,T=texture2D(uVelocity,vT).y,B=texture2D(uVelocity,vB).y;vec2 C=texture2D(uVelocity,vUv).xy;if(vL.x<0.0){L=-C.x;}if(vR.x>1.0){R=-C.x;}if(vT.y>1.0){T=-C.y;}if(vB.y<0.0){B=-C.y;}gl_FragColor=vec4(0.5*(R-L+T-B),0.0,0.0,1.0);}`);
@@ -1638,10 +1653,10 @@ class FluidSimulation{
     target.width=w;target.height=h;target.texelSizeX=1/w;target.texelSizeY=1/h;return target;
   }
   _drawDisplay(target){
-    const{gl}=this;
-    const width=target==null?gl.drawingBufferWidth:target.width,height=target==null?gl.drawingBufferHeight:target.height;
+    const{gl,config}=this;
     this.displayMaterial.bind();
     gl.uniform1i(this.displayMaterial.uniforms.uTexture,this.dye.read.attach(0));
+    if(this.displayMaterial.uniforms.uIntensity!=null)gl.uniform1f(this.displayMaterial.uniforms.uIntensity,config.INTENSITY??1.0);
     this._blit(target);
   }
   _updateKeywords(){this.displayMaterial&&this.displayMaterial.setKeywords([]);}
