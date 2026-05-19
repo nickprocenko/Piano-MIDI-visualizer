@@ -795,25 +795,29 @@ class FluidController{
 // LED OUTPUT
 // ═══════════════════════════════════════════════════════
 class LedOutput{
-  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;}
+  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;this._lastError='';}
   async connectSerial(){
-    if(!navigator.serial){alert('Web Serial requires Chrome or Edge.');return false;}
+    if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
+      this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
+    if(!navigator.serial){this._lastError='Web Serial not available — use Chrome or Edge.';return false;}
     try{
       const p=await navigator.serial.requestPort();
       await p.open({baudRate:115200});
       this._ser=p; this._writer=p.writable.getWriter();
-      this.connected=true; return true;
-    }catch(e){return false;}
+      this.connected=true; this._lastError=''; return true;
+    }catch(e){this._lastError=e.message||String(e);return false;}
   }
   async connectBluetooth(svcUuid,charUuid){
-    if(!navigator.bluetooth){alert('Web Bluetooth requires Chrome or Edge.');return false;}
+    if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
+      this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
+    if(!navigator.bluetooth){this._lastError='Web Bluetooth not available — use Chrome or Edge.';return false;}
     try{
       const dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:[svcUuid.toLowerCase()]});
       const srv=await dev.gatt.connect();
       const svc=await srv.getPrimaryService(svcUuid.toLowerCase());
       this._char=await svc.getCharacteristic(charUuid.toLowerCase());
-      this.connected=true; return true;
-    }catch(e){return false;}
+      this.connected=true; this._lastError=''; return true;
+    }catch(e){this._lastError=e.message||String(e);return false;}
   }
   disconnect(){
     this.stopSweep();
@@ -1164,6 +1168,7 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="row"><label>Fade Amount %</label><input type="range" id="sl-led-fade-amt" min="0" max="100" step="5" value="${lo.led_fade_amount||0}"><span class="val" id="v-sl-led-fade-amt">${lo.led_fade_amount||0}</span></div>
 <div class="row"><label>Fade Speed %</label><input type="range" id="sl-led-fade-spd" min="0" max="200" step="5" value="${lo.led_fade_speed||80}"><span class="val" id="v-sl-led-fade-spd">${lo.led_fade_speed||80}</span></div>
 <div class="row"><label>Status</label><span class="led-status" id="led-status-dot"></span><span id="led-status-txt">Disconnected</span></div>
+<div id="led-diag" style="font-size:11px;color:#e08080;margin:2px 0 8px 0;min-height:14px;padding:0 4px"></div>
 <div class="row"><label></label>
 <button class="action-btn" id="btn-led-connect">Connect</button>
 <button class="action-btn" id="btn-led-disconnect" style="margin-left:6px">Disconnect</button>
@@ -1459,6 +1464,11 @@ function wireSettings(root, app){
     if(app.led._sweepTimer){app.led.stopSweep(Config.lo);btnSweep.textContent='Sweep LEDs';}
     else if(app.led.connected){app.led.startSweep(Config.lo);btnSweep.textContent='Stop Sweep';}
   });
+  // Also update transport dropdown so diag re-evaluates on transport change
+  const ledTransEl=root.querySelector('#led-transport');
+  if(ledTransEl) ledTransEl.addEventListener('change',()=>updateLedStatus(root,app));
+  // Show initial diagnostic state
+  updateLedStatus(root,app);
   // LED sustain
   const ledSustainBtn=root.querySelector('#btn-led-sustain');
   if(ledSustainBtn) ledSustainBtn.addEventListener('click',()=>{
@@ -1532,9 +1542,20 @@ function wireSettings(root, app){
 }
 
 function updateLedStatus(root,app){
-  const dot=root.querySelector('#led-status-dot'), txt=root.querySelector('#led-status-txt');
+  const dot=root.querySelector('#led-status-dot');
+  const txt=root.querySelector('#led-status-txt');
+  const diag=root.querySelector('#led-diag');
   if(dot)dot.classList.toggle('connected',app.led.connected);
   if(txt)txt.textContent=app.led.connected?'Connected':'Disconnected';
+  if(diag){
+    if(app.led.connected){diag.textContent='';}
+    else{
+      const t=Config.lo.transport;
+      if(t==='serial'&&!navigator.serial) diag.textContent='Web Serial not available — use Chrome/Edge over HTTPS';
+      else if(t==='bluetooth'&&!navigator.bluetooth) diag.textContent='Web Bluetooth not available — use Chrome/Edge over HTTPS';
+      else diag.textContent=app.led._lastError||'';
+    }
+  }
 }
 function updateAudStatus(root,app){
   const el=root.querySelector('#aud-status'); if(el)el.textContent=app.audience.connected?'Connected':'Disconnected';
@@ -1931,6 +1952,7 @@ class App{
         document.querySelectorAll('.stab-panel').forEach(p=>p.classList.remove('active'));
         btn.classList.add('active');
         const p=document.getElementById('stab-'+btn.dataset.stab); if(p)p.classList.add('active');
+        if(btn.dataset.stab==='led')updateLedStatus(document,this);
       });
     });
   }
