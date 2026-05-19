@@ -196,6 +196,7 @@ const Config = {
       press_smoke_amount_percent:100, decay_speed:80, decay_value:20,
       color_r:0, color_g:230, color_b:230,
       interior_r:120, interior_g:255, interior_b:255,
+      color_mode:'solid', note_colors:null, user_script:'',
       effect_glow_enabled:1, effect_highlight_enabled:1,
       effect_sparks_enabled:1, effect_smoke_enabled:1,
       effect_press_smoke_enabled:0, effect_moon_dust_enabled:0,
@@ -205,7 +206,7 @@ const Config = {
       fluid_density_dissipation:15, fluid_velocity_dissipation:7, fluid_pressure:80,
       fluid_splat_size:20, fluid_opacity:80, fluid_color_strength:100,
     },
-    keyboard_style:{height_percent:18, brightness:100, visible:1},
+    keyboard_style:{height_percent:18, brightness:100, visible:1, width_percent:100},
     display_style:{background_color:'#0f0f14', background_image:''},
     led_output:{
       enabled:0, transport:'none', led_count:177, mirror_per_key:2,
@@ -214,6 +215,7 @@ const Config = {
     },
     audience_control:{enabled:0, ws_url:'', transition_ms:220},
     user_themes:[], active_user_theme_index:0,
+    note_color_themes:[], active_note_theme:{type:'builtin',index:0},
   },
   data:null,
   load(){
@@ -246,16 +248,18 @@ const BLACK_SET=new Set([1,3,6,8,10]);
 const BK_W=0.60, BK_H=0.62;
 function isBlack(n){return BLACK_SET.has(n%12);}
 
-function buildLayout(W,H,hp){
+function buildLayout(W,H,hp,wp=100){
   const frac=Math.max(.05,Math.min(.5,hp/100));
   const pianoH=Math.round(H*frac), pianoY=H-pianoH;
   let nw=0; for(let n=PIANO_FIRST;n<=PIANO_LAST;n++) if(!isBlack(n))nw++;
-  const ww=W/nw, bw=ww*BK_W, bh=pianoH*BK_H;
+  const pw=Math.round(W*Math.max(60,Math.min(100,wp))/100);
+  const offsetX=Math.floor((W-pw)/2);
+  const ww=pw/nw, bw=ww*BK_W, bh=pianoH*BK_H;
   const wkeys=new Map(), bkeys=new Map(), wc=new Map();
   let wi=0;
   for(let n=PIANO_FIRST;n<=PIANO_LAST;n++){
     if(isBlack(n))continue;
-    const l=Math.round(wi*ww), r=Math.round((wi+1)*ww);
+    const l=offsetX+Math.round(wi*ww), r=offsetX+Math.round((wi+1)*ww);
     wkeys.set(n,{x:l,y:pianoY,w:Math.max(1,r-l),h:pianoH});
     wc.set(n,l+(r-l)/2); wi++;
   }
@@ -268,7 +272,7 @@ function buildLayout(W,H,hp){
     const cx=(lc+rc)*.5, x=Math.round(cx-bw*.5);
     bkeys.set(n,{x,y:pianoY,w:Math.max(1,Math.round(bw)),h:Math.round(bh)});
   }
-  return{wkeys,bkeys,pianoY,pianoH,ww};
+  return{wkeys,bkeys,pianoY,pianoH,ww,offsetX,pw};
 }
 function getRect(lay,n){return lay.bkeys.get(n)||lay.wkeys.get(n)||null;}
 
@@ -281,15 +285,16 @@ function rgba(r,g,b,a){return`rgba(${r},${g},${b},${a})`;}
 
 function drawPiano(ctx,lay,active,ks){
   if(!ks.visible)return;
-  const{wkeys,bkeys,pianoY,pianoH}=lay;
+  const{wkeys,bkeys,pianoY,pianoH,offsetX,pw}=lay;
   const W=ctx.canvas.width;
   const br=Math.max(.1,Math.min(1.5,ks.brightness/100));
-  const bg=ctx.createLinearGradient(0,pianoY,0,pianoY+pianoH);
+  const pW=pw??W, pX=offsetX??0;
+  const bg=ctx.createLinearGradient(pX,pianoY,pX,pianoY+pianoH);
   bg.addColorStop(0,rgb(...sc(20,23,30,br)));
   bg.addColorStop(1,rgb(...sc(10,12,18,br)));
-  ctx.fillStyle=bg; ctx.fillRect(0,pianoY,W,pianoH);
+  ctx.fillStyle=bg; ctx.fillRect(pX,pianoY,pW,pianoH);
   const lipH=Math.max(2,pianoH*.05|0);
-  ctx.fillStyle=rgb(...sc(54,60,72,br)); ctx.fillRect(0,pianoY,W,lipH);
+  ctx.fillStyle=rgb(...sc(54,60,72,br)); ctx.fillRect(pX,pianoY,pW,lipH);
   const labelSz=Math.max(9,pianoH*.095|0);
   // White keys
   for(const[n,k]of wkeys){
@@ -467,7 +472,7 @@ class FXRenderer{
     const cx=t.renderX,ty=t.renderTopY,by=t.renderBottomY,w=t.renderWidth;
     const h=Math.max(2,by-ty); if(by<0||ty>this.H)return;
     const hw=w/2;
-    const r=ns.color_r,g=ns.color_g,b=ns.color_b;
+    const{r,g,b}=resolveNoteColor(t.note,ns);
     const bl=ns.inner_blend_percent/100;
     const ir=Math.round(ns.interior_r*(1-bl)+r*bl);
     const ig=Math.round(ns.interior_g*(1-bl)+g*bl);
@@ -755,7 +760,8 @@ class FluidController{
     // Per-splat scale: color_strength maps 0-200 → 0-0.30
     // Reinhard tonemapper in the display shader prevents solid saturation.
     const scale=(ns.fluid_color_strength??100)/100*0.15;
-    const r=ns.color_r/255*scale, g=ns.color_g/255*scale, b=ns.color_b/255*scale;
+    const{r:cr,g:cg,b:cb}=resolveNoteColor(t.note,ns);
+    const r=cr/255*scale, g=cg/255*scale, b=cb/255*scale;
     // Rise speed: 0.0030 ≈ 18 % canvas height per second at 100 %
     const velY=-(ns.fluid_intensity/100)*0.003;
     // Radius: 1-100 → 0.0002-0.010 (before aspect-ratio correction)
@@ -877,6 +883,73 @@ const ThemeManager={
 };
 
 // ═══════════════════════════════════════════════════════
+// NOTE COLOR SYSTEM
+// ═══════════════════════════════════════════════════════
+function hsvToRgb(h,s,v){
+  const i=Math.floor(h*6),f=h*6-i;
+  const p=v*(1-s),q=v*(1-f*s),t2=v*(1-(1-f)*s);
+  const m=[[v,t2,p],[q,v,p],[p,v,t2],[p,q,v],[t2,p,v],[v,p,q]][i%6];
+  return{r:Math.round(m[0]*255),g:Math.round(m[1]*255),b:Math.round(m[2]*255)};
+}
+function _buildRainbow(){return Array.from({length:128},(_,n)=>hsvToRgb(((n-21)/87%1+1)%1,0.9,1.0));}
+function _buildOctave(){return Array.from({length:128},(_,n)=>hsvToRgb((n%12)/12,0.9,1.0));}
+function _buildFire(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return{r:255,g:Math.round(t*200),b:0};});}
+function _buildIce(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return{r:0,g:Math.round(180+t*75),b:255};});}
+function _buildSunset(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return hsvToRgb(0.04+t*0.18,0.95,1.0);});}
+
+function resolveNoteColor(note,ns){
+  const nc=ns.note_colors;
+  if(!nc)return{r:ns.color_r,g:ns.color_g,b:ns.color_b};
+  return nc[note]||{r:ns.color_r,g:ns.color_g,b:ns.color_b};
+}
+
+function runUserScript(code){
+  const colors=new Array(128).fill(null);
+  const api={
+    setNote(n,r,g,b){if(n>=0&&n<128)colors[n]={r:r|0,g:g|0,b:b|0};},
+    setOctave(oct,r,g,b){for(let n=((oct%12)+12)%12;n<128;n+=12)colors[n]={r:r|0,g:g|0,b:b|0};},
+    setAll(r,g,b){for(let n=0;n<128;n++)colors[n]={r:r|0,g:g|0,b:b|0};},
+    hsvToRgb,
+  };
+  try{new Function('api',code)(api);return colors;}
+  catch(e){alert('Script error: '+e.message);return null;}
+}
+
+const BUILTIN_NOTE_THEMES=[
+  {name:'Solid',mode:'solid',build:()=>null,
+   script:'// Solid mode: all notes use the global Outer color\n// defined in the Notes tab Color section.\n// No per-note mapping.'},
+  {name:'Rainbow',mode:'rainbow',build:_buildRainbow,
+   script:'// Full keyboard rainbow — red (low) to violet (high).\nfor(let n=0;n<128;n++){\n  const hue=((n-21)/87%1+1)%1;\n  const{r,g,b}=api.hsvToRgb(hue,0.9,1.0);\n  api.setNote(n,r,g,b);\n}'},
+  {name:'Octave Rainbow',mode:'octave',build:_buildOctave,
+   script:'// Each pitch class (C, C#, D … B) gets a distinct hue.\nfor(let n=0;n<128;n++){\n  const{r,g,b}=api.hsvToRgb((n%12)/12,0.9,1.0);\n  api.setNote(n,r,g,b);\n}'},
+  {name:'Fire',mode:'fire',build:_buildFire,
+   script:'// Low notes deep red, high notes bright yellow.\nfor(let n=0;n<128;n++){\n  const t=Math.max(0,Math.min(1,(n-21)/87));\n  api.setNote(n,255,Math.round(t*200),0);\n}'},
+  {name:'Ice',mode:'ice',build:_buildIce,
+   script:'// Cool blue-cyan gradient across the keyboard.\nfor(let n=0;n<128;n++){\n  const t=Math.max(0,Math.min(1,(n-21)/87));\n  api.setNote(n,0,Math.round(180+t*75),255);\n}'},
+  {name:'Sunset',mode:'sunset',build:_buildSunset,
+   script:'// Warm orange-to-yellow sunset gradient.\nfor(let n=0;n<128;n++){\n  const t=Math.max(0,Math.min(1,(n-21)/87));\n  const{r,g,b}=api.hsvToRgb(0.04+t*0.18,0.95,1.0);\n  api.setNote(n,r,g,b);\n}'},
+];
+
+const NoteColorThemeManager={
+  getAll(){return Config.data.note_color_themes||[];},
+  save(name){
+    const themes=Config.data.note_color_themes;
+    const i=themes.findIndex(t=>t.name===name);
+    const entry={name,colors:Config.ns.note_colors,script:Config.ns.user_script||''};
+    if(i>=0)themes[i]=entry; else themes.push(entry);
+    Config.save();
+  },
+  load(i){
+    const t=(Config.data.note_color_themes||[])[i]; if(!t)return;
+    Config.ns.note_colors=t.colors;
+    Config.ns.user_script=t.script||'';
+    Config.ns.color_mode='script';
+    Config.save();
+  },
+  delete(i){(Config.data.note_color_themes||[]).splice(i,1);Config.save();},
+};
+
+// ═══════════════════════════════════════════════════════
 // SETTINGS CONTENT BUILDER
 // ═══════════════════════════════════════════════════════
 function hex(r,g,b){return'#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');}
@@ -887,8 +960,20 @@ function buildSettingsHTML(tab){
   const krow=(lbl,id,min,max,step,ks_key)=>`<div class="row"><label>${lbl}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${ks[ks_key]}" data-cfk="${ks_key}" data-cfg="ks"><span class="val" id="v-${id}">${ks[ks_key]}</span></div>`;
   const tog=(lbl,key)=>`<div class="toggle-btn${ns[key]?' on':''}" data-ns-tog="${key}">${lbl}</div>`;
 
+  const ncSel=(prefix)=>`<div class="section"><h2>Note Colors</h2>
+<div class="row"><label>Theme</label>
+<select id="${prefix}-nc-sel" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px"></select>
+<button id="${prefix}-nc-del" class="action-btn" style="margin-left:6px;display:none" title="Delete">×</button>
+</div>
+<div id="${prefix}-nc-script" style="display:none;margin-top:8px">
+<textarea id="${prefix}-nc-ta" rows="5" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:monospace;font-size:11px;resize:vertical"></textarea>
+<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+<button id="${prefix}-nc-run" class="action-btn">▶ Run</button>
+<button id="${prefix}-nc-saveas" class="action-btn">Save As…</button>
+</div></div></div>`;
+
   const tabs={
-    notes:`<div class="section"><h2>Color</h2>
+    notes:ncSel('notes')+`<div class="section"><h2>Color</h2>
 <div class="color-row"><label>Outer</label><input type="color" id="cp-outer" value="${hex(ns.color_r,ns.color_g,ns.color_b)}">
 <div class="rgb-wrap">
 <input type="range" min="0" max="255" value="${ns.color_r}" data-cfk="color_r" data-cfg="ns" style="accent-color:#ff6a6a">
@@ -912,7 +997,7 @@ ${row('Decay Value','r-dv',0,100,5,'decay_value')}
 ${row('Note Width px','r-nw',4,40,1,'width_px')}
 ${row('Roundness px','r-rnd',0,20,1,'edge_roundness_px')}
 </div>`,
-    effects:`<div class="section"><h2>Effect Toggles</h2>
+    effects:ncSel('effects')+`<div class="section"><h2>Effect Toggles</h2>
 <div class="effects-grid">
 ${tog('Glow','effect_glow_enabled')}${tog('Highlight','effect_highlight_enabled')}${tog('Sparks','effect_sparks_enabled')}${tog('Smoke','effect_smoke_enabled')}
 ${tog('Start Mist','effect_press_smoke_enabled')}${tog('Moon Dust','effect_moon_dust_enabled')}${tog('Steam','effect_steam_smoke_enabled')}${tog('Halo Pulse','effect_halo_pulse_enabled')}
@@ -924,7 +1009,7 @@ ${row('Spark %','r-spkst',0,300,5,'spark_amount_percent')}
 ${row('Smoke %','r-smkst',0,300,5,'smoke_amount_percent')}
 ${row('Mist %','r-mstst',0,250,5,'press_smoke_amount_percent')}
 </div></div>`,
-    fluid:`<div class="section"><h2>GPU Fluid Simulation</h2>
+    fluid:ncSel('fluid')+`<div class="section"><h2>GPU Fluid Simulation</h2>
 <div class="toggle-btn${ns.effect_fluid_enabled?' on':''}" data-ns-tog="effect_fluid_enabled" style="max-width:180px;margin-bottom:12px">GPU Fluid</div>
 ${row('Rise Speed %','r-fi',0,200,5,'fluid_intensity')}
 ${row('Splat Size','r-fss',1,100,1,'fluid_splat_size')}
@@ -937,6 +1022,7 @@ ${row('Pressure %','r-fp',0,100,5,'fluid_pressure')}
 </div>`,
     keyboard:`<div class="section"><h2>Keyboard</h2>
 ${krow('Height %','r-kh',8,45,1,'height_percent')}
+${krow('Width %','r-kw',60,100,5,'width_percent')}
 ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="row"><label>Visible</label>
 <button class="vis-btn${ks.visible?' on':''}" id="btn-kvis">${ks.visible?'Visible':'Hidden'}</button>
@@ -982,6 +1068,107 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 // ═══════════════════════════════════════════════════════
 let _saveTimer=null;
 function schedSave(){clearTimeout(_saveTimer);_saveTimer=setTimeout(()=>Config.save(),300);}
+
+function wireNoteThemeDropdown(root,prefix,refreshAll){
+  const sel=root.querySelector(`#${prefix}-nc-sel`);
+  const delBtn=root.querySelector(`#${prefix}-nc-del`);
+  const scriptDiv=root.querySelector(`#${prefix}-nc-script`);
+  const ta=root.querySelector(`#${prefix}-nc-ta`);
+  const runBtn=root.querySelector(`#${prefix}-nc-run`);
+  const saveasBtn=root.querySelector(`#${prefix}-nc-saveas`);
+  if(!sel)return ()=>{};
+
+  function refresh(){
+    const ant=Config.data.active_note_theme||{type:'builtin',index:0};
+    sel.innerHTML='';
+    const bGrp=document.createElement('optgroup'); bGrp.label='Built-in';
+    BUILTIN_NOTE_THEMES.forEach((t,i)=>{
+      const opt=document.createElement('option'); opt.value=`b${i}`; opt.textContent=t.name; bGrp.appendChild(opt);
+    });
+    sel.appendChild(bGrp);
+    const userThemes=NoteColorThemeManager.getAll();
+    if(userThemes.length){
+      const uGrp=document.createElement('optgroup'); uGrp.label='My Themes';
+      userThemes.forEach((t,i)=>{
+        const opt=document.createElement('option'); opt.value=`u${i}`; opt.textContent=t.name; uGrp.appendChild(opt);
+      });
+      sel.appendChild(uGrp);
+    }
+    sel.value=(ant.type==='user')?`u${ant.index}`:`b${ant.index}`;
+    updateUI();
+  }
+
+  function updateUI(){
+    const v=sel.value||'b0';
+    const isUser=v.startsWith('u');
+    delBtn.style.display=isUser?'':'none';
+    const isSolid=v==='b0';
+    scriptDiv.style.display=isSolid?'none':'';
+    if(isUser){
+      const i=+v.slice(1), t=NoteColorThemeManager.getAll()[i];
+      ta.value=t?t.script||'':'';
+      ta.readOnly=false; ta.style.opacity='1';
+    } else {
+      const i=+v.slice(1);
+      ta.value=BUILTIN_NOTE_THEMES[i]?.script||'';
+      ta.readOnly=true; ta.style.opacity='0.65';
+    }
+  }
+
+  function applyTheme(v){
+    if(v.startsWith('b')){
+      const i=+v.slice(1), theme=BUILTIN_NOTE_THEMES[i]; if(!theme)return;
+      Config.ns.color_mode=theme.mode;
+      Config.ns.note_colors=theme.build();
+      Config.data.active_note_theme={type:'builtin',index:i};
+    } else {
+      const i=+v.slice(1);
+      NoteColorThemeManager.load(i);
+      Config.data.active_note_theme={type:'user',index:i};
+    }
+    Config.save();
+  }
+
+  sel.addEventListener('change',()=>{ applyTheme(sel.value); updateUI(); refreshAll(); });
+
+  if(runBtn) runBtn.addEventListener('click',()=>{
+    const colors=runUserScript(ta.value); if(!colors)return;
+    Config.ns.note_colors=colors;
+    Config.ns.user_script=ta.value;
+    Config.ns.color_mode='script';
+    const v=sel.value;
+    if(v.startsWith('u')){
+      const i=+v.slice(1), themes=NoteColorThemeManager.getAll();
+      if(themes[i]){themes[i].colors=colors; themes[i].script=ta.value;}
+    }
+    Config.save();
+  });
+
+  if(saveasBtn) saveasBtn.addEventListener('click',()=>{
+    const name=prompt('Theme name:'); if(!name)return;
+    const colors=runUserScript(ta.value); if(!colors)return;
+    Config.ns.note_colors=colors; Config.ns.user_script=ta.value;
+    NoteColorThemeManager.save(name);
+    const i=NoteColorThemeManager.getAll().length-1;
+    Config.data.active_note_theme={type:'user',index:i};
+    Config.save();
+    refreshAll();
+  });
+
+  if(delBtn) delBtn.addEventListener('click',()=>{
+    const v=sel.value; if(!v.startsWith('u'))return;
+    const i=+v.slice(1), t=NoteColorThemeManager.getAll()[i];
+    if(!t||!confirm(`Delete "${t.name}"?`))return;
+    NoteColorThemeManager.delete(i);
+    Config.data.active_note_theme={type:'builtin',index:0};
+    Config.ns.color_mode='solid'; Config.ns.note_colors=null;
+    Config.save();
+    refreshAll();
+  });
+
+  refresh();
+  return refresh;
+}
 
 function wireSettings(root, app){
   // Range sliders
@@ -1084,6 +1271,12 @@ function wireSettings(root, app){
   if(btnThemeSave) btnThemeSave.addEventListener('click',()=>{
     const name=prompt('Theme name:'); if(!name)return;
     ThemeManager.save(name); refreshThemeGrid(root);
+  });
+  // Note color theme dropdowns (Notes / Effects / Fluid tabs share the same system)
+  const ncRefreshers=[];
+  function refreshAllNcDropdowns(){ncRefreshers.forEach(fn=>fn());}
+  ['notes','effects','fluid'].forEach(p=>{
+    ncRefreshers.push(wireNoteThemeDropdown(root,p,refreshAllNcDropdowns));
   });
 }
 
@@ -1229,7 +1422,7 @@ class App{
     const dt=Math.max(1,Math.min(33,rawDt));
     this.smoothedDt=this.smoothedDt*.85+dt*.15;
     this.fpsCount++; if(now-this.fpsTime>=1000){this.fps=this.fpsCount;this.fpsCount=0;this.fpsTime=now;this._hudFps.textContent=this.fps+' fps';}
-    if(this.rebuildLayout){this.layout=buildLayout(this.mainCanvas.width,this.mainCanvas.height,Config.ks.height_percent);this.rebuildLayout=false;}
+    if(this.rebuildLayout){this.layout=buildLayout(this.mainCanvas.width,this.mainCanvas.height,Config.ks.height_percent,Config.ks.width_percent??100);this.rebuildLayout=false;}
     if(this._vizActive)this._update(dt);
     this._draw();
   }
@@ -1345,7 +1538,7 @@ class App{
     [this.mainCanvas,this.bgCanvas].forEach(c=>{c.width=W;c.height=H;});
     const fc=document.getElementById('fluid-canvas'); fc.width=W; fc.height=H;
     if(window.fluidSim)window.fluidSim.resize();
-    this.layout=buildLayout(W,H,Config.ks.height_percent);
+    this.layout=buildLayout(W,H,Config.ks.height_percent,Config.ks.width_percent??100);
     if(this.fx)this.fx.resize(W,H); else this.fx=new FXRenderer(W,H);
   }
 
