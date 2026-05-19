@@ -752,14 +752,14 @@ class FluidController{
   splat(t,ns,W,H){
     if(!this._enabled||!window.fluidSim)return;
     const normX=t.x/W, normY=t.bottomY/H;
-    // Small per-splat colour value; Reinhard tonemapper in the display shader
-    // prevents saturation even when dye accumulates over many held frames.
-    const scale=0.04;
+    // Per-splat scale: color_strength maps 0-200 → 0-0.30
+    // Reinhard tonemapper in the display shader prevents solid saturation.
+    const scale=(ns.fluid_color_strength??100)/100*0.15;
     const r=ns.color_r/255*scale, g=ns.color_g/255*scale, b=ns.color_b/255*scale;
-    // Rise speed: factor 0.0025 gives ~15 % canvas height per second at 100 %
-    const velY=-(ns.fluid_intensity/100)*0.0025;
-    // Radius: linear map 1-100 → 0.0002-0.006 (before aspect-ratio correction)
-    const velRadius=Math.max(0.0002,(ns.fluid_splat_size??20)/100*0.006);
+    // Rise speed: 0.0030 ≈ 18 % canvas height per second at 100 %
+    const velY=-(ns.fluid_intensity/100)*0.003;
+    // Radius: 1-100 → 0.0002-0.010 (before aspect-ratio correction)
+    const velRadius=Math.max(0.0002,(ns.fluid_splat_size??20)/100*0.010);
     window.fluidSim.addSplat(normX,normY,0,velY,r,g,b,velRadius,velRadius*1.4);
   }
 }
@@ -1215,6 +1215,10 @@ class App{
     this._buildSettingsScreens();
     document.getElementById('main-canvas').addEventListener('keydown',e=>{if(e.key==='Escape')this.showMenu();});
     this._setupKeyboardMouse();
+    // Apply saved fluid state immediately (setEnabled / updateConfig are normally
+    // only called on user interaction, so saved settings would otherwise be ignored)
+    this.fluid.setEnabled(Config.ns.effect_fluid_enabled);
+    this.fluid.updateConfig(Config.ns);
     this._boundFrame=this._frame.bind(this);
     requestAnimationFrame(this._boundFrame);
   }
