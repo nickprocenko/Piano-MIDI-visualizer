@@ -1136,6 +1136,12 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="theme-grid" id="theme-grid"></div>
 <div style="display:flex;gap:8px;margin-top:8px">
 <button class="action-btn" id="btn-theme-save">Save Current</button>
+</div></div>
+<div class="section"><h2>Save File</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Export all settings and presets to a file, or load a previously exported file.</p>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="action-btn" id="btn-cfg-export">Export…</button>
+<label class="action-btn" style="cursor:pointer">Import… <input type="file" id="inp-cfg-import" accept=".json" style="display:none"></label>
 </div></div>`,
   };
   return tabs[tab]||'';
@@ -1423,6 +1429,34 @@ function wireSettings(root, app){
   if(btnThemeSave) btnThemeSave.addEventListener('click',()=>{
     const name=prompt('Theme name:'); if(!name)return;
     ThemeManager.save(name); refreshThemeGrid(root);
+  });
+  // Export / Import save file
+  const btnExport=root.querySelector('#btn-cfg-export');
+  if(btnExport) btnExport.addEventListener('click',()=>{
+    const json=JSON.stringify(Config.data,null,2);
+    const blob=new Blob([json],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    const d=new Date();
+    a.href=url;
+    a.download='piano-vis-'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+  const inpImport=root.querySelector('#inp-cfg-import');
+  if(inpImport) inpImport.addEventListener('change',e=>{
+    const f=e.target.files[0]; if(!f)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const loaded=JSON.parse(ev.target.result);
+        // Deep-merge loaded data onto defaults so missing keys get filled
+        Config.data=Config._merge(JSON.parse(JSON.stringify(Config._d)),loaded);
+        Config.save();
+        location.reload();
+      }catch(err){alert('Invalid save file: '+err.message);}
+    };
+    reader.readAsText(f);
   });
   // Note color theme dropdowns (Notes / Effects / Fluid tabs share the same system)
   const ncRefreshers=[];
