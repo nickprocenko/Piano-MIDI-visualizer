@@ -209,7 +209,7 @@ const Config = {
       fluid_own_color:0, fluid_own_r:0, fluid_own_g:230, fluid_own_b:230,
     },
     keyboard_style:{height_percent:18, brightness:100, visible:1, width_percent:100},
-    display_style:{background_color:'#0f0f14', background_image:''},
+    display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000},
     led_output:{
       enabled:0, transport:'none', led_count:177, mirror_per_key:2,
       ble_service_uuid:'6E400001-B5A3-F393-E0A9-E50E24DCCA9E',
@@ -795,7 +795,7 @@ class FluidController{
 // LED OUTPUT
 // ═══════════════════════════════════════════════════════
 class LedOutput{
-  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);}
+  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;}
   async connectSerial(){
     if(!navigator.serial){alert('Web Serial requires Chrome or Edge.');return false;}
     try{
@@ -816,19 +816,42 @@ class LedOutput{
     }catch(e){return false;}
   }
   disconnect(){
+    this.stopSweep();
     if(this._writer){try{this._writer.releaseLock();}catch(e){} this._writer=null;}
     if(this._ser){try{this._ser.close();}catch(e){} this._ser=null;}
     this._ble=null;this._char=null;this.connected=false;
   }
+  _send(enc){
+    if(this._writer)this._writer.write(enc).catch(()=>{});
+    else if(this._char)this._char.writeValueWithoutResponse(enc).catch(()=>{});
+  }
+  startSweep(lo){
+    if(this._sweepTimer)this.stopSweep();
+    const cnt=Math.max(1,lo.led_count||177);
+    let i=0;
+    this._sweepTimer=setInterval(()=>{
+      const parts=['LEDS',cnt];
+      for(let j=0;j<cnt;j++)parts.push(j===i?255:0,j===i?255:0,j===i?255:0);
+      this._send(new TextEncoder().encode(parts.join(',')+'\n'));
+      i=(i+1)%cnt;
+    },80);
+  }
+  stopSweep(lo){
+    clearInterval(this._sweepTimer); this._sweepTimer=null;
+    if(this.connected){
+      const cnt=Math.max(1,(lo&&lo.led_count)||177);
+      const parts=['LEDS',cnt];
+      for(let j=0;j<cnt*3;j++)parts.push(0);
+      this._send(new TextEncoder().encode(parts.join(',')+'\n'));
+    }
+  }
   update(activeNotes,sustainedNotes,lo,ns,now){
-    if(!this.connected)return;
+    if(!this.connected||this._sweepTimer)return;
     const fps=Math.max(1,Math.min(60,lo.fps_limit||30));
     if(now-this._lastMs<1000/fps)return;
     const dt=Math.min(0.1,(now-this._lastMs)/1000);
     this._lastMs=now;
     const cnt=lo.led_count, mpk=lo.mirror_per_key||2;
-    const{r,g,b}=resolveNoteColor(0,0,ns); // base color (note 0 resolves to solid if no theme)
-    const cr=ns.color_r,cg=ns.color_g,cb=ns.color_b;
     const fadeAmt=(lo.led_fade_amount||0)/100;
     const fadeEnabled=fadeAmt>0;
     const decay=fadeEnabled?Math.pow(Math.max(0,1-fadeAmt),dt*200/Math.max(1,lo.led_fade_speed||80)):0;
@@ -847,10 +870,7 @@ class LedOutput{
         parts.push(Math.round(nr*br),Math.round(ng*br),Math.round(nb*br));
       }else{parts.push(0,0,0);}
     }
-    const line=parts.join(',')+'\n';
-    const enc=new TextEncoder().encode(line);
-    if(this._writer) this._writer.write(enc).catch(()=>{});
-    else if(this._char) this._char.writeValueWithoutResponse(enc).catch(()=>{});
+    this._send(new TextEncoder().encode(parts.join(',')+'\n'));
   }
 }
 
@@ -1125,8 +1145,10 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 </div></div>`,
     display:`<div class="section"><h2>Background</h2>
 <div class="row"><label>Color</label><input type="color" id="cp-bg" value="${ds.background_color||'#0f0f14'}"></div>
-<div class="row"><label>Image / GIF</label><input type="file" id="bg-file-input" accept="image/*" style="flex:1;font-size:11px;color:var(--muted)"></div>
-<div class="row"><label></label><button class="action-btn" id="btn-clear-bg">Clear Image</button></div>
+<div class="row"><label>Images / GIF</label><input type="file" id="bg-file-input" accept="image/*" multiple style="flex:1;font-size:11px;color:var(--muted)"></div>
+<div class="row"><label>Slide s</label><input type="range" id="sl-bg-slide" min="1" max="60" step="1" value="${Math.round((ds.bg_slide_ms??5000)/1000)}"><span class="val" id="v-sl-bg-slide">${Math.round((ds.bg_slide_ms??5000)/1000)}</span></div>
+<div class="row"><label>Fade s</label><input type="range" id="sl-bg-fade" min="0" max="10" step="0.5" value="${((ds.bg_fade_ms??1000)/1000).toFixed(1)}"><span class="val" id="v-sl-bg-fade">${((ds.bg_fade_ms??1000)/1000).toFixed(1)}</span></div>
+<div class="row"><label></label><button class="action-btn" id="btn-clear-bg">Clear Images</button></div>
 </div>`,
     led:`<div class="section"><h2>LED Strip Output</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Requires Chrome or Edge. Uses Web Serial or Web Bluetooth.</p>
@@ -1145,6 +1167,9 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="row"><label></label>
 <button class="action-btn" id="btn-led-connect">Connect</button>
 <button class="action-btn" id="btn-led-disconnect" style="margin-left:6px">Disconnect</button>
+</div>
+<div class="row"><label></label>
+<button class="action-btn" id="btn-led-sweep">Sweep LEDs</button>
 </div></div>`,
     audience:`<div class="section"><h2>Audience Color Control</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Connect to a WebSocket that sends <code>color_set</code> events to change note color live.</p>
@@ -1391,14 +1416,28 @@ function wireSettings(root, app){
   // Background colour
   const cpBg=root.querySelector('#cp-bg');
   if(cpBg) cpBg.addEventListener('input',e=>{Config.ds.background_color=e.target.value;schedSave();});
-  // Background image
+  // Background image / slideshow
   const bgFile=root.querySelector('#bg-file-input');
   if(bgFile) bgFile.addEventListener('change',e=>{
-    const f=e.target.files[0]; if(!f)return;
-    const url=URL.createObjectURL(f); app.setBgImage(url);
+    if(!e.target.files.length)return;
+    app.setBgImages(e.target.files);
   });
   const clearBg=root.querySelector('#btn-clear-bg');
-  if(clearBg) clearBg.addEventListener('click',()=>{app.setBgImage(null);});
+  if(clearBg) clearBg.addEventListener('click',()=>{app.clearBgImages();});
+  const slBgSlide=root.querySelector('#sl-bg-slide');
+  const vBgSlide=root.querySelector('#v-sl-bg-slide');
+  if(slBgSlide) slBgSlide.addEventListener('input',e=>{
+    Config.ds.bg_slide_ms=+e.target.value*1000;
+    if(vBgSlide)vBgSlide.textContent=e.target.value;
+    schedSave();
+  });
+  const slBgFade=root.querySelector('#sl-bg-fade');
+  const vBgFade=root.querySelector('#v-sl-bg-fade');
+  if(slBgFade) slBgFade.addEventListener('input',e=>{
+    Config.ds.bg_fade_ms=+e.target.value*1000;
+    if(vBgFade)vBgFade.textContent=e.target.value;
+    schedSave();
+  });
   // LED
   const ledTrans=root.querySelector('#led-transport');
   if(ledTrans) ledTrans.addEventListener('change',()=>{Config.lo.transport=ledTrans.value;schedSave();});
@@ -1415,6 +1454,11 @@ function wireSettings(root, app){
   });
   const btnDisc=root.querySelector('#btn-led-disconnect');
   if(btnDisc) btnDisc.addEventListener('click',()=>{app.led.disconnect();updateLedStatus(root,app);});
+  const btnSweep=root.querySelector('#btn-led-sweep');
+  if(btnSweep) btnSweep.addEventListener('click',()=>{
+    if(app.led._sweepTimer){app.led.stopSweep(Config.lo);btnSweep.textContent='Sweep LEDs';}
+    else if(app.led.connected){app.led.startSweep(Config.lo);btnSweep.textContent='Stop Sweep';}
+  });
   // LED sustain
   const ledSustainBtn=root.querySelector('#btn-led-sustain');
   if(ledSustainBtn) ledSustainBtn.addEventListener('click',()=>{
@@ -1593,7 +1637,8 @@ class App{
     this.lastTime=0;
     this.fpsTime=0; this.fpsCount=0; this.fps=0;
     this.rebuildLayout=false;
-    this._bgImg=null; this._bgUrl=null;
+    this._bgImages=[];   // [{img:HTMLImageElement, url:string}]
+    this._bgPhase=0;     // performance.now() when slideshow started
     this._mode='freeplay'; // 'freeplay' or 'file'
     this._vizActive=false;
     this._panelOpen=false;
@@ -1682,11 +1727,28 @@ class App{
     const ctx=this.ctx;
     // Background
     const bgColor=Config.ds.background_color||'#0f0f14';
-    if(this._bgImg){
-      this.bgCtx.fillStyle=bgColor; this.bgCtx.fillRect(0,0,W,H);
-      this.bgCtx.drawImage(this._bgImg,0,0,W,H);
-    }else{
-      this.bgCtx.fillStyle=bgColor; this.bgCtx.fillRect(0,0,W,H);
+    this.bgCtx.fillStyle=bgColor; this.bgCtx.fillRect(0,0,W,H);
+    if(this._bgImages.length>0){
+      const slideMs=Math.max(500,Config.ds.bg_slide_ms??5000);
+      const fadeMs=Math.max(0,Config.ds.bg_fade_ms??1000);
+      const cycleMs=slideMs+fadeMs;
+      const elapsed=(performance.now()-this._bgPhase)%cycleMs;
+      const totalElapsed=performance.now()-this._bgPhase;
+      const imgIdx=Math.floor(totalElapsed/cycleMs)%this._bgImages.length;
+      const nextIdx=(imgIdx+1)%this._bgImages.length;
+      const isFading=fadeMs>0&&elapsed>slideMs;
+      const fadeT=isFading?(elapsed-slideMs)/fadeMs:0;
+      const cur=this._bgImages[imgIdx]?.img;
+      const nxt=this._bgImages[nextIdx]?.img;
+      if(cur?.complete&&cur.naturalWidth>0){
+        this.bgCtx.globalAlpha=1;
+        this.bgCtx.drawImage(cur,0,0,W,H);
+      }
+      if(isFading&&this._bgImages.length>1&&nxt?.complete&&nxt.naturalWidth>0){
+        this.bgCtx.globalAlpha=fadeT;
+        this.bgCtx.drawImage(nxt,0,0,W,H);
+        this.bgCtx.globalAlpha=1;
+      }
     }
     // Main canvas — transparent; bg-canvas handles the background fill
     ctx.clearRect(0,0,W,H);
@@ -1751,10 +1813,19 @@ class App{
     if(this.fx)this.fx.resize(W,H); else this.fx=new FXRenderer(W,H);
   }
 
-  setBgImage(url){
-    if(this._bgUrl)URL.revokeObjectURL(this._bgUrl);
-    this._bgUrl=url; this._bgImg=null;
-    if(url){const img=new Image(); img.onload=()=>{this._bgImg=img;}; img.src=url;}
+  setBgImages(files){
+    this.clearBgImages();
+    for(const f of files){
+      const url=URL.createObjectURL(f);
+      const entry={img:new Image(),url};
+      entry.img.src=url;
+      this._bgImages.push(entry);
+    }
+    this._bgPhase=performance.now();
+  }
+  clearBgImages(){
+    for(const e of this._bgImages)URL.revokeObjectURL(e.url);
+    this._bgImages=[];
   }
 
   // Screen management
