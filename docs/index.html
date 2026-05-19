@@ -200,6 +200,7 @@ const Config = {
       effect_glow_enabled:1, effect_highlight_enabled:1,
       effect_sparks_enabled:1, effect_smoke_enabled:1,
       effect_press_smoke_enabled:0, effect_moon_dust_enabled:0,
+      moon_dust_amount_percent:100, moon_dust_opacity_percent:100,
       effect_steam_smoke_enabled:0, effect_halo_pulse_enabled:0,
       effect_fluid_enabled:0,
       fluid_intensity:80, fluid_curl:30,
@@ -353,10 +354,10 @@ function trailW(lay,n,ns){
 
 class TrailManager{
   constructor(){this.active=new Map();this.all=[];}
-  start(n,lay,ns,ks,H){
+  start(n,ch,lay,ns,ks,H){
     const r=getRect(lay,n); if(!r)return null;
     const ay=anchorY(lay,n,ks,H), tw=trailW(lay,n,ns), cx=r.x+r.w/2;
-    const t={note:n,x:cx,topY:ay,bottomY:ay,width:tw,
+    const t={note:n,channel:ch??0,x:cx,topY:ay,bottomY:ay,width:tw,
       renderX:cx,renderTopY:ay,renderBottomY:ay,renderWidth:tw,
       released:false,ageMs:0,sparks:[],smoke:[],mist:[]};
     this.active.set(n,t); this.all.push(t);
@@ -475,7 +476,7 @@ class FXRenderer{
     const cx=t.renderX,ty=t.renderTopY,by=t.renderBottomY,w=t.renderWidth;
     const h=Math.max(2,by-ty); if(by<0||ty>this.H)return;
     const hw=w/2;
-    const{r,g,b}=resolveNoteColor(t.note,ns);
+    const{r,g,b}=resolveNoteColor(t.note,t.channel,ns);
     const bl=ns.inner_blend_percent/100;
     const ir=Math.round(ns.interior_r*(1-bl)+r*bl);
     const ig=Math.round(ns.interior_g*(1-bl)+g*bl);
@@ -507,14 +508,14 @@ class FXRenderer{
     }
     // Moon dust
     if(ns.effect_moon_dust_enabled){
-      const stemLen=Math.max(1,h),swarm=Math.max(4,Math.min(14,4+(stemLen/70|0)));
+      const stemLen=Math.max(1,h),swarm=Math.max(0,Math.min(14,(4+(stemLen/70|0))*(ns.moon_dust_amount_percent??100)/100|0));
       const span=Math.max(10,stemLen-10),base=(t.ageMs*.0058)+(cx*.014);
       for(let i=0;i<swarm;i++){
         const f=i/Math.max(1,swarm-1), ang=base+i*1.37;
         const orbit=w*(.55+.75*f)+7+(i%3)*3;
         const px=cx+Math.sin(ang)*orbit, py=by-f*span+Math.cos(ang*1.24+f*2.7)*(4+(8*f|0));
         const tw2=.52+.48*Math.sin(ang*2.5+i*.65);
-        const al=Math.max(0,Math.min(255,40+90*Math.max(0,tw2)+f*38|0));
+        const al=Math.max(0,Math.min(255,(40+90*Math.max(0,tw2)+f*38)*(ns.moon_dust_opacity_percent??100)/100|0));
         this.octx.fillStyle=rgba(Math.min(255,ir*.55+120|0),Math.min(255,ig*.55+120|0),Math.min(255,ib*.60+128|0),al/255);
         this.octx.beginPath();this.octx.arc(px,py,i%4?1:2,0,Math.PI*2);this.octx.fill();
       }
@@ -593,6 +594,7 @@ class MidiHandler{
   constructor(){
     this.activeNotes=new Set();
     this.sustainedNotes=new Set();
+    this.noteChannel=new Map();
     this._sustain=false;
     this.portName='Computer Keyboard';
     this.connected=false;
@@ -623,17 +625,18 @@ class MidiHandler{
     }
   }
   _onMsg(d){
-    const st=d[0]&0xF0,n=d[1],v=d[2];
+    const st=d[0]&0xF0,ch=d[0]&0x0F,n=d[1],v=d[2];
     if(st===0x90&&v>0){
       this.activeNotes.add(n);
+      this.noteChannel.set(n,ch);
       this.sustainedNotes.delete(n);
     } else if(st===0x80||(st===0x90&&v===0)){
       if(this._sustain){this.sustainedNotes.add(n);}
-      else{this.activeNotes.delete(n);}
+      else{this.activeNotes.delete(n);this.noteChannel.delete(n);}
     } else if(st===0xB0&&n===64){
       this._sustain=v>=64;
       if(!this._sustain){
-        for(const sn of this.sustainedNotes)this.activeNotes.delete(sn);
+        for(const sn of this.sustainedNotes){this.activeNotes.delete(sn);this.noteChannel.delete(sn);}
         this.sustainedNotes.clear();
       }
     }
@@ -658,7 +661,7 @@ class MidiHandler{
     try{this._access=await navigator.requestMIDIAccess({sysex:false});return true;}
     catch(e){return false;}
   }
-  close(){this._stopQwerty();if(this._port)this._port.onmidimessage=null;this.activeNotes.clear();}
+  close(){this._stopQwerty();if(this._port)this._port.onmidimessage=null;this.activeNotes.clear();this.noteChannel.clear();}
 }
 
 // ═══════════════════════════════════════════════════════
@@ -686,7 +689,7 @@ function parseMidi(buf){
       const tp=st&0xF0;
       if(tp===0x90||tp===0x80){
         const n=u8(),vel=u8();
-        evts.push({tick,type:tp===0x90?'on':'off',n,vel});
+        evts.push({tick,type:tp===0x90?'on':'off',ch:st&0x0F,n,vel});
       }else if(tp===0xB0||tp===0xA0||tp===0xE0){u8();u8();}
       else if(tp===0xC0||tp===0xD0){u8();}
       else if(st===0xFF){
@@ -714,30 +717,30 @@ function parseMidi(buf){
   const all=[];
   for(const tr of tracks) for(const e of tr){
     if(e.type==='on'||e.type==='off')
-      all.push({timeMs:tickToMs(e.tick),type:e.type==='on'?'noteon':'noteoff',note:e.n,velocity:e.vel});
+      all.push({timeMs:tickToMs(e.tick),type:e.type==='on'?'noteon':'noteoff',note:e.n,velocity:e.vel,channel:e.ch??0});
   }
   all.sort((a,b)=>a.timeMs-b.timeMs||(a.type==='noteoff'?-1:1));
   return all;
 }
 
 class MidiFilePlayer{
-  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.filename='';}
+  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.filename='';}
   load(buf,name){
     this.filename=name; this.events=parseMidi(buf);
     this.stop();
   }
   play(){if(!this.events.length)return;this.playing=true;this.t0=performance.now()-this.pos;this.idx=this._seek(this.pos);}
-  pause(){this.playing=false;this.pos=performance.now()-this.t0;this.activeNotes.clear();}
-  stop(){this.playing=false;this.pos=0;this.idx=0;this.activeNotes.clear();}
+  pause(){this.playing=false;this.pos=performance.now()-this.t0;this.activeNotes.clear();this.noteChannel.clear();}
+  stop(){this.playing=false;this.pos=0;this.idx=0;this.activeNotes.clear();this.noteChannel.clear();}
   update(){
     if(!this.playing)return false;
     const el=performance.now()-this.t0; let ch=false;
     while(this.idx<this.events.length&&this.events[this.idx].timeMs<=el){
       const e=this.events[this.idx++];
-      if(e.type==='noteon'&&e.velocity>0){this.activeNotes.add(e.note);ch=true;}
-      else if(e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0)){this.activeNotes.delete(e.note);ch=true;}
+      if(e.type==='noteon'&&e.velocity>0){this.activeNotes.add(e.note);this.noteChannel.set(e.note,e.channel??0);ch=true;}
+      else if(e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0)){this.activeNotes.delete(e.note);this.noteChannel.delete(e.note);ch=true;}
     }
-    if(this.idx>=this.events.length){this.playing=false;this.activeNotes.clear();this.pos=0;return true;}
+    if(this.idx>=this.events.length){this.playing=false;this.activeNotes.clear();this.noteChannel.clear();this.pos=0;return true;}
     return ch;
   }
   _seek(ms){
@@ -778,7 +781,7 @@ class FluidController{
     const scale=(ns.fluid_color_strength??100)/100*0.15;
     const{r:cr,g:cg,b:cb}=ns.fluid_own_color
       ?{r:ns.fluid_own_r,g:ns.fluid_own_g,b:ns.fluid_own_b}
-      :resolveNoteColor(t.note,ns);
+      :resolveNoteColor(t.note,t.channel,ns);
     const r=cr/255*scale, g=cg/255*scale, b=cb/255*scale;
     // Rise speed: 0.0030 ≈ 18 % canvas height per second at 100 %
     const velY=-(ns.fluid_intensity/100)*0.003;
@@ -824,7 +827,7 @@ class LedOutput{
     const dt=Math.min(0.1,(now-this._lastMs)/1000);
     this._lastMs=now;
     const cnt=lo.led_count, mpk=lo.mirror_per_key||2;
-    const{r,g,b}=resolveNoteColor(0,ns); // base color (note 0 resolves to solid if no theme)
+    const{r,g,b}=resolveNoteColor(0,0,ns); // base color (note 0 resolves to solid if no theme)
     const cr=ns.color_r,cg=ns.color_g,cb=ns.color_b;
     const fadeAmt=(lo.led_fade_amount||0)/100;
     const fadeEnabled=fadeAmt>0;
@@ -840,7 +843,7 @@ class LedOutput{
       const key=PIANO_FIRST+Math.floor(i/mpk);
       const br=this._bright[key];
       if(br>0){
-        const{r:nr,g:ng,b:nb}=resolveNoteColor(key,ns);
+        const{r:nr,g:ng,b:nb}=resolveNoteColor(key,0,ns);
         parts.push(Math.round(nr*br),Math.round(ng*br),Math.round(nb*br));
       }else{parts.push(0,0,0);}
     }
@@ -895,6 +898,7 @@ class AudienceColorClient{
 const THEME_FIELDS=['color_r','color_g','color_b','interior_r','interior_g','interior_b',
   'inner_blend_percent','glow_strength_percent','highlight_strength_percent',
   'spark_amount_percent','smoke_amount_percent','press_smoke_amount_percent',
+  'moon_dust_amount_percent','moon_dust_opacity_percent',
   'effect_glow_enabled','effect_highlight_enabled','effect_sparks_enabled','effect_smoke_enabled',
   'effect_press_smoke_enabled','effect_moon_dust_enabled','effect_steam_smoke_enabled','effect_halo_pulse_enabled'];
 
@@ -930,21 +934,36 @@ function _buildFire(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,
 function _buildIce(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return{r:0,g:Math.round(180+t*75),b:255};});}
 function _buildSunset(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return hsvToRgb(0.04+t*0.18,0.95,1.0);});}
 
-function resolveNoteColor(note,ns){
+function resolveNoteColor(note,channel,ns){
   const nc=ns.note_colors;
-  if(!nc)return{r:ns.color_r,g:ns.color_g,b:ns.color_b};
-  return nc[note]||{r:ns.color_r,g:ns.color_g,b:ns.color_b};
+  const fallback={r:ns.color_r,g:ns.color_g,b:ns.color_b};
+  if(!nc)return fallback;
+  // Backward compat: plain Array(128) from saved themes / built-in themes
+  if(Array.isArray(nc))return nc[note]||fallback;
+  const{notes,channelColors,zones}=nc;
+  const ch=channel??0;
+  // Priority 1: zone (channel + pitch range)
+  for(let i=0;i<zones.length;i++){const z=zones[i];if(z.ch===ch&&note>=z.lo&&note<=z.hi)return{r:z.r,g:z.g,b:z.b};}
+  // Priority 2: channel
+  const cc=channelColors[ch];if(cc)return cc;
+  // Priority 3: per-note
+  if(notes&&notes[note])return notes[note];
+  return fallback;
 }
 
 function runUserScript(code){
-  const colors=new Array(128).fill(null);
+  const notes=new Array(128).fill(null);
+  const channelColors=new Array(16).fill(null);
+  const zones=[];
   const api={
-    setNote(n,r,g,b){if(n>=0&&n<128)colors[n]={r:r|0,g:g|0,b:b|0};},
-    setOctave(oct,r,g,b){for(let n=((oct%12)+12)%12;n<128;n+=12)colors[n]={r:r|0,g:g|0,b:b|0};},
-    setAll(r,g,b){for(let n=0;n<128;n++)colors[n]={r:r|0,g:g|0,b:b|0};},
+    setNote(n,r,g,b){if(n>=0&&n<128)notes[n]={r:r|0,g:g|0,b:b|0};},
+    setOctave(oct,r,g,b){for(let n=((oct%12)+12)%12;n<128;n+=12)notes[n]={r:r|0,g:g|0,b:b|0};},
+    setAll(r,g,b){for(let n=0;n<128;n++)notes[n]={r:r|0,g:g|0,b:b|0};},
+    setChannel(ch,r,g,b){if(ch>=0&&ch<16)channelColors[ch]={r:r|0,g:g|0,b:b|0};},
+    setZone(ch,lo,hi,r,g,b){zones.push({ch:ch|0,lo:lo|0,hi:hi|0,r:r|0,g:g|0,b:b|0});},
     hsvToRgb,
   };
-  try{new Function('api',code)(api);return colors;}
+  try{new Function('api',code)(api);return{notes,channelColors,zones};}
   catch(e){alert('Script error: '+e.message);return null;}
 }
 
@@ -1075,6 +1094,8 @@ ${row('Highlight %','r-hlst',0,170,5,'highlight_strength_percent')}
 ${row('Spark %','r-spkst',0,300,5,'spark_amount_percent')}
 ${row('Smoke %','r-smkst',0,300,5,'smoke_amount_percent')}
 ${row('Mist %','r-mstst',0,250,5,'press_smoke_amount_percent')}
+${row('Moon Dust %','r-mdamt',0,300,5,'moon_dust_amount_percent')}
+${row('Moon Dust Opacity %','r-mdop',0,200,5,'moon_dust_opacity_percent')}
 </div></div>`,
     fluid:ncSel('fluid')+fluidSel()+`<div class="section"><h2>Fluid Settings</h2>
 <div class="toggle-btn${ns.effect_fluid_enabled?' on':''}" data-ns-tog="effect_fluid_enabled" style="max-width:180px;margin-bottom:12px">GPU Fluid</div>
@@ -1136,6 +1157,12 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="theme-grid" id="theme-grid"></div>
 <div style="display:flex;gap:8px;margin-top:8px">
 <button class="action-btn" id="btn-theme-save">Save Current</button>
+</div></div>
+<div class="section"><h2>Save File</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Export all settings and presets to a file, or load a previously exported file.</p>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<button class="action-btn" id="btn-cfg-export">Export…</button>
+<label class="action-btn" style="cursor:pointer">Import… <input type="file" id="inp-cfg-import" accept=".json" style="display:none"></label>
 </div></div>`,
   };
   return tabs[tab]||'';
@@ -1424,6 +1451,34 @@ function wireSettings(root, app){
     const name=prompt('Theme name:'); if(!name)return;
     ThemeManager.save(name); refreshThemeGrid(root);
   });
+  // Export / Import save file
+  const btnExport=root.querySelector('#btn-cfg-export');
+  if(btnExport) btnExport.addEventListener('click',()=>{
+    const json=JSON.stringify(Config.data,null,2);
+    const blob=new Blob([json],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    const d=new Date();
+    a.href=url;
+    a.download='piano-vis-'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+  const inpImport=root.querySelector('#inp-cfg-import');
+  if(inpImport) inpImport.addEventListener('change',e=>{
+    const f=e.target.files[0]; if(!f)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{
+        const loaded=JSON.parse(ev.target.result);
+        // Deep-merge loaded data onto defaults so missing keys get filled
+        Config.data=Config._merge(JSON.parse(JSON.stringify(Config._d)),loaded);
+        Config.save();
+        location.reload();
+      }catch(err){alert('Invalid save file: '+err.message);}
+    };
+    reader.readAsText(f);
+  });
   // Note color theme dropdowns (Notes / Effects / Fluid tabs share the same system)
   const ncRefreshers=[];
   function refreshAllNcDropdowns(){ncRefreshers.forEach(fn=>fn());}
@@ -1602,7 +1657,9 @@ class App{
     for(const n of activeNotes) if(!this.prevNotes.has(n)) newly.push(n);
     for(const n of this.prevNotes) if(!activeNotes.has(n)) released.push(n);
     for(let i=0;i<newly.length;i++){
-      const t=this.trails.start(newly[i],this.layout,ns,ks,H);
+      const ni=newly[i];
+      const src=this._mode==='file'?this.midiFile:this.midi;
+      const t=this.trails.start(ni,src.noteChannel.get(ni)??0,this.layout,ns,ks,H);
       if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
     }
     for(let i=0;i<released.length;i++) this.trails.release(released[i],ns);
