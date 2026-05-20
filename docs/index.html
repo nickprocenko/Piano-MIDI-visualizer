@@ -596,6 +596,7 @@ class MidiHandler{
     this.sustainedNotes=new Set();
     this.reattackedNotes=new Set();
     this.noteChannel=new Map();
+    this.noteVelocity=new Map();
     this._sustain=false;
     this.portName='Computer Keyboard';
     this.connected=false;
@@ -630,15 +631,16 @@ class MidiHandler{
     if(st===0x90&&v>0){
       if(this.activeNotes.has(n))this.reattackedNotes.add(n);
       this.activeNotes.add(n);
+      this.noteVelocity.set(n,v);
       this.noteChannel.set(n,ch);
       this.sustainedNotes.delete(n);
     } else if(st===0x80||(st===0x90&&v===0)){
       if(this._sustain){this.sustainedNotes.add(n);}
-      else{this.activeNotes.delete(n);this.noteChannel.delete(n);}
+      else{this.activeNotes.delete(n);this.noteChannel.delete(n);this.noteVelocity.delete(n);}
     } else if(st===0xB0&&n===64){
       this._sustain=v>=64;
       if(!this._sustain){
-        for(const sn of this.sustainedNotes){this.activeNotes.delete(sn);this.noteChannel.delete(sn);}
+        for(const sn of this.sustainedNotes){this.activeNotes.delete(sn);this.noteChannel.delete(sn);this.noteVelocity.delete(sn);}
         this.sustainedNotes.clear();
       }
     }
@@ -1005,15 +1007,19 @@ function runUserScript(code){
   const notes=new Array(128).fill(null);
   const channelColors=new Array(16).fill(null);
   const zones=[];
+  let _onNoteOn=null,_onNoteOff=null,_onFrame=null;
   const api={
-    setNote(n,r,g,b){if(n>=0&&n<128)notes[n]={r:r|0,g:g|0,b:b|0};},
+    setNote(n,r,g,b){if(n>=0&&n<128)notes[n]=r==null?null:{r:r|0,g:g|0,b:b|0};},
     setOctave(oct,r,g,b){for(let n=((oct%12)+12)%12;n<128;n+=12)notes[n]={r:r|0,g:g|0,b:b|0};},
     setAll(r,g,b){for(let n=0;n<128;n++)notes[n]={r:r|0,g:g|0,b:b|0};},
     setChannel(ch,r,g,b){if(ch>=0&&ch<16)channelColors[ch]={r:r|0,g:g|0,b:b|0};},
     setZone(ch,lo,hi,r,g,b){zones.push({ch:ch|0,lo:lo|0,hi:hi|0,r:r|0,g:g|0,b:b|0});},
     hsvToRgb,
+    onNoteOn(fn){_onNoteOn=fn;},
+    onNoteOff(fn){_onNoteOff=fn;},
+    onFrame(fn){_onFrame=fn;},
   };
-  try{new Function('api',code)(api);return{notes,channelColors,zones};}
+  try{new Function('api',code)(api);return{notes,channelColors,zones,_onNoteOn,_onNoteOff,_onFrame};}
   catch(e){alert('Script error: '+e.message);return null;}
 }
 
@@ -1093,7 +1099,7 @@ function buildSettingsHTML(tab){
 <button id="${prefix}-nc-del" class="action-btn" style="margin-left:6px;display:none" title="Delete">×</button>
 </div>
 <div id="${prefix}-nc-script" style="display:none;margin-top:8px">
-<textarea id="${prefix}-nc-ta" rows="5" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:monospace;font-size:11px;resize:vertical"></textarea>
+<textarea id="${prefix}-nc-ta" rows="8" placeholder="// Static setup — runs once:\napi.setAll(0, 100, 200);\n\n// Called on each note strike:\napi.onNoteOn(function(note, velocity, channel) {\n  const b = Math.round(velocity * 2);\n  api.setNote(note, b, b, 255);\n});\n\n// Called on note release:\napi.onNoteOff(function(note, channel) {\n  api.setNote(note, null); // revert to base colour\n});\n\n// Called every animation frame:\napi.onFrame(function(activeNotes, now, dt) {\n  // now = ms,  dt = seconds since last frame\n  for (const n of activeNotes) {\n    const [r,g,b] = api.hsvToRgb((now/2000 + n/12) % 1, 1, 1);\n    api.setNote(n, r, g, b);\n  }\n});" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:monospace;font-size:11px;resize:vertical"></textarea>
 <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
 <button id="${prefix}-nc-run" class="action-btn">▶ Run</button>
 <button id="${prefix}-nc-saveas" class="action-btn">Save As…</button>
@@ -1789,6 +1795,13 @@ class App{
     }
     this.led.reattack(this.midi.reattackedNotes,this.lastTime);
     this.midi.reattackedNotes.clear();
+    const nc=ns.note_colors;
+    if(nc&&typeof nc==='object'&&!Array.isArray(nc)){
+      const src=this._mode==='file'?this.midiFile:this.midi;
+      if(nc._onNoteOn)for(let i=0;i<newly.length;i++){try{nc._onNoteOn(newly[i],src.noteVelocity?.get(newly[i])??127,src.noteChannel.get(newly[i])??0);}catch(e){}}
+      if(nc._onNoteOff)for(let i=0;i<released.length;i++){try{nc._onNoteOff(released[i],src.noteChannel.get(released[i])??0);}catch(e){}}
+      if(nc._onFrame)try{nc._onFrame(activeNotes,this.lastTime,dt/1000);}catch(e){}
+    }
     for(let i=0;i<newly.length;i++){
       const ni=newly[i];
       const src=this._mode==='file'?this.midiFile:this.midi;
