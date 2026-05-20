@@ -795,7 +795,7 @@ class FluidController{
 // LED OUTPUT
 // ═══════════════════════════════════════════════════════
 class LedOutput{
-  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;}
+  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;}
   async connectSerial(){
     if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
       this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
@@ -838,7 +838,19 @@ class LedOutput{
   }
   _send(enc){
     if(this._writer)this._writer.write(enc).catch(()=>{});
-    else if(this._char)this._char.writeValueWithoutResponse(enc).catch(()=>{});
+    else if(this._char)this._sendBle(enc);
+  }
+  async _sendBle(enc){
+    const CHUNK=200;
+    for(let off=0;off<enc.length;off+=CHUNK){
+      try{await this._char.writeValueWithoutResponse(enc.slice(off,off+CHUNK));}
+      catch(e){
+        const msg='BLE write: '+(e.message||String(e));
+        this._lastError=msg;
+        if(this._onError)this._onError(msg);
+        return;
+      }
+    }
   }
   startSweep(lo){
     if(this._sweepTimer)this.stopSweep();
@@ -1493,9 +1505,10 @@ function wireSettings(root, app){
     else if(t==='bluetooth')await app.led.connectBluetooth(Config.lo.ble_service_uuid,Config.lo.ble_char_uuid);
     updateLedStatus(root,app);
     if(Config.lo.transport==='serial'&&app.led.connected)attachConsole(); else detachConsole();
+    app.led._onError=(msg)=>{const diag=root.querySelector('#led-diag');if(diag)diag.textContent=msg;};
   });
   const btnDisc=root.querySelector('#btn-led-disconnect');
-  if(btnDisc) btnDisc.addEventListener('click',()=>{app.led.disconnect();updateLedStatus(root,app);detachConsole();});
+  if(btnDisc) btnDisc.addEventListener('click',()=>{app.led.disconnect();app.led._onError=null;updateLedStatus(root,app);detachConsole();});
   const btnSweep=root.querySelector('#btn-led-sweep');
   if(btnSweep) btnSweep.addEventListener('click',()=>{
     if(app.led._sweepTimer){app.led.stopSweep(Config.lo);btnSweep.textContent='Sweep LEDs';}
