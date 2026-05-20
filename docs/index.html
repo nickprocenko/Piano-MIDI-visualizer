@@ -594,6 +594,7 @@ class MidiHandler{
   constructor(){
     this.activeNotes=new Set();
     this.sustainedNotes=new Set();
+    this.reattackedNotes=new Set();
     this.noteChannel=new Map();
     this._sustain=false;
     this.portName='Computer Keyboard';
@@ -627,6 +628,7 @@ class MidiHandler{
   _onMsg(d){
     const st=d[0]&0xF0,ch=d[0]&0x0F,n=d[1],v=d[2];
     if(st===0x90&&v>0){
+      if(this.activeNotes.has(n))this.reattackedNotes.add(n);
       this.activeNotes.add(n);
       this.noteChannel.set(n,ch);
       this.sustainedNotes.delete(n);
@@ -795,7 +797,7 @@ class FluidController{
 // LED OUTPUT
 // ═══════════════════════════════════════════════════════
 class LedOutput{
-  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;}
+  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;this._gapUntil=new Float32Array(128);}
   async connectSerial(){
     if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
       this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
@@ -836,6 +838,7 @@ class LedOutput{
     if(this._ser){try{this._ser.close();}catch(e){} this._ser=null;}
     this._ble=null;this._char=null;this.connected=false;
   }
+  reattack(notes,now){for(const n of notes)this._gapUntil[n]=now+50;}
   _send(enc){
     if(this._writer)this._writer.write(enc).catch(()=>{});
     else if(this._char)this._sendBle(enc);
@@ -883,7 +886,7 @@ class LedOutput{
     const fadeEnabled=fadeAmt>0;
     const decay=fadeEnabled?Math.pow(Math.max(0,1-fadeAmt),dt*200/Math.max(1,lo.led_fade_speed||80)):0;
     for(let n=0;n<128;n++){
-      const lit=activeNotes.has(n)||(lo.led_sustain&&sustainedNotes.has(n));
+      const lit=(activeNotes.has(n)||(lo.led_sustain&&sustainedNotes.has(n)))&&!(this._gapUntil[n]>now);
       if(lit)this._bright[n]=1.0;
       else if(fadeEnabled)this._bright[n]=Math.max(0,this._bright[n]*decay);
       else this._bright[n]=0;
@@ -1704,6 +1707,7 @@ class App{
     this._activeNotes=new Set();  // swap buffer — never allocate in frame loop
     this._newly=[];               // reused arrays — no per-frame allocation
     this._released=[];
+    this._pendingRestart=new Set();
     this.smoothedDt=16.67;
     this.lastTime=0;
     this.fpsTime=0; this.fpsCount=0; this.fps=0;
@@ -1772,6 +1776,19 @@ class App{
     const released=this._released; released.length=0;
     for(const n of activeNotes) if(!this.prevNotes.has(n)) newly.push(n);
     for(const n of this.prevNotes) if(!activeNotes.has(n)) released.push(n);
+    for(const n of this._pendingRestart){
+      if(activeNotes.has(n)){
+        const src=this._mode==='file'?this.midiFile:this.midi;
+        const t=this.trails.start(n,src.noteChannel.get(n)??0,this.layout,ns,ks,H);
+        if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
+      }
+    }
+    this._pendingRestart.clear();
+    for(const n of this.midi.reattackedNotes){
+      if(this.trails.active.has(n)){this.trails.release(n,ns);this._pendingRestart.add(n);}
+    }
+    this.led.reattack(this.midi.reattackedNotes,this.lastTime);
+    this.midi.reattackedNotes.clear();
     for(let i=0;i<newly.length;i++){
       const ni=newly[i];
       const src=this._mode==='file'?this.midiFile:this.midi;
