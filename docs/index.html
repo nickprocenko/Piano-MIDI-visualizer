@@ -99,6 +99,20 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .action-btn:hover{background:var(--btn-hover)}
 .led-status{display:inline-block;width:8px;height:8px;border-radius:50%;background:#555;margin-right:6px;vertical-align:middle}
 .led-status.connected{background:var(--on-color)}
+/* Track config screen */
+#track-channel-list{width:560px;max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.track-row{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--btn-bg);border:1px solid var(--border);border-radius:6px;transition:opacity .15s}
+.track-row.muted{opacity:.35}
+.track-ch-label{font-size:13px;font-weight:600;min-width:58px}
+.track-ch-meta{font-size:11px;color:var(--muted);flex:1}
+.track-color-swatch{width:28px;height:28px;border-radius:4px;border:none;cursor:pointer;padding:2px;outline:1px solid var(--border)}
+.track-mute-btn,.track-player-btn{padding:5px 10px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid var(--border);font-family:inherit;font-weight:600}
+.track-mute-btn{background:var(--btn-bg);color:var(--text)}
+.track-mute-btn.muted{background:var(--off-bg);color:var(--off-color);border-color:var(--off-color)}
+.track-player-btn{background:var(--btn-bg);color:var(--muted)}
+.track-player-btn.active{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
+.tracks-actions{display:flex;gap:12px;margin-top:24px;align-items:center}
+#btn-tracks-play{width:auto;padding:0 36px;height:52px;font-size:16px}
 </style>
 </head>
 <body>
@@ -158,6 +172,16 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   </div>
   <div id="recent-files"></div>
   <button class="screen-back" id="btn-file-back">← Back</button>
+</div>
+
+<!-- TRACK CONFIG SCREEN -->
+<div class="screen" id="screen-tracks">
+  <div class="screen-title" id="tracks-filename">Configure Tracks</div>
+  <div id="track-channel-list"></div>
+  <div class="tracks-actions">
+    <button class="screen-back" id="btn-tracks-back">← Back</button>
+    <button class="menu-btn" id="btn-tracks-play">▶ Play</button>
+  </div>
 </div>
 
 <!-- FULL SETTINGS SCREEN -->
@@ -728,24 +752,37 @@ function parseMidi(buf){
 }
 
 class MidiFilePlayer{
-  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.filename='';}
+  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';}
   load(buf,name){
     this.filename=name; this.events=parseMidi(buf);
     this.stop();
   }
   play(){if(!this.events.length)return;this.playing=true;this.t0=performance.now()-this.pos;this.idx=this._seek(this.pos);}
-  pause(){this.playing=false;this.pos=performance.now()-this.t0;this.activeNotes.clear();this.noteChannel.clear();}
-  stop(){this.playing=false;this.pos=0;this.idx=0;this.activeNotes.clear();this.noteChannel.clear();}
+  pause(){this.playing=false;this.pos=performance.now()-this.t0;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();}
+  stop(){this.playing=false;this.pos=0;this.idx=0;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();}
   update(){
     if(!this.playing)return false;
     const el=performance.now()-this.t0; let ch=false;
     while(this.idx<this.events.length&&this.events[this.idx].timeMs<=el){
       const e=this.events[this.idx++];
-      if(e.type==='noteon'&&e.velocity>0){this.activeNotes.add(e.note);this.noteChannel.set(e.note,e.channel??0);ch=true;}
-      else if(e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0)){this.activeNotes.delete(e.note);this.noteChannel.delete(e.note);ch=true;}
+      if(e.type==='noteon'&&e.velocity>0){this.activeNotes.add(e.note);this.noteChannel.set(e.note,e.channel??0);this.noteVelocity.set(e.note,e.velocity);ch=true;}
+      else if(e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0)){this.activeNotes.delete(e.note);this.noteChannel.delete(e.note);this.noteVelocity.delete(e.note);ch=true;}
     }
-    if(this.idx>=this.events.length){this.playing=false;this.activeNotes.clear();this.noteChannel.clear();this.pos=0;return true;}
+    if(this.idx>=this.events.length){this.playing=false;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();this.pos=0;return true;}
     return ch;
+  }
+  getChannelInfo(){
+    const info={};
+    for(const e of this.events){
+      if(e.type==='noteon'&&e.velocity>0){
+        const c=e.channel??0;
+        if(!info[c])info[c]={ch:c,count:0,minNote:127,maxNote:0};
+        info[c].count++;
+        if(e.note<info[c].minNote)info[c].minNote=e.note;
+        if(e.note>info[c].maxNote)info[c].maxNote=e.note;
+      }
+    }
+    return Object.values(info).sort((a,b)=>a.ch-b.ch);
   }
   _seek(ms){
     let lo=0,hi=this.events.length;
@@ -1714,6 +1751,7 @@ class App{
     this._newly=[];               // reused arrays — no per-frame allocation
     this._released=[];
     this._pendingRestart=new Set();
+    this._channelConfig=null;     // Array(16) set by track config screen
     this.smoothedDt=16.67;
     this.lastTime=0;
     this.fpsTime=0; this.fpsCount=0; this.fps=0;
@@ -1805,7 +1843,9 @@ class App{
     for(let i=0;i<newly.length;i++){
       const ni=newly[i];
       const src=this._mode==='file'?this.midiFile:this.midi;
-      const t=this.trails.start(ni,src.noteChannel.get(ni)??0,this.layout,ns,ks,H);
+      const ch=src.noteChannel.get(ni)??0;
+      if(this._channelConfig?.[ch]?.muted)continue;
+      const t=this.trails.start(ni,ch,this.layout,ns,ks,H);
       if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
     }
     for(let i=0;i<released.length;i++) this.trails.release(released[i],ns);
@@ -1952,6 +1992,63 @@ class App{
   }
   showFileSelect(){this._showScreen('screen-file'); this._refreshRecent();}
   showSettings(){this._showScreen('screen-settings');}
+
+  showTrackConfig(){
+    this._showScreen('screen-tracks');
+    const info=this.midiFile.getChannelInfo();
+    document.getElementById('tracks-filename').textContent=this.midiFile.filename||'Configure Tracks';
+    const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','A♭','A','B♭','B'];
+    const noteName=n=>NOTE_NAMES[n%12]+(Math.floor(n/12)-1);
+    // Default palette — ch9 gets grey (drums)
+    const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
+    const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
+    // Build config — preserve existing or create fresh
+    if(!this._channelConfig||this._channelConfig._file!==this.midiFile.filename){
+      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig._file=this.midiFile.filename;
+    }
+    const list=document.getElementById('track-channel-list');
+    list.innerHTML='';
+    info.forEach(({ch,count,minNote,maxNote})=>{
+      const cfg=this._channelConfig[ch];
+      const row=document.createElement('div');
+      row.className='track-row'+(cfg.muted?' muted':'');
+      row.innerHTML=`
+        <span class="track-ch-label">Ch ${ch+1}</span>
+        <span class="track-ch-meta">${count} notes &nbsp;·&nbsp; ${noteName(minNote)}–${noteName(maxNote)}</span>
+        <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
+        <button class="track-player-btn${cfg.isPlayer?' active':''}" title="Mark as your part">You play</button>
+        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>`;
+      const colorEl=row.querySelector('.track-color-swatch');
+      colorEl.oninput=e=>{
+        const hex=e.target.value;
+        cfg.r=parseInt(hex.slice(1,3),16);cfg.g=parseInt(hex.slice(3,5),16);cfg.b=parseInt(hex.slice(5,7),16);
+      };
+      const playerBtn=row.querySelector('.track-player-btn');
+      playerBtn.onclick=()=>{cfg.isPlayer=!cfg.isPlayer;playerBtn.classList.toggle('active',cfg.isPlayer);};
+      const muteBtn=row.querySelector('.track-mute-btn');
+      muteBtn.onclick=()=>{
+        cfg.muted=!cfg.muted;
+        muteBtn.textContent=cfg.muted?'Muted':'Active';
+        muteBtn.classList.toggle('muted',cfg.muted);
+        row.classList.toggle('muted',cfg.muted);
+      };
+      list.appendChild(row);
+    });
+  }
+
+  _applyChannelConfig(){
+    if(!this._channelConfig)return;
+    const channelColors=new Array(16).fill(null);
+    for(let ch=0;ch<16;ch++){
+      const c=this._channelConfig[ch];
+      if(!c||c.muted)continue;
+      const dim=c.isPlayer?1:0.35;
+      channelColors[ch]={r:Math.round(c.r*dim),g:Math.round(c.g*dim),b:Math.round(c.b*dim)};
+    }
+    Config.ns.note_colors={notes:new Array(128).fill(null),channelColors,zones:[]};
+    Config.ns.color_mode='script';
+  }
   togglePanel(){
     this._panelOpen=!this._panelOpen;
     document.getElementById('panel-settings').classList.toggle('open',this._panelOpen);
@@ -2009,6 +2106,15 @@ class App{
     document.getElementById('btn-fullscreen-menu').onclick=()=>toggleFullscreen();
     // Device select
     document.getElementById('btn-device-back').onclick=()=>this.showMenu();
+    // Track config
+    document.getElementById('btn-tracks-back').onclick=()=>this.showFileSelect();
+    document.getElementById('btn-tracks-play').onclick=()=>{
+      this._applyChannelConfig();
+      this.prevNotes.clear();this._activeNotes?.clear();
+      this._pendingFilePlay=true;
+      this.showVisualizer();
+      this.startFilePlayback();
+    };
     // File select
     document.getElementById('btn-file-back').onclick=()=>this.showMenu();
     document.getElementById('btn-browse').onclick=()=>document.getElementById('file-input').click();
@@ -2069,10 +2175,7 @@ class App{
     this._addRecent(file.name);
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
-    this.showDeviceSelect();
-    // Auto-play after device select — handled in device item click
-    // Override: also start playback when visualizer starts
-    this._pendingFilePlay=true;
+    this.showTrackConfig();
   }
 
   startFilePlayback(){
