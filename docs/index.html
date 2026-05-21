@@ -101,6 +101,12 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .led-status.connected{background:var(--on-color)}
 #toast{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.78);color:#fff;padding:8px 20px;border-radius:20px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .25s;z-index:9999;white-space:nowrap}
 #toast.show{opacity:1}
+/* Background image thumbnails */
+.bg-thumb-grid{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.bg-thumb{position:relative;width:64px;height:44px;border-radius:4px;background-size:cover;background-position:center;border:1px solid var(--border);overflow:hidden;flex-shrink:0;cursor:default}
+.bg-thumb-x{position:absolute;top:2px;right:2px;width:16px;height:16px;background:rgba(0,0,0,.75);color:#fff;border:none;border-radius:3px;font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s;padding:0}
+.bg-thumb:hover .bg-thumb-x{opacity:1}
+.bg-thumb-gif{position:absolute;bottom:2px;left:2px;font-size:8px;font-weight:700;color:#fff;background:rgba(0,0,0,.6);border-radius:2px;padding:0 3px;pointer-events:none}
 /* Track config screen */
 #track-channel-list{width:560px;max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
 .track-row{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--btn-bg);border:1px solid var(--border);border-radius:6px;transition:opacity .15s}
@@ -1282,10 +1288,17 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 </div></div>`,
     display:`<div class="section"><h2>Background</h2>
 <div class="row"><label>Color</label><input type="color" id="cp-bg" value="${ds.background_color||'#0f0f14'}"></div>
-<div class="row"><label>Images / GIF</label><input type="file" id="bg-file-input" accept="image/*" multiple style="flex:1;font-size:11px;color:var(--muted)"></div>
+<div class="row" style="flex-wrap:wrap;gap:6px">
+  <label>Images</label>
+  <button class="action-btn" id="btn-bg-add">+ Add…</button>
+  <input type="file" id="bg-file-input" accept="image/*" multiple style="display:none">
+  <button class="action-btn" id="btn-bg-shuffle" title="Shuffle order">⇄ Shuffle</button>
+  <span id="bg-img-count" style="font-size:11px;color:var(--muted);align-self:center"></span>
+</div>
+<div class="bg-thumb-grid"></div>
 <div class="row"><label>Slide s</label><input type="range" id="sl-bg-slide" min="1" max="60" step="1" value="${Math.round((ds.bg_slide_ms??5000)/1000)}"><span class="val" id="v-sl-bg-slide">${Math.round((ds.bg_slide_ms??5000)/1000)}</span></div>
 <div class="row"><label>Fade s</label><input type="range" id="sl-bg-fade" min="0" max="10" step="0.5" value="${((ds.bg_fade_ms??1000)/1000).toFixed(1)}"><span class="val" id="v-sl-bg-fade">${((ds.bg_fade_ms??1000)/1000).toFixed(1)}</span></div>
-<div class="row"><label></label><button class="action-btn" id="btn-clear-bg">Clear Images</button></div>
+<div class="row"><label></label><button class="action-btn" id="btn-clear-bg">Clear All</button></div>
 </div>`,
     led:`<div class="section"><h2>LED Strip Output</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Requires Chrome or Edge. Uses Web Serial or Web Bluetooth.</p>
@@ -1572,10 +1585,17 @@ function wireSettings(root, app){
   if(cpBg) cpBg.addEventListener('input',e=>{Config.ds.background_color=e.target.value;schedSave();});
   // Background image / slideshow
   const bgFile=root.querySelector('#bg-file-input');
-  if(bgFile) bgFile.addEventListener('change',e=>{
-    if(!e.target.files.length)return;
-    app.setBgImages(e.target.files);
-  });
+  const addBgBtn=root.querySelector('#btn-bg-add');
+  if(addBgBtn&&bgFile){
+    addBgBtn.onclick=()=>bgFile.click();
+    bgFile.addEventListener('change',e=>{
+      if(!e.target.files.length)return;
+      app.addBgImages(e.target.files);
+      e.target.value=''; // allow same files to be re-added
+    });
+  }
+  const shuffleBgBtn=root.querySelector('#btn-bg-shuffle');
+  if(shuffleBgBtn) shuffleBgBtn.onclick=()=>app.shuffleBgImages();
   const clearBg=root.querySelector('#btn-clear-bg');
   if(clearBg) clearBg.addEventListener('click',()=>{app.clearBgImages();});
   const slBgSlide=root.querySelector('#sl-bg-slide');
@@ -1917,7 +1937,7 @@ class App{
       const ni=newly[i];
       const src=this._mode==='file'?this.midiFile:this.midi;
       const ch=src.noteChannel.get(ni)??0;
-      if(this._channelConfig?.[ch]?.muted)continue;
+      if(this._mode==='file'&&this._channelConfig?.[ch]?.muted)continue;
       const t=this.trails.start(ni,ch,this.layout,ns,ks,H);
       if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
     }
@@ -2027,23 +2047,67 @@ class App{
     if(this.fx)this.fx.resize(W,H); else this.fx=new FXRenderer(W,H);
   }
 
-  setBgImages(files){
-    this.clearBgImages();
+  setBgImages(files){ this.clearBgImages(); this.addBgImages(files); }
+  addBgImages(files){
     const pool=document.getElementById('bg-img-pool');
     for(const f of files){
       const url=URL.createObjectURL(f);
       const img=new Image();
       img.src=url;
-      pool?.appendChild(img); // keep in DOM so browser advances GIF frames
-      this._bgImages.push({img,url});
+      pool?.appendChild(img);
+      this._bgImages.push({img,url,name:f.name,isGif:/\.gif$/i.test(f.name)});
+    }
+    if(!this._bgPhase)this._bgPhase=performance.now();
+    this._refreshBgThumbs();
+  }
+  removeBgImage(index){
+    const e=this._bgImages[index]; if(!e)return;
+    e.img.remove();
+    URL.revokeObjectURL(e.url);
+    this._bgImages.splice(index,1);
+    this._refreshBgThumbs();
+  }
+  shuffleBgImages(){
+    for(let i=this._bgImages.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [this._bgImages[i],this._bgImages[j]]=[this._bgImages[j],this._bgImages[i]];
     }
     this._bgPhase=performance.now();
+    this._refreshBgThumbs();
   }
   clearBgImages(){
     const pool=document.getElementById('bg-img-pool');
     if(pool)pool.innerHTML='';
     for(const e of this._bgImages)URL.revokeObjectURL(e.url);
     this._bgImages=[];
+    this._bgPhase=0;
+    this._refreshBgThumbs();
+  }
+  _refreshBgThumbs(){
+    const imgs=this._bgImages;
+    document.querySelectorAll('.bg-thumb-grid').forEach(grid=>{
+      grid.innerHTML='';
+      imgs.forEach((e,i)=>{
+        const t=document.createElement('div');
+        t.className='bg-thumb';
+        t.style.backgroundImage=`url(${e.url})`;
+        t.title=e.name||`Image ${i+1}`;
+        if(e.isGif){
+          const tag=document.createElement('span');
+          tag.className='bg-thumb-gif';tag.textContent='GIF';
+          t.appendChild(tag);
+        }
+        const x=document.createElement('button');
+        x.className='bg-thumb-x';x.textContent='×';
+        x.onclick=()=>this.removeBgImage(i);
+        t.appendChild(x);
+        grid.appendChild(t);
+      });
+    });
+    const n=imgs.length;
+    document.querySelectorAll('#bg-img-count').forEach(el=>{
+      el.textContent=n?`${n} image${n>1?'s':''}` :'';
+    });
   }
 
   // Screen management
