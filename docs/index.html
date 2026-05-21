@@ -150,7 +150,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <div class="tab-panels" id="ptab-panels"></div>
 </div>
 <div id="toast"></div>
-<div id="bg-img-pool" style="position:fixed;left:-9999px;opacity:0;pointer-events:none;width:1px;height:1px;overflow:hidden"></div>
+<div id="bg-img-pool" style="position:fixed;left:-9999px;top:0;opacity:0.01;pointer-events:none"></div>
 
 <!-- MENU SCREEN -->
 <div class="screen active" id="screen-menu">
@@ -243,7 +243,7 @@ const Config = {
       fluid_own_color:0, fluid_own_r:0, fluid_own_g:230, fluid_own_b:230,
     },
     keyboard_style:{height_percent:18, brightness:100, visible:1, width_percent:100},
-    display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000},
+    display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000, gif_speed_percent:100},
     led_output:{
       enabled:0, transport:'none', led_count:177, mirror_per_key:2,
       ble_service_uuid:'6E400001-B5A3-F393-E0A9-E50E24DCCA9E',
@@ -1298,6 +1298,7 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="bg-thumb-grid"></div>
 <div class="row"><label>Slide s</label><input type="range" id="sl-bg-slide" min="1" max="60" step="1" value="${Math.round((ds.bg_slide_ms??5000)/1000)}"><span class="val" id="v-sl-bg-slide">${Math.round((ds.bg_slide_ms??5000)/1000)}</span></div>
 <div class="row"><label>Fade s</label><input type="range" id="sl-bg-fade" min="0" max="10" step="0.5" value="${((ds.bg_fade_ms??1000)/1000).toFixed(1)}"><span class="val" id="v-sl-bg-fade">${((ds.bg_fade_ms??1000)/1000).toFixed(1)}</span></div>
+<div class="row"><label>GIF Speed %</label><input type="range" id="sl-gif-speed" min="10" max="300" step="10" value="${ds.gif_speed_percent??100}"><span class="val" id="v-sl-gif-speed">${ds.gif_speed_percent??100}</span></div>
 <div class="row"><label></label><button class="action-btn" id="btn-clear-bg">Clear All</button></div>
 </div>`,
     led:`<div class="section"><h2>LED Strip Output</h2>
@@ -1612,6 +1613,14 @@ function wireSettings(root, app){
     if(vBgFade)vBgFade.textContent=e.target.value;
     schedSave();
   });
+  const slGifSpeed=root.querySelector('#sl-gif-speed');
+  const vGifSpeed=root.querySelector('#v-sl-gif-speed');
+  if(slGifSpeed) slGifSpeed.addEventListener('input',e=>{
+    Config.ds.gif_speed_percent=+e.target.value;
+    if(vGifSpeed)vGifSpeed.textContent=e.target.value;
+    if(app._gifSampleTs!==undefined)app._gifSampleTs=0; // force re-sample on speed change
+    schedSave();
+  });
   // LED
   const ledTrans=root.querySelector('#led-transport');
   if(ledTrans) ledTrans.addEventListener('change',()=>{Config.lo.transport=ledTrans.value;schedSave();});
@@ -1851,6 +1860,10 @@ class App{
     this.rebuildLayout=false;
     this._bgImages=[];   // [{img:HTMLImageElement, url:string}]
     this._bgPhase=0;     // performance.now() when slideshow started
+    this._gifSampleTs=0;         // last time we sampled the GIF frame
+    this._gifSampleImgIdx=-1;    // which image was sampled
+    this._gifSampleCanvas=document.createElement('canvas');
+    this._gifSampleCtx=this._gifSampleCanvas.getContext('2d');
     this._mode='freeplay'; // 'freeplay' or 'file'
     this._vizActive=false;
     this._panelOpen=false;
@@ -1966,17 +1979,32 @@ class App{
       const slideMs=Math.max(500,Config.ds.bg_slide_ms??5000);
       const fadeMs=Math.max(0,Config.ds.bg_fade_ms??1000);
       const cycleMs=slideMs+fadeMs;
-      const elapsed=(performance.now()-this._bgPhase)%cycleMs;
-      const totalElapsed=performance.now()-this._bgPhase;
+      const now=performance.now();
+      const elapsed=(now-this._bgPhase)%cycleMs;
+      const totalElapsed=now-this._bgPhase;
       const imgIdx=Math.floor(totalElapsed/cycleMs)%this._bgImages.length;
       const nextIdx=(imgIdx+1)%this._bgImages.length;
       const isFading=fadeMs>0&&elapsed>slideMs;
       const fadeT=isFading?(elapsed-slideMs)/fadeMs:0;
-      const cur=this._bgImages[imgIdx]?.img;
+      const curEntry=this._bgImages[imgIdx];
       const nxt=this._bgImages[nextIdx]?.img;
-      if(cur?.complete&&cur.naturalWidth>0){
+      if(curEntry?.img?.complete&&curEntry.img.naturalWidth>0){
         this.bgCtx.globalAlpha=1;
-        this.bgCtx.drawImage(cur,0,0,W,H);
+        if(curEntry.isGif){
+          // Speed-controlled sampling: only advance GIF frame on schedule
+          const speed=Math.max(10,Config.ds.gif_speed_percent??100)/100;
+          const sampleInterval=50/speed; // base ~20fps sample rate
+          if(imgIdx!==this._gifSampleImgIdx||now-this._gifSampleTs>=sampleInterval){
+            const sc=this._gifSampleCanvas;
+            if(sc.width!==W||sc.height!==H){sc.width=W;sc.height=H;}
+            this._gifSampleCtx.drawImage(curEntry.img,0,0,W,H);
+            this._gifSampleTs=now;
+            this._gifSampleImgIdx=imgIdx;
+          }
+          this.bgCtx.drawImage(this._gifSampleCanvas,0,0,W,H);
+        } else {
+          this.bgCtx.drawImage(curEntry.img,0,0,W,H);
+        }
       }
       if(isFading&&this._bgImages.length>1&&nxt?.complete&&nxt.naturalWidth>0){
         this.bgCtx.globalAlpha=fadeT;
