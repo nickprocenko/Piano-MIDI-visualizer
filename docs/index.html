@@ -1043,6 +1043,65 @@ function resolveNoteColor(note,channel,ns){
   return fallback;
 }
 
+function buildScriptPrompt(currentScript){
+  return `You are writing a JavaScript colour script for a Piano MIDI Visualiser.
+
+EXECUTION: The script runs as new Function('api', code)(api) in a browser.
+No imports, no fetch, no require — plain ES2020 browser JS only.
+Return value is ignored; interact only through the api object.
+
+API REFERENCE:
+  api.setNote(n, r, g, b)        n=0-127 MIDI note; r/g/b=0-255; pass null for r to clear
+  api.setOctave(oct, r, g, b)    oct=0-11 pitch class (applies to all octaves)
+  api.setAll(r, g, b)            set all 128 notes
+  api.setChannel(ch, r, g, b)    ch=0-15
+  api.setZone(ch, lo, hi, r, g, b)
+  [r,g,b] = api.hsvToRgb(h,s,v) h/s/v all 0-1; returns array [r,g,b] 0-255
+
+  api.onNoteOn(fn)    fn(note, velocity, channel)  fired when a note is struck
+  api.onNoteOff(fn)   fn(note, channel)             fired on note release
+  api.onFrame(fn)     fn(activeNotes, now, dt)      fired every animation frame
+                      activeNotes = Set of active MIDI note numbers
+                      now = performance.now() in ms
+                      dt = seconds since last frame
+
+MIDI NOTE NUMBERS: A0=21  C4=60 (middle C)  A4=69  C8=108  piano range 21-108
+Pitch classes: C=0 C#=1 D=2 D#=3 E=4 F=5 F#=6 G=7 G#=8 A=9 Bb=10 B=11
+
+EXAMPLE — Rainbow keyboard (static):
+for(let n=0;n<128;n++){
+  const hue=((n-21)/87%1+1)%1;
+  const [r,g,b]=api.hsvToRgb(hue,0.9,1.0);
+  api.setNote(n,r,g,b);
+}
+
+EXAMPLE — Velocity-reactive notes with rainbow animation:
+api.setAll(0,30,60);
+api.onNoteOn(function(note,velocity,channel){
+  const bright=Math.round(velocity*2);
+  api.setNote(note,bright,bright,255);
+});
+api.onNoteOff(function(note,channel){
+  api.setNote(note,null);
+});
+api.onFrame(function(activeNotes,now,dt){
+  for(const n of activeNotes){
+    const [r,g,b]=api.hsvToRgb((now/2000+n/12)%1,1,1);
+    api.setNote(n,r,g,b);
+  }
+});
+
+CURRENT SCRIPT (modify or replace entirely):
+\`\`\`
+${currentScript||'// empty — write a new script from scratch'}
+\`\`\`
+
+Respond with ONLY the JavaScript code, no markdown fences, no explanation.
+
+YOUR REQUEST:
+[describe the colour effect you want here]`;
+}
+
 function runUserScript(code){
   const notes=new Array(128).fill(null);
   const channelColors=new Array(16).fill(null);
@@ -1143,6 +1202,7 @@ function buildSettingsHTML(tab){
 <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
 <button id="${prefix}-nc-run" class="action-btn">▶ Run</button>
 <button id="${prefix}-nc-saveas" class="action-btn">Save As…</button>
+<button id="${prefix}-nc-copy-prompt" class="action-btn">Copy AI Prompt</button>
 </div></div></div>`;
 
   const fluidSel=()=>`<div class="section"><h2>Fluid Presets</h2>
@@ -1368,6 +1428,14 @@ function wireNoteThemeDropdown(root,prefix,refreshAll){
     Config.data.active_note_theme={type:'user',index:i};
     Config.save();
     refreshAll();
+  });
+
+  const copyPromptBtn=root.querySelector(`#${prefix}-nc-copy-prompt`);
+  if(copyPromptBtn) copyPromptBtn.addEventListener('click',()=>{
+    const prompt=buildScriptPrompt(ta.value.trim());
+    navigator.clipboard.writeText(prompt).then(()=>{
+      if(window.app?._showToast)app._showToast('AI prompt copied to clipboard');
+    });
   });
 
   if(delBtn) delBtn.addEventListener('click',()=>{
