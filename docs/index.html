@@ -846,7 +846,7 @@ class FluidController{
 // LED OUTPUT
 // ═══════════════════════════════════════════════════════
 class LedOutput{
-  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;this._gapUntil=new Float32Array(128);}
+  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._prevLit=new Uint8Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;this._gapUntil=new Float32Array(128);}
   async connectSerial(){
     if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
       this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
@@ -936,9 +936,13 @@ class LedOutput{
     const decay=fadeEnabled?Math.pow(Math.max(0,1-fadeAmt),dt*200/Math.max(1,lo.led_fade_speed||80)):0;
     for(let n=0;n<128;n++){
       const lit=(activeNotes.has(n)||(lo.led_sustain&&sustainedNotes&&sustainedNotes.has(n)))&&!(this._gapUntil[n]>now);
-      if(lit)this._bright[n]=1.0;
-      else if(fadeEnabled)this._bright[n]=Math.max(0,this._bright[n]*decay);
-      else this._bright[n]=0;
+      if(lit){
+        if(!this._prevLit[n])this._bright[n]=1.0; // new strike — reset to full
+        else if(fadeEnabled)this._bright[n]=Math.max(0,this._bright[n]*decay); // decay while held
+      }else{
+        this._bright[n]=0; // released — cut immediately
+      }
+      this._prevLit[n]=lit?1:0;
     }
     const parts=['LEDS',cnt];
     for(let i=0;i<cnt;i++){
