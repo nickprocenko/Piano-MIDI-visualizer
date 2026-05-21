@@ -924,7 +924,7 @@ class LedOutput{
       this._send(new TextEncoder().encode(parts.join(',')+'\n'));
     }
   }
-  update(activeNotes,sustainedNotes,lo,ns,now){
+  update(activeNotes,sustainedNotes,noteChannel,lo,ns,now){
     if(!this.connected||this._sweepTimer)return;
     const fps=Math.max(1,Math.min(60,lo.fps_limit||30));
     if(now-this._lastMs<1000/fps)return;
@@ -935,7 +935,7 @@ class LedOutput{
     const fadeEnabled=fadeAmt>0;
     const decay=fadeEnabled?Math.pow(Math.max(0,1-fadeAmt),dt*200/Math.max(1,lo.led_fade_speed||80)):0;
     for(let n=0;n<128;n++){
-      const lit=(activeNotes.has(n)||(lo.led_sustain&&sustainedNotes.has(n)))&&!(this._gapUntil[n]>now);
+      const lit=(activeNotes.has(n)||(lo.led_sustain&&sustainedNotes&&sustainedNotes.has(n)))&&!(this._gapUntil[n]>now);
       if(lit)this._bright[n]=1.0;
       else if(fadeEnabled)this._bright[n]=Math.max(0,this._bright[n]*decay);
       else this._bright[n]=0;
@@ -943,9 +943,12 @@ class LedOutput{
     const parts=['LEDS',cnt];
     for(let i=0;i<cnt;i++){
       const key=PIANO_FIRST+Math.floor(i/mpk);
+      // Skip LEDs that map beyond the piano range — prevents off-piano MIDI notes from flickering edge LEDs
+      if(key>PIANO_LAST){parts.push(0,0,0);continue;}
       const br=this._bright[key];
       if(br>0){
-        const{r:nr,g:ng,b:nb}=resolveNoteColor(key,0,ns);
+        const ch=noteChannel?.get(key)??0;
+        const{r:nr,g:ng,b:nb}=resolveNoteColor(key,ch,ns);
         parts.push(Math.round(nr*br),Math.round(ng*br),Math.round(nb*br));
       }else{parts.push(0,0,0);}
     }
@@ -1919,7 +1922,8 @@ class App{
       for(const n of this.midi.activeNotes) activeNotes.add(n);
     }
     // LED
-    this.led.update(activeNotes,this.midi.sustainedNotes,Config.lo,ns,this.lastTime);
+    const src=this._mode==='file'?this.midiFile:this.midi;
+    this.led.update(activeNotes,this._mode==='file'?null:this.midi.sustainedNotes,src.noteChannel,Config.lo,ns,this.lastTime);
     // Trails — compute diff with pre-allocated arrays, no Set spreads
     const W=this.mainCanvas.width,H=this.mainCanvas.height;
     const newly=this._newly; newly.length=0;
