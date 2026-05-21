@@ -1041,6 +1041,8 @@ function _buildFire(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,
 function _buildIce(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return{r:0,g:Math.round(180+t*75),b:255};});}
 function _buildSunset(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return hsvToRgb(0.04+t*0.18,0.95,1.0);});}
 function _buildRidersOnTheStorm(){return Array.from({length:128},(_,n)=>n<=59?{r:255,g:255,b:255}:{r:160,g:0,b:255});}
+function _buildMoonlightSonata(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return{r:Math.round(20+t*175),g:Math.round(15+t*200),b:Math.round(120+t*135)};});}
+function _buildLightMyFire(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return{r:Math.round(200+t*55),g:Math.round(t*180),b:0};});}
 
 function resolveNoteColor(note,channel,ns){
   const nc=ns.note_colors;
@@ -1153,6 +1155,10 @@ const BUILTIN_NOTE_THEMES=[
    script:'// Warm orange-to-yellow sunset gradient.\nfor(let n=0;n<128;n++){\n  const t=Math.max(0,Math.min(1,(n-21)/87));\n  const{r,g,b}=api.hsvToRgb(0.04+t*0.18,0.95,1.0);\n  api.setNote(n,r,g,b);\n}'},
   {name:'Riders on the Storm',mode:'script',build:_buildRidersOnTheStorm,
    script:'// White lightning left hand, purple right hand.\n// Split at B below middle C (MIDI 59 / B3).\nfor(let n=0;n<128;n++){\n  if(n<=59)api.setNote(n,255,255,255); // white lightning\n  else     api.setNote(n,160,0,255);  // electric purple\n}'},
+  {name:'Moonlight Sonata',mode:'script',build:_buildMoonlightSonata,
+   script:'// Midnight blue (low) to moonlit silver-white (high).\nfor(let n=0;n<128;n++){\n  const t=Math.max(0,Math.min(1,(n-21)/87));\n  api.setNote(n,\n    Math.round(20+t*175),   // 20 → 195\n    Math.round(15+t*200),   // 15 → 215\n    Math.round(120+t*135)   // 120 → 255\n  );\n}'},
+  {name:'Light My Fire',mode:'script',build:_buildLightMyFire,
+   script:'// Deep crimson (low) to golden amber (high).\nfor(let n=0;n<128;n++){\n  const t=Math.max(0,Math.min(1,(n-21)/87));\n  api.setNote(n,\n    Math.round(200+t*55),   // 200 → 255 red\n    Math.round(t*180),      // 0 → 180 green\n    0\n  );\n}'},
 ];
 
 const NoteColorThemeManager={
