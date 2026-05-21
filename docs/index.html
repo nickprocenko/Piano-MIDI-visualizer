@@ -124,7 +124,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 </style>
 </head>
 <body>
-<canvas id="bg-canvas"></canvas>
+<canvas id="bg-canvas" style="display:none"></canvas>
+<div id="bg-slide-a" style="position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;pointer-events:none"></div>
+<div id="bg-slide-b" style="position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;pointer-events:none;opacity:0"></div>
 <canvas id="fluid-canvas"></canvas>
 <canvas id="main-canvas" tabindex="0"></canvas>
 
@@ -150,7 +152,6 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <div class="tab-panels" id="ptab-panels"></div>
 </div>
 <div id="toast"></div>
-<div id="bg-img-pool" style="position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0.01;pointer-events:none;z-index:-1"></div>
 
 <!-- MENU SCREEN -->
 <div class="screen active" id="screen-menu">
@@ -1625,7 +1626,6 @@ function wireSettings(root, app){
   if(slGifSpeed) slGifSpeed.addEventListener('input',e=>{
     Config.ds.gif_speed_percent=+e.target.value;
     if(vGifSpeed)vGifSpeed.textContent=e.target.value;
-    if(app._gifSampleTs!==undefined)app._gifSampleTs=0; // force re-sample on speed change
     schedSave();
   });
   // LED
@@ -1844,8 +1844,14 @@ class App{
   constructor(){
     this.mainCanvas=document.getElementById('main-canvas');
     this.ctx=this.mainCanvas.getContext('2d');
-    this.bgCanvas=document.getElementById('bg-canvas');
-    this.bgCtx=this.bgCanvas.getContext('2d');
+    this.bgCanvas=document.getElementById('bg-canvas'); // kept for compat; not drawn on
+    this.bgCtx=null;
+    this._bgA=document.getElementById('bg-slide-a');
+    this._bgB=document.getElementById('bg-slide-b');
+    this._bgFront='a';
+    this._bgSlideIdx=0;
+    this._bgSlideTimer=null;
+    this._bgLastColor='';
     this.layout=null;
     this.trails=new TrailManager();
     this.fx=null;
@@ -1865,12 +1871,7 @@ class App{
     this.lastTime=0;
     this.fpsTime=0; this.fpsCount=0; this.fps=0;
     this.rebuildLayout=false;
-    this._bgImages=[];   // [{img:HTMLImageElement, url:string}]
-    this._bgPhase=0;     // performance.now() when slideshow started
-    this._gifSampleTs=0;         // last time we sampled the GIF frame
-    this._gifSampleImgIdx=-1;    // which image was sampled
-    this._gifSampleCanvas=document.createElement('canvas');
-    this._gifSampleCtx=this._gifSampleCanvas.getContext('2d');
+    this._bgImages=[];   // [{url:string, name:string, isGif:bool}]
     this._mode='freeplay'; // 'freeplay' or 'file'
     this._vizActive=false;
     this._panelOpen=false;
@@ -1980,47 +1981,13 @@ class App{
   _draw(){
     const W=this.mainCanvas.width,H=this.mainCanvas.height;
     const ctx=this.ctx;
-    // Background
+    // Background colour — CSS div handles images/GIFs; just keep colour in sync
     const bgColor=Config.ds.background_color||'#0f0f14';
-    this.bgCtx.fillStyle=bgColor; this.bgCtx.fillRect(0,0,W,H);
-    if(this._bgImages.length>0){
-      const slideMs=Math.max(500,Config.ds.bg_slide_ms??5000);
-      const fadeMs=Math.max(0,Config.ds.bg_fade_ms??1000);
-      const cycleMs=slideMs+fadeMs;
-      const now=performance.now();
-      const elapsed=(now-this._bgPhase)%cycleMs;
-      const totalElapsed=now-this._bgPhase;
-      const imgIdx=Math.floor(totalElapsed/cycleMs)%this._bgImages.length;
-      const nextIdx=(imgIdx+1)%this._bgImages.length;
-      const isFading=fadeMs>0&&elapsed>slideMs;
-      const fadeT=isFading?(elapsed-slideMs)/fadeMs:0;
-      const curEntry=this._bgImages[imgIdx];
-      const nxt=this._bgImages[nextIdx]?.img;
-      if(curEntry?.img?.complete&&curEntry.img.naturalWidth>0){
-        this.bgCtx.globalAlpha=1;
-        if(curEntry.isGif){
-          // Speed-controlled sampling: only advance GIF frame on schedule
-          const speed=Math.max(10,Config.ds.gif_speed_percent??100)/100;
-          const sampleInterval=50/speed; // base ~20fps sample rate
-          if(imgIdx!==this._gifSampleImgIdx||now-this._gifSampleTs>=sampleInterval){
-            const sc=this._gifSampleCanvas;
-            if(sc.width!==W||sc.height!==H){sc.width=W;sc.height=H;}
-            this._gifSampleCtx.drawImage(curEntry.img,0,0,W,H);
-            this._gifSampleTs=now;
-            this._gifSampleImgIdx=imgIdx;
-          }
-          this.bgCtx.drawImage(this._gifSampleCanvas,0,0,W,H);
-        } else {
-          this.bgCtx.drawImage(curEntry.img,0,0,W,H);
-        }
-      }
-      if(isFading&&this._bgImages.length>1&&nxt?.complete&&nxt.naturalWidth>0){
-        this.bgCtx.globalAlpha=fadeT;
-        this.bgCtx.drawImage(nxt,0,0,W,H);
-        this.bgCtx.globalAlpha=1;
-      }
+    if(this._bgLastColor!==bgColor){
+      this._bgLastColor=bgColor;
+      this._bgA.style.backgroundColor=bgColor;
+      this._bgB.style.backgroundColor=bgColor;
     }
-    // Main canvas — transparent; bg-canvas handles the background fill
     ctx.clearRect(0,0,W,H);
     if(!this._vizActive||!this.layout){return;}
     const ns=Config.ns;
@@ -2076,7 +2043,7 @@ class App{
 
   _resize(){
     const W=window.innerWidth,H=window.innerHeight;
-    [this.mainCanvas,this.bgCanvas].forEach(c=>{c.width=W;c.height=H;});
+    this.mainCanvas.width=W; this.mainCanvas.height=H;
     const fc=document.getElementById('fluid-canvas'); fc.width=W; fc.height=H;
     if(window.fluidSim)window.fluidSim.resize();
     this.layout=buildLayout(W,H,Config.ks.height_percent,Config.ks.width_percent??100);
@@ -2085,22 +2052,18 @@ class App{
 
   setBgImages(files){ this.clearBgImages(); this.addBgImages(files); }
   addBgImages(files){
-    const pool=document.getElementById('bg-img-pool');
-    for(const f of files){
-      const url=URL.createObjectURL(f);
-      const img=new Image();
-      img.src=url;
-      pool?.appendChild(img);
-      this._bgImages.push({img,url,name:f.name,isGif:/\.gif$/i.test(f.name)});
-    }
-    if(!this._bgPhase)this._bgPhase=performance.now();
+    for(const f of files)
+      this._bgImages.push({url:URL.createObjectURL(f),name:f.name,isGif:/\.gif$/i.test(f.name)});
+    if(!this._bgSlideTimer&&this._bgImages.length>0)this._startBgSlide();
     this._refreshBgThumbs();
   }
   removeBgImage(index){
     const e=this._bgImages[index]; if(!e)return;
-    e.img.remove();
     URL.revokeObjectURL(e.url);
     this._bgImages.splice(index,1);
+    clearTimeout(this._bgSlideTimer); this._bgSlideTimer=null;
+    this._bgSlideIdx=Math.min(this._bgSlideIdx,Math.max(0,this._bgImages.length-1));
+    if(this._bgImages.length>0)this._startBgSlide(); else this._clearBgSlides();
     this._refreshBgThumbs();
   }
   shuffleBgImages(){
@@ -2108,16 +2071,54 @@ class App{
       const j=Math.floor(Math.random()*(i+1));
       [this._bgImages[i],this._bgImages[j]]=[this._bgImages[j],this._bgImages[i]];
     }
-    this._bgPhase=performance.now();
+    clearTimeout(this._bgSlideTimer); this._bgSlideTimer=null;
+    this._bgSlideIdx=0;
+    if(this._bgImages.length>0)this._startBgSlide();
     this._refreshBgThumbs();
   }
   clearBgImages(){
-    const pool=document.getElementById('bg-img-pool');
-    if(pool)pool.innerHTML='';
+    clearTimeout(this._bgSlideTimer); this._bgSlideTimer=null;
     for(const e of this._bgImages)URL.revokeObjectURL(e.url);
     this._bgImages=[];
-    this._bgPhase=0;
+    this._bgSlideIdx=0;
+    this._clearBgSlides();
     this._refreshBgThumbs();
+  }
+  _clearBgSlides(){
+    this._bgA.style.backgroundImage='none'; this._bgA.style.opacity='1';
+    this._bgB.style.backgroundImage='none'; this._bgB.style.opacity='0';
+    this._bgFront='a';
+  }
+  _startBgSlide(){
+    clearTimeout(this._bgSlideTimer); this._bgSlideTimer=null;
+    if(!this._bgImages.length){this._clearBgSlides();return;}
+    this._bgSlideIdx=this._bgSlideIdx%this._bgImages.length;
+    this._showBgSlide();
+  }
+  _showBgSlide(){
+    if(!this._bgImages.length)return;
+    const slideMs=Math.max(500,Config.ds.bg_slide_ms??5000);
+    const fadeMs=Math.max(0,Config.ds.bg_fade_ms??1000);
+    const entry=this._bgImages[this._bgSlideIdx%this._bgImages.length];
+    const isA=this._bgFront==='a';
+    const front=isA?this._bgA:this._bgB;
+    const back=isA?this._bgB:this._bgA;
+    back.style.transition='none';
+    back.style.opacity='0';
+    back.style.backgroundImage=`url("${entry.url}")`;
+    back.getBoundingClientRect(); // force reflow before transitioning
+    back.style.transition=`opacity ${fadeMs}ms linear`;
+    back.style.opacity='1';
+    setTimeout(()=>{
+      front.style.transition=`opacity ${fadeMs}ms linear`;
+      front.style.opacity='0';
+      this._bgFront=isA?'b':'a';
+    },fadeMs);
+    if(this._bgImages.length>1)
+      this._bgSlideTimer=setTimeout(()=>{
+        this._bgSlideIdx=(this._bgSlideIdx+1)%this._bgImages.length;
+        this._showBgSlide();
+      },slideMs+fadeMs);
   }
   _refreshBgThumbs(){
     const imgs=this._bgImages;
