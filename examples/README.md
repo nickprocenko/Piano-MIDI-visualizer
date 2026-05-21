@@ -7,6 +7,7 @@ Preset save files for the Piano MIDI Visualiser. Each `.json` file can be loaded
 | File | Description |
 |------|-------------|
 | `claire-de-lune.json` | Moonlight palette — soft blue-white trails, fluid ripple, dark background |
+| `riders-on-the-storm.json` | Split keyboard — white lightning left (≤ B3), electric purple right (≥ C4); stormy black background. Add lightning GIFs via the Images slideshow for the full effect. |
 
 ## AI Prompts
 

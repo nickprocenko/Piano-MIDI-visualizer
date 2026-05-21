@@ -1040,6 +1040,7 @@ function _buildOctave(){return Array.from({length:128},(_,n)=>hsvToRgb((n%12)/12
 function _buildFire(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return{r:255,g:Math.round(t*200),b:0};});}
 function _buildIce(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return{r:0,g:Math.round(180+t*75),b:255};});}
 function _buildSunset(){return Array.from({length:128},(_,n)=>{const t=Math.max(0,Math.min(1,(n-21)/87));return hsvToRgb(0.04+t*0.18,0.95,1.0);});}
+function _buildRidersOnTheStorm(){return Array.from({length:128},(_,n)=>n<=59?{r:255,g:255,b:255}:{r:160,g:0,b:255});}
 
 function resolveNoteColor(note,channel,ns){
   const nc=ns.note_colors;
@@ -1150,6 +1151,8 @@ const BUILTIN_NOTE_THEMES=[
    script:'// Cool blue-cyan gradient across the keyboard.\nfor(let n=0;n<128;n++){\n  const t=Math.max(0,Math.min(1,(n-21)/87));\n  api.setNote(n,0,Math.round(180+t*75),255);\n}'},
   {name:'Sunset',mode:'sunset',build:_buildSunset,
    script:'// Warm orange-to-yellow sunset gradient.\nfor(let n=0;n<128;n++){\n  const t=Math.max(0,Math.min(1,(n-21)/87));\n  const{r,g,b}=api.hsvToRgb(0.04+t*0.18,0.95,1.0);\n  api.setNote(n,r,g,b);\n}'},
+  {name:'Riders on the Storm',mode:'script',build:_buildRidersOnTheStorm,
+   script:'// White lightning left hand, purple right hand.\n// Split at B below middle C (MIDI 59 / B3).\nfor(let n=0;n<128;n++){\n  if(n<=59)api.setNote(n,255,255,255); // white lightning\n  else     api.setNote(n,160,0,255);  // electric purple\n}'},
 ];
 
 const NoteColorThemeManager={
@@ -1897,6 +1900,11 @@ class App{
     // only called on user interaction, so saved settings would otherwise be ignored)
     this.fluid.setEnabled(Config.ns.effect_fluid_enabled);
     this.fluid.updateConfig(Config.ns);
+    // Apply active built-in note theme if note_colors wasn't persisted (e.g. after preset import)
+    if(!Config.ns.note_colors){
+      const ant=Config.data.active_note_theme||{type:'builtin',index:0};
+      if(ant.type==='builtin'){const t=BUILTIN_NOTE_THEMES[ant.index];if(t)Config.ns.note_colors=t.build();}
+    }
     this._boundFrame=this._frame.bind(this);
     requestAnimationFrame(this._boundFrame);
   }
