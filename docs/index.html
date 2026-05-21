@@ -1937,7 +1937,7 @@ class App{
       const ni=newly[i];
       const src=this._mode==='file'?this.midiFile:this.midi;
       const ch=src.noteChannel.get(ni)??0;
-      if(this._channelConfig?.[ch]?.muted)continue;
+      if(this._mode==='file'&&this._channelConfig?.[ch]?.muted)continue;
       const t=this.trails.start(ni,ch,this.layout,ns,ks,H);
       if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
     }
