@@ -144,6 +144,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <div class="tab-panels" id="ptab-panels"></div>
 </div>
 <div id="toast"></div>
+<div id="bg-img-pool" style="position:fixed;left:-9999px;opacity:0;pointer-events:none;width:1px;height:1px;overflow:hidden"></div>
 
 <!-- MENU SCREEN -->
 <div class="screen active" id="screen-menu">
@@ -2028,15 +2029,19 @@ class App{
 
   setBgImages(files){
     this.clearBgImages();
+    const pool=document.getElementById('bg-img-pool');
     for(const f of files){
       const url=URL.createObjectURL(f);
-      const entry={img:new Image(),url};
-      entry.img.src=url;
-      this._bgImages.push(entry);
+      const img=new Image();
+      img.src=url;
+      pool?.appendChild(img); // keep in DOM so browser advances GIF frames
+      this._bgImages.push({img,url});
     }
     this._bgPhase=performance.now();
   }
   clearBgImages(){
+    const pool=document.getElementById('bg-img-pool');
+    if(pool)pool.innerHTML='';
     for(const e of this._bgImages)URL.revokeObjectURL(e.url);
     this._bgImages=[];
   }
