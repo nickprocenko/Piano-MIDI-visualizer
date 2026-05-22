@@ -9,7 +9,7 @@ Current deployed website: <a href="https://nickprocenko.github.io/Piano-MIDI-vis
 - Borderless fullscreen on a second monitor — clicking your PC monitor won't minimise the window
 - Real-time MIDI input (USB MIDI devices — tested with Roland JUNO-DS)
 - 88-key piano rendering with animation controls
-- Falling-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
+- rising-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
 - Animated background image / GIF slideshow
 - ESP32 LED strip(s) synchronisation over serial or BLE
 - Audience live colour control via WebSocket (Twitch channel-point integration)
