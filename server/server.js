@@ -85,21 +85,29 @@ function notifyAll(text) {
 const suggestionQueue = []; // [{ cat, optionIdx, suggestedBy }]
 const QUEUE_MAX = 5;
 
-function findOption(query) {
+// Pending clarification: username → { matches, chatId, expires }
+const pendingClarification = new Map();
+const CLARIFICATION_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+function findAllMatches(query) {
   const q = query.toLowerCase().trim();
-  if (!q) return null;
-  // Exact match first, then starts-with, then substring — so "storm" finds "Storm" before "Riders on the Storm"
+  if (!q) return [];
+  const results = [];
+  const seen = new Set();
   for (const pass of ['exact', 'starts', 'includes']) {
     for (const cat of CATEGORIES) {
       for (let i = 0; i < cat.options.length; i++) {
+        const key = `${cat.id}:${i}`;
+        if (seen.has(key)) continue;
         const opt = cat.options[i].toLowerCase();
-        if (pass === 'exact'    && opt === q)            return { cat, optionIdx: i };
-        if (pass === 'starts'   && opt.startsWith(q))    return { cat, optionIdx: i };
-        if (pass === 'includes' && opt.includes(q))      return { cat, optionIdx: i };
+        const hit = (pass === 'exact' && opt === q)
+                 || (pass === 'starts' && opt.startsWith(q))
+                 || (pass === 'includes' && opt.includes(q));
+        if (hit) { results.push({ cat, optionIdx: i }); seen.add(key); }
       }
     }
   }
-  return null;
+  return results;
 }
 
 // ── WebSocket server ──────────────────────────────────────────────────────────
@@ -286,6 +294,27 @@ const httpServer = http.createServer((req, res) => {
   res.end('Not found');
 });
 
+function queueSuggestion(from, chatId, match) {
+  if (suggestionQueue.some(s => s.suggestedBy === from)) {
+    kikReply(chatId, from,
+      `You already have a suggestion in the queue! Wait for it to run first.`,
+      KIK_USERNAME, KIK_API_KEY);
+    return;
+  }
+  if (suggestionQueue.length >= QUEUE_MAX) {
+    kikReply(chatId, from,
+      `The suggestion queue is full (${QUEUE_MAX}/${QUEUE_MAX}). Check back soon!`,
+      KIK_USERNAME, KIK_API_KEY);
+    return;
+  }
+  suggestionQueue.push({ cat: match.cat, optionIdx: match.optionIdx, suggestedBy: from });
+  const pos = suggestionQueue.length;
+  kikReply(chatId, from,
+    `✓ "${match.cat.options[match.optionIdx]}" added to the queue at position ${pos}!`,
+    KIK_USERNAME, KIK_API_KEY);
+  console.log(`[suggest] ${from} → ${match.cat.options[match.optionIdx]} (${match.cat.id})`);
+}
+
 function handleKikMessage(from, chatId, text) {
   // Register user so we can proactively message them later
   userRegistry.set(from, chatId);
@@ -312,36 +341,50 @@ function handleKikMessage(from, chatId, text) {
   // ── !suggest ──────────────────────────────────────────────────────────────
   if (lower.startsWith('!suggest ')) {
     const query = text.slice(9).trim();
-    const match = findOption(query);
-    if (!match) {
+    const matches = findAllMatches(query);
+    if (matches.length === 0) {
       kikReply(chatId, from,
         `Couldn't find that. Try: rainbow, moonlight sonata, fire, storm, ocean blue, slow…`,
         KIK_USERNAME, KIK_API_KEY);
       return;
     }
-    if (suggestionQueue.some(s => s.suggestedBy === from)) {
+    if (matches.length === 1) {
+      queueSuggestion(from, chatId, matches[0]);
+    } else {
+      // Ambiguous — ask the viewer to clarify
+      pendingClarification.set(from, { matches, chatId, expires: Date.now() + CLARIFICATION_TTL_MS });
+      const list = matches.map((m, i) => `${i + 1}. ${m.cat.options[m.optionIdx]} (${m.cat.label})`).join('\n');
       kikReply(chatId, from,
-        `You already have a suggestion in the queue! Wait for it to run first.`,
+        `Which one did you mean?\n${list}\nReply with a number, or type !suggest <name> again to try differently.`,
         KIK_USERNAME, KIK_API_KEY);
-      return;
     }
-    if (suggestionQueue.length >= QUEUE_MAX) {
-      kikReply(chatId, from,
-        `The suggestion queue is full (${QUEUE_MAX}/${QUEUE_MAX}). Check back soon!`,
-        KIK_USERNAME, KIK_API_KEY);
-      return;
-    }
-    suggestionQueue.push({ cat: match.cat, optionIdx: match.optionIdx, suggestedBy: from });
-    const pos = suggestionQueue.length;
-    kikReply(chatId, from,
-      `✓ "${match.cat.options[match.optionIdx]}" added to the queue at position ${pos}!`,
-      KIK_USERNAME, KIK_API_KEY);
-    console.log(`[suggest] ${from} → ${match.cat.options[match.optionIdx]} (${match.cat.id})`);
     return;
   }
 
-  // ── numeric vote ──────────────────────────────────────────────────────────
+  // ── numeric: clarification response or poll vote ───────────────────────────
   const num = parseInt(lower);
+
+  // Clarification takes priority over voting
+  if (!isNaN(num) && pendingClarification.has(from)) {
+    const pending = pendingClarification.get(from);
+    pendingClarification.delete(from);
+    if (Date.now() > pending.expires) {
+      kikReply(chatId, from,
+        `That suggestion timed out. Type !suggest <name> again to try!`,
+        KIK_USERNAME, KIK_API_KEY);
+      return;
+    }
+    const choice = num - 1;
+    if (choice < 0 || choice >= pending.matches.length) {
+      kikReply(chatId, from,
+        `Please reply with a number between 1 and ${pending.matches.length}.`,
+        KIK_USERNAME, KIK_API_KEY);
+      pendingClarification.set(from, pending); // restore
+      return;
+    }
+    queueSuggestion(from, chatId, pending.matches[choice]);
+    return;
+  }
 
   if (state !== 'active' || !currentPoll) {
     kikReply(chatId, from, 'No active poll right now. Check back soon!', KIK_USERNAME, KIK_API_KEY);
