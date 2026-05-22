@@ -7,6 +7,9 @@ Preset save files for the Piano MIDI Visualiser. Each `.json` file can be loaded
 | File | Description |
 |------|-------------|
 | `claire-de-lune.json` | Moonlight palette — soft blue-white trails, fluid ripple, dark background |
+| `riders-on-the-storm.json` | Split keyboard — white lightning left (≤ B3), electric purple right (≥ C4); stormy black background. Add lightning GIFs via the Images slideshow for the full effect. |
+| `moonlight-sonata.json` | Midnight blue (low) → moonlit silver-white (high); near-black interior for deep glow from edges; moon dust particles, gentle fluid ripple, halo pulse |
+| `light-my-fire.json` | Deep crimson (low) → golden amber (high); bright yellow interior for burning hot core; sparks, smoke, press smoke, high-intensity fluid with orange tint |
 
 ## AI Prompts
 
