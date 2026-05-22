@@ -101,12 +101,20 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .led-status.connected{background:var(--on-color)}
 #toast{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.78);color:#fff;padding:8px 20px;border-radius:20px;font-size:13px;pointer-events:none;opacity:0;transition:opacity .25s;z-index:9999;white-space:nowrap}
 #toast.show{opacity:1}
-/* Background image thumbnails */
-.bg-thumb-grid{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
-.bg-thumb{position:relative;width:64px;height:44px;border-radius:4px;background-size:cover;background-position:center;border:1px solid var(--border);overflow:hidden;flex-shrink:0;cursor:default}
-.bg-thumb-x{position:absolute;top:2px;right:2px;width:16px;height:16px;background:rgba(0,0,0,.75);color:#fff;border:none;border-radius:3px;font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s;padding:0}
-.bg-thumb:hover .bg-thumb-x{opacity:1}
-.bg-thumb-gif{position:absolute;bottom:2px;left:2px;font-size:8px;font-weight:700;color:#fff;background:rgba(0,0,0,.6);border-radius:2px;padding:0 3px;pointer-events:none}
+/* Background image item cards */
+.bg-item-list{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+.bg-item-card{background:var(--btn-bg);border:1px solid var(--border);border-radius:6px;padding:6px 8px}
+.bg-item-top{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.bg-thumb-mini{width:52px;height:36px;border-radius:3px;background-size:cover;background-position:center;border:1px solid var(--border);flex-shrink:0}
+.bg-item-name{flex:1;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.bg-thumb-gif{font-size:8px;font-weight:700;color:#0dd;background:rgba(0,0,0,.5);border-radius:2px;padding:0 3px;flex-shrink:0}
+.bg-item-x{width:18px;height:18px;background:rgba(120,40,40,.85);color:#fff;border:none;border-radius:3px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0}
+.bg-item-x:hover{background:rgba(180,60,60,.9)}
+.bg-item-sliders{display:grid;gap:3px}
+.bg-slider-row{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)}
+.bg-slider-row label{width:36px;text-align:right;flex-shrink:0}
+.bg-slider-row input[type=range]{flex:1;height:4px;accent-color:#0cc}
+.bg-slider-row .bg-sv{width:30px;text-align:right;color:var(--text);flex-shrink:0}
 /* Track config screen */
 #track-channel-list{width:560px;max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
 .track-row{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--btn-bg);border:1px solid var(--border);border-radius:6px;transition:opacity .15s}
@@ -1337,10 +1345,7 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
   <button class="action-btn" id="btn-bg-shuffle" title="Shuffle order">⇄ Shuffle</button>
   <span id="bg-img-count" style="font-size:11px;color:var(--muted);align-self:center"></span>
 </div>
-<div class="bg-thumb-grid"></div>
-<div class="row"><label>Slide s</label><input type="range" id="sl-bg-slide" min="1" max="60" step="1" value="${Math.round((ds.bg_slide_ms??5000)/1000)}"><span class="val" id="v-sl-bg-slide">${Math.round((ds.bg_slide_ms??5000)/1000)}</span></div>
-<div class="row"><label>Fade s</label><input type="range" id="sl-bg-fade" min="0" max="10" step="0.5" value="${((ds.bg_fade_ms??1000)/1000).toFixed(1)}"><span class="val" id="v-sl-bg-fade">${((ds.bg_fade_ms??1000)/1000).toFixed(1)}</span></div>
-<div class="row"><label>GIF Speed %</label><input type="range" id="sl-gif-speed" min="10" max="300" step="10" value="${ds.gif_speed_percent??100}"><span class="val" id="v-sl-gif-speed">${ds.gif_speed_percent??100}</span></div>
+<div class="bg-item-list"></div>
 <div class="row"><label></label><button class="action-btn" id="btn-clear-bg">Clear All</button></div>
 </div>`,
     led:`<div class="section"><h2>LED Strip Output</h2>
@@ -1641,27 +1646,6 @@ function wireSettings(root, app){
   if(shuffleBgBtn) shuffleBgBtn.onclick=()=>app.shuffleBgImages();
   const clearBg=root.querySelector('#btn-clear-bg');
   if(clearBg) clearBg.addEventListener('click',()=>{app.clearBgImages();});
-  const slBgSlide=root.querySelector('#sl-bg-slide');
-  const vBgSlide=root.querySelector('#v-sl-bg-slide');
-  if(slBgSlide) slBgSlide.addEventListener('input',e=>{
-    Config.ds.bg_slide_ms=+e.target.value*1000;
-    if(vBgSlide)vBgSlide.textContent=e.target.value;
-    schedSave();
-  });
-  const slBgFade=root.querySelector('#sl-bg-fade');
-  const vBgFade=root.querySelector('#v-sl-bg-fade');
-  if(slBgFade) slBgFade.addEventListener('input',e=>{
-    Config.ds.bg_fade_ms=+e.target.value*1000;
-    if(vBgFade)vBgFade.textContent=e.target.value;
-    schedSave();
-  });
-  const slGifSpeed=root.querySelector('#sl-gif-speed');
-  const vGifSpeed=root.querySelector('#v-sl-gif-speed');
-  if(slGifSpeed) slGifSpeed.addEventListener('input',e=>{
-    Config.ds.gif_speed_percent=+e.target.value;
-    if(vGifSpeed)vGifSpeed.textContent=e.target.value;
-    schedSave();
-  });
   // LED
   const ledTrans=root.querySelector('#led-transport');
   if(ledTrans) ledTrans.addEventListener('change',()=>{Config.lo.transport=ledTrans.value;schedSave();});
@@ -2092,7 +2076,7 @@ class App{
   setBgImages(files){ this.clearBgImages(); this.addBgImages(files); }
   addBgImages(files){
     for(const f of files)
-      this._bgImages.push({url:URL.createObjectURL(f),name:f.name,isGif:/\.gif$/i.test(f.name)});
+      this._bgImages.push({url:URL.createObjectURL(f),name:f.name,isGif:/\.gif$/i.test(f.name),slide_ms:5000,fade_ms:1000,gif_speed_pct:100});
     if(!this._bgSlideTimer&&this._bgImages.length>0)this._startBgSlide();
     this._refreshBgThumbs();
   }
@@ -2136,9 +2120,9 @@ class App{
   }
   _showBgSlide(){
     if(!this._bgImages.length)return;
-    const slideMs=Math.max(500,Config.ds.bg_slide_ms??5000);
-    const fadeMs=Math.max(0,Config.ds.bg_fade_ms??1000);
     const entry=this._bgImages[this._bgSlideIdx%this._bgImages.length];
+    const slideMs=Math.max(500,entry.slide_ms??Config.ds.bg_slide_ms??5000);
+    const fadeMs=Math.max(0,entry.fade_ms??Config.ds.bg_fade_ms??1000);
     const isA=this._bgFront==='a';
     const front=isA?this._bgA:this._bgB;
     const back=isA?this._bgB:this._bgA;
@@ -2161,23 +2145,61 @@ class App{
   }
   _refreshBgThumbs(){
     const imgs=this._bgImages;
-    document.querySelectorAll('.bg-thumb-grid').forEach(grid=>{
-      grid.innerHTML='';
+    document.querySelectorAll('.bg-item-list').forEach(list=>{
+      list.innerHTML='';
       imgs.forEach((e,i)=>{
-        const t=document.createElement('div');
-        t.className='bg-thumb';
-        t.style.backgroundImage=`url(${e.url})`;
-        t.title=e.name||`Image ${i+1}`;
+        const card=document.createElement('div');
+        card.className='bg-item-card';
+
+        // Top row: thumbnail, name, GIF badge, × button
+        const top=document.createElement('div');
+        top.className='bg-item-top';
+
+        const thumb=document.createElement('div');
+        thumb.className='bg-thumb-mini';
+        thumb.style.backgroundImage=`url(${e.url})`;
+        top.appendChild(thumb);
+
+        const name=document.createElement('span');
+        name.className='bg-item-name';
+        name.textContent=e.name||`Image ${i+1}`;
+        name.title=e.name||`Image ${i+1}`;
+        top.appendChild(name);
+
         if(e.isGif){
           const tag=document.createElement('span');
           tag.className='bg-thumb-gif';tag.textContent='GIF';
-          t.appendChild(tag);
+          top.appendChild(tag);
         }
+
         const x=document.createElement('button');
-        x.className='bg-thumb-x';x.textContent='×';
+        x.className='bg-item-x';x.textContent='×';
         x.onclick=()=>this.removeBgImage(i);
-        t.appendChild(x);
-        grid.appendChild(t);
+        top.appendChild(x);
+        card.appendChild(top);
+
+        // Slider rows
+        const sliders=document.createElement('div');
+        sliders.className='bg-item-sliders';
+
+        const mkRow=(label,min,max,step,val,unit,onInput)=>{
+          const row=document.createElement('div');
+          row.className='bg-slider-row';
+          const lbl=document.createElement('label');lbl.textContent=label;
+          const sl=document.createElement('input');sl.type='range';sl.min=min;sl.max=max;sl.step=step;sl.value=val;
+          const sv=document.createElement('span');sv.className='bg-sv';sv.textContent=val+unit;
+          sl.addEventListener('input',()=>{sv.textContent=sl.value+unit;onInput(+sl.value);});
+          row.appendChild(lbl);row.appendChild(sl);row.appendChild(sv);
+          return row;
+        };
+
+        sliders.appendChild(mkRow('Slide',1,60,1,Math.round((e.slide_ms??5000)/1000),'s',v=>{e.slide_ms=v*1000;}));
+        sliders.appendChild(mkRow('Fade',0,10,0.5,((e.fade_ms??1000)/1000).toFixed(1),'s',v=>{e.fade_ms=v*1000;}));
+        if(e.isGif)
+          sliders.appendChild(mkRow('Speed',10,300,10,e.gif_speed_pct??100,'%',v=>{e.gif_speed_pct=v;}));
+
+        card.appendChild(sliders);
+        list.appendChild(card);
       });
     });
     const n=imgs.length;
