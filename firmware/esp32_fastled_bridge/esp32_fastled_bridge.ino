@@ -18,6 +18,11 @@ extern "C" bool btInUse(void) { return true; }
 #define LED_COUNT   177
 #define BRIGHTNESS  128
 
+// WS2812B second strip (mirrored). FastLED uses RMT on ESP32-S3 for WS2812B
+// so BLE radio interrupts cannot corrupt its output.
+#define DATA_PIN_2   34          // adjust to actual GPIO wiring
+#define LED_COUNT_2  LED_COUNT
+
 #define SERIAL_BAUD 115200
 #define MAX_LINE_LEN 4096
 #define ENABLE_BLE 1
@@ -28,15 +33,24 @@ static const char* BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* BLE_WRITE_UUID   = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 
 CRGB leds[LED_COUNT];
+CRGB leds2[LED_COUNT_2];
 char lineBuf[MAX_LINE_LEN];
 size_t lineLen = 0;
+
+// Ring buffer for bytes arriving from the BLE callback (NimBLE FreeRTOS task,
+// Core 0). loop() (Core 1) drains it — FastLED.show() only ever runs in loop().
+static char           blePipe[MAX_LINE_LEN * 2];
+static volatile size_t bpHead = 0;
+static size_t          bpTail = 0;  // only written by loop()
+static portMUX_TYPE    bleMux = portMUX_INITIALIZER_UNLOCKED;
 
 #if ENABLE_BLE && HAS_NIMBLE
 NimBLEServer* bleServer = nullptr;
 #endif
 
 void clearAll() {
-  fill_solid(leds, LED_COUNT, CRGB::Black);
+  fill_solid(leds,  LED_COUNT,  CRGB::Black);
+  fill_solid(leds2, LED_COUNT_2, CRGB::Black);
   FastLED.show();
 }
 
@@ -82,6 +96,13 @@ bool applyFrame(char* line) {
     leds[i] = CRGB::Black;
   }
 
+  // Mirror to WS2812B strip (FastLED handles BGR vs GRB per-strip at show time).
+  int mirrorCount = min((int)LED_COUNT, (int)LED_COUNT_2);
+  memcpy(leds2, leds, sizeof(CRGB) * mirrorCount);
+  for (int i = mirrorCount; i < LED_COUNT_2; ++i) {
+    leds2[i] = CRGB::Black;
+  }
+
   FastLED.show();
   return true;
 }
@@ -119,13 +140,24 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
 ServerCallbacks serverCallbacks;
 
+// onWrite only pushes bytes into the ring buffer — it never touches leds[] or
+// calls FastLED.show(). This avoids the race where the NimBLE task (Core 0)
+// and the Arduino loop task (Core 1) both write to shared globals simultaneously.
 class RxCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
     (void)connInfo;
     std::string value = pCharacteristic->getValue();
+    portENTER_CRITICAL(&bleMux);
     for (size_t i = 0; i < value.size(); ++i) {
-      processIncomingByte(value[i]);
+      char c = value[i];
+      size_t next = (bpHead + 1) % sizeof(blePipe);
+      if (next != bpTail) {
+        blePipe[bpHead] = c;
+        bpHead = next;
+      }
+      // silently drop on overflow — safer than corrupting shared parse state
     }
+    portEXIT_CRITICAL(&bleMux);
   }
 };
 
@@ -158,6 +190,7 @@ void setup() {
   // Clear LEDs immediately on boot — before any delay — so a reset wipes
   // whatever noise/state the strip was showing.
   FastLED.addLeds<LED_TYPE, DATA_PIN, CLOCK_PIN, COLOR_ORDER>(leds, LED_COUNT);
+  FastLED.addLeds<WS2812B, DATA_PIN_2, GRB>(leds2, LED_COUNT_2);
   FastLED.setBrightness(BRIGHTNESS);
   clearAll();
 
@@ -165,7 +198,7 @@ void setup() {
   Serial.begin(SERIAL_BAUD);
   Serial.println("=== Piano-LED-Bridge booting ===");
   Serial.print("HAS_NIMBLE = "); Serial.println(HAS_NIMBLE);
-  Serial.println("FastLED ready");
+  Serial.println("FastLED ready (SK9822 + WS2812B)");
 
 #if ENABLE_BLE
 #if HAS_NIMBLE
@@ -178,6 +211,18 @@ void setup() {
 }
 
 void loop() {
+  // Drain BLE ring buffer. bpHead is written under bleMux by the NimBLE task;
+  // snapshot it once so we don't race on the comparison inside the loop.
+  size_t h;
+  portENTER_CRITICAL(&bleMux);
+  h = bpHead;
+  portEXIT_CRITICAL(&bleMux);
+  while (bpTail != h) {
+    processIncomingByte(blePipe[bpTail]);
+    bpTail = (bpTail + 1) % sizeof(blePipe);
+  }
+
+  // Drain serial
   while (Serial.available() > 0) {
     processIncomingByte((char)Serial.read());
   }
