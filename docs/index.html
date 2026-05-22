@@ -1870,6 +1870,25 @@ class App{
     this.bgCtx=null;
     this._bgA=document.getElementById('bg-slide-a');
     this._bgB=document.getElementById('bg-slide-b');
+    this._bgGifCanvasA=document.createElement('canvas');
+    this._bgGifCanvasB=document.createElement('canvas');
+    [this._bgGifCanvasA,this._bgGifCanvasB].forEach(c=>{
+      c.style.position='absolute';
+      c.style.inset='0';
+      c.style.width='100%';
+      c.style.height='100%';
+      c.style.pointerEvents='none';
+      c.style.display='none';
+    });
+    this._bgA.appendChild(this._bgGifCanvasA);
+    this._bgB.appendChild(this._bgGifCanvasB);
+    this._bgGifCtxA=this._bgGifCanvasA.getContext('2d');
+    this._bgGifCtxB=this._bgGifCanvasB.getContext('2d');
+    this._bgGifRaf=0;
+    this._bgLayerState={
+      a:{mode:'css',entry:null,frames:null,durations:null,frameIdx:0,frameMs:0,lastTs:0,token:0},
+      b:{mode:'css',entry:null,frames:null,durations:null,frameIdx:0,frameMs:0,lastTs:0,token:0},
+    };
     this._bgFront='a';
     this._bgSlideIdx=0;
     this._bgSlideTimer=null;
@@ -2072,6 +2091,10 @@ class App{
     const W=window.innerWidth,H=window.innerHeight;
     this.mainCanvas.width=W; this.mainCanvas.height=H;
     const fc=document.getElementById('fluid-canvas'); fc.width=W; fc.height=H;
+    this._bgGifCanvasA.width=W; this._bgGifCanvasA.height=H;
+    this._bgGifCanvasB.width=W; this._bgGifCanvasB.height=H;
+    this._drawBgGifFrame('a');
+    this._drawBgGifFrame('b');
     if(window.fluidSim)window.fluidSim.resize();
     this.layout=buildLayout(W,H,Config.ks.height_percent,Config.ks.width_percent??100);
     if(this.fx)this.fx.resize(W,H); else this.fx=new FXRenderer(W,H);
@@ -2080,12 +2103,162 @@ class App{
   _makeBgEntry(file){
     return{
       url:URL.createObjectURL(file),
+      blob:file,
       name:file.name,
       isGif:/\.gif$/i.test(file.name),
       slide_ms:Math.max(500,Config.ds.bg_slide_ms??5000),
       fade_ms:Math.max(0,Config.ds.bg_fade_ms??1000),
       gif_speed_pct:Math.max(10,Math.min(300,Config.ds.gif_speed_percent??100)),
+      _gifFrames:null,
+      _gifDurations:null,
+      _gifDecodePromise:null,
+      _gifDecodeFailed:false,
     };
+  }
+  _bgLayerParts(key){
+    if(key==='a')return{layer:this._bgA,canvas:this._bgGifCanvasA,ctx:this._bgGifCtxA,state:this._bgLayerState.a};
+    return{layer:this._bgB,canvas:this._bgGifCanvasB,ctx:this._bgGifCtxB,state:this._bgLayerState.b};
+  }
+  _bgGifSpeed(entry){
+    const sp=Number(entry?.gif_speed_pct??100);
+    if(!Number.isFinite(sp))return 100;
+    return Math.max(10,Math.min(300,sp));
+  }
+  _drawCoverFrame(ctx,canvas,frame){
+    if(!ctx||!canvas||!frame)return;
+    const cw=canvas.width,ch=canvas.height,fw=frame.width,fh=frame.height;
+    if(cw<=0||ch<=0||fw<=0||fh<=0)return;
+    const sc=Math.max(cw/fw,ch/fh);
+    const dw=fw*sc,dh=fh*sc;
+    const dx=(cw-dw)*0.5,dy=(ch-dh)*0.5;
+    ctx.clearRect(0,0,cw,ch);
+    ctx.drawImage(frame,dx,dy,dw,dh);
+  }
+  _drawBgGifFrame(key){
+    const {canvas,ctx,state}=this._bgLayerParts(key);
+    if(state.mode!=='gif'||!state.frames?.length||!ctx||!canvas)return;
+    const frame=state.frames[state.frameIdx%state.frames.length];
+    this._drawCoverFrame(ctx,canvas,frame);
+  }
+  _ensureBgGifLoop(){
+    if(this._bgGifRaf)return;
+    this._bgGifRaf=requestAnimationFrame(ts=>this._tickBgGifs(ts));
+  }
+  _tickBgGifs(now){
+    this._bgGifRaf=0;
+    let any=false;
+    ['a','b'].forEach(key=>{
+      const {state}=this._bgLayerParts(key);
+      if(state.mode!=='gif'||!state.frames?.length||!state.entry)return;
+      any=true;
+      if(!state.lastTs)state.lastTs=now;
+      const dt=Math.max(0,now-state.lastTs);
+      state.lastTs=now;
+      state.frameMs+=dt*(this._bgGifSpeed(state.entry)/100);
+      let changed=false;
+      let guard=0;
+      while(state.durations?.length&&state.frameMs>=state.durations[state.frameIdx%state.durations.length]&&guard<state.frames.length*2){
+        state.frameMs-=state.durations[state.frameIdx%state.durations.length];
+        state.frameIdx=(state.frameIdx+1)%state.frames.length;
+        changed=true;
+        guard++;
+      }
+      if(changed)this._drawBgGifFrame(key);
+    });
+    if(any)this._bgGifRaf=requestAnimationFrame(ts=>this._tickBgGifs(ts));
+  }
+  _deactivateBgLayer(key){
+    const {layer,canvas,ctx,state}=this._bgLayerParts(key);
+    state.token++;
+    state.mode='css';
+    state.entry=null;
+    state.frames=null;
+    state.durations=null;
+    state.frameIdx=0;
+    state.frameMs=0;
+    state.lastTs=0;
+    if(ctx)ctx.clearRect(0,0,canvas.width,canvas.height);
+    canvas.style.display='none';
+    layer.style.backgroundImage='none';
+  }
+  _disposeBgGifCache(entry){
+    if(!entry)return;
+    if(Array.isArray(entry._gifFrames)){
+      entry._gifFrames.forEach(f=>{try{f?.close?.();}catch(_){}});
+    }
+    entry._gifFrames=null;
+    entry._gifDurations=null;
+    entry._gifDecodePromise=null;
+  }
+  async _ensureGifDecoded(entry){
+    if(!entry?.isGif||entry._gifDecodeFailed)return null;
+    if(Array.isArray(entry._gifFrames)&&entry._gifFrames.length&&Array.isArray(entry._gifDurations)&&entry._gifDurations.length)
+      return{frames:entry._gifFrames,durations:entry._gifDurations};
+    if(entry._gifDecodePromise)return entry._gifDecodePromise;
+    if(typeof ImageDecoder==='undefined'||!entry.blob){
+      entry._gifDecodeFailed=true;
+      return null;
+    }
+    entry._gifDecodePromise=(async()=>{
+      try{
+        const buf=await entry.blob.arrayBuffer();
+        const mime=(entry.blob.type&&entry.blob.type.startsWith('image/'))?entry.blob.type:'image/gif';
+        const dec=new ImageDecoder({data:buf,type:mime});
+        await dec.tracks.ready;
+        const track=dec.tracks.selectedTrack;
+        const frameCount=(track&&Number.isFinite(track.frameCount))?track.frameCount:0;
+        if(!frameCount){try{dec.close?.();}catch(_){} return null;}
+        const frames=[],durations=[];
+        for(let i=0;i<frameCount;i++){
+          const out=await dec.decode({frameIndex:i,completeFramesOnly:true});
+          const vf=out.image;
+          const bmp=await createImageBitmap(vf);
+          const durUs=Number(vf.duration??0);
+          durations.push(Math.max(16,durUs>0?durUs/1000:100));
+          frames.push(bmp);
+          vf.close();
+        }
+        try{dec.close?.();}catch(_){}
+        if(!frames.length)return null;
+        entry._gifFrames=frames;
+        entry._gifDurations=durations;
+        return{frames,durations};
+      }catch(_){
+        entry._gifDecodeFailed=true;
+        return null;
+      }finally{
+        entry._gifDecodePromise=null;
+      }
+    })();
+    return entry._gifDecodePromise;
+  }
+  async _setBgLayerEntry(key,entry){
+    const {layer,canvas,state}=this._bgLayerParts(key);
+    state.token++;
+    const token=state.token;
+    state.mode='css';
+    state.entry=entry;
+    state.frames=null;
+    state.durations=null;
+    state.frameIdx=0;
+    state.frameMs=0;
+    state.lastTs=0;
+    canvas.style.display='none';
+    layer.style.backgroundImage=`url("${entry.url}")`;
+    if(!entry?.isGif)return;
+    const decoded=await this._ensureGifDecoded(entry);
+    if(state.token!==token||state.entry!==entry)return;
+    if(!decoded?.frames?.length||!decoded?.durations?.length)return;
+    state.mode='gif';
+    state.frames=decoded.frames;
+    state.durations=decoded.durations;
+    state.frameIdx=0;
+    state.frameMs=0;
+    state.lastTs=0;
+    layer.style.backgroundImage='none';
+    canvas.style.display='block';
+    this._drawBgGifFrame(key);
+    this._ensureBgGifLoop();
   }
   _restartBgSlide(){
     clearTimeout(this._bgSlideTimer); this._bgSlideTimer=null;
@@ -2102,6 +2275,7 @@ class App{
   }
   removeBgImage(index){
     const e=this._bgImages[index]; if(!e)return;
+    this._disposeBgGifCache(e);
     URL.revokeObjectURL(e.url);
     this._bgImages.splice(index,1);
     clearTimeout(this._bgSlideTimer); this._bgSlideTimer=null;
@@ -2121,15 +2295,20 @@ class App{
   }
   clearBgImages(){
     clearTimeout(this._bgSlideTimer); this._bgSlideTimer=null;
-    for(const e of this._bgImages)URL.revokeObjectURL(e.url);
+    for(const e of this._bgImages){
+      this._disposeBgGifCache(e);
+      URL.revokeObjectURL(e.url);
+    }
     this._bgImages=[];
     this._bgSlideIdx=0;
     this._clearBgSlides();
     this._refreshBgThumbs();
   }
   _clearBgSlides(){
-    this._bgA.style.backgroundImage='none'; this._bgA.style.opacity='1';
-    this._bgB.style.backgroundImage='none'; this._bgB.style.opacity='0';
+    this._deactivateBgLayer('a');
+    this._deactivateBgLayer('b');
+    this._bgA.style.opacity='1';
+    this._bgB.style.opacity='0';
     this._bgFront='a';
   }
   _startBgSlide(){
@@ -2144,11 +2323,13 @@ class App{
     const slideMs=Math.max(500,entry.slide_ms??Config.ds.bg_slide_ms??5000);
     const fadeMs=Math.max(0,entry.fade_ms??Config.ds.bg_fade_ms??1000);
     const isA=this._bgFront==='a';
+    const frontKey=isA?'a':'b';
+    const backKey=isA?'b':'a';
     const front=isA?this._bgA:this._bgB;
     const back=isA?this._bgB:this._bgA;
     back.style.transition='none';
     back.style.opacity='0';
-    back.style.backgroundImage=`url("${entry.url}")`;
+    this._setBgLayerEntry(backKey,entry);
     back.getBoundingClientRect(); // force reflow before transitioning
     back.style.transition=`opacity ${fadeMs}ms linear`;
     back.style.opacity='1';
@@ -2156,6 +2337,7 @@ class App{
       front.style.transition=`opacity ${fadeMs}ms linear`;
       front.style.opacity='0';
       this._bgFront=isA?'b':'a';
+      this._deactivateBgLayer(frontKey);
     },fadeMs);
     if(this._bgImages.length>1)
       this._bgSlideTimer=setTimeout(()=>{
