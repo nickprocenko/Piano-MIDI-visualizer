@@ -1241,7 +1241,7 @@ const FluidThemeManager={
 // ═══════════════════════════════════════════════════════
 // SETTINGS CONTENT BUILDER
 // ═══════════════════════════════════════════════════════
-function hex(r,g,b){return'#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');}
+function hex(r,g,b){return'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,(+v)||0)).toString(16).padStart(2,'0')).join('');}
 
 function buildSettingsHTML(tab){
   const ns=Config.ns,ks=Config.ks,ds=Config.ds,lo=Config.lo,ac=Config.ac;
@@ -1438,7 +1438,7 @@ function wireNoteThemeDropdown(root,prefix,refreshAll){
   function updateUI(){
     const v=sel.value||'b0';
     const isUser=v.startsWith('u');
-    delBtn.style.display=isUser?'':'none';
+    if(delBtn)delBtn.style.display=isUser?'':'none';
     const isSolid=v==='b0';
     scriptDiv.style.display=isSolid?'none':'';
     if(isUser){
@@ -1528,7 +1528,7 @@ function wireFluidPresets(root,app){
       if(i>=BUILTIN_FLUID_THEMES.length)o.dataset.user='1';
       sel.appendChild(o);
     });
-    delBtn.style.display=sel.options[sel.selectedIndex]?.dataset.user==='1'?'':'none';
+    if(delBtn)delBtn.style.display=sel.options[sel.selectedIndex]?.dataset.user==='1'?'':'none';
   }
   renderOpts();
   sel.addEventListener('change',()=>{
@@ -1540,17 +1540,17 @@ function wireFluidPresets(root,app){
       const sl=root.querySelector(`input[data-cfk="${k}"]`);
       if(sl){sl.value=ns[k];const ve=root.querySelector(`#v-${sl.id}`);if(ve)ve.textContent=ns[k];}
     });
-    delBtn.style.display=sel.options[sel.selectedIndex]?.dataset.user==='1'?'':'none';
+    if(delBtn)delBtn.style.display=sel.options[sel.selectedIndex]?.dataset.user==='1'?'':'none';
   });
-  saveBtn.addEventListener('click',()=>{
+  if(saveBtn) saveBtn.addEventListener('click',()=>{
     const name=prompt('Preset name:','');
     if(!name||!name.trim())return;
     FluidThemeManager.save(name.trim());
     renderOpts();
     sel.value=BUILTIN_FLUID_THEMES.length+FluidThemeManager.getAll().length-1;
-    delBtn.style.display='';
+    if(delBtn)delBtn.style.display='';
   });
-  delBtn.addEventListener('click',()=>{
+  if(delBtn) delBtn.addEventListener('click',()=>{
     const i=+sel.value-BUILTIN_FLUID_THEMES.length;
     if(i<0)return;
     FluidThemeManager.delete(i);
@@ -1908,7 +1908,7 @@ class App{
     window.addEventListener('resize',()=>this._resize());
     this._setupScreens();
     this._setupHUD();
-    this._buildSettingsScreens();
+    try{this._buildSettingsScreens();}catch(e){console.error('Settings build error:',e);}
     document.getElementById('main-canvas').addEventListener('keydown',e=>{if(e.key==='Escape')this.showMenu();});
     this._setupKeyboardMouse();
     // Apply saved fluid state immediately (setEnabled / updateConfig are normally
