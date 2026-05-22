@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:;">
 <title>Piano MIDI Visualizer</title>
 <style>
 :root {
@@ -268,6 +269,10 @@ const Config = {
   load(){
     let stored={};
     try{ stored=JSON.parse(localStorage.getItem('pianoVisCfg')||'{}'); }catch(e){}
+    // note_colors must be null or a flat note-array object; if stored as a script-result
+    // object ({notes:[],channelColors:[],...}) it will crash _merge — sanitise before merging
+    if(stored.note_style&&stored.note_style.note_colors!==null&&typeof stored.note_style.note_colors==='object')
+      stored.note_style.note_colors=null;
     this.data=this._merge(JSON.parse(JSON.stringify(this._d)),stored);
   },
   save(){localStorage.setItem('pianoVisCfg',JSON.stringify(this.data));},
