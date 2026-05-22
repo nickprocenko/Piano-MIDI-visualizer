@@ -265,7 +265,7 @@ const Config = {
   save(){localStorage.setItem('pianoVisCfg',JSON.stringify(this.data));},
   _merge(t,s){
     for(const k in s){
-      if(s[k]!==null&&typeof s[k]==='object'&&!Array.isArray(s[k])&&typeof t[k]==='object')
+      if(s[k]!==null&&typeof s[k]==='object'&&!Array.isArray(s[k])&&t[k]!==null&&typeof t[k]==='object')
         this._merge(t[k],s[k]);
       else t[k]=s[k];
     }
