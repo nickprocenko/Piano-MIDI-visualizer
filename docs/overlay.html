@@ -116,7 +116,6 @@ const WS_URL = 'ws://localhost:8766';
 const card         = document.getElementById('card');
 const catLabel     = document.getElementById('category-label');
 const countdown    = document.getElementById('countdown');
-const botName      = document.getElementById('bot-name');
 const optionsWrap  = document.getElementById('options-wrap');
 const resultBanner = document.getElementById('result-banner');
 const idlePill     = document.getElementById('idle-pill');
@@ -165,9 +164,16 @@ function startPoll(msg) {
   clearTimeout(hideResultTimer);
   resultBanner.style.display = 'none';
 
-  if (msg.kik_bot) botName.textContent = '@' + msg.kik_bot;
+  const bot = msg.kik_bot || 'pianonick';
   catLabel.textContent = msg.label || msg.category;
   currentOptions = msg.options;
+
+  const hint = document.getElementById('kik-hint');
+  if (msg.suggested_by) {
+    hint.innerHTML = `Suggested by <strong>@${esc(msg.suggested_by)}</strong> &nbsp;·&nbsp; Vote on Kik: <strong>@${esc(bot)}</strong>`;
+  } else {
+    hint.innerHTML = `Vote on Kik: <strong>@${esc(bot)}</strong> — type a number`;
+  }
 
   buildOptionRows(msg.options);
   updateVotes(new Array(msg.options.length).fill(0), 0);

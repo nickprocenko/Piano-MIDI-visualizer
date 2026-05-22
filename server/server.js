@@ -54,7 +54,53 @@ const CATEGORIES = [
       return { type: 'apply_change', category: 'effects', ...this._fx[i] };
     },
   },
+  {
+    id: 'fluid',
+    label: 'Fluid Effect',
+    options: ['Default', 'Smoke', 'Fire', 'Storm', 'Gentle', 'Explosion'],
+    applyMsg(i) {
+      return { type: 'apply_change', category: 'fluid', fluid_preset_index: i };
+    },
+  },
 ];
+
+// ── Random category picker (never repeats the last one) ───────────────────────
+let lastCatId = null;
+
+function pickCategory() {
+  const pool = lastCatId ? CATEGORIES.filter(c => c.id !== lastCatId) : CATEGORIES;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// ── User registry (username → chatId, populated from inbound messages) ────────
+const userRegistry = new Map();
+
+function notifyAll(text) {
+  for (const [username, cid] of userRegistry) {
+    kikReply(cid, username, text, KIK_USERNAME, KIK_API_KEY);
+  }
+}
+
+// ── Suggestion queue ──────────────────────────────────────────────────────────
+const suggestionQueue = []; // [{ cat, optionIdx, suggestedBy }]
+const QUEUE_MAX = 5;
+
+function findOption(query) {
+  const q = query.toLowerCase().trim();
+  if (!q) return null;
+  // Exact match first, then starts-with, then substring — so "storm" finds "Storm" before "Riders on the Storm"
+  for (const pass of ['exact', 'starts', 'includes']) {
+    for (const cat of CATEGORIES) {
+      for (let i = 0; i < cat.options.length; i++) {
+        const opt = cat.options[i].toLowerCase();
+        if (pass === 'exact'    && opt === q)            return { cat, optionIdx: i };
+        if (pass === 'starts'   && opt.startsWith(q))    return { cat, optionIdx: i };
+        if (pass === 'includes' && opt.includes(q))      return { cat, optionIdx: i };
+      }
+    }
+  }
+  return null;
+}
 
 // ── WebSocket server ──────────────────────────────────────────────────────────
 const wss = new WebSocketServer({ port: WS_PORT });
@@ -73,12 +119,14 @@ wss.on('connection', ws => {
           const cat = currentPoll.cat;
           const elapsed = Date.now() - currentPoll.startTime;
           const remaining = Math.max(0, POLL_DURATION_MS - elapsed);
-          send(ws, { type: 'poll_start', category: cat.id, label: cat.label, options: cat.options, duration_ms: remaining });
+          send(ws, {
+            type: 'poll_start', category: cat.id, label: cat.label,
+            options: cat.options, duration_ms: remaining,
+            kik_bot: KIK_USERNAME, suggested_by: currentPoll.suggestedBy || null,
+          });
           send(ws, { type: 'poll_update', votes: computeCounts(), total: currentVotes.size });
         } else {
-          const coolRemaining = pollTimer
-            ? Math.max(0, (cooldownEnd || 0) - Date.now())
-            : 0;
+          const coolRemaining = pollTimer ? Math.max(0, (cooldownEnd || 0) - Date.now()) : 0;
           send(ws, { type: 'cooldown', remaining_ms: coolRemaining });
         }
       }
@@ -107,7 +155,6 @@ function broadcastAll(msg) {
 let state        = 'cooldown';
 let pollTimer    = null;
 let cooldownEnd  = 0;
-let catIdx       = 0;
 let currentPoll  = null;
 let currentVotes = new Map(); // kik username → optionIndex
 
@@ -122,10 +169,21 @@ function startCooldown() {
 }
 
 function startPoll() {
-  const cat = CATEGORIES[catIdx % CATEGORIES.length];
-  currentPoll  = { cat, startTime: Date.now() };
+  // Dequeue a viewer suggestion, or pick a random category
+  let cat, suggestedBy = null;
+  if (suggestionQueue.length > 0) {
+    const item = suggestionQueue.shift();
+    cat = item.cat;
+    suggestedBy = item.suggestedBy;
+  } else {
+    cat = pickCategory();
+  }
+  lastCatId = cat.id;
+
+  currentPoll  = { cat, startTime: Date.now(), suggestedBy };
   currentVotes = new Map();
   state = 'active';
+
   const msg = {
     type: 'poll_start',
     category: cat.id,
@@ -133,10 +191,22 @@ function startPoll() {
     options: cat.options,
     duration_ms: POLL_DURATION_MS,
     kik_bot: KIK_USERNAME,
+    suggested_by: suggestedBy,
   };
   broadcastAll(msg);
   pollTimer = setTimeout(endPoll, POLL_DURATION_MS);
-  console.log(`[poll] started: ${cat.label} (${POLL_DURATION_MS / 1000}s)`);
+  console.log(`[poll] started: ${cat.label}${suggestedBy ? ` (suggested by ${suggestedBy})` : ''} (${POLL_DURATION_MS / 1000}s)`);
+
+  // Notify all known users about the new poll
+  const optList = cat.options.map((o, i) => `${i + 1}. ${o}`).join('\n');
+  notifyAll(`🎹 New poll: ${cat.label}!\nType a number to vote:\n${optList}`);
+
+  // Personal ping to the suggester
+  if (suggestedBy && userRegistry.has(suggestedBy)) {
+    kikReply(userRegistry.get(suggestedBy), suggestedBy,
+      `Your suggestion is up for a vote right now! Type 1–${cat.options.length} to vote.`,
+      KIK_USERNAME, KIK_API_KEY);
+  }
 }
 
 function computeCounts() {
@@ -177,16 +247,13 @@ function endPoll() {
   broadcastAll(endMsg);
 
   if (hasWinner) {
-    const applyMsg = cat.applyMsg(winnerIdx);
-    broadcast('visualizer', applyMsg);
+    broadcast('visualizer', cat.applyMsg(winnerIdx));
     console.log(`[poll] winner: ${cat.options[winnerIdx]} (${counts[winnerIdx]}/${total} votes)`);
   } else {
     console.log(`[poll] tied — no change (counts: ${counts.join(', ')})`);
   }
 
-  catIdx++;
   state = 'applying';
-  // Brief pause so overlay can show the result, then cooldown
   pollTimer = setTimeout(startCooldown, 3_000);
 }
 
@@ -220,8 +287,12 @@ const httpServer = http.createServer((req, res) => {
 });
 
 function handleKikMessage(from, chatId, text) {
-  const lower = text.toLowerCase();
+  // Register user so we can proactively message them later
+  userRegistry.set(from, chatId);
 
+  const lower = text.toLowerCase().trim();
+
+  // ── status ────────────────────────────────────────────────────────────────
   if (lower === 'status') {
     let reply;
     if (state === 'active' && currentPoll) {
@@ -238,6 +309,38 @@ function handleKikMessage(from, chatId, text) {
     return;
   }
 
+  // ── !suggest ──────────────────────────────────────────────────────────────
+  if (lower.startsWith('!suggest ')) {
+    const query = text.slice(9).trim();
+    const match = findOption(query);
+    if (!match) {
+      kikReply(chatId, from,
+        `Couldn't find that. Try: rainbow, moonlight sonata, fire, storm, ocean blue, slow…`,
+        KIK_USERNAME, KIK_API_KEY);
+      return;
+    }
+    if (suggestionQueue.some(s => s.suggestedBy === from)) {
+      kikReply(chatId, from,
+        `You already have a suggestion in the queue! Wait for it to run first.`,
+        KIK_USERNAME, KIK_API_KEY);
+      return;
+    }
+    if (suggestionQueue.length >= QUEUE_MAX) {
+      kikReply(chatId, from,
+        `The suggestion queue is full (${QUEUE_MAX}/${QUEUE_MAX}). Check back soon!`,
+        KIK_USERNAME, KIK_API_KEY);
+      return;
+    }
+    suggestionQueue.push({ cat: match.cat, optionIdx: match.optionIdx, suggestedBy: from });
+    const pos = suggestionQueue.length;
+    kikReply(chatId, from,
+      `✓ "${match.cat.options[match.optionIdx]}" added to the queue at position ${pos}!`,
+      KIK_USERNAME, KIK_API_KEY);
+    console.log(`[suggest] ${from} → ${match.cat.options[match.optionIdx]} (${match.cat.id})`);
+    return;
+  }
+
+  // ── numeric vote ──────────────────────────────────────────────────────────
   const num = parseInt(lower);
 
   if (state !== 'active' || !currentPoll) {
@@ -259,10 +362,10 @@ function handleKikMessage(from, chatId, text) {
   const counts = computeCounts();
   broadcast('overlay', { type: 'poll_update', votes: counts, total: currentVotes.size });
 
-  const elapsed   = Date.now() - currentPoll.startTime;
-  const secsLeft  = Math.max(0, Math.round((POLL_DURATION_MS - elapsed) / 1000));
-  const label     = currentPoll.cat.options[optIdx];
-  const reply     = isChange
+  const elapsed  = Date.now() - currentPoll.startTime;
+  const secsLeft = Math.max(0, Math.round((POLL_DURATION_MS - elapsed) / 1000));
+  const label    = currentPoll.cat.options[optIdx];
+  const reply    = isChange
     ? `Changed to "${label}"! Results in ${secsLeft}s.`
     : `✓ Voted for "${label}"! Results in ${secsLeft}s.`;
   kikReply(chatId, from, reply, KIK_USERNAME, KIK_API_KEY);

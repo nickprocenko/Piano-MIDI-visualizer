@@ -993,6 +993,9 @@ class AudienceColorClient{
               Config.ns.speed_px_per_sec=m.speed_px_per_sec;
             } else if(cat==='effects'){
               Config.ns[`effect_${m.effect}_enabled`]=m.enabled?1:0;
+            } else if(cat==='fluid'){
+              const preset=BUILTIN_FLUID_THEMES[m.fluid_preset_index];
+              if(preset){Object.assign(Config.ns,preset.params);Config.ns.effect_fluid_enabled=1;}
             }
           } else if(m.type==='poll_start'){
             window.app?._showToast?.(`Vote: ${m.label} — type 1–${m.options.length} on Kik`);
