@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Piano Visualiser — Vote Overlay</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;font-family:'Segoe UI',system-ui,sans-serif}
+
+  #card{
+    position:fixed;
+    bottom:24px;right:24px;
+    width:320px;
+    background:rgba(10,10,18,.88);
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:14px;
+    padding:16px 18px 14px;
+    backdrop-filter:blur(12px);
+    color:#fff;
+    pointer-events:none;
+    transform:translateX(360px);
+    transition:transform .45s cubic-bezier(.22,.68,0,1.2);
+    will-change:transform;
+  }
+  #card.visible{transform:translateX(0)}
+
+  #card-header{
+    display:flex;align-items:center;justify-content:space-between;
+    margin-bottom:10px;
+  }
+  #category-label{
+    font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    color:rgba(255,255,255,.55);
+  }
+  #countdown{
+    font-size:13px;font-weight:700;
+    color:#a78bfa;
+    font-variant-numeric:tabular-nums;
+  }
+
+  #kik-hint{
+    font-size:11px;color:rgba(255,255,255,.4);
+    margin-bottom:10px;
+  }
+  #kik-hint strong{color:rgba(255,255,255,.7);}
+
+  .option-row{margin-bottom:8px;}
+  .option-label{
+    display:flex;justify-content:space-between;
+    font-size:13px;font-weight:500;
+    margin-bottom:3px;
+  }
+  .option-num{
+    width:20px;height:20px;
+    background:rgba(167,139,250,.25);
+    border-radius:5px;
+    display:inline-flex;align-items:center;justify-content:center;
+    font-size:11px;font-weight:700;color:#a78bfa;
+    margin-right:7px;flex-shrink:0;
+  }
+  .option-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .option-pct{font-size:11px;color:rgba(255,255,255,.5);margin-left:6px;}
+
+  .bar-track{
+    height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden;
+  }
+  .bar-fill{
+    height:100%;background:linear-gradient(90deg,#7c3aed,#a78bfa);
+    border-radius:2px;
+    transition:width .4s ease;
+    width:0%;
+  }
+
+  #result-banner{
+    margin-top:10px;padding:7px 10px;
+    background:rgba(124,58,237,.25);
+    border:1px solid rgba(167,139,250,.35);
+    border-radius:8px;
+    font-size:12px;font-weight:600;
+    color:#c4b5fd;
+    text-align:center;
+    display:none;
+  }
+
+  /* cooldown tiny pill */
+  #idle-pill{
+    position:fixed;bottom:24px;right:24px;
+    padding:6px 14px;
+    background:rgba(10,10,18,.7);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:20px;
+    font-size:11px;color:rgba(255,255,255,.3);
+    pointer-events:none;
+    opacity:0;transition:opacity .3s;
+  }
+  #idle-pill.visible{opacity:1;}
+</style>
+</head>
+<body>
+
+<div id="card">
+  <div id="card-header">
+    <span id="category-label">Loading…</span>
+    <span id="countdown"></span>
+  </div>
+  <div id="kik-hint">Vote on Kik: <strong id="bot-name">@pianonick</strong> — type a number</div>
+  <div id="options-wrap"></div>
+  <div id="result-banner"></div>
+</div>
+
+<div id="idle-pill">Next vote coming soon…</div>
+
+<script>
+const WS_URL = 'ws://localhost:8766';
+
+const card         = document.getElementById('card');
+const catLabel     = document.getElementById('category-label');
+const countdown    = document.getElementById('countdown');
+const botName      = document.getElementById('bot-name');
+const optionsWrap  = document.getElementById('options-wrap');
+const resultBanner = document.getElementById('result-banner');
+const idlePill     = document.getElementById('idle-pill');
+
+let countdownTimer  = null;
+let pollEndTime     = 0;
+let currentOptions  = [];
+let hideResultTimer = null;
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connect() {
+  const ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'identify', role: 'overlay' }));
+  };
+
+  ws.onmessage = e => {
+    try { handleMsg(JSON.parse(e.data)); } catch(_) {}
+  };
+
+  ws.onclose = () => {
+    setTimeout(connect, 3000);
+  };
+}
+
+function handleMsg(msg) {
+  switch(msg.type) {
+    case 'poll_start':
+      startPoll(msg);
+      break;
+    case 'poll_update':
+      updateVotes(msg.votes, msg.total);
+      break;
+    case 'poll_end':
+      showResult(msg);
+      break;
+    case 'cooldown':
+      showIdle();
+      break;
+  }
+}
+
+// ── Poll start ────────────────────────────────────────────────────────────────
+function startPoll(msg) {
+  clearTimeout(hideResultTimer);
+  resultBanner.style.display = 'none';
+
+  if (msg.kik_bot) botName.textContent = '@' + msg.kik_bot;
+  catLabel.textContent = msg.label || msg.category;
+  currentOptions = msg.options;
+
+  buildOptionRows(msg.options);
+  updateVotes(new Array(msg.options.length).fill(0), 0);
+
+  pollEndTime = Date.now() + msg.duration_ms;
+  startCountdown();
+
+  idlePill.classList.remove('visible');
+  card.classList.add('visible');
+}
+
+function buildOptionRows(options) {
+  optionsWrap.innerHTML = '';
+  options.forEach((opt, i) => {
+    const row = document.createElement('div');
+    row.className = 'option-row';
+    row.innerHTML = `
+      <div class="option-label">
+        <span><span class="option-num">${i+1}</span><span class="option-name">${esc(opt)}</span></span>
+        <span class="option-pct" id="pct-${i}">0%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill" id="bar-${i}"></div></div>`;
+    optionsWrap.appendChild(row);
+  });
+}
+
+// ── Vote update ───────────────────────────────────────────────────────────────
+function updateVotes(votes, total) {
+  votes.forEach((count, i) => {
+    const pct = total > 0 ? Math.round(count / total * 100) : 0;
+    const barEl = document.getElementById(`bar-${i}`);
+    const pctEl = document.getElementById(`pct-${i}`);
+    if (barEl) barEl.style.width = pct + '%';
+    if (pctEl) pctEl.textContent = pct + '%';
+  });
+}
+
+// ── Countdown ─────────────────────────────────────────────────────────────────
+function startCountdown() {
+  clearInterval(countdownTimer);
+  tick();
+  countdownTimer = setInterval(tick, 500);
+}
+
+function tick() {
+  const secsLeft = Math.max(0, Math.round((pollEndTime - Date.now()) / 1000));
+  countdown.textContent = secsLeft + 's';
+  if (secsLeft === 0) clearInterval(countdownTimer);
+}
+
+// ── Poll end ──────────────────────────────────────────────────────────────────
+function showResult(msg) {
+  clearInterval(countdownTimer);
+  countdown.textContent = '';
+
+  if (msg.votes) updateVotes(msg.votes, msg.total);
+
+  resultBanner.style.display = 'block';
+  resultBanner.textContent = msg.winner_label
+    ? '✓ Applied: ' + msg.winner_label
+    : 'Vote tied — no change';
+
+  // Slide out after 4 s, then show idle pill
+  hideResultTimer = setTimeout(() => {
+    card.classList.remove('visible');
+    setTimeout(showIdle, 500);
+  }, 4000);
+}
+
+// ── Idle / cooldown ───────────────────────────────────────────────────────────
+function showIdle() {
+  clearInterval(countdownTimer);
+  card.classList.remove('visible');
+  idlePill.classList.add('visible');
+  // Hide pill after 5 s (server will send poll_start when ready)
+  setTimeout(() => idlePill.classList.remove('visible'), 5000);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+connect();
+</script>
+</body>
+</html>

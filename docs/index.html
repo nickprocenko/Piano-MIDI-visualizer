@@ -970,12 +970,34 @@ class AudienceColorClient{
     if(!url)return;
     try{
       this._ws=new WebSocket(url);
-      this._ws.onopen=()=>{this.connected=true;};
+      this._ws.onopen=()=>{
+        this.connected=true;
+        this._ws.send(JSON.stringify({type:'identify',role:'visualizer'}));
+      };
       this._ws.onclose=()=>{this.connected=false;};
       this._ws.onmessage=e=>{
-        try{const m=JSON.parse(e.data);
+        try{
+          const m=JSON.parse(e.data);
           if(m.type==='color_set'&&m.rgb){
             this._pending.push({r:m.rgb.r||0,g:m.rgb.g||0,b:m.rgb.b||0,ms:m.transition_ms||220});
+          } else if(m.type==='apply_change'){
+            const cat=m.category;
+            if(cat==='theme'){
+              const t=BUILTIN_NOTE_THEMES[m.theme_index];
+              if(t){Config.ns.note_colors=t.build();Config.data.active_note_theme={type:'builtin',index:m.theme_index};}
+            } else if(cat==='color'){
+              this._pending.push({r:m.r||0,g:m.g||0,b:m.b||0,ms:220});
+              Config.ns.note_colors=null;
+              Config.data.active_note_theme={type:'none'};
+            } else if(cat==='speed'){
+              Config.ns.speed_px_per_sec=m.speed_px_per_sec;
+            } else if(cat==='effects'){
+              Config.ns[`effect_${m.effect}_enabled`]=m.enabled?1:0;
+            }
+          } else if(m.type==='poll_start'){
+            window.app?._showToast?.(`Vote: ${m.label} — type 1–${m.options.length} on Kik`);
+          } else if(m.type==='poll_end'){
+            window.app?._showToast?.(m.winner_label?`Applied: ${m.winner_label}`:'Vote tied — no change');
           }
         }catch(ex){}
       };
@@ -1347,9 +1369,9 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 </div>
 <pre id="led-console" style="width:100%;height:120px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:monospace;font-size:10px;margin:0;white-space:pre-wrap;word-break:break-all"></pre>
 </div></div>`,
-    audience:`<div class="section"><h2>Audience Color Control</h2>
-<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Connect to a WebSocket that sends <code>color_set</code> events to change note color live.</p>
-<div class="row"><label>WebSocket URL</label><input type="text" id="aud-url" value="${ac.ws_url||''}" placeholder="wss://example.com/ws" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
+    audience:`<div class="section"><h2>Audience Vote</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Connect to the local vote server (<code>node server/server.js</code>). Audience votes via Kik; winning option is applied automatically.</p>
+<div class="row"><label>WebSocket URL</label><input type="text" id="aud-url" value="${ac.ws_url||''}" placeholder="ws://localhost:8766" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
 <div class="row"><label>Transition ms</label><input type="number" id="aud-trans" value="${ac.transition_ms||220}" min="20" max="3000" style="width:80px;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
 <div class="row"><label>Status</label><span id="aud-status">Disconnected</span></div>
 <div class="row"><label></label><button class="action-btn" id="btn-aud-connect">Connect</button><button class="action-btn" id="btn-aud-disconnect" style="margin-left:6px">Disconnect</button></div>

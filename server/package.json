@@ -1,0 +1,12 @@
+{
+  "name": "piano-viz-server",
+  "version": "1.0.0",
+  "description": "Audience vote server for Piano MIDI Visualiser",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8"
+  }
+}
