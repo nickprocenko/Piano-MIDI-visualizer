@@ -96,7 +96,7 @@ class App:
         self._fluid_renderer: Optional[object] = None
         self._led_output: Optional[LedOutput] = None
         # Background animation: list of slides, each slide is (frames, durations_ms)
-        self._bg_slides: list[tuple[list[pygame.Surface], list[float]]] = []
+        self._bg_slides: list[tuple[list[pygame.Surface], list[float], dict]] = []
         self._bg_slide_index: int = 0
         self._bg_slide_ms: float = 0.0
         self._bg_frame_index: int = 0
@@ -1045,18 +1045,24 @@ class App:
         self._note_style["interior_g"] = max(g, min(255, g + 74))
         self._note_style["interior_b"] = max(b, min(255, b + 48))
 
-    def _load_display_style(self) -> dict[str, int | str]:
+    def _load_display_style(self) -> dict:
         style = cfg.load().get("display_style", {})
-        width_scale = int(style.get("width_scale_percent", 66))
-        width_scale = max(60, min(80, width_scale))
+        width_scale = max(60, min(80, int(style.get("width_scale_percent", 66))))
+        items = list(style.get("background_slideshow_items", []))
+        if not items:
+            # Migrate from old format
+            paths = list(style.get("background_slideshow_paths", []))
+            single = str(style.get("background_image", ""))
+            slide_sec     = int(style.get("background_slide_duration_sec", 5))
+            trans_pct     = int(style.get("background_transition_percent", 35))
+            gif_speed_pct = int(style.get("gif_speed_percent", 100))
+            all_paths = paths if paths else ([single] if single else [])
+            items = [{"path": p, "slide_sec": slide_sec, "transition_pct": trans_pct, "gif_speed_pct": gif_speed_pct} for p in all_paths]
         return {
             "width_scale_percent": width_scale,
             "background_alpha": int(style.get("background_alpha", 120)),
             "background_image": str(style.get("background_image", "")),
-            "background_slideshow_paths": list(style.get("background_slideshow_paths", [])),
-            "background_slide_duration_sec": int(style.get("background_slide_duration_sec", 5)),
-            "background_transition_percent": int(style.get("background_transition_percent", 35)),
-            "gif_speed_percent": int(style.get("gif_speed_percent", 100)),
+            "background_slideshow_items": items,
         }
 
     @staticmethod
@@ -1090,19 +1096,16 @@ class App:
         except Exception:
             return [], []
 
-    def _load_background_slides(self) -> list[tuple[list[pygame.Surface], list[float]]]:
-        """Build slide list from config. Slideshow paths take priority over single image."""
-        slideshow_paths: list[str] = list(self._display_style.get("background_slideshow_paths", []))
-        single_path: str = str(self._display_style.get("background_image", ""))
-
-        paths_to_use: list[str] = slideshow_paths if slideshow_paths else ([single_path] if single_path else [])
-        slides: list[tuple[list[pygame.Surface], list[float]]] = []
-        for p_str in paths_to_use:
-            p = pathlib.Path(p_str)
+    def _load_background_slides(self) -> list[tuple[list[pygame.Surface], list[float], dict]]:
+        """Build slide list from config. Returns (frames, durations, item_dict) per slide."""
+        items: list[dict] = list(self._display_style.get("background_slideshow_items", []))
+        slides: list[tuple[list[pygame.Surface], list[float], dict]] = []
+        for item in items:
+            p = pathlib.Path(item.get("path", ""))
             if p.exists():
                 frames, durs = self._load_image_frames(p)
                 if frames:
-                    slides.append((frames, durs))
+                    slides.append((frames, durs, item))
         return slides
 
     def _advance_background(self, dt_ms: float) -> tuple[Optional[pygame.Surface], Optional[pygame.Surface], float]:
@@ -1110,10 +1113,13 @@ class App:
         if not self._bg_slides:
             return None, None, 0.0
 
-        slide_dur_ms = max(500.0, float(self._display_style.get("background_slide_duration_sec", 5)) * 1000.0)
-        transition_ratio = int(self._display_style.get("background_transition_percent", 35)) / 100.0
-        transition_ratio = max(0.10, min(0.90, transition_ratio))
-        transition_ms = max(500.0, min(3000.0, slide_dur_ms * transition_ratio))
+        cur_idx   = self._bg_slide_index % len(self._bg_slides)
+        frames, durations, item = self._bg_slides[cur_idx]
+
+        slide_dur_ms     = max(500.0, float(item.get("slide_sec", 5)) * 1000.0)
+        transition_ratio = max(0.10, min(0.90, item.get("transition_pct", 35) / 100.0))
+        transition_ms    = max(500.0, min(3000.0, slide_dur_ms * transition_ratio))
+        speed_pct        = max(10, min(200, int(item.get("gif_speed_pct", 100))))
 
         # Advance slide if there are multiple slides
         if len(self._bg_slides) > 1:
@@ -1123,15 +1129,19 @@ class App:
                 self._bg_slide_index = (self._bg_slide_index + 1) % len(self._bg_slides)
                 self._bg_frame_index = 0
                 self._bg_frame_ms = 0.0
+                # Reload per-item settings for the new slide
+                cur_idx = self._bg_slide_index % len(self._bg_slides)
+                frames, durations, item = self._bg_slides[cur_idx]
+                slide_dur_ms     = max(500.0, float(item.get("slide_sec", 5)) * 1000.0)
+                transition_ratio = max(0.10, min(0.90, item.get("transition_pct", 35) / 100.0))
+                transition_ms    = max(500.0, min(3000.0, slide_dur_ms * transition_ratio))
+                speed_pct        = max(10, min(200, int(item.get("gif_speed_pct", 100))))
 
-        frames, durations = self._bg_slides[self._bg_slide_index % len(self._bg_slides)]
         if not frames:
             return None, None, 0.0
 
-        # Advance GIF frame. Speed slider scales playback rate.
+        # Advance GIF frame using per-item speed
         if len(frames) > 1:
-            speed_pct = int(self._display_style.get("gif_speed_percent", 100))
-            speed_pct = max(10, min(200, speed_pct))
             self._bg_frame_ms += dt_ms * (speed_pct / 100.0)
             while durations and self._bg_frame_ms >= durations[self._bg_frame_index % len(durations)]:
                 self._bg_frame_ms -= durations[self._bg_frame_index % len(durations)]
@@ -1139,7 +1149,7 @@ class App:
 
         current_frame = frames[self._bg_frame_index % len(frames)]
 
-        # Soft dissolve near the end of the slide interval.
+        # Soft dissolve near the end of the slide interval
         next_frame: Optional[pygame.Surface] = None
         blend = 0.0
         if len(self._bg_slides) > 1:
@@ -1149,7 +1159,7 @@ class App:
                 t = max(0.0, min(1.0, t))
                 blend = t * t * (3.0 - 2.0 * t)
                 next_idx = (self._bg_slide_index + 1) % len(self._bg_slides)
-                next_frames, _next_durations = self._bg_slides[next_idx]
+                next_frames, _next_durations, _next_item = self._bg_slides[next_idx]
                 if next_frames:
                     next_frame = next_frames[0]
 
