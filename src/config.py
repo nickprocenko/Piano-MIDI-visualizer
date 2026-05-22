@@ -41,6 +41,7 @@ _DEFAULTS: dict[str, Any] = {
         "width_scale_percent": 66,
         "background_alpha": 120,
         "background_image": "",
+        "background_slideshow_items": [],
         "fullscreen": True,
     },
     "audience_control": {
