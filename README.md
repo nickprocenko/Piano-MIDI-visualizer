@@ -162,7 +162,8 @@ A Node.js server that lets your Kik audience vote on live visual changes. Polls 
 
 | Category | Options |
 |----------|---------|
-| Note Theme | Rainbow, Riders on the Storm, Moonlight Sonata, Light My Fire |
+| Note Theme | Rainbow, Octave Rainbow, Fire, Ice, Sunset |
+| Performance | Riders on the Storm, Moonlight Sonata, Light My Fire, Claire de Lune *(full visual preset)* |
 | Trail Colour | Ocean Blue, Sunset Red, Forest Green, Neon Purple |
 | Trail Speed | Slow, Normal, Fast, Very Fast |
 | Effects | Sparks On/Off, Smoke On/Off |
@@ -172,9 +173,10 @@ A Node.js server that lets your Kik audience vote on live visual changes. Polls 
 
 | Message | Bot replies |
 |---------|------------|
-| `1` – `4` (poll active) | Confirms vote with time remaining |
+| `1` – `N` (poll active) | Confirms vote with time remaining |
 | `!suggest <name>` | Queues a poll for the matched option; if ambiguous, lists candidates numbered for clarification |
 | `status` | Shows current poll or next-poll countdown |
+| `!help` | Lists all categories, options, and commands |
 
 **`!suggest` details:** fuzzy-matches against all option names across all categories (exact → starts-with → substring). When multiple options match, the bot asks the viewer to pick from a numbered list before queuing. One suggestion per viewer in the queue at a time; queue capped at 5. When the poll goes live, the overlay shows *"Suggested by @username"* and the suggester gets a personal Kik ping.
 

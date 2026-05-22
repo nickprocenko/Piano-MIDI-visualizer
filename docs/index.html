@@ -1009,6 +1009,23 @@ class AudienceColorClient{
             } else if(cat==='fluid'){
               const preset=BUILTIN_FLUID_THEMES[m.fluid_preset_index];
               if(preset){Object.assign(Config.ns,preset.params);Config.ns.effect_fluid_enabled=1;}
+            } else if(cat==='performance'){
+              const p=BUILTIN_PERFORMANCES[m.performance_index];
+              if(p){
+                const t=BUILTIN_NOTE_THEMES[p.noteThemeIndex];
+                if(t){Config.ns.note_colors=t.build();Config.data.active_note_theme={type:'builtin',index:p.noteThemeIndex};}
+                Config.ns.color_r=p.r;Config.ns.color_g=p.g;Config.ns.color_b=p.b;
+                Config.ns.speed_px_per_sec=p.speed;
+                Config.ns.effect_sparks_enabled=p.sparks;
+                Config.ns.effect_smoke_enabled=p.smoke;
+                Config.ns.effect_glow_enabled=p.glow;
+                Config.ns.effect_fluid_enabled=p.fluid;
+                Config.ns.effect_halo_pulse_enabled=p.halo;
+                Config.ns.effect_moon_dust_enabled=p.moon;
+                Config.ns.effect_press_smoke_enabled=p.pressMist;
+                Config.ns.glow_strength_percent=p.glowStrength;
+                Config.ds.background_color=p.bg;
+              }
             }
           } else if(m.type==='poll_start'){
             window.app?._showToast?.(`Vote: ${m.label} — type 1–${m.options.length} on Kik`);
@@ -1227,6 +1244,13 @@ const BUILTIN_FLUID_THEMES=[
   {name:'Explosion', params:{fluid_intensity:180,fluid_curl:70, fluid_density_dissipation:25,fluid_velocity_dissipation:4, fluid_pressure:100,fluid_splat_size:80,fluid_color_strength:200}},
 ];
 const _FLUID_PRESET_KEYS=['fluid_intensity','fluid_curl','fluid_density_dissipation','fluid_velocity_dissipation','fluid_pressure','fluid_splat_size','fluid_color_strength'];
+
+const BUILTIN_PERFORMANCES=[
+  {name:'Riders on the Storm',noteThemeIndex:6,speed:380,sparks:1,smoke:0,glow:1,fluid:1,halo:1,moon:0,pressMist:0,glowStrength:100,bg:'#020408',r:255,g:255,b:255},
+  {name:'Moonlight Sonata',   noteThemeIndex:7,speed:300,sparks:0,smoke:0,glow:1,fluid:1,halo:1,moon:1,pressMist:0,glowStrength:95, bg:'#010208',r:120,g:140,b:255},
+  {name:'Light My Fire',      noteThemeIndex:8,speed:460,sparks:1,smoke:1,glow:1,fluid:1,halo:1,moon:0,pressMist:1,glowStrength:90, bg:'#080200',r:230,g:60, b:0  },
+  {name:'Claire de Lune',     noteThemeIndex:0,speed:320,sparks:0,smoke:0,glow:1,fluid:1,halo:0,moon:0,pressMist:0,glowStrength:90, bg:'#050814',r:140,g:180,b:255},
+];
 const FluidThemeManager={
   getAll(){return Config.data.fluid_themes||[];},
   save(name){
@@ -1449,12 +1473,11 @@ function wireNoteThemeDropdown(root,prefix,refreshAll){
     if(isUser){
       const i=+v.slice(1), t=NoteColorThemeManager.getAll()[i];
       ta.value=t?t.script||'':'';
-      ta.readOnly=false; ta.style.opacity='1';
     } else {
       const i=+v.slice(1);
       ta.value=BUILTIN_NOTE_THEMES[i]?.script||'';
-      ta.readOnly=true; ta.style.opacity='0.65';
     }
+    ta.readOnly=false; ta.style.opacity='1';
   }
 
   function applyTheme(v){

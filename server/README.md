@@ -10,11 +10,22 @@ Node.js server that lets your Kik audience vote on visual changes to the Piano M
 4. After 30 s the winner is applied to the visualiser instantly.
 5. A 15 s cooldown runs, then the next category poll starts.
 
-**Vote categories** (cycle indefinitely):
-- Note Theme — Rainbow / Riders on the Storm / Moonlight Sonata / Light My Fire
+**Vote categories** (random rotation, never repeats back-to-back):
+- Note Theme — Rainbow / Octave Rainbow / Fire / Ice / Sunset
+- Performance — Riders on the Storm / Moonlight Sonata / Light My Fire / Claire de Lune *(applies full visual preset)*
 - Trail Colour — Ocean Blue / Sunset Red / Forest Green / Neon Purple
 - Trail Speed — Slow / Normal / Fast / Very Fast
 - Effects — Sparks On / Off / Smoke On / Off
+- Fluid Effect — Default / Smoke / Fire / Storm / Gentle / Explosion
+
+**Viewer commands:**
+
+| Message | What happens |
+|---------|-------------|
+| `1`–`N` (poll active) | Casts your vote; bot confirms with time remaining |
+| `!suggest <name>` | Fuzzy-matches an option and queues it for the next poll; bot replies with queue position |
+| `status` | Shows the active poll and options |
+| `!help` | Lists all categories, options, and commands |
 
 ---
 
