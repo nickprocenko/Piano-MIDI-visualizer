@@ -1444,12 +1444,11 @@ function wireNoteThemeDropdown(root,prefix,refreshAll){
     if(isUser){
       const i=+v.slice(1), t=NoteColorThemeManager.getAll()[i];
       ta.value=t?t.script||'':'';
-      ta.readOnly=false; ta.style.opacity='1';
     } else {
       const i=+v.slice(1);
       ta.value=BUILTIN_NOTE_THEMES[i]?.script||'';
-      ta.readOnly=true; ta.style.opacity='0.65';
     }
+    ta.readOnly=false; ta.style.opacity='1';
   }
 
   function applyTheme(v){
