@@ -183,7 +183,6 @@ void setupBleReceiver() {
   service->start();
 
   NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
-  advertising->useLegacyAdvertising(true);  // BLE 4.x compatible — visible to phones + Windows
   advertising->addServiceUUID(BLE_SERVICE_UUID);
   advertising->setName(BLE_DEVICE_NAME);
   advertising->enableScanResponse(true);    // Name in scan response so Windows sees it

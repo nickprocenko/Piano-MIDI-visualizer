@@ -18,8 +18,10 @@ from src.piano import Piano
 from src.device_select import DeviceSelect
 from src.display_settings import DisplaySettingsScreen
 from src.keyboard_settings import KeyboardSettingsScreen
+from src.hardware_settings import HardwareSettingsScreen
 from src.led_settings import LedSettingsScreen
 from src.notes_settings import NotesSettingsScreen
+from src.profile_screen import ProfileScreen
 from src.settings import SettingsScreen
 from src.song_select import SongSelect
 from src.theme_settings import ThemeSettingsScreen
@@ -53,6 +55,8 @@ class State(Enum):
     DISPLAY_SETTINGS = auto()
     AUDIENCE_SETTINGS = auto()
     THEME_SETTINGS = auto()
+    HARDWARE_SETTINGS = auto()
+    PROFILE_SCREEN = auto()
     SONG_SELECT = auto()
     HIGHWAY = auto()
 
@@ -81,6 +85,10 @@ class App:
         self._display_settings_screen: Optional[DisplaySettingsScreen] = None
         self._audience_settings_screen: Optional[AudienceSettingsScreen] = None
         self._theme_settings_screen: Optional[ThemeSettingsScreen] = None
+        self._hardware_settings_screen: Optional[HardwareSettingsScreen] = None
+        self._profile_screen: Optional[ProfileScreen] = None
+        self._profile_btn_hover: bool = False
+        self._profile_btn_rect: pygame.Rect = pygame.Rect(0, 0, 120, 32)
         self._song_select: Optional[SongSelect] = None
         self._selected_port: int = 0
         self._selected_midi_file: Optional[pathlib.Path] = None
@@ -88,6 +96,7 @@ class App:
         self._note_style_meta: dict[str, str | bool] = self._load_note_style_meta()
         self._keyboard_style: dict[str, int | bool] = self._load_keyboard_style()
         self._display_style: dict[str, int | str] = self._load_display_style()
+        self._hardware: dict = self._load_hardware()
         self._highway_surface: Optional[pygame.Surface] = None
         self._prev_active_notes: set[int] = set()
         self._active_note_trails: dict[int, dict[str, float | bool]] = {}
@@ -273,6 +282,7 @@ class App:
         )
         self._midi = MidiInput()
         self._midi.connect(self._selected_port)
+        self._midi.set_sustain_enabled(bool(self._hardware.get("sustain_enabled", False)))
         self._led_output = LedOutput.from_config()
         self._led_output.connect()
         self._audience_client = AudienceColorClient.from_config()
@@ -431,6 +441,44 @@ class App:
                     elif result == "theme_settings":
                         self._enter_theme_settings()
                         self.state = State.THEME_SETTINGS
+                    elif result == "hardware_settings":
+                        self._enter_hardware_settings()
+                        self.state = State.HARDWARE_SETTINGS
+
+            elif self.state == State.HARDWARE_SETTINGS:
+                if self._hardware_settings_screen is not None:
+                    result = self._hardware_settings_screen.handle_event(event)
+                    if result in ("back", "sustain_changed"):
+                        self._hardware = self._load_hardware()
+                        if self._midi is not None:
+                            self._midi.set_sustain_enabled(bool(self._hardware.get("sustain_enabled", False)))
+                        if result == "back":
+                            self._hardware_settings_screen = None
+                            self.state = State.SETTINGS
+
+            elif self.state == State.PROFILE_SCREEN:
+                if self._profile_screen is not None:
+                    result = self._profile_screen.handle_event(event)
+                    if result == "back":
+                        self._profile_screen = None
+                        self.state = State.HIGHWAY
+                    elif result == "profile_loaded":
+                        self._note_style = self._load_note_style()
+                        self._note_style_meta = self._load_note_style_meta()
+                        self._keyboard_style = self._load_keyboard_style()
+                        self._display_style = self._load_display_style()
+                        self._hardware = self._load_hardware()
+                        self._bg_slides = self._load_background_slides()
+                        self._refresh_claire_script_state()
+                        if self._piano is not None:
+                            self._piano.set_height_percent(int(self._keyboard_style.get("height_percent", 18)))
+                        if self._led_output is not None:
+                            r = self._note_style["color_r"]
+                            g = self._note_style["color_g"]
+                            b = self._note_style["color_b"]
+                            self._led_output.set_active_color(r, g, b)
+                        if self._midi is not None:
+                            self._midi.set_sustain_enabled(bool(self._hardware.get("sustain_enabled", False)))
 
             elif self.state == State.NOTES_SETTINGS:
                 if self._notes_settings_screen is not None:
@@ -494,10 +542,19 @@ class App:
                         self.state = State.MENU
 
             elif self.state == State.HIGHWAY:
-                if event.type == pygame.KEYDOWN:
+                if event.type == pygame.MOUSEMOTION:
+                    self._profile_btn_hover = self._profile_btn_rect.collidepoint(event.pos)
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self._profile_btn_rect.collidepoint(event.pos):
+                        self._enter_profile_screen()
+                        self.state = State.PROFILE_SCREEN
+                elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self._leave_highway()
                         self.state = State.MENU
+                    elif event.key == pygame.K_p:
+                        self._enter_profile_screen()
+                        self.state = State.PROFILE_SCREEN
                     elif event.key == pygame.K_r:
                         # Retry MIDI connection
                         if self._midi is not None and not self._midi.connected:
@@ -589,6 +646,12 @@ class App:
             return
 
         if self.state == State.THEME_SETTINGS and self._theme_settings_screen is not None:
+            return
+
+        if self.state == State.HARDWARE_SETTINGS and self._hardware_settings_screen is not None:
+            return
+
+        if self.state == State.PROFILE_SCREEN and self._profile_screen is not None:
             return
 
         if self.state != State.HIGHWAY:
@@ -829,6 +892,12 @@ class App:
         elif self.state == State.THEME_SETTINGS:
             if self._theme_settings_screen is not None:
                 self._theme_settings_screen.draw()
+        elif self.state == State.HARDWARE_SETTINGS:
+            if self._hardware_settings_screen is not None:
+                self._hardware_settings_screen.draw()
+        elif self.state == State.PROFILE_SCREEN:
+            if self._profile_screen is not None:
+                self._profile_screen.draw()
         elif self.state == State.SONG_SELECT:
             if self._song_select is not None:
                 self._song_select.draw()
@@ -876,6 +945,7 @@ class App:
             esc_text = self._small_font.render("Press ESC to return", True, (150, 150, 150))
             esc_rect = esc_text.get_rect(topright=(screen_rect.right - 16, 12))
             self.screen.blit(esc_text, esc_rect)
+            self._draw_profile_btn()
             return
 
         # Show overlay text only for song playback mode.
@@ -917,6 +987,20 @@ class App:
                 self._small_font = pygame.font.SysFont("Arial", 20)
             live = self._small_font.render("Live", True, (90, 255, 140))
             self.screen.blit(live, (10, self.screen.get_height() - live.get_height() - 8))
+
+        self._draw_profile_btn()
+
+    def _draw_profile_btn(self) -> None:
+        """Draw the floating [PROFILES] button in the top-right corner of the screen."""
+        if self._small_font is None:
+            self._small_font = pygame.font.SysFont("Arial", 20)
+        pb_w, pb_h = 110, 30
+        self._profile_btn_rect = pygame.Rect(self.screen.get_width() - pb_w - 10, 8, pb_w, pb_h)
+        pb_bg = (60, 60, 80) if self._profile_btn_hover else (30, 30, 42)
+        pygame.draw.rect(self.screen, pb_bg, self._profile_btn_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (80, 80, 110), self._profile_btn_rect, width=1, border_radius=6)
+        pb_s = self._small_font.render("[PROFILES]", True, (180, 180, 210))
+        self.screen.blit(pb_s, pb_s.get_rect(center=self._profile_btn_rect.center))
 
     def _draw_freeplay_trails(self, target: pygame.Surface) -> None:
         if not self._note_trails or self._fx_renderer is None:
@@ -982,6 +1066,15 @@ class App:
             "active_theme_id": str(style.get("active_theme_id", "custom")),
             "experimental_claire_script_enabled": bool(style.get("experimental_claire_script_enabled", 0)),
         }
+
+    def _load_hardware(self) -> dict:
+        return dict(cfg.load().get("hardware", {"sustain_enabled": False}))
+
+    def _enter_hardware_settings(self) -> None:
+        self._hardware_settings_screen = HardwareSettingsScreen(self.screen)
+
+    def _enter_profile_screen(self) -> None:
+        self._profile_screen = ProfileScreen(self.screen)
 
     def _refresh_claire_script_state(self) -> None:
         theme_id = str(self._note_style_meta.get("active_theme_id", "custom"))
