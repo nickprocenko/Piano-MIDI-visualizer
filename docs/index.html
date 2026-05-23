@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; connect-src 'self' wss://ws-us2.pusher.com https://kick.com blob: data:;">
 <title>Piano MIDI Visualizer</title>
 <style>
 :root {
@@ -1142,7 +1142,7 @@ class KickChatClient{
     this._openWS(chatroomId);
   }
   _openWS(chatroomId){
-    const url='wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=7.0.3&flash=false';
+    const url='wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0-rc2&flash=false';
     try{
       this._ws=new WebSocket(url);
       this._ws.onopen=()=>{
@@ -1153,7 +1153,7 @@ class KickChatClient{
           const msg=JSON.parse(e.data);
           if(msg.event==='pusher:ping'){this._ws.send(JSON.stringify({event:'pusher:pong',data:{}}));return;}
           if(msg.event==='pusher_internal:subscription_succeeded'){this.connected=true;this._setStatus('connected');}
-          if(msg.event==='App\\Events\\ChatMessageEvent'){
+          if(msg.event==='App\\Events\\ChatMessageEvent'||msg.event==='App\\Events\\ChatMessageSentEvent'){
             const d=typeof msg.data==='string'?JSON.parse(msg.data):msg.data;
             const text=((d&&d.content)||'').trim();
             // !color / !colour / !light / !lights / !led
