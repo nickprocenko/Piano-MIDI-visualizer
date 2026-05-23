@@ -1,4 +1,4 @@
-"""Settings hub screen — horizontal tab bar navigation + MIDI folder management."""
+"""Settings hub screen — compact navigation grid + MIDI folder management."""
 
 from __future__ import annotations
 
@@ -18,13 +18,16 @@ REMOVE_TEXT_COLOR = (220, 150, 150)
 NO_FOLDERS_COLOR = (150, 150, 150)
 MUTED_TEXT_COLOR = (150, 150, 150)
 
-TAB_FONT_SIZE = 21
+TITLE_FONT_SIZE = 28   # smaller than before — saves space
 LABEL_FONT_SIZE = 22
 BTN_FONT_SIZE = 26
-TAB_H = 44
-TAB_GAP = 6
-TAB_PAD_X = 18
-MARGIN_X = 16
+NAV_FONT_SIZE = 24
+
+NAV_BTN_H = 52
+NAV_BTN_GAP = 10
+NAV_COLS = 2
+MARGIN_X = 24
+SECTION_GAP = 20
 ADD_BTN_H = 48
 ROW_HEIGHT = 46
 ROW_GAP = 8
@@ -33,14 +36,15 @@ REMOVE_BTN_W = 56
 BACK_BTN_W = 160
 BACK_BTN_H = 52
 
-TABS: list[tuple[str, str]] = [
-    ("Notes",     "notes_settings"),
-    ("Keyboard",  "keyboard_settings"),
-    ("LED",       "led_settings"),
-    ("Display",   "display_settings"),
-    ("Audience",  "audience_settings"),
-    ("Themes",    "theme_settings"),
-    ("Hardware",  "hardware_settings"),
+# (label, action) pairs — will be laid out as a 2-column grid
+NAV_ITEMS: list[tuple[str, str]] = [
+    ("NOTES SETTINGS",    "notes_settings"),
+    ("KEYBOARD SETTINGS", "keyboard_settings"),
+    ("LED SETTINGS",      "led_settings"),
+    ("DISPLAY SETTINGS",  "display_settings"),
+    ("AUDIENCE SETTINGS", "audience_settings"),
+    ("THEME MANAGER",     "theme_settings"),
+    ("HARDWARE SETTINGS", "hardware_settings"),
 ]
 
 
@@ -75,7 +79,7 @@ def _truncate(font: pygame.font.Font, text: str, max_w: int) -> str:
 
 class SettingsScreen:
     """
-    Settings hub with a compact horizontal tab strip.
+    Settings hub with a compact 2-column navigation grid.
 
     ``handle_event()`` returns one of:
       ``"back"``              — user pressed BACK or ESC
@@ -91,13 +95,14 @@ class SettingsScreen:
 
     def __init__(self, screen: pygame.Surface) -> None:
         self.screen = screen
-        self._tab_font = pygame.font.SysFont("Arial", TAB_FONT_SIZE, bold=True)
+        self._title_font = pygame.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
         self._label_font = pygame.font.SysFont("Arial", LABEL_FONT_SIZE)
+        self._nav_font = pygame.font.SysFont("Arial", NAV_FONT_SIZE, bold=True)
         self._btn_font = pygame.font.SysFont("Arial", BTN_FONT_SIZE)
 
         self._folders: list[str] = []
-        self._tab_rects: list[pygame.Rect] = []
-        self._hover_tab: int = -1
+        self._nav_rects: list[pygame.Rect] = []
+        self._hover_nav: int = -1
         self._add_rect = pygame.Rect(0, 0, 0, ADD_BTN_H)
         self._back_rect = pygame.Rect(0, 0, BACK_BTN_W, BACK_BTN_H)
         self._row_rects: list[pygame.Rect] = []
@@ -106,7 +111,7 @@ class SettingsScreen:
         self._hover_back = False
         self._hover_remove: int = -1
         self._list_start_y = 0
-        self._folder_section_label_pos = (0, 0)
+        self._title_pos = (0, 0)
 
         self._load()
         self._build_layout()
@@ -123,9 +128,9 @@ class SettingsScreen:
             if self._back_rect.collidepoint(event.pos):
                 return "back"
 
-            for i, rect in enumerate(self._tab_rects):
+            for i, rect in enumerate(self._nav_rects):
                 if rect.collidepoint(event.pos):
-                    return TABS[i][1]
+                    return NAV_ITEMS[i][1]
 
             if self._add_rect.collidepoint(event.pos):
                 folder = _pick_folder()
@@ -146,7 +151,8 @@ class SettingsScreen:
 
     def draw(self) -> None:
         self.screen.fill(BG_COLOR)
-        self._draw_tab_strip()
+        self._draw_title()
+        self._draw_nav_grid()
         self._draw_folder_section()
         self._draw_back_button()
 
@@ -162,38 +168,41 @@ class SettingsScreen:
         sr = self.screen.get_rect()
         cx = sr.centerx
 
-        # --- Tab strip ---
-        # Measure each tab label width
-        tab_widths = [
-            self._tab_font.render(label, True, (0, 0, 0)).get_width() + TAB_PAD_X * 2
-            for label, _ in TABS
-        ]
-        total_strip_w = sum(tab_widths) + TAB_GAP * (len(TABS) - 1)
-        # Clamp strip within screen
-        if total_strip_w > sr.width - 2 * MARGIN_X:
-            # Scale down all tabs proportionally
-            available = sr.width - 2 * MARGIN_X - TAB_GAP * (len(TABS) - 1)
-            tab_widths = [max(40, available * w // total_strip_w) for w in tab_widths]
-            total_strip_w = sum(tab_widths) + TAB_GAP * (len(TABS) - 1)
+        # Compact title at top
+        title_surf = self._title_font.render("Settings", True, TITLE_COLOR)
+        title_y = 12
+        self._title_surf = title_surf
+        self._title_pos = (cx - title_surf.get_width() // 2, title_y)
 
-        strip_x = cx - total_strip_w // 2
-        tab_y = 10
-        self._tab_rects = []
-        x = strip_x
-        for w in tab_widths:
-            self._tab_rects.append(pygame.Rect(x, tab_y, w, TAB_H))
-            x += w + TAB_GAP
+        # Navigation grid — 2 columns
+        grid_top = title_y + title_surf.get_height() + 14
+        available_w = sr.width - 2 * MARGIN_X
+        col_w = (available_w - NAV_BTN_GAP) // 2
+        self._nav_rects = []
+        for i, _ in enumerate(NAV_ITEMS):
+            col = i % NAV_COLS
+            row = i // NAV_COLS
+            x = MARGIN_X + col * (col_w + NAV_BTN_GAP)
+            y = grid_top + row * (NAV_BTN_H + NAV_BTN_GAP)
+            self._nav_rects.append(pygame.Rect(x, y, col_w, NAV_BTN_H))
 
-        # --- Folder section ---
-        section_top = tab_y + TAB_H + 18
-        self._folder_section_label_pos = (MARGIN_X, section_top)
+        # If odd number of items the last button spans both columns
+        if len(NAV_ITEMS) % NAV_COLS == 1:
+            last = self._nav_rects[-1]
+            self._nav_rects[-1] = pygame.Rect(MARGIN_X, last.y, available_w, NAV_BTN_H)
 
+        grid_bottom = self._nav_rects[-1].bottom if self._nav_rects else grid_top
+
+        # MIDI Search Folders section
+        section_top = grid_bottom + SECTION_GAP
+        self._folder_label_pos = (MARGIN_X, section_top)
         label_h = self._label_font.get_height()
-        add_y = section_top + label_h + 8
-        add_w = min(360, sr.width - 2 * MARGIN_X)
+
+        add_y = section_top + label_h + 6
+        add_w = min(360, available_w)
         self._add_rect = pygame.Rect(cx - add_w // 2, add_y, add_w, ADD_BTN_H)
 
-        list_y = add_y + ADD_BTN_H + 16
+        list_y = add_y + ADD_BTN_H + 12
         self._list_start_y = list_y
 
         self._row_rects = []
@@ -210,14 +219,14 @@ class SettingsScreen:
             self._remove_rects.append(rem_rect)
             y += ROW_HEIGHT + ROW_GAP
 
-        back_y = max(y + 16, sr.height - BACK_BTN_H - 18)
+        back_y = max(y + 12, sr.height - BACK_BTN_H - 14)
         self._back_rect = pygame.Rect(cx - BACK_BTN_W // 2, back_y, BACK_BTN_W, BACK_BTN_H)
 
     def _update_hover(self, pos: tuple[int, int]) -> None:
-        self._hover_tab = -1
-        for i, rect in enumerate(self._tab_rects):
+        self._hover_nav = -1
+        for i, rect in enumerate(self._nav_rects):
             if rect.collidepoint(pos):
-                self._hover_tab = i
+                self._hover_nav = i
                 break
         self._hover_add = self._add_rect.collidepoint(pos)
         self._hover_back = self._back_rect.collidepoint(pos)
@@ -227,19 +236,22 @@ class SettingsScreen:
                 self._hover_remove = i
                 break
 
-    def _draw_tab_strip(self) -> None:
-        for i, (label, _action) in enumerate(TABS):
-            rect = self._tab_rects[i]
-            is_hover = self._hover_tab == i
+    def _draw_title(self) -> None:
+        self.screen.blit(self._title_surf, self._title_pos)
+
+    def _draw_nav_grid(self) -> None:
+        for i, (label, _action) in enumerate(NAV_ITEMS):
+            rect = self._nav_rects[i]
+            is_hover = self._hover_nav == i
             bg = BUTTON_HOVER_BG if is_hover else BUTTON_NORMAL_BG
             fg = BUTTON_HOVER_TEXT_COLOR if is_hover else BUTTON_TEXT_COLOR
-            pygame.draw.rect(self.screen, bg, rect, border_radius=6)
-            pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, rect, width=1, border_radius=6)
-            surf = self._tab_font.render(label, True, fg)
+            pygame.draw.rect(self.screen, bg, rect, border_radius=8)
+            pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, rect, width=1, border_radius=8)
+            surf = self._nav_font.render(label, True, fg)
             self.screen.blit(surf, surf.get_rect(center=rect.center))
 
     def _draw_folder_section(self) -> None:
-        lx, ly = self._folder_section_label_pos
+        lx, ly = self._folder_label_pos
         label_surf = self._label_font.render("MIDI Search Folders", True, MUTED_TEXT_COLOR)
         self.screen.blit(label_surf, (lx, ly))
 
