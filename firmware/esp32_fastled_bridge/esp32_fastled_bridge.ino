@@ -20,8 +20,8 @@ extern "C" bool btInUse(void) { return true; }
 
 // WS2812B second strip (mirrored). FastLED uses RMT on ESP32-S3 for WS2812B
 // so BLE radio interrupts cannot corrupt its output.
-#define DATA_PIN_2   34          // adjust to actual GPIO wiring
-#define LED_COUNT_2  LED_COUNT
+#define DATA_PIN_2   18
+#define LED_COUNT_2  144         // 1m 144-pixel WS2812B strip
 
 #define SERIAL_BAUD 115200
 #define MAX_LINE_LEN 4096
@@ -196,6 +196,9 @@ void setup() {
   FastLED.addLeds<LED_TYPE, DATA_PIN, CLOCK_PIN, COLOR_ORDER>(leds, LED_COUNT);
   FastLED.addLeds<WS2812B, DATA_PIN_2, GRB>(leds2, LED_COUNT_2);
   FastLED.setBrightness(BRIGHTNESS);
+  // Clamp total current draw so the 5V rail doesn't sag and corrupt WS2812B data.
+  // Raise the milliamps limit if your PSU can supply more cleanly.
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, 2000);
   clearAll();
 
   delay(500);
