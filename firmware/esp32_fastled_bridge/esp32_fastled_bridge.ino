@@ -133,7 +133,12 @@ void processIncomingByte(char c) {
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
     (void)connInfo; (void)reason;
-    clearAll();
+    // Do NOT clear LEDs — a brief signal dropout would flash the strip black.
+    // Instead, flush parse state so the first frame after reconnect starts clean.
+    portENTER_CRITICAL(&bleMux);
+    bpHead = bpTail = 0;  // discard any partial BLE frame in the ring buffer
+    portEXIT_CRITICAL(&bleMux);
+    lineLen = 0;           // discard partial line buffer
     NimBLEDevice::getAdvertising()->start();
   }
 };
