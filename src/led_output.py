@@ -280,7 +280,7 @@ class LedOutput:
         self._send_accum_ms = 0
 
     def update(self, active_notes: set[int], dt_ms: int) -> None:
-        """Rate-limited update; sends only when frame content changes."""
+        """Send immediately on note change; rate-limit only unchanged frames."""
         if not self._connected:
             return
 
@@ -292,16 +292,13 @@ class LedOutput:
             self._connected = False
             return
 
-        self._send_accum_ms += dt_ms
-        interval_ms = max(1, int(1000 / self._cfg.fps_limit))
-        if self._send_accum_ms < interval_ms:
-            return
-        self._send_accum_ms = 0
-
         frame = self._build_frame(active_notes)
         if frame == self._last_frame:
+            # Nothing changed — suppress send until rate-limit interval expires
+            self._send_accum_ms += dt_ms
             return
-
+        # Frame changed (note-on/off) — send immediately, reset accumulator
+        self._send_accum_ms = 0
         if self._send_frame(frame):
             self._last_frame = frame
         else:

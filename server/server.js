@@ -16,9 +16,17 @@ const CATEGORIES = [
   {
     id: 'theme',
     label: 'Note Theme',
-    options: ['Rainbow', 'Riders on the Storm', 'Moonlight Sonata', 'Light My Fire'],
+    options: ['Rainbow', 'Octave Rainbow', 'Fire', 'Ice', 'Sunset'],
     applyMsg(i) {
-      return { type: 'apply_change', category: 'theme', theme_index: [1, 6, 7, 8][i] };
+      return { type: 'apply_change', category: 'theme', theme_index: [1, 2, 3, 4, 5][i] };
+    },
+  },
+  {
+    id: 'performance',
+    label: 'Performance',
+    options: ['Riders on the Storm', 'Moonlight Sonata', 'Light My Fire', 'Claire de Lune'],
+    applyMsg(i) {
+      return { type: 'apply_change', category: 'performance', performance_index: i };
     },
   },
   {
@@ -320,6 +328,22 @@ function handleKikMessage(from, chatId, text) {
   userRegistry.set(from, chatId);
 
   const lower = text.toLowerCase().trim();
+
+  // ── !help / !options ──────────────────────────────────────────────────────
+  if (lower === '!help' || lower === 'help' || lower === '!options') {
+    const catList = CATEGORIES.map(c =>
+      `• ${c.label}:\n  ${c.options.map((o, i) => `${i + 1}. ${o}`).join(', ')}`
+    ).join('\n');
+    kikReply(chatId, from,
+      `🎹 Piano Visualiser Commands:\n\n`
+      + `  Type 1–N to vote during a poll\n`
+      + `  !suggest <name> — queue your pick for the next poll\n`
+      + `  status — see the active poll\n`
+      + `  !help — show this message\n\n`
+      + `Vote categories:\n${catList}`,
+      KIK_USERNAME, KIK_API_KEY);
+    return;
+  }
 
   // ── status ────────────────────────────────────────────────────────────────
   if (lower === 'status') {

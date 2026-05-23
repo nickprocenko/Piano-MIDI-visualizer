@@ -173,3 +173,70 @@ Behavior:
 - App smooths from current to target color over `transition_ms`
 - Updates note colors in real time
 - Updates LED active color in real time
+
+### Example Presets
+
+`examples/` contains ready-made JSON settings files. Import any of them via **Settings → Import**:
+
+| File | Description |
+|------|-------------|
+| `claire-de-lune.json` | Soft blue-white palette, gentle fluid ripple, no sparks |
+| `moonlight-sonata.json` | Deep indigo tones, slow trails |
+| `light-my-fire.json` | Warm amber/red, sparks on, fast scroll |
+| `riders-on-the-storm.json` | Cool storm palette, smoke enabled |
+
+### AI Prompt Files
+
+`examples/prompts/` contains copy-paste prompts for any external AI (Claude, ChatGPT, etc.):
+
+- `script.md` — generates a colour script with the full API reference embedded
+- `preset.md` — generates a JSON settings preset with the full schema embedded
+
+Click **Copy AI Prompt** in the script editor to copy a prompt that already includes your current script for the AI to iterate on.
+
+---
+
+## Audience Vote Server (`server/`)
+
+A Node.js server that lets your Kik audience vote on live visual changes. Polls run automatically; winners are applied to the web visualizer instantly via WebSocket.
+
+### Vote categories (random rotation, never repeats back-to-back)
+
+| Category | Options |
+|----------|---------|
+| Note Theme | Rainbow, Octave Rainbow, Fire, Ice, Sunset |
+| Performance | Riders on the Storm, Moonlight Sonata, Light My Fire, Claire de Lune *(full visual preset)* |
+| Trail Colour | Ocean Blue, Sunset Red, Forest Green, Neon Purple |
+| Trail Speed | Slow, Normal, Fast, Very Fast |
+| Effects | Sparks On/Off, Smoke On/Off |
+| Fluid Effect | Default, Smoke, Fire, Storm, Gentle, Explosion |
+
+### Viewer commands
+
+| Message | Bot replies |
+|---------|------------|
+| `1` – `N` (poll active) | Confirms vote with time remaining |
+| `!suggest <name>` | Queues a poll for the matched option; if ambiguous, lists candidates numbered for clarification |
+| `status` | Shows current poll or next-poll countdown |
+| `!help` | Lists all categories, options, and commands |
+
+**`!suggest` details:** fuzzy-matches against all option names across all categories (exact → starts-with → substring). When multiple options match, the bot asks the viewer to pick from a numbered list before queuing. One suggestion per viewer in the queue at a time; queue capped at 5. When the poll goes live, the overlay shows *"Suggested by @username"* and the suggester gets a personal Kik ping.
+
+**Proactive notifications:** every viewer who has previously messaged the bot receives a Kik notification when a new poll starts, including the numbered option list.
+
+### Setup
+
+See [`server/README.md`](server/README.md) for the complete setup guide (Kik bot registration, ngrok, OBS browser source, WebSocket connection).
+
+Quick start:
+```bash
+cd server
+npm install
+export KIK_USERNAME=yourbotname
+export KIK_API_KEY=yourapikey
+node server.js
+```
+
+### OBS Overlay (`docs/overlay.html`)
+
+Add as a **Browser Source** in OBS (1920×1080, transparent background, local file path). The corner card slides in when a poll starts and slides out during the cooldown. Shows live vote bars, countdown, and the "Suggested by" attribution when applicable.
