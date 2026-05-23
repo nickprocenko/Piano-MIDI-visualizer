@@ -73,6 +73,9 @@ class MidiInput:
     def __init__(self) -> None:
         self._midi_in: Optional[object] = None  # rtmidi.MidiIn instance
         self._active_notes: set[int] = set()
+        self._sustained_notes: set[int] = set()
+        self._sustain_down: bool = False
+        self._sustain_enabled: bool = False
         self._cc_events: collections.deque[tuple[int, int]] = collections.deque(maxlen=64)
         self._lock = threading.Lock()
         self._virtual_mode: bool = False
@@ -158,10 +161,23 @@ class MidiInput:
             self._active_notes.discard(note)
         return True
 
-    def get_active_notes(self) -> set[int]:
-        """Return a *copy* of the set of currently held MIDI note numbers."""
+    def set_sustain_enabled(self, enabled: bool) -> None:
+        """Toggle true piano sustain hold behaviour (CC 64).
+
+        When enabled, notes released while the sustain pedal is held move to a
+        sustained set instead of being removed.  Disabling clears sustained notes
+        immediately so nothing gets stuck.
+        """
         with self._lock:
-            return set(self._active_notes)
+            self._sustain_enabled = enabled
+            if not enabled:
+                self._sustained_notes.clear()
+                self._sustain_down = False
+
+    def get_active_notes(self) -> set[int]:
+        """Return a *copy* of the set of currently held MIDI note numbers (includes sustained)."""
+        with self._lock:
+            return set(self._active_notes) | set(self._sustained_notes)
 
     def drain_cc_events(self) -> list[tuple[int, int]]:
         """Atomically drain and return all queued CC events as (cc_number, value) pairs."""
@@ -181,6 +197,8 @@ class MidiInput:
             self._midi_in = None
         with self._lock:
             self._active_notes.clear()
+            self._sustained_notes.clear()
+        self._sustain_down = False
         self._virtual_mode = False
         self.connected = False
         self.port_name = ""
@@ -208,12 +226,24 @@ class MidiInput:
         # Note On (with velocity > 0) → add note
         if status == _NOTE_ON and velocity > 0:
             with self._lock:
+                self._sustained_notes.discard(note)  # re-strike clears sustained state
                 self._active_notes.add(note)
-        # Note Off OR Note On with velocity 0 → remove note
+        # Note Off OR Note On with velocity 0 → remove note (or sustain it)
         elif status == _NOTE_OFF or (status == _NOTE_ON and velocity == 0):
             with self._lock:
                 self._active_notes.discard(note)
-        # Control Change → queue for polling
+                if self._sustain_enabled and self._sustain_down:
+                    self._sustained_notes.add(note)
+                else:
+                    self._sustained_notes.discard(note)
+        # Control Change → queue for polling and handle sustain pedal
         elif status == _CC:
             with self._lock:
                 self._cc_events.append((note, velocity))  # note=cc number, velocity=cc value
+                if note == 64:  # sustain pedal
+                    if self._sustain_enabled:
+                        if velocity > 0:
+                            self._sustain_down = True
+                        else:
+                            self._sustain_down = False
+                            self._sustained_notes.clear()
