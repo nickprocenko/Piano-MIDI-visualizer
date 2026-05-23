@@ -254,12 +254,12 @@ const Config = {
       fluid_splat_size:20, fluid_opacity:80, fluid_color_strength:100,
       fluid_own_color:0, fluid_own_r:0, fluid_own_g:230, fluid_own_b:230,
       split_enabled:0, split_point:60,
-      split_left_outer_r:30,  split_left_outer_g:80,  split_left_outer_b:255,
-      split_left_inner_r:255, split_left_inner_g:255, split_left_inner_b:255,
-      split_left_inner_blend:25,
-      split_right_outer_r:255, split_right_outer_g:80,  split_right_outer_b:30,
-      split_right_inner_r:255, split_right_inner_g:220, split_right_inner_b:100,
-      split_right_inner_blend:25,
+      split_upper_inner_r:255, split_upper_inner_g:220, split_upper_inner_b:100,
+      split_upper_inner_blend:25,
+      split_lower_outer_r:30,  split_lower_outer_g:80,  split_lower_outer_b:255,
+      split_lower_inner_r:255, split_lower_inner_g:255, split_lower_inner_b:255,
+      split_lower_inner_blend:25,
+      split_lower_note_colors:null, split_lower_script:'', split_lower_active_theme:'b0',
     },
     keyboard_style:{height_percent:18, brightness:100, visible:1, width_percent:100},
     display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000, gif_speed_percent:100},
@@ -542,8 +542,8 @@ class FXRenderer{
     const{r,g,b}=resolveNoteColor(t.note,t.channel,ns);
     let intR=ns.interior_r,intG=ns.interior_g,intB=ns.interior_b,bl=ns.inner_blend_percent/100;
     if(ns.split_enabled){
-      if(t.note<ns.split_point){intR=ns.split_left_inner_r;intG=ns.split_left_inner_g;intB=ns.split_left_inner_b;bl=ns.split_left_inner_blend/100;}
-      else{intR=ns.split_right_inner_r;intG=ns.split_right_inner_g;intB=ns.split_right_inner_b;bl=ns.split_right_inner_blend/100;}
+      if(t.note<ns.split_point){intR=ns.split_lower_inner_r;intG=ns.split_lower_inner_g;intB=ns.split_lower_inner_b;bl=ns.split_lower_inner_blend/100;}
+      else{intR=ns.split_upper_inner_r;intG=ns.split_upper_inner_g;intB=ns.split_upper_inner_b;bl=ns.split_upper_inner_blend/100;}
     }
     const ir=Math.round(intR*(1-bl)+r*bl);
     const ig=Math.round(intG*(1-bl)+g*bl);
@@ -1209,27 +1209,23 @@ function _buildHeadlightsRain(){return Array.from({length:128},(_,n)=>{if(n<=59)
 function _buildWetNeon(){return Array.from({length:128},(_,n)=>{if(n<=59){const t=Math.max(0,Math.min(1,(n-21)/38));return hsvToRgb(0.78-t*0.11,0.88,0.5+t*0.4);}else{const t=Math.max(0,Math.min(1,(n-60)/48));return hsvToRgb(0.47-t*0.08,0.95-t*0.2,0.45+t*0.55);}});}
 function _buildOceanTrench(){return Array.from({length:128},(_,n)=>{if(n<=59){const t=Math.max(0,Math.min(1,(n-21)/38));return hsvToRgb(0.68,0.98,0.15+t*0.3);}else{const t=Math.max(0,Math.min(1,(n-60)/48));return hsvToRgb(0.49-t*0.04,0.9-t*0.3,0.4+t*0.5);}});}
 
-function resolveNoteColor(note,channel,ns){
-  const nc=ns.note_colors;
-  const fallback={r:ns.color_r,g:ns.color_g,b:ns.color_b};
+function _resolveNC(note,ch,nc,fallback){
   if(!nc)return fallback;
-  // Backward compat: plain Array(128) from saved themes / built-in themes
   if(Array.isArray(nc))return nc[note]||fallback;
   const{notes,channelColors,zones}=nc;
-  const ch=channel??0;
-  // Priority 1: zone (channel + pitch range)
   for(let i=0;i<zones.length;i++){const z=zones[i];if(z.ch===ch&&note>=z.lo&&note<=z.hi)return{r:z.r,g:z.g,b:z.b};}
-  // Priority 2: channel
   const cc=channelColors[ch];if(cc)return cc;
-  // Priority 3: per-note
   if(notes&&notes[note])return notes[note];
-  // Priority 4: split (replaces global fallback when no script/zone/channel/per-note colour is set)
-  if(ns.split_enabled){
-    return note<ns.split_point
-      ?{r:ns.split_left_outer_r, g:ns.split_left_outer_g, b:ns.split_left_outer_b}
-      :{r:ns.split_right_outer_r,g:ns.split_right_outer_g,b:ns.split_right_outer_b};
-  }
   return fallback;
+}
+function resolveNoteColor(note,channel,ns){
+  const ch=channel??0;
+  if(ns.split_enabled){
+    if(note<ns.split_point)
+      return _resolveNC(note,ch,ns.split_lower_note_colors,{r:ns.split_lower_outer_r,g:ns.split_lower_outer_g,b:ns.split_lower_outer_b});
+    // Upper hand: uses global note_colors with color_r/g/b fallback
+  }
+  return _resolveNC(note,ch,ns.note_colors,{r:ns.color_r,g:ns.color_g,b:ns.color_b});
 }
 
 function buildScriptPrompt(currentScript){
@@ -1355,8 +1351,8 @@ const NoteColorThemeManager={
     Config.ns.user_script=t.script||'';
     Config.ns.color_mode='script';
     // Restore per-hand inner colours if this theme was saved from the split UI
-    const splitInnerKeys=['split_left_inner_r','split_left_inner_g','split_left_inner_b','split_left_inner_blend',
-                          'split_right_inner_r','split_right_inner_g','split_right_inner_b','split_right_inner_blend'];
+    const splitInnerKeys=['split_upper_inner_r','split_upper_inner_g','split_upper_inner_b','split_upper_inner_blend',
+                          'split_lower_inner_r','split_lower_inner_g','split_lower_inner_b','split_lower_inner_blend'];
     for(const k of splitInnerKeys)if(k in t)Config.ns[k]=t[k];
     Config.save();
   },
@@ -1400,6 +1396,50 @@ const FluidThemeManager={
 // ═══════════════════════════════════════════════════════
 function hex(r,g,b){return'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,(+v)||0)).toString(16).padStart(2,'0')).join('');}
 
+function colourCard(side,ns){
+  const isUpper=side==='upper';
+  const p=side;
+  let outerR,outerG,outerB,innerR,innerG,innerB,blendVal,scriptText,showScript,themeName,isUser=false;
+  if(isUpper){
+    outerR=ns.color_r;outerG=ns.color_g;outerB=ns.color_b;
+    innerR=ns.interior_r;innerG=ns.interior_g;innerB=ns.interior_b;
+    blendVal=ns.inner_blend_percent;
+    const ant=Config.data.active_note_theme||{type:'builtin',index:0};
+    isUser=ant.type==='user';
+    themeName=isUser?(NoteColorThemeManager.getAll()[ant.index]?.name||'My Theme'):(BUILTIN_NOTE_THEMES[ant.index]?.name||'Solid');
+    showScript=isUser||ant.index>0;
+    scriptText=ns.user_script||(isUser?'':(BUILTIN_NOTE_THEMES[ant.index]?.script||''));
+  }else{
+    outerR=ns.split_lower_outer_r;outerG=ns.split_lower_outer_g;outerB=ns.split_lower_outer_b;
+    innerR=ns.split_lower_inner_r;innerG=ns.split_lower_inner_g;innerB=ns.split_lower_inner_b;
+    blendVal=ns.split_lower_inner_blend;
+    const tv=ns.split_lower_active_theme||'b0';
+    const tIdx=+tv.slice(1);
+    const tIsUser=tv.startsWith('u');
+    isUser=tIsUser;
+    themeName=tIsUser?(NoteColorThemeManager.getAll()[tIdx]?.name||'My Theme'):(BUILTIN_NOTE_THEMES[tIdx]?.name||'Solid');
+    showScript=!!ns.split_lower_note_colors;
+    scriptText=ns.split_lower_script||'';
+  }
+  const ph=`// Static setup — runs once:\napi.setAll(0, 100, 200);\n\n// Called on each note strike:\napi.onNoteOn(function(note, velocity, channel) {\n  const b = Math.round(velocity * 2);\n  api.setNote(note, b, b, 255);\n});\n\n// Called every frame:\napi.onFrame(function(activeNotes, now, dt) {\n  for (const n of activeNotes) {\n    const [r,g,b] = api.hsvToRgb((now/2000 + n/12) % 1, 1, 1);\n    api.setNote(n, r, g, b);\n  }\n});`;
+  return `<div class="section" id="${p}-colour-card">
+<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+<button id="${p}-theme-btn" class="action-btn" style="flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">▼ ${themeName}</button>
+<button id="${p}-nc-del" class="action-btn" style="${isUser?'':'display:none'}" title="Delete">×</button>
+</div>
+<div id="${p}-theme-picker" style="display:none;margin-bottom:8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px;max-height:200px;overflow-y:auto"></div>
+<div class="color-row"><label>Outer</label><input type="color" id="cp-${p}-outer" value="${hex(outerR,outerG,outerB)}"></div>
+<div class="color-row"><label>Inner</label><input type="color" id="cp-${p}-inner" value="${hex(innerR,innerG,innerB)}"></div>
+<div class="row"><label>Blend %</label><input type="range" id="sl-${p}-blend" min="0" max="100" step="5" value="${blendVal}" style="flex:1"><span id="v-sl-${p}-blend" style="min-width:28px;text-align:right">${blendVal}</span></div>
+<div id="${p}-nc-script" style="${showScript?'':'display:none;'}margin-top:8px">
+<textarea id="${p}-nc-ta" rows="7" placeholder="${ph.replace(/"/g,'&quot;')}" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:monospace;font-size:11px;resize:vertical"></textarea>
+<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+<button id="${p}-nc-run" class="action-btn">▶ Run</button>
+<button id="${p}-nc-saveas" class="action-btn">Save As…</button>
+<button id="${p}-nc-copy-prompt" class="action-btn">Copy AI Prompt</button>
+</div></div></div>`;
+}
+
 function buildSettingsHTML(tab){
   const ns=Config.ns,ks=Config.ks,ds=Config.ds,lo=Config.lo,ac=Config.ac,kc=Config.kc||{},hw=Config.data.hardware||{};
   const row=(lbl,id,min,max,step,ns_key)=>`<div class="row"><label>${lbl}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${ns[ns_key]}" data-cfk="${ns_key}" data-cfg="ns"><span class="val" id="v-${id}">${ns[ns_key]}</span></div>`;
@@ -1429,20 +1469,19 @@ function buildSettingsHTML(tab){
 </div></div>`;
 
   const tabs={
-    notes:ncSel('notes')+`<div class="section"><h2>Color</h2>
-<div class="color-row"><label>Outer</label><input type="color" id="cp-outer" value="${hex(ns.color_r,ns.color_g,ns.color_b)}">
-<div class="rgb-wrap">
-<input type="range" min="0" max="255" value="${ns.color_r}" data-cfk="color_r" data-cfg="ns" style="accent-color:#ff6a6a">
-<input type="range" min="0" max="255" value="${ns.color_g}" data-cfk="color_g" data-cfg="ns" style="accent-color:#6ed76e">
-<input type="range" min="0" max="255" value="${ns.color_b}" data-cfk="color_b" data-cfg="ns" style="accent-color:#6a8aff">
-</div></div>
-<div class="color-row"><label>Inner</label><input type="color" id="cp-inner" value="${hex(ns.interior_r,ns.interior_g,ns.interior_b)}">
-<div class="rgb-wrap">
-<input type="range" min="0" max="255" value="${ns.interior_r}" data-cfk="interior_r" data-cfg="ns" style="accent-color:#ff6a6a">
-<input type="range" min="0" max="255" value="${ns.interior_g}" data-cfk="interior_g" data-cfg="ns" style="accent-color:#6ed76e">
-<input type="range" min="0" max="255" value="${ns.interior_b}" data-cfk="interior_b" data-cfg="ns" style="accent-color:#6a8aff">
-</div></div>
-${row('Inner Blend %','r-ibl',0,100,5,'inner_blend_percent')}
+    notes:`<div class="section">
+<div class="row"><label style="font-weight:600">Key Split</label><button id="split-toggle" class="action-btn${ns.split_enabled?' on':''}">${ns.split_enabled?'ON':'OFF'}</button></div>
+<div id="split-point-row" style="${ns.split_enabled?'':'display:none;'}margin-top:8px">
+<div class="row"><label>Split Point</label><select id="split-point-sel" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px">
+${Array.from({length:87},(_,i)=>{const n=21+i;return `<option value="${n}"${n===ns.split_point?' selected':''}>${noteName(n)} (${n})</option>`;}).join('')}
+</select></div></div></div>
+<p id="upper-card-label" style="margin:0 0 3px 2px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em">${ns.split_enabled?'Colours Upper':'Colours'}</p>
+${colourCard('upper',ns)}
+<div id="lower-card-wrap" style="${ns.split_enabled?'':'display:none;'}margin-top:2px">
+<p style="margin:10px 0 3px 2px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Colours Lower</p>
+${colourCard('lower',ns)}
+</div>
+<div class="section"><h2>Global</h2>
 ${row('Glow Strength %','r-gs',0,180,5,'glow_strength_percent')}
 ${row('Edge Width px','r-ew',1,8,1,'outer_edge_width_px')}
 </div>
@@ -1452,23 +1491,7 @@ ${row('Decay Speed','r-ds',0,240,5,'decay_speed')}
 ${row('Decay Value','r-dv',0,100,5,'decay_value')}
 ${row('Note Width px','r-nw',4,40,1,'width_px')}
 ${row('Roundness px','r-rnd',0,20,1,'edge_roundness_px')}
-</div>
-<div class="section"><h2>Key Split</h2>
-<div class="row"><label>Enable</label><button id="split-toggle" class="action-btn${ns.split_enabled?' on':''}">${ns.split_enabled?'ON':'OFF'}</button></div>
-<div id="split-controls" style="${ns.split_enabled?'':'opacity:0.4;pointer-events:none'}">
-<div class="row"><label>Split Point</label><select id="split-point-sel" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px">
-${Array.from({length:87},(_,i)=>{const n=21+i;return `<option value="${n}"${n===ns.split_point?' selected':''}>${noteName(n)} (${n})</option>`;}).join('')}
-</select></div>
-<h3 style="margin:10px 0 4px;font-size:12px;color:var(--muted);font-weight:600">Left Hand (below split)</h3>
-<div class="color-row"><label>Outer</label><input type="color" id="cp-sl-outer" value="${hex(ns.split_left_outer_r,ns.split_left_outer_g,ns.split_left_outer_b)}"></div>
-<div class="color-row"><label>Inner</label><input type="color" id="cp-sl-inner" value="${hex(ns.split_left_inner_r,ns.split_left_inner_g,ns.split_left_inner_b)}"></div>
-<div class="row"><label>Blend %</label><input type="range" id="sl-sl-blend" min="0" max="100" step="5" value="${ns.split_left_inner_blend}" style="flex:1"><span id="v-sl-sl-blend" style="min-width:28px;text-align:right">${ns.split_left_inner_blend}</span></div>
-<h3 style="margin:10px 0 4px;font-size:12px;color:var(--muted);font-weight:600">Right Hand (split &amp; above)</h3>
-<div class="color-row"><label>Outer</label><input type="color" id="cp-sr-outer" value="${hex(ns.split_right_outer_r,ns.split_right_outer_g,ns.split_right_outer_b)}"></div>
-<div class="color-row"><label>Inner</label><input type="color" id="cp-sr-inner" value="${hex(ns.split_right_inner_r,ns.split_right_inner_g,ns.split_right_inner_b)}"></div>
-<div class="row"><label>Blend %</label><input type="range" id="sl-sr-blend" min="0" max="100" step="5" value="${ns.split_right_inner_blend}" style="flex:1"><span id="v-sl-sr-blend" style="min-width:28px;text-align:right">${ns.split_right_inner_blend}</span></div>
-<div style="margin-top:10px"><button id="split-saveas" class="action-btn">Save Split as Theme…</button></div>
-</div></div>`,
+</div>`,
     effects:ncSel('effects')+`<div class="section"><h2>Effect Toggles</h2>
 <div class="effects-grid">
 ${tog('Glow','effect_glow_enabled')}${tog('Highlight','effect_highlight_enabled')}${tog('Sparks','effect_sparks_enabled')}${tog('Smoke','effect_smoke_enabled')}
@@ -1709,6 +1732,174 @@ function wireNoteThemeDropdown(root,prefix,refreshAll){
   return refresh;
 }
 
+function wireColourCard(root,side,refreshAll){
+  const isUpper=side==='upper';
+  const p=side;
+  const outerKeys=isUpper?['color_r','color_g','color_b']:['split_lower_outer_r','split_lower_outer_g','split_lower_outer_b'];
+  const innerKeys=isUpper?['interior_r','interior_g','interior_b']:['split_lower_inner_r','split_lower_inner_g','split_lower_inner_b'];
+  const blendKey=isUpper?'inner_blend_percent':'split_lower_inner_blend';
+  const getNC  =()=>isUpper?Config.ns.note_colors:Config.ns.split_lower_note_colors;
+  const setNC  =v =>isUpper?(Config.ns.note_colors=v):(Config.ns.split_lower_note_colors=v);
+  const getScript=()=>isUpper?Config.ns.user_script:Config.ns.split_lower_script;
+  const setScript=v =>isUpper?(Config.ns.user_script=v):(Config.ns.split_lower_script=v);
+  const getAT  =()=>{
+    if(isUpper)return Config.data.active_note_theme||{type:'builtin',index:0};
+    const v=Config.ns.split_lower_active_theme||'b0';
+    return v.startsWith('u')?{type:'user',index:+v.slice(1)}:{type:'builtin',index:+v.slice(1)};
+  };
+  const setAT  =(type,index)=>{
+    if(isUpper)Config.data.active_note_theme={type,index};
+    else Config.ns.split_lower_active_theme=(type==='user'?'u':'b')+index;
+  };
+
+  const themePicker=root.querySelector(`#${p}-theme-picker`);
+  const themeBtn   =root.querySelector(`#${p}-theme-btn`);
+  const scriptDiv  =root.querySelector(`#${p}-nc-script`);
+  const ta         =root.querySelector(`#${p}-nc-ta`);
+  const delBtn     =root.querySelector(`#${p}-nc-del`);
+
+  function sampleColors(nc){
+    if(!nc)return[{r:Config.ns.color_r,g:Config.ns.color_g,b:Config.ns.color_b}];
+    if(Array.isArray(nc))return[nc[30]||{r:80,g:80,b:80},nc[60]||{r:80,g:80,b:80},nc[90]||{r:80,g:80,b:80}];
+    const n=nc.notes;
+    return n?[n[30]||{r:80,g:80,b:80},n[60]||{r:80,g:80,b:80},n[90]||{r:80,g:80,b:80}]:[{r:80,g:80,b:80}];
+  }
+
+  function buildPicker(){
+    if(!themePicker)return;
+    themePicker.innerHTML='';
+    const grid=document.createElement('div');
+    grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:5px';
+    function addTile(label,val,colors){
+      const tile=document.createElement('button');
+      tile.className='action-btn';
+      tile.style.cssText='flex-direction:column;gap:3px;padding:5px 4px;height:auto;width:100%';
+      const preview=document.createElement('div');
+      preview.style.cssText='display:flex;gap:2px;width:100%;height:8px';
+      (colors||[]).forEach(c=>{
+        const s=document.createElement('div');
+        s.style.cssText=`flex:1;background:rgb(${c.r},${c.g},${c.b});border-radius:2px`;
+        preview.appendChild(s);
+      });
+      const name=document.createElement('div');
+      name.style.cssText='font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%;text-align:left';
+      name.textContent=label;
+      tile.appendChild(preview);tile.appendChild(name);
+      tile.addEventListener('click',()=>{applyTheme(val);hidePicker();});
+      grid.appendChild(tile);
+    }
+    BUILTIN_NOTE_THEMES.forEach((t,i)=>addTile(t.name,`b${i}`,sampleColors(t.build?t.build():null)));
+    NoteColorThemeManager.getAll().forEach((t,i)=>addTile(t.name,`u${i}`,sampleColors(t.colors)));
+    themePicker.appendChild(grid);
+  }
+  function showPicker(){buildPicker();if(themePicker)themePicker.style.display='';}
+  function hidePicker(){if(themePicker)themePicker.style.display='none';}
+  if(themeBtn)themeBtn.addEventListener('click',()=>{ if(themePicker&&themePicker.style.display==='none')showPicker();else hidePicker(); });
+
+  function applyTheme(val){
+    if(val.startsWith('b')){
+      const i=+val.slice(1),theme=BUILTIN_NOTE_THEMES[i];if(!theme)return;
+      setNC(theme.build?theme.build():null);
+      setScript(theme.script||'');
+      setAT('builtin',i);
+      if(isUpper)Config.ns.color_mode=theme.mode;
+    }else{
+      const i=+val.slice(1),t=NoteColorThemeManager.getAll()[i];if(!t)return;
+      setNC(t.colors);setScript(t.script||'');setAT('user',i);
+      if(isUpper)Config.ns.color_mode='script';
+      ['split_upper_inner_r','split_upper_inner_g','split_upper_inner_b','split_upper_inner_blend',
+       'split_lower_inner_r','split_lower_inner_g','split_lower_inner_b','split_lower_inner_blend']
+        .forEach(k=>{if(k in t)Config.ns[k]=t[k];});
+    }
+    updateCardUI();Config.save();if(refreshAll)refreshAll();
+  }
+
+  function updateCardUI(){
+    const nc=getNC();
+    const isSolid=!nc;
+    if(scriptDiv)scriptDiv.style.display=isSolid?'none':'';
+    if(ta)ta.value=getScript()||'';
+    const at=getAT();
+    let label='Themes';
+    if(at.type==='user')label=NoteColorThemeManager.getAll()[at.index]?.name||'My Theme';
+    else label=BUILTIN_NOTE_THEMES[at.index]?.name||'Solid';
+    if(themeBtn)themeBtn.textContent=`▼ ${label}`;
+    if(delBtn)delBtn.style.display=(at.type==='user')?'':'none';
+  }
+
+  const cpOuter=root.querySelector(`#cp-${p}-outer`);
+  const cpInner=root.querySelector(`#cp-${p}-inner`);
+  const blendSl=root.querySelector(`#sl-${p}-blend`);
+  const blendLbl=root.querySelector(`#v-sl-${p}-blend`);
+  if(cpOuter)cpOuter.addEventListener('input',e=>{
+    const h=e.target.value;
+    Config.ns[outerKeys[0]]=parseInt(h.slice(1,3),16);
+    Config.ns[outerKeys[1]]=parseInt(h.slice(3,5),16);
+    Config.ns[outerKeys[2]]=parseInt(h.slice(5,7),16);
+    schedSave();
+  });
+  if(cpInner)cpInner.addEventListener('input',e=>{
+    const h=e.target.value;
+    Config.ns[innerKeys[0]]=parseInt(h.slice(1,3),16);
+    Config.ns[innerKeys[1]]=parseInt(h.slice(3,5),16);
+    Config.ns[innerKeys[2]]=parseInt(h.slice(5,7),16);
+    schedSave();
+  });
+  if(blendSl)blendSl.addEventListener('input',()=>{
+    Config.ns[blendKey]=+blendSl.value;
+    if(blendLbl)blendLbl.textContent=blendSl.value;
+    schedSave();
+  });
+
+  const runBtn   =root.querySelector(`#${p}-nc-run`);
+  const saveasBtn=root.querySelector(`#${p}-nc-saveas`);
+  const copyBtn  =root.querySelector(`#${p}-nc-copy-prompt`);
+  if(runBtn)runBtn.addEventListener('click',()=>{
+    if(!ta)return;
+    const result=runUserScript(ta.value);if(!result)return;
+    setNC(result);setScript(ta.value);
+    if(isUpper)Config.ns.color_mode='script';
+    const at=getAT();
+    if(at.type==='user'){const themes=NoteColorThemeManager.getAll();if(themes[at.index]){themes[at.index].colors=result;themes[at.index].script=ta.value;}}
+    Config.save();
+  });
+  if(saveasBtn)saveasBtn.addEventListener('click',()=>{
+    if(!ta)return;
+    const name=prompt('Theme name:');if(!name)return;
+    const result=runUserScript(ta.value);if(!result)return;
+    setNC(result);setScript(ta.value);
+    if(isUpper)Config.ns.color_mode='script';
+    const ns=Config.ns;
+    Config.data.note_color_themes.push({
+      name,colors:result,script:ta.value,
+      split_upper_inner_r:ns.split_upper_inner_r,split_upper_inner_g:ns.split_upper_inner_g,
+      split_upper_inner_b:ns.split_upper_inner_b,split_upper_inner_blend:ns.split_upper_inner_blend,
+      split_lower_inner_r:ns.split_lower_inner_r,split_lower_inner_g:ns.split_lower_inner_g,
+      split_lower_inner_b:ns.split_lower_inner_b,split_lower_inner_blend:ns.split_lower_inner_blend,
+    });
+    const i=Config.data.note_color_themes.length-1;
+    setAT('user',i);Config.save();updateCardUI();if(refreshAll)refreshAll();
+  });
+  if(copyBtn)copyBtn.addEventListener('click',()=>{
+    if(!ta)return;
+    navigator.clipboard.writeText(buildScriptPrompt(ta.value.trim())).then(()=>{
+      if(window.app?._showToast)app._showToast('AI prompt copied');
+    });
+  });
+  if(delBtn)delBtn.addEventListener('click',()=>{
+    const at=getAT();if(at.type!=='user')return;
+    const t=NoteColorThemeManager.getAll()[at.index];
+    if(!t||!confirm(`Delete "${t.name}"?`))return;
+    NoteColorThemeManager.delete(at.index);
+    setAT('builtin',0);setNC(null);setScript('');
+    if(isUpper)Config.ns.color_mode='solid';
+    Config.save();updateCardUI();if(refreshAll)refreshAll();
+  });
+
+  updateCardUI();
+  return updateCardUI;
+}
+
 function wireFluidPresets(root,app){
   const sel=root.querySelector('#fluid-preset-sel');
   const delBtn=root.querySelector('#fluid-preset-del');
@@ -1812,14 +2003,8 @@ function wireSettings(root, app){
       if(cfg==='ns')Config.ns[k]=v; else if(cfg==='ks'){Config.ks[k]=v; app.rebuildLayout=true;}
       const ve=root.querySelector(`#v-${el.id}`)||root.querySelector(`[id="v-${el.id}"]`);
       if(ve)ve.textContent=v;
-      // Update colour pickers if RGB
+      // Update colour picker if fluid RGB slider changed
       const ns=Config.ns;
-      if(['color_r','color_g','color_b'].includes(k)){
-        const cp=root.querySelector('#cp-outer'); if(cp)cp.value=hex(ns.color_r,ns.color_g,ns.color_b);
-      }
-      if(['interior_r','interior_g','interior_b'].includes(k)){
-        const cp=root.querySelector('#cp-inner'); if(cp)cp.value=hex(ns.interior_r,ns.interior_g,ns.interior_b);
-      }
       if(['fluid_own_r','fluid_own_g','fluid_own_b'].includes(k)){
         const cp=root.querySelector('#cp-fluid'); if(cp)cp.value=hex(ns.fluid_own_r??0,ns.fluid_own_g??230,ns.fluid_own_b??230);
       }
@@ -1827,25 +2012,6 @@ function wireSettings(root, app){
       if(k.startsWith('fluid_'))app.fluid.updateConfig(ns);
       schedSave();
     });
-  });
-  // Colour pickers
-  const cpOuter=root.querySelector('#cp-outer');
-  if(cpOuter) cpOuter.addEventListener('input',e=>{
-    const h=e.target.value;
-    Config.ns.color_r=parseInt(h.slice(1,3),16);
-    Config.ns.color_g=parseInt(h.slice(3,5),16);
-    Config.ns.color_b=parseInt(h.slice(5,7),16);
-    ['color_r','color_g','color_b'].forEach((k,i)=>{
-      const sl=root.querySelector(`input[data-cfk="${k}"]`); if(sl){sl.value=[Config.ns.color_r,Config.ns.color_g,Config.ns.color_b][i]; const ve=root.querySelector(`#v-${sl.id}`);if(ve)ve.textContent=sl.value;}
-    }); schedSave();
-  });
-  const cpInner=root.querySelector('#cp-inner');
-  if(cpInner) cpInner.addEventListener('input',e=>{
-    const h=e.target.value;
-    Config.ns.interior_r=parseInt(h.slice(1,3),16);
-    Config.ns.interior_g=parseInt(h.slice(3,5),16);
-    Config.ns.interior_b=parseInt(h.slice(5,7),16);
-    schedSave();
   });
   const cpFluid=root.querySelector('#cp-fluid');
   if(cpFluid) cpFluid.addEventListener('input',e=>{
@@ -2028,77 +2194,36 @@ function wireSettings(root, app){
     };
     reader.readAsText(f);
   });
-  // Note color theme dropdowns (Notes / Effects / Fluid tabs share the same system)
+  // Note color theme dropdowns — Effects and Fluid tabs use the dropdown selector
   const ncRefreshers=[];
   function refreshAllNcDropdowns(){ncRefreshers.forEach(fn=>fn());}
-  ['notes','effects','fluid'].forEach(p=>{
+  ['effects','fluid'].forEach(p=>{
     ncRefreshers.push(wireNoteThemeDropdown(root,p,refreshAllNcDropdowns));
   });
 
-  // ── Key Split ──
-  (function(){
-    const toggle=root.querySelector('#split-toggle');
-    const controls=root.querySelector('#split-controls');
-    const pointSel=root.querySelector('#split-point-sel');
-    function setSplitState(on){
-      Config.ns.split_enabled=on?1:0;
-      if(toggle){toggle.textContent=on?'ON':'OFF';toggle.classList.toggle('on',!!on);}
-      if(controls){controls.style.opacity=on?'1':'0.4';controls.style.pointerEvents=on?'':'none';}
-      schedSave();
-    }
-    if(toggle) toggle.addEventListener('click',()=>setSplitState(!Config.ns.split_enabled));
-    if(pointSel) pointSel.addEventListener('change',()=>{Config.ns.split_point=+pointSel.value;schedSave();});
-    function wireSplitPicker(id,rk,gk,bk){
-      const cp=root.querySelector(`#${id}`); if(!cp)return;
-      cp.addEventListener('input',e=>{
-        const h=e.target.value;
-        Config.ns[rk]=parseInt(h.slice(1,3),16);
-        Config.ns[gk]=parseInt(h.slice(3,5),16);
-        Config.ns[bk]=parseInt(h.slice(5,7),16);
-        schedSave();
-      });
-    }
-    wireSplitPicker('cp-sl-outer','split_left_outer_r','split_left_outer_g','split_left_outer_b');
-    wireSplitPicker('cp-sl-inner','split_left_inner_r','split_left_inner_g','split_left_inner_b');
-    wireSplitPicker('cp-sr-outer','split_right_outer_r','split_right_outer_g','split_right_outer_b');
-    wireSplitPicker('cp-sr-inner','split_right_inner_r','split_right_inner_g','split_right_inner_b');
-    [['sl-sl-blend','split_left_inner_blend'],['sl-sr-blend','split_right_inner_blend']].forEach(([id,key])=>{
-      const sl=root.querySelector(`#${id}`); if(!sl)return;
-      sl.addEventListener('input',()=>{
-        Config.ns[key]=+sl.value;
-        const lbl=root.querySelector(`#v-${id}`); if(lbl)lbl.textContent=sl.value;
-        schedSave();
-      });
-    });
-    const saveBtn=root.querySelector('#split-saveas');
-    if(saveBtn) saveBtn.addEventListener('click',()=>{
-      const name=prompt('Theme name:'); if(!name)return;
-      const ns=Config.ns;
-      const sp=ns.split_point;
-      const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>(v|0).toString(16).padStart(2,'0')).join('');
-      const script=[
-        `// Key Split — left hand below ${noteName(sp)} (MIDI ${sp}), right hand from ${noteName(sp)}`,
-        `// Left:  outer ${toHex(ns.split_left_outer_r,ns.split_left_outer_g,ns.split_left_outer_b)}, inner ${toHex(ns.split_left_inner_r,ns.split_left_inner_g,ns.split_left_inner_b)}, blend ${ns.split_left_inner_blend}%`,
-        `// Right: outer ${toHex(ns.split_right_outer_r,ns.split_right_outer_g,ns.split_right_outer_b)}, inner ${toHex(ns.split_right_inner_r,ns.split_right_inner_g,ns.split_right_inner_b)}, blend ${ns.split_right_inner_blend}%`,
-        `for(let n=0;n<128;n++){`,
-        `  if(n<${sp}) api.setNote(n,${ns.split_left_outer_r},${ns.split_left_outer_g},${ns.split_left_outer_b});`,
-        `  else        api.setNote(n,${ns.split_right_outer_r},${ns.split_right_outer_g},${ns.split_right_outer_b});`,
-        `}`,
-      ].join('\n');
-      const result=runUserScript(script); if(!result)return;
-      Config.ns.note_colors=result;
-      Config.ns.user_script=script;
-      Config.ns.color_mode='script';
-      Config.data.note_color_themes.push({
-        name, colors:result, script,
-        split_left_inner_r:ns.split_left_inner_r,   split_left_inner_g:ns.split_left_inner_g,   split_left_inner_b:ns.split_left_inner_b,   split_left_inner_blend:ns.split_left_inner_blend,
-        split_right_inner_r:ns.split_right_inner_r, split_right_inner_g:ns.split_right_inner_g, split_right_inner_b:ns.split_right_inner_b, split_right_inner_blend:ns.split_right_inner_blend,
-      });
-      Config.data.active_note_theme={type:'user',index:Config.data.note_color_themes.length-1};
-      Config.save();
-      refreshAllNcDropdowns();
-    });
-  })();
+  // ── Key Split toggle & point ──
+  const splitToggle  =root.querySelector('#split-toggle');
+  const splitPointRow=root.querySelector('#split-point-row');
+  const upperLabel   =root.querySelector('#upper-card-label');
+  const lowerWrap    =root.querySelector('#lower-card-wrap');
+  const splitPointSel=root.querySelector('#split-point-sel');
+  function applySplitState(on){
+    Config.ns.split_enabled=on?1:0;
+    if(splitToggle){splitToggle.textContent=on?'ON':'OFF';splitToggle.classList.toggle('on',!!on);}
+    if(splitPointRow)splitPointRow.style.display=on?'':'none';
+    if(upperLabel)upperLabel.textContent=on?'Colours Upper':'Colours';
+    if(lowerWrap)lowerWrap.style.display=on?'':'none';
+    schedSave();
+  }
+  if(splitToggle)splitToggle.addEventListener('click',()=>applySplitState(!Config.ns.split_enabled));
+  if(splitPointSel)splitPointSel.addEventListener('change',()=>{Config.ns.split_point=+splitPointSel.value;schedSave();});
+
+  // ── Colour cards (Notes tab) ──
+  function refreshAllCards(){cardRefreshFns.forEach(fn=>fn());}
+  const cardRefreshFns=[];
+  function onCardChange(){refreshAllCards();refreshAllNcDropdowns();}
+  cardRefreshFns.push(wireColourCard(root,'upper',onCardChange));
+  cardRefreshFns.push(wireColourCard(root,'lower',onCardChange));
 }
 
 function updateLedStatus(root,app){
