@@ -214,10 +214,12 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
     <button class="snav-btn" data-stab="keyboard">Keyboard</button>
     <button class="snav-btn" data-stab="display">Display</button>
     <div class="snav-title">Hardware</div>
+    <button class="snav-btn" data-stab="hardware">Hardware</button>
     <button class="snav-btn" data-stab="led">LED Output</button>
     <button class="snav-btn" data-stab="audience">Audience</button>
     <div class="snav-title">Presets</div>
     <button class="snav-btn" data-stab="themes">Themes</button>
+    <button class="snav-btn" data-stab="profiles">Profiles</button>
     <div style="flex:1"></div>
     <button class="screen-back" id="btn-settings-back" style="margin:16px;align-self:flex-start">← Back</button>
   </nav>
@@ -262,6 +264,8 @@ const Config = {
     },
     audience_control:{enabled:0, ws_url:'', transition_ms:220},
     kick_chat:{enabled:0, channel_slug:'', transition_ms:600},
+    hardware:{sustain_enabled:1},
+    profiles:[],
     user_themes:[], active_user_theme_index:0,
     note_color_themes:[], active_note_theme:{type:'builtin',index:0},
     fluid_themes:[],
@@ -688,10 +692,20 @@ class MidiHandler{
       if(this._sustain){this.sustainedNotes.add(n);}
       else{this.activeNotes.delete(n);this.noteChannel.delete(n);this.noteVelocity.delete(n);}
     } else if(st===0xB0&&n===64){
-      this._sustain=v>=64;
-      if(!this._sustain){
-        for(const sn of this.sustainedNotes){this.activeNotes.delete(sn);this.noteChannel.delete(sn);this.noteVelocity.delete(sn);}
-        this.sustainedNotes.clear();
+      const sustainEnabled=!!Config.data?.hardware?.sustain_enabled;
+      if(sustainEnabled){
+        this._sustain=v>=64;
+        if(!this._sustain){
+          for(const sn of this.sustainedNotes){this.activeNotes.delete(sn);this.noteChannel.delete(sn);this.noteVelocity.delete(sn);}
+          this.sustainedNotes.clear();
+        }
+      }
+      this._sustainTaps=this._sustainTaps||[];
+      if(v>=64){
+        const now=Date.now();
+        this._sustainTaps.push(now);
+        this._sustainTaps=this._sustainTaps.filter(t=>now-t<1000);
+        if(this._sustainTaps.length>=3){this._sustainTaps=[];if(typeof onTripleSustainTap==='function')onTripleSustainTap();}
       }
     }
   }
@@ -1348,7 +1362,7 @@ const FluidThemeManager={
 function hex(r,g,b){return'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,(+v)||0)).toString(16).padStart(2,'0')).join('');}
 
 function buildSettingsHTML(tab){
-  const ns=Config.ns,ks=Config.ks,ds=Config.ds,lo=Config.lo,ac=Config.ac;
+  const ns=Config.ns,ks=Config.ks,ds=Config.ds,lo=Config.lo,ac=Config.ac,hw=Config.data.hardware||{};
   const row=(lbl,id,min,max,step,ns_key)=>`<div class="row"><label>${lbl}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${ns[ns_key]}" data-cfk="${ns_key}" data-cfg="ns"><span class="val" id="v-${id}">${ns[ns_key]}</span></div>`;
   const krow=(lbl,id,min,max,step,ks_key)=>`<div class="row"><label>${lbl}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${ks[ks_key]}" data-cfk="${ks_key}" data-cfg="ks"><span class="val" id="v-${id}">${ks[ks_key]}</span></div>`;
   const tog=(lbl,key)=>`<div class="toggle-btn${ns[key]?' on':''}" data-ns-tog="${key}">${lbl}</div>`;
@@ -1508,6 +1522,20 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <button class="action-btn" id="btn-cfg-export">Export…</button>
 <label class="action-btn" style="cursor:pointer">Import… <input type="file" id="inp-cfg-import" accept=".json" style="display:none"></label>
 </div></div>`,
+    hardware:`<div class="section"><h2>Sustain Pedal (CC 64)</h2>
+<div class="row"><label>Enable Piano Sustain</label>
+<div class="toggle-btn${hw.sustain_enabled?' on':''}" id="btn-hw-sustain">${hw.sustain_enabled?'On':'Off'}</div></div>
+<p style="font-size:12px;color:var(--muted);margin-top:8px">When enabled, notes held while the sustain pedal is pressed stay active until the pedal is released.</p>
+<p style="font-size:12px;color:var(--muted);margin-top:6px">Triple-tapping the sustain pedal to cycle themes always works regardless of this setting.</p>
+</div>`,
+    profiles:`<div class="section"><h2>Profiles</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:12px">Save and load named settings snapshots stored in your browser.</p>
+<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+<input type="text" id="profile-name-inp" placeholder="Profile name…" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:inherit;font-size:13px">
+<button class="action-btn" id="btn-profile-save">Save</button>
+</div>
+<div id="profile-list"></div>
+</div>`,
   };
   return tabs[tab]||'';
 }
@@ -1669,6 +1697,58 @@ function wireFluidPresets(root,app){
   });
 }
 
+function wireProfiles(root){
+  const list=root.querySelector('#profile-list');
+  const nameInp=root.querySelector('#profile-name-inp');
+  const saveBtn=root.querySelector('#btn-profile-save');
+  if(!list)return;
+
+  function renderProfiles(){
+    const profiles=Config.data.profiles||[];
+    if(!profiles.length){list.innerHTML='<p style="font-size:12px;color:var(--muted)">No profiles saved yet.</p>';return;}
+    list.innerHTML=profiles.map((p,i)=>`
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border)">
+        <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
+        <span style="font-size:11px;color:var(--muted)">${p.date||''}</span>
+        <button class="action-btn" data-pi="${i}" data-act="load" style="padding:3px 10px;font-size:11px">Load</button>
+        <button class="action-btn" data-pi="${i}" data-act="del" style="padding:3px 10px;font-size:11px;color:#dc8c8c;border-color:#7a3a3a">Del</button>
+      </div>`).join('');
+    list.querySelectorAll('[data-act]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const i=+btn.dataset.pi;
+        if(btn.dataset.act==='load'){
+          const snap=Config.data.profiles[i]?.data;
+          if(!snap)return;
+          const merged=Config._merge(JSON.parse(JSON.stringify(Config._d)),snap);
+          merged.profiles=Config.data.profiles;
+          Config.data=merged;
+          Config.save();
+          location.reload();
+        } else {
+          Config.data.profiles.splice(i,1);
+          Config.save();
+          renderProfiles();
+        }
+      });
+    });
+  }
+
+  if(saveBtn) saveBtn.addEventListener('click',()=>{
+    const name=(nameInp?.value||'').trim();
+    if(!name)return;
+    if(!Config.data.profiles)Config.data.profiles=[];
+    const snap=JSON.parse(JSON.stringify(Config.data));
+    delete snap.profiles;
+    const d=new Date();
+    Config.data.profiles.push({name,date:d.toLocaleDateString(),data:snap});
+    Config.save();
+    if(nameInp)nameInp.value='';
+    renderProfiles();
+  });
+
+  renderProfiles();
+}
+
 function wireSettings(root, app){
   // Range sliders
   root.querySelectorAll('input[type=range][data-cfg]').forEach(el=>{
@@ -1810,6 +1890,18 @@ function wireSettings(root, app){
     ledSustainBtn.classList.toggle('on',!!Config.lo.led_sustain);
     schedSave();
   });
+  // Hardware sustain toggle
+  const hwSustainBtn=root.querySelector('#btn-hw-sustain');
+  if(hwSustainBtn) hwSustainBtn.addEventListener('click',()=>{
+    if(!Config.data.hardware)Config.data.hardware={};
+    Config.data.hardware.sustain_enabled=Config.data.hardware.sustain_enabled?0:1;
+    const on=!!Config.data.hardware.sustain_enabled;
+    hwSustainBtn.classList.toggle('on',on);
+    hwSustainBtn.textContent=on?'On':'Off';
+    schedSave();
+  });
+  // Profiles
+  wireProfiles(root);
   // LED fade sliders
   [['sl-led-fade-amt','led_fade_amount'],['sl-led-fade-spd','led_fade_speed']].forEach(([id,key])=>{
     const sl=root.querySelector(`#${id}`); if(!sl)return;
@@ -2739,7 +2831,9 @@ class App{
     const TABS=[
       {id:'notes',label:'Notes'},{id:'effects',label:'Effects'},{id:'fluid',label:'Fluid'},
       {id:'keyboard',label:'Keyboard'},{id:'display',label:'Display'},
-      {id:'led',label:'LED Output'},{id:'audience',label:'Audience'},{id:'themes',label:'Themes'},
+      {id:'hardware',label:'Hardware'},
+      {id:'led',label:'LED Output'},{id:'audience',label:'Audience'},
+      {id:'themes',label:'Themes'},{id:'profiles',label:'Profiles'},
     ];
     content.innerHTML=TABS.map((t,i)=>`<div class="stab-panel${i===0?' active':''}" id="stab-${t.id}">${buildSettingsHTML(t.id)}</div>`).join('');
     wireSettings(content,this);
