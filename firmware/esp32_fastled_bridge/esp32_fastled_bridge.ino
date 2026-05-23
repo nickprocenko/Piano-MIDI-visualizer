@@ -32,10 +32,16 @@ static const char* BLE_DEVICE_NAME = "Piano-LED-Bridge";
 static const char* BLE_SERVICE_UUID = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E";
 static const char* BLE_WRITE_UUID   = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 
+// Minimum ms between FastLED.show() calls. Caps RMT output rate so the 4.3 ms
+// WS2812B transmission window opens less frequently, reducing the chance that a
+// BLE connection event fires mid-frame and corrupts the signal.
+#define MIN_SHOW_INTERVAL_MS 40   // ~25 fps max
+
 CRGB leds[LED_COUNT];
 CRGB leds2[LED_COUNT_2];
 char lineBuf[MAX_LINE_LEN];
 size_t lineLen = 0;
+static uint32_t lastShowMs = 0;
 
 // Ring buffer for bytes arriving from the BLE callback (NimBLE FreeRTOS task,
 // Core 0). loop() (Core 1) drains it — FastLED.show() only ever runs in loop().
@@ -103,6 +109,11 @@ bool applyFrame(char* line) {
     leds2[i] = CRGB::Black;
   }
 
+  uint32_t now = millis();
+  if (now - lastShowMs < MIN_SHOW_INTERVAL_MS) {
+    return true;  // frame accepted but suppressed — too soon after last show
+  }
+  lastShowMs = now;
   FastLED.show();
   return true;
 }
@@ -131,6 +142,14 @@ void processIncomingByte(char c) {
 
 #if ENABLE_BLE && HAS_NIMBLE
 class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+    // Request a longer connection interval (80–160 ms) so the BLE radio fires
+    // less frequently. Default intervals of ~15 ms mean the radio fires every
+    // 15 ms; with a 4.3 ms WS2812B RMT window the collision rate is very high.
+    // At 100 ms intervals the collision probability drops to ~4 %.
+    // Units are 1.25 ms per BLE spec: 80 = 100 ms, 128 = 160 ms.
+    pServer->updateConnParams(connInfo.getConnHandle(), 80, 128, 0, 400);
+  }
   void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
     (void)connInfo; (void)reason;
     // Do NOT clear LEDs — a brief signal dropout would flash the strip black.
