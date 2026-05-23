@@ -1074,8 +1074,8 @@ function _parseKickColor(arg){
 }
 
 class KickChatClient{
-  constructor(){this._ws=null;this.connected=false;this._status='off';this._slug='';this._transMs=600;this._audience=null;}
-  init(audience){this._audience=audience;}
+  constructor(){this._ws=null;this.connected=false;this._status='off';this._slug='';this._transMs=600;this._app=null;this._audience=null;}
+  init(app){this._app=app;this._audience=app.audience;}
   connect(slug,transMs){
     this.disconnect();
     slug=(slug||'').trim();
@@ -1106,14 +1106,25 @@ class KickChatClient{
           if(msg.event==='pusher_internal:subscription_succeeded'){this.connected=true;this._setStatus('connected');}
           if(msg.event==='App\\Events\\ChatMessageEvent'){
             const d=typeof msg.data==='string'?JSON.parse(msg.data):msg.data;
-            const text=(d&&d.content)||'';
-            const m=text.match(/^!(colou?r|lights?|led)\s+(.+)$/i);
-            if(m){
-              const col=_parseKickColor(m[2]);
-              if(col&&this._audience){
-                this._audience._pending.push({r:col[0],g:col[1],b:col[2],ms:this._transMs});
-              }
-            }
+            const text=((d&&d.content)||'').trim();
+            // !color / !colour / !light / !lights / !led
+            const mColor=text.match(/^!(colou?r|lights?|led)\s+(.+)$/i);
+            if(mColor){const col=_parseKickColor(mColor[2]);if(col&&this._audience)this._audience._pending.push({r:col[0],g:col[1],b:col[2],ms:this._transMs});}
+            // !inner <color>
+            const mInner=text.match(/^!inner\s+(.+)$/i);
+            if(mInner){const c=_parseKickColor(mInner[1]);if(c){Config.ns.interior_r=c[0];Config.ns.interior_g=c[1];Config.ns.interior_b=c[2];}}
+            // !blend <0-100>
+            const mBlend=text.match(/^!blend\s+(\d+)$/i);
+            if(mBlend){Config.ns.inner_blend_percent=Math.min(100,Math.max(0,+mBlend[1]));}
+            // !speed slow/normal/fast/veryfast/<number>
+            const mSpeed=text.match(/^!speed\s+(\S+)$/i);
+            if(mSpeed){const SPEEDS={slow:200,normal:420,fast:600,veryfast:900};const v=SPEEDS[mSpeed[1].toLowerCase()]||(+mSpeed[1]||0);if(v>=80&&v<=1200)Config.ns.speed_px_per_sec=v;}
+            // !theme <name>
+            const mTheme=text.match(/^!theme\s+(.+)$/i);
+            if(mTheme){const key=mTheme[1].toLowerCase().replace(/[\s\-]+/g,'');const t=BUILTIN_NOTE_THEMES.find(t=>t.name.toLowerCase().replace(/[\s\-]+/g,'')===key);if(t){Config.ns.note_colors=t.build();Config.data.active_note_theme={type:'builtin',index:BUILTIN_NOTE_THEMES.indexOf(t)};}}
+            // !fluid on/off
+            const mFluid=text.match(/^!fluid\s+(on|off)$/i);
+            if(mFluid){const v=mFluid[1].toLowerCase()==='on'?1:0;Config.ns.effect_fluid_enabled=v;if(this._app){this._app.fluid.setEnabled(v);this._app.fluid.updateConfig(Config.ns);}}
           }
         }catch(ex){}
       };
@@ -2023,7 +2034,7 @@ class App{
     this.led=new LedOutput();
     this.audience=new AudienceColorClient();
     this.kickChat=new KickChatClient();
-    this.kickChat.init(this.audience);
+    this.kickChat.init(this);
     this._synth=new AudioSynth();
     this.prevNotes=new Set();
     this._activeNotes=new Set();  // swap buffer — never allocate in frame loop
