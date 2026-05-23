@@ -1362,7 +1362,7 @@ const FluidThemeManager={
 function hex(r,g,b){return'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,(+v)||0)).toString(16).padStart(2,'0')).join('');}
 
 function buildSettingsHTML(tab){
-  const ns=Config.ns,ks=Config.ks,ds=Config.ds,lo=Config.lo,ac=Config.ac,hw=Config.data.hardware||{};
+  const ns=Config.ns,ks=Config.ks,ds=Config.ds,lo=Config.lo,ac=Config.ac,kc=Config.kc||{},hw=Config.data.hardware||{};
   const row=(lbl,id,min,max,step,ns_key)=>`<div class="row"><label>${lbl}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${ns[ns_key]}" data-cfk="${ns_key}" data-cfg="ns"><span class="val" id="v-${id}">${ns[ns_key]}</span></div>`;
   const krow=(lbl,id,min,max,step,ks_key)=>`<div class="row"><label>${lbl}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${ks[ks_key]}" data-cfk="${ks_key}" data-cfg="ks"><span class="val" id="v-${id}">${ks[ks_key]}</span></div>`;
   const tog=(lbl,key)=>`<div class="toggle-btn${ns[key]?' on':''}" data-ns-tog="${key}">${lbl}</div>`;
