@@ -20,7 +20,7 @@ extern "C" bool btInUse(void) { return true; }
 
 // WS2812B second strip (mirrored). FastLED uses RMT on ESP32-S3 for WS2812B
 // so BLE radio interrupts cannot corrupt its output.
-#define DATA_PIN_2   34          // adjust to actual GPIO wiring
+#define DATA_PIN_2   18
 #define LED_COUNT_2  LED_COUNT
 
 #define SERIAL_BAUD 115200
