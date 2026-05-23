@@ -7,11 +7,11 @@ from src import config as cfg
 
 BG_COLOR = (15, 15, 20)
 TITLE_COLOR = (230, 230, 230)
-BUTTON_NORMAL_BG = (35, 35, 45)
-BUTTON_HOVER_BG = (60, 60, 80)
-BUTTON_TEXT_COLOR = (210, 210, 210)
+BUTTON_NORMAL_BG = (30, 38, 65)       # blue-tinted so buttons stand out from background
+BUTTON_HOVER_BG = (55, 70, 115)
+BUTTON_TEXT_COLOR = (200, 215, 255)   # soft blue-white
 BUTTON_HOVER_TEXT_COLOR = (255, 255, 255)
-BUTTON_BORDER_COLOR = (80, 80, 110)
+BUTTON_BORDER_COLOR = (70, 95, 155)   # clearly visible blue border
 REMOVE_NORMAL_BG = (60, 30, 30)
 REMOVE_HOVER_BG = (100, 40, 40)
 REMOVE_TEXT_COLOR = (220, 150, 150)
