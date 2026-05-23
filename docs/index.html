@@ -876,7 +876,7 @@ class FluidController{
 // LED OUTPUT
 // ═══════════════════════════════════════════════════════
 class LedOutput{
-  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._prevLit=new Uint8Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;this._gapUntil=new Float32Array(128);}
+  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._prevLit=new Uint8Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;this._gapUntil=new Float32Array(128);this._bleSending=false;}
   async connectSerial(){
     if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
       this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
@@ -923,6 +923,8 @@ class LedOutput{
     else if(this._char)this._sendBle(enc);
   }
   async _sendBle(enc){
+    if(this._bleSending)return; // drop frame — previous send still in flight
+    this._bleSending=true;
     const CHUNK=200;
     for(let off=0;off<enc.length;off+=CHUNK){
       try{await this._char.writeValueWithoutResponse(enc.slice(off,off+CHUNK));}
@@ -930,9 +932,11 @@ class LedOutput{
         const msg='BLE write: '+(e.message||String(e));
         this._lastError=msg;
         if(this._onError)this._onError(msg);
+        this._bleSending=false;
         return;
       }
     }
+    this._bleSending=false;
   }
   startSweep(lo){
     if(this._sweepTimer)this.stopSweep();
@@ -967,10 +971,11 @@ class LedOutput{
     for(let n=0;n<128;n++){
       const lit=(activeNotes.has(n)||(lo.led_sustain&&sustainedNotes&&sustainedNotes.has(n)))&&!(this._gapUntil[n]>now);
       if(lit){
-        if(!this._prevLit[n])this._bright[n]=1.0; // new strike — reset to full
-        else if(fadeEnabled)this._bright[n]=Math.max(0,this._bright[n]*decay); // decay while held
+        this._bright[n]=1.0; // full brightness while held
+      }else if(fadeEnabled){
+        this._bright[n]=Math.max(0,this._bright[n]*decay); // decay after release
       }else{
-        this._bright[n]=0; // released — cut immediately
+        this._bright[n]=0; // instant off
       }
       this._prevLit[n]=lit?1:0;
     }
