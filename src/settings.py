@@ -1,46 +1,51 @@
-"""Settings screen — manage MIDI file search folders."""
+"""Settings hub screen — compact navigation grid + MIDI folder management."""
 
 from __future__ import annotations
 
 import pygame
 from src import config as cfg
 
-# Colour palette (matches menu.py)
 BG_COLOR = (15, 15, 20)
 TITLE_COLOR = (230, 230, 230)
-BUTTON_NORMAL_BG = (35, 35, 45)
-BUTTON_HOVER_BG = (60, 60, 80)
-BUTTON_TEXT_COLOR = (210, 210, 210)
+BUTTON_NORMAL_BG = (30, 38, 65)       # blue-tinted so buttons stand out from background
+BUTTON_HOVER_BG = (55, 70, 115)
+BUTTON_TEXT_COLOR = (200, 215, 255)   # soft blue-white
 BUTTON_HOVER_TEXT_COLOR = (255, 255, 255)
-BUTTON_BORDER_COLOR = (80, 80, 110)
+BUTTON_BORDER_COLOR = (70, 95, 155)   # clearly visible blue border
 REMOVE_NORMAL_BG = (60, 30, 30)
 REMOVE_HOVER_BG = (100, 40, 40)
 REMOVE_TEXT_COLOR = (220, 150, 150)
 NO_FOLDERS_COLOR = (150, 150, 150)
+MUTED_TEXT_COLOR = (150, 150, 150)
 
-TITLE_FONT_SIZE = 42
+TITLE_FONT_SIZE = 28   # smaller than before — saves space
 LABEL_FONT_SIZE = 22
-BTN_FONT_SIZE = 28
-ROW_HEIGHT = 48
-ROW_GAP = 10
+BTN_FONT_SIZE = 26
+NAV_FONT_SIZE = 24
+
+NAV_BTN_H = 52
+NAV_BTN_GAP = 10
+NAV_COLS = 2
+MARGIN_X = 24
+SECTION_GAP = 20
+ADD_BTN_H = 48
+ROW_HEIGHT = 46
+ROW_GAP = 8
 ROW_WIDTH = 600
-REMOVE_BTN_W = 60
-ADD_BTN_W = 340
-ADD_BTN_H = 52
-NOTES_BTN_W = 340
-NOTES_BTN_H = 52
-KEYBOARD_BTN_W = 340
-KEYBOARD_BTN_H = 52
-LED_BTN_W = 340
-LED_BTN_H = 52
-DISPLAY_BTN_W = 340
-DISPLAY_BTN_H = 52
-AUDIENCE_BTN_W = 340
-AUDIENCE_BTN_H = 52
-THEMES_BTN_W = 340
-THEMES_BTN_H = 52
+REMOVE_BTN_W = 56
 BACK_BTN_W = 160
 BACK_BTN_H = 52
+
+# (label, action) pairs — will be laid out as a 2-column grid
+NAV_ITEMS: list[tuple[str, str]] = [
+    ("NOTES SETTINGS",    "notes_settings"),
+    ("KEYBOARD SETTINGS", "keyboard_settings"),
+    ("LED SETTINGS",      "led_settings"),
+    ("DISPLAY SETTINGS",  "display_settings"),
+    ("AUDIENCE SETTINGS", "audience_settings"),
+    ("THEME MANAGER",     "theme_settings"),
+    ("HARDWARE SETTINGS", "hardware_settings"),
+]
 
 
 def _pick_folder() -> str | None:
@@ -49,7 +54,6 @@ def _pick_folder() -> str | None:
         import tkinter as tk
         from tkinter import filedialog
 
-        # -topmost ensures the dialog floats above the pygame window.
         root = tk.Tk()
         root.withdraw()
         root.wm_attributes("-topmost", True)
@@ -75,56 +79,42 @@ def _truncate(font: pygame.font.Font, text: str, max_w: int) -> str:
 
 class SettingsScreen:
     """
-    Settings screen for managing MIDI file search folders.
+    Settings hub with a compact 2-column navigation grid.
 
-    ``handle_event()`` returns:
-      ``"back"``  — user pressed BACK or ESC (changes are auto-saved).
-        ``"notes_settings"`` — open the note visual customization screen.
-        ``"keyboard_settings"`` — open keyboard settings screen.
-                ``"led_settings"`` — open ESP32 LED output settings screen.
-        ``"display_settings"`` — open projector/display settings screen.
-                ``"audience_settings"`` — open audience WebSocket settings screen.
-      ``None``    — nothing actionable.
+    ``handle_event()`` returns one of:
+      ``"back"``              — user pressed BACK or ESC
+      ``"notes_settings"``    — open note visual customisation screen
+      ``"keyboard_settings"`` — open keyboard settings screen
+      ``"led_settings"``      — open ESP32 LED output settings screen
+      ``"display_settings"``  — open projector/display settings screen
+      ``"audience_settings"`` — open audience WebSocket settings screen
+      ``"theme_settings"``    — open theme manager screen
+      ``"hardware_settings"`` — open hardware settings screen
+      ``None``                — nothing actionable
     """
 
     def __init__(self, screen: pygame.Surface) -> None:
         self.screen = screen
         self._title_font = pygame.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
         self._label_font = pygame.font.SysFont("Arial", LABEL_FONT_SIZE)
+        self._nav_font = pygame.font.SysFont("Arial", NAV_FONT_SIZE, bold=True)
         self._btn_font = pygame.font.SysFont("Arial", BTN_FONT_SIZE)
 
         self._folders: list[str] = []
-        self._add_rect = pygame.Rect(0, 0, ADD_BTN_W, ADD_BTN_H)
-        self._notes_rect = pygame.Rect(0, 0, NOTES_BTN_W, NOTES_BTN_H)
-        self._keyboard_rect = pygame.Rect(0, 0, KEYBOARD_BTN_W, KEYBOARD_BTN_H)
-        self._led_rect = pygame.Rect(0, 0, LED_BTN_W, LED_BTN_H)
-        self._display_rect = pygame.Rect(0, 0, DISPLAY_BTN_W, DISPLAY_BTN_H)
-        self._audience_rect = pygame.Rect(0, 0, AUDIENCE_BTN_W, AUDIENCE_BTN_H)
-        self._themes_rect = pygame.Rect(0, 0, THEMES_BTN_W, THEMES_BTN_H)
+        self._nav_rects: list[pygame.Rect] = []
+        self._hover_nav: int = -1
+        self._add_rect = pygame.Rect(0, 0, 0, ADD_BTN_H)
         self._back_rect = pygame.Rect(0, 0, BACK_BTN_W, BACK_BTN_H)
         self._row_rects: list[pygame.Rect] = []
         self._remove_rects: list[pygame.Rect] = []
-
         self._hover_add = False
-        self._hover_notes = False
-        self._hover_keyboard = False
-        self._hover_led = False
-        self._hover_display = False
-        self._hover_audience = False
-        self._hover_themes = False
         self._hover_back = False
         self._hover_remove: int = -1
-
-        self._title_surf: pygame.Surface | None = None
-        self._title_pos = (0, 0)
         self._list_start_y = 0
+        self._title_pos = (0, 0)
 
         self._load()
         self._build_layout()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def handle_event(self, event: pygame.event.Event) -> str | None:
         if event.type == pygame.MOUSEMOTION:
@@ -138,23 +128,9 @@ class SettingsScreen:
             if self._back_rect.collidepoint(event.pos):
                 return "back"
 
-            if self._notes_rect.collidepoint(event.pos):
-                return "notes_settings"
-
-            if self._keyboard_rect.collidepoint(event.pos):
-                return "keyboard_settings"
-
-            if self._led_rect.collidepoint(event.pos):
-                return "led_settings"
-
-            if self._display_rect.collidepoint(event.pos):
-                return "display_settings"
-
-            if self._audience_rect.collidepoint(event.pos):
-                return "audience_settings"
-
-            if self._themes_rect.collidepoint(event.pos):
-                return "theme_settings"
+            for i, rect in enumerate(self._nav_rects):
+                if rect.collidepoint(event.pos):
+                    return NAV_ITEMS[i][1]
 
             if self._add_rect.collidepoint(event.pos):
                 folder = _pick_folder()
@@ -176,19 +152,9 @@ class SettingsScreen:
     def draw(self) -> None:
         self.screen.fill(BG_COLOR)
         self._draw_title()
-        self._draw_notes_button()
-        self._draw_keyboard_button()
-        self._draw_led_button()
-        self._draw_display_button()
-        self._draw_audience_button()
-        self._draw_themes_button()
-        self._draw_add_button()
-        self._draw_folders()
+        self._draw_nav_grid()
+        self._draw_folder_section()
         self._draw_back_button()
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
 
     def _load(self) -> None:
         self._folders = list(cfg.load().get("search_folders", []))
@@ -202,45 +168,41 @@ class SettingsScreen:
         sr = self.screen.get_rect()
         cx = sr.centerx
 
+        # Compact title at top
         title_surf = self._title_font.render("Settings", True, TITLE_COLOR)
-        title_y = sr.height // 8
+        title_y = 12
         self._title_surf = title_surf
         self._title_pos = (cx - title_surf.get_width() // 2, title_y)
 
-        notes_y = title_y + title_surf.get_height() + 24
-        self._notes_rect = pygame.Rect(
-            cx - NOTES_BTN_W // 2, notes_y, NOTES_BTN_W, NOTES_BTN_H
-        )
+        # Navigation grid — 2 columns
+        grid_top = title_y + title_surf.get_height() + 14
+        available_w = sr.width - 2 * MARGIN_X
+        col_w = (available_w - NAV_BTN_GAP) // 2
+        self._nav_rects = []
+        for i, _ in enumerate(NAV_ITEMS):
+            col = i % NAV_COLS
+            row = i // NAV_COLS
+            x = MARGIN_X + col * (col_w + NAV_BTN_GAP)
+            y = grid_top + row * (NAV_BTN_H + NAV_BTN_GAP)
+            self._nav_rects.append(pygame.Rect(x, y, col_w, NAV_BTN_H))
 
-        keyboard_y = notes_y + NOTES_BTN_H + 12
-        self._keyboard_rect = pygame.Rect(
-            cx - KEYBOARD_BTN_W // 2, keyboard_y, KEYBOARD_BTN_W, KEYBOARD_BTN_H
-        )
+        # If odd number of items the last button spans both columns
+        if len(NAV_ITEMS) % NAV_COLS == 1:
+            last = self._nav_rects[-1]
+            self._nav_rects[-1] = pygame.Rect(MARGIN_X, last.y, available_w, NAV_BTN_H)
 
-        led_y = keyboard_y + KEYBOARD_BTN_H + 12
-        self._led_rect = pygame.Rect(
-            cx - LED_BTN_W // 2, led_y, LED_BTN_W, LED_BTN_H
-        )
+        grid_bottom = self._nav_rects[-1].bottom if self._nav_rects else grid_top
 
-        display_y = led_y + LED_BTN_H + 12
-        self._display_rect = pygame.Rect(
-            cx - DISPLAY_BTN_W // 2, display_y, DISPLAY_BTN_W, DISPLAY_BTN_H
-        )
+        # MIDI Search Folders section
+        section_top = grid_bottom + SECTION_GAP
+        self._folder_label_pos = (MARGIN_X, section_top)
+        label_h = self._label_font.get_height()
 
-        audience_y = display_y + DISPLAY_BTN_H + 12
-        self._audience_rect = pygame.Rect(
-            cx - AUDIENCE_BTN_W // 2, audience_y, AUDIENCE_BTN_W, AUDIENCE_BTN_H
-        )
+        add_y = section_top + label_h + 6
+        add_w = min(360, available_w)
+        self._add_rect = pygame.Rect(cx - add_w // 2, add_y, add_w, ADD_BTN_H)
 
-        themes_y = audience_y + AUDIENCE_BTN_H + 12
-        self._themes_rect = pygame.Rect(
-            cx - THEMES_BTN_W // 2, themes_y, THEMES_BTN_W, THEMES_BTN_H
-        )
-
-        add_y = themes_y + THEMES_BTN_H + 12
-        self._add_rect = pygame.Rect(cx - ADD_BTN_W // 2, add_y, ADD_BTN_W, ADD_BTN_H)
-
-        list_y = add_y + ADD_BTN_H + 28
+        list_y = add_y + ADD_BTN_H + 12
         self._list_start_y = list_y
 
         self._row_rects = []
@@ -257,19 +219,16 @@ class SettingsScreen:
             self._remove_rects.append(rem_rect)
             y += ROW_HEIGHT + ROW_GAP
 
-        back_y = max(y + 24, sr.height - BACK_BTN_H - 24)
-        self._back_rect = pygame.Rect(
-            cx - BACK_BTN_W // 2, back_y, BACK_BTN_W, BACK_BTN_H
-        )
+        back_y = max(y + 12, sr.height - BACK_BTN_H - 14)
+        self._back_rect = pygame.Rect(cx - BACK_BTN_W // 2, back_y, BACK_BTN_W, BACK_BTN_H)
 
     def _update_hover(self, pos: tuple[int, int]) -> None:
+        self._hover_nav = -1
+        for i, rect in enumerate(self._nav_rects):
+            if rect.collidepoint(pos):
+                self._hover_nav = i
+                break
         self._hover_add = self._add_rect.collidepoint(pos)
-        self._hover_notes = self._notes_rect.collidepoint(pos)
-        self._hover_keyboard = self._keyboard_rect.collidepoint(pos)
-        self._hover_led = self._led_rect.collidepoint(pos)
-        self._hover_display = self._display_rect.collidepoint(pos)
-        self._hover_audience = self._audience_rect.collidepoint(pos)
-        self._hover_themes   = self._themes_rect.collidepoint(pos)
         self._hover_back = self._back_rect.collidepoint(pos)
         self._hover_remove = -1
         for i, rect in enumerate(self._remove_rects):
@@ -278,121 +237,59 @@ class SettingsScreen:
                 break
 
     def _draw_title(self) -> None:
-        if self._title_surf:
-            self.screen.blit(self._title_surf, self._title_pos)
+        self.screen.blit(self._title_surf, self._title_pos)
 
-    def _draw_add_button(self) -> None:
+    def _draw_nav_grid(self) -> None:
+        for i, (label, _action) in enumerate(NAV_ITEMS):
+            rect = self._nav_rects[i]
+            is_hover = self._hover_nav == i
+            bg = BUTTON_HOVER_BG if is_hover else BUTTON_NORMAL_BG
+            fg = BUTTON_HOVER_TEXT_COLOR if is_hover else BUTTON_TEXT_COLOR
+            pygame.draw.rect(self.screen, bg, rect, border_radius=8)
+            pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, rect, width=1, border_radius=8)
+            surf = self._nav_font.render(label, True, fg)
+            self.screen.blit(surf, surf.get_rect(center=rect.center))
+
+    def _draw_folder_section(self) -> None:
+        lx, ly = self._folder_label_pos
+        label_surf = self._label_font.render("MIDI Search Folders", True, MUTED_TEXT_COLOR)
+        self.screen.blit(label_surf, (lx, ly))
+
+        # Add button
         bg = BUTTON_HOVER_BG if self._hover_add else BUTTON_NORMAL_BG
         fg = BUTTON_HOVER_TEXT_COLOR if self._hover_add else BUTTON_TEXT_COLOR
         pygame.draw.rect(self.screen, bg, self._add_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._add_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("+ ADD SEARCH FOLDER", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._add_rect.center))
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._add_rect, width=1, border_radius=8)
+        add_surf = self._btn_font.render("+ ADD SEARCH FOLDER", True, fg)
+        self.screen.blit(add_surf, add_surf.get_rect(center=self._add_rect.center))
 
-    def _draw_notes_button(self) -> None:
-        bg = BUTTON_HOVER_BG if self._hover_notes else BUTTON_NORMAL_BG
-        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_notes else BUTTON_TEXT_COLOR
-        pygame.draw.rect(self.screen, bg, self._notes_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._notes_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("NOTES SETTINGS", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._notes_rect.center))
-
-    def _draw_keyboard_button(self) -> None:
-        bg = BUTTON_HOVER_BG if self._hover_keyboard else BUTTON_NORMAL_BG
-        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_keyboard else BUTTON_TEXT_COLOR
-        pygame.draw.rect(self.screen, bg, self._keyboard_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._keyboard_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("KEYBOARD SETTINGS", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._keyboard_rect.center))
-
-    def _draw_led_button(self) -> None:
-        bg = BUTTON_HOVER_BG if self._hover_led else BUTTON_NORMAL_BG
-        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_led else BUTTON_TEXT_COLOR
-        pygame.draw.rect(self.screen, bg, self._led_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._led_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("LED SETTINGS", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._led_rect.center))
-
-    def _draw_display_button(self) -> None:
-        bg = BUTTON_HOVER_BG if self._hover_display else BUTTON_NORMAL_BG
-        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_display else BUTTON_TEXT_COLOR
-        pygame.draw.rect(self.screen, bg, self._display_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._display_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("DISPLAY SETTINGS", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._display_rect.center))
-
-    def _draw_audience_button(self) -> None:
-        bg = BUTTON_HOVER_BG if self._hover_audience else BUTTON_NORMAL_BG
-        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_audience else BUTTON_TEXT_COLOR
-        pygame.draw.rect(self.screen, bg, self._audience_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._audience_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("AUDIENCE SETTINGS", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._audience_rect.center))
-
-    def _draw_themes_button(self) -> None:
-        bg = BUTTON_HOVER_BG if self._hover_themes else BUTTON_NORMAL_BG
-        fg = BUTTON_HOVER_TEXT_COLOR if self._hover_themes else BUTTON_TEXT_COLOR
-        pygame.draw.rect(self.screen, bg, self._themes_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._themes_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("THEME MANAGER", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._themes_rect.center))
-
-    def _draw_folders(self) -> None:
+        # Folder list
         if not self._folders:
             sr = self.screen.get_rect()
-            msg = self._label_font.render(
-                "No search folders added yet.", True, NO_FOLDERS_COLOR
-            )
-            self.screen.blit(
-                msg, (sr.centerx - msg.get_width() // 2, self._list_start_y + 10)
-            )
+            msg = self._label_font.render("No search folders added yet.", True, NO_FOLDERS_COLOR)
+            self.screen.blit(msg, (sr.centerx - msg.get_width() // 2, self._list_start_y + 8))
             return
 
         for i, folder in enumerate(self._folders):
             row_rect = self._row_rects[i]
             rem_rect = self._remove_rects[i]
 
-            # Path row
             pygame.draw.rect(self.screen, BUTTON_NORMAL_BG, row_rect, border_radius=6)
-            pygame.draw.rect(
-                self.screen, BUTTON_BORDER_COLOR, row_rect, width=1, border_radius=6
-            )
+            pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, row_rect, width=1, border_radius=6)
             label_text = _truncate(self._label_font, folder, row_rect.width - 16)
-            label_surf = self._label_font.render(label_text, True, BUTTON_TEXT_COLOR)
-            self.screen.blit(
-                label_surf,
-                label_surf.get_rect(midleft=(row_rect.left + 8, row_rect.centery)),
-            )
+            label_s = self._label_font.render(label_text, True, BUTTON_TEXT_COLOR)
+            self.screen.blit(label_s, label_s.get_rect(midleft=(row_rect.left + 8, row_rect.centery)))
 
-            # Remove [✕] button
             r_bg = REMOVE_HOVER_BG if i == self._hover_remove else REMOVE_NORMAL_BG
             pygame.draw.rect(self.screen, r_bg, rem_rect, border_radius=6)
-            pygame.draw.rect(
-                self.screen, BUTTON_BORDER_COLOR, rem_rect, width=1, border_radius=6
-            )
-            x_surf = self._label_font.render("✕", True, REMOVE_TEXT_COLOR)
-            self.screen.blit(x_surf, x_surf.get_rect(center=rem_rect.center))
+            pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, rem_rect, width=1, border_radius=6)
+            x_s = self._label_font.render("✕", True, REMOVE_TEXT_COLOR)
+            self.screen.blit(x_s, x_s.get_rect(center=rem_rect.center))
 
     def _draw_back_button(self) -> None:
         bg = BUTTON_HOVER_BG if self._hover_back else BUTTON_NORMAL_BG
         fg = BUTTON_HOVER_TEXT_COLOR if self._hover_back else BUTTON_TEXT_COLOR
         pygame.draw.rect(self.screen, bg, self._back_rect, border_radius=8)
-        pygame.draw.rect(
-            self.screen, BUTTON_BORDER_COLOR, self._back_rect, width=1, border_radius=8
-        )
-        label = self._btn_font.render("BACK", True, fg)
-        self.screen.blit(label, label.get_rect(center=self._back_rect.center))
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._back_rect, width=1, border_radius=8)
+        surf = self._btn_font.render("BACK", True, fg)
+        self.screen.blit(surf, surf.get_rect(center=self._back_rect.center))

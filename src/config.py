@@ -56,6 +56,12 @@ _DEFAULTS: dict[str, Any] = {
         "channel_slug": "",
         "transition_ms": 600,
     },
+    "hardware": {
+        "sustain_enabled": False,
+    },
+    "profiles": {
+        "profiles_dir": "",
+    },
     "user_themes": [],
     "active_user_theme_index": 0,
 }
