@@ -264,7 +264,7 @@ const Config = {
       led_sustain:0, led_fade_amount:0, led_fade_speed:80,
     },
     audience_control:{enabled:0, ws_url:'', transition_ms:220},
-    kick_chat:{enabled:0, channel_slug:'', transition_ms:600},
+    kick_chat:{enabled:0, channel_slug:'', chatroom_id:'', transition_ms:600},
     user_themes:[], active_user_theme_index:0,
     note_color_themes:[], active_note_theme:{type:'builtin',index:0},
     fluid_themes:[],
@@ -1102,21 +1102,13 @@ function _parseKickColor(arg){
 class KickChatClient{
   constructor(){this._ws=null;this.connected=false;this._status='off';this._slug='';this._transMs=600;this._app=null;this._audience=null;}
   init(app){this._app=app;this._audience=app.audience;}
-  connect(slug,transMs){
+  connect(chatroomId,transMs){
     this.disconnect();
-    slug=(slug||'').trim();
-    if(!slug){this._setStatus('off');return;}
-    this._slug=slug.toLowerCase();
+    chatroomId=String(chatroomId||'').trim();
+    if(!chatroomId){this._setStatus('off');return;}
     this._transMs=transMs||600;
     this._setStatus('connecting…');
-    fetch(`https://kick.com/api/v1/channels/${this._slug}`)
-      .then(r=>r.json())
-      .then(d=>{
-        const id=d&&d.chatroom&&d.chatroom.id;
-        if(!id)throw new Error('channel not found');
-        this._openWS(id);
-      })
-      .catch(e=>{this._setStatus('error: '+e.message);});
+    this._openWS(chatroomId);
   }
   _openWS(chatroomId){
     const url='wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=7.0.3&flash=false';
@@ -1549,12 +1541,16 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <pre id="led-console" style="width:100%;height:120px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:monospace;font-size:10px;margin:0;white-space:pre-wrap;word-break:break-all"></pre>
 </div></div>`,
     audience:`<div class="section"><h2>Kick.com Chat</h2>
-<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Viewers type <code>!color red</code> in your Kick.com chat to change note colors live. Enter your channel username below and click Connect.</p>
-<div class="row"><label>Channel username</label><input type="text" id="kick-slug" value="${kc.channel_slug||''}" placeholder="your_kick_username" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
+<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Viewers type <code>!color red</code> in your Kick.com chat to change note colors live.</p>
+<p style="font-size:11px;color:var(--accent);margin-bottom:8px;font-weight:600">Step 1 — Find your Chatroom ID</p>
+<div class="row"><label>Your username</label><input type="text" id="kick-slug" value="${kc.channel_slug||''}" placeholder="your_kick_username" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"><a id="kick-id-link" href="https://kick.com/api/v1/channels/${kc.channel_slug||''}" target="_blank" class="action-btn" style="margin-left:6px;text-decoration:none;white-space:nowrap">Open ↗</a></div>
+<p style="font-size:11px;color:var(--muted);margin:4px 0 10px 0">In the page that opens, find <code>"chatroom"</code> and copy the <code>"id"</code> number.</p>
+<p style="font-size:11px;color:var(--accent);margin-bottom:8px;font-weight:600">Step 2 — Connect</p>
+<div class="row"><label>Chatroom ID</label><input type="text" id="kick-chatroom-id" value="${kc.chatroom_id||''}" placeholder="e.g. 12345" style="width:120px;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
 <div class="row"><label>Transition ms</label><input type="number" id="kick-trans" value="${kc.transition_ms||600}" min="20" max="3000" style="width:80px;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
 <div class="row"><label>Status</label><span id="kick-status">Off</span></div>
 <div class="row"><label></label><button class="action-btn" id="btn-kick-connect">Connect</button><button class="action-btn" id="btn-kick-disconnect" style="margin-left:6px">Disconnect</button></div>
-<p style="font-size:11px;color:var(--muted);margin-top:8px">Supported: <code>!color red</code> &nbsp;·&nbsp; <code>!color #FF0080</code> &nbsp;·&nbsp; <code>!color 255 0 128</code><br>Aliases: <code>!colour</code> <code>!light</code> <code>!lights</code> <code>!led</code> — all work the same way.</p>
+<p style="font-size:11px;color:var(--muted);margin-top:8px">Chat commands: <code>!color red</code> &nbsp;·&nbsp; <code>!inner white</code> &nbsp;·&nbsp; <code>!blend 40</code> &nbsp;·&nbsp; <code>!speed fast</code> &nbsp;·&nbsp; <code>!theme rainbow</code> &nbsp;·&nbsp; <code>!fluid on/off</code> &nbsp;·&nbsp; <code>!split C4</code></p>
 </div>
 <div class="section"><h2>Audience Vote Server</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Connect to the local vote server (<code>node server/server.js</code>). Audience votes via Kik; winning option is applied automatically.</p>
@@ -1936,17 +1932,24 @@ function wireSettings(root, app){
   wireFluidPresets(root,app);
   // Kick.com Chat
   const kickSlug=root.querySelector('#kick-slug');
+  const kickIdLink=root.querySelector('#kick-id-link');
+  const kickChatroomId=root.querySelector('#kick-chatroom-id');
   const kickTrans=root.querySelector('#kick-trans');
+  if(kickSlug) kickSlug.addEventListener('input',()=>{
+    const s=kickSlug.value.trim();
+    Config.kc.channel_slug=s; Config.save();
+    if(kickIdLink)kickIdLink.href='https://kick.com/api/v1/channels/'+s;
+  });
+  if(kickChatroomId) kickChatroomId.addEventListener('change',()=>{Config.kc.chatroom_id=kickChatroomId.value.trim();Config.save();});
   const btnKickC=root.querySelector('#btn-kick-connect');
   if(btnKickC) btnKickC.addEventListener('click',()=>{
-    const slug=kickSlug?kickSlug.value.trim():'';
+    const id=kickChatroomId?kickChatroomId.value.trim():'';
     const ms=kickTrans?parseInt(kickTrans.value)||600:600;
-    Config.kc.channel_slug=slug; Config.kc.transition_ms=ms; Config.save();
-    app.kickChat.connect(slug,ms);
+    Config.kc.chatroom_id=id; Config.kc.transition_ms=ms; Config.save();
+    app.kickChat.connect(id,ms);
   });
   const btnKickD=root.querySelector('#btn-kick-disconnect');
   if(btnKickD) btnKickD.addEventListener('click',()=>{app.kickChat.disconnect();});
-  if(kickSlug) kickSlug.addEventListener('change',()=>{Config.kc.channel_slug=kickSlug.value.trim();Config.save();});
   if(kickTrans) kickTrans.addEventListener('change',()=>{Config.kc.transition_ms=parseInt(kickTrans.value)||600;Config.save();});
   // Audience Vote Server
   const audUrl=root.querySelector('#aud-url');
@@ -2179,7 +2182,7 @@ class App{
       const ant=Config.data.active_note_theme||{type:'builtin',index:0};
       if(ant.type==='builtin'){const t=BUILTIN_NOTE_THEMES[ant.index];if(t)Config.ns.note_colors=t.build();}
     }
-    if(Config.kc.channel_slug)this.kickChat.connect(Config.kc.channel_slug,Config.kc.transition_ms);
+    if(Config.kc.chatroom_id)this.kickChat.connect(Config.kc.chatroom_id,Config.kc.transition_ms);
     this._boundFrame=this._frame.bind(this);
     requestAnimationFrame(this._boundFrame);
   }
