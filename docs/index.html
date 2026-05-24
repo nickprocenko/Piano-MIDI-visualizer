@@ -1166,7 +1166,7 @@ class KickChatClient{
               const col=_parseKickColor(mColor[2]);
               console.log('[kick colour]',{arg:mColor[2],col,audience:this._audience});
               toast('colour: '+mColor[2].trim()+(col?'':' (unknown color)'));
-              if(col&&this._audience){this._audience._pending.push({r:col[0],g:col[1],b:col[2],ms:this._transMs});}
+              if(col&&this._audience){Config.ns.note_colors=null;this._audience._pending.push({r:col[0],g:col[1],b:col[2],ms:this._transMs});}
             }
             // !inner <color>
             const mInner=text.match(/^!inner\s+(.+)$/i);
