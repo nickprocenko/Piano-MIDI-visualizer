@@ -130,6 +130,26 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .track-player-btn.active{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
 .tracks-actions{display:flex;gap:12px;margin-top:24px;align-items:center}
 #btn-tracks-play{width:auto;padding:0 36px;height:52px;font-size:16px}
+/* Scenes sidebar tab */
+.scene-item{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border)}
+.scene-item:last-child{border-bottom:none}
+.scene-item-name{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scene-item-date{font-size:10px;color:var(--muted);flex-shrink:0}
+.scene-load-btn{padding:3px 8px;font-size:11px;background:rgba(0,180,180,.18);color:var(--accent);border:1px solid var(--accent);border-radius:3px;cursor:pointer;font-family:inherit;flex-shrink:0}
+.scene-load-btn:hover{background:rgba(0,180,180,.32)}
+.scene-del-btn{width:18px;height:18px;background:rgba(120,40,40,.85);color:#fff;border:none;border-radius:3px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0}
+.scene-del-btn:hover{background:rgba(180,60,60,.9)}
+/* MIDI CC mapping table */
+.midi-cc-table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px}
+.midi-cc-table th{text-align:left;color:var(--muted);padding:4px 4px 4px 0;border-bottom:1px solid var(--border);font-weight:600;letter-spacing:.5px}
+.midi-cc-table td{padding:4px 4px 4px 0;border-bottom:1px solid rgba(80,80,96,.4);vertical-align:middle}
+.midi-learn-btn{padding:3px 7px;font-size:10px;background:var(--btn-bg);border:1px solid var(--border);border-radius:3px;cursor:pointer;color:var(--text);font-family:inherit}
+.midi-learn-btn.listening{border-color:var(--accent);color:var(--accent);animation:blink .6s step-end infinite}
+@keyframes blink{50%{opacity:.3}}
+.midi-add-form{background:var(--btn-bg);border:1px solid var(--border);border-radius:4px;padding:8px;margin-top:4px;display:flex;flex-direction:column;gap:6px}
+.midi-form-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.midi-form-row label{font-size:11px;color:var(--muted);min-width:70px}
+.midi-form-row select,.midi-form-row input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:11px;font-family:inherit}
 </style>
 </head>
 <body>
@@ -219,7 +239,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
     <button class="snav-btn" data-stab="audience">Audience</button>
     <div class="snav-title">Presets</div>
     <button class="snav-btn" data-stab="themes">Themes</button>
-    <button class="snav-btn" data-stab="profiles">Profiles</button>
+    <button class="snav-btn" data-stab="profiles">Scenes &amp; Profiles</button>
     <div style="flex:1"></div>
     <button class="screen-back" id="btn-settings-back" style="margin:16px;align-self:flex-start">← Back</button>
   </nav>
@@ -274,8 +294,9 @@ const Config = {
     },
     audience_control:{enabled:0, ws_url:'', transition_ms:220},
     kick_chat:{enabled:0, channel_slug:'', chatroom_id:'', transition_ms:600},
-    hardware:{sustain_enabled:1},
+    hardware:{sustain_enabled:1,midi_cc_mappings:[]},
     profiles:[],
+    active_profile_id:'',
     user_themes:[], active_user_theme_index:0,
     note_color_themes:[], active_note_theme:{type:'builtin',index:0},
     fluid_themes:[],
@@ -289,6 +310,15 @@ const Config = {
     if(stored.note_style&&stored.note_style.note_colors!==null&&typeof stored.note_style.note_colors==='object')
       stored.note_style.note_colors=null;
     this.data=this._merge(JSON.parse(JSON.stringify(this._d)),stored);
+    // Migrate old flat profiles [{name,date,data}] → [{id,name,created,scenes:[]}]
+    if(this.data.profiles?.length&&!this.data.profiles[0]?.scenes){
+      this.data.profiles=this.data.profiles.map(p=>({
+        id:crypto.randomUUID(),name:p.name,created:p.date||'',
+        scenes:[{id:crypto.randomUUID(),name:p.name,created:p.date||'',data:p.data||{},bgImages:[]}]
+      }));
+    }
+    if(!this.data.active_profile_id&&this.data.profiles?.length)
+      this.data.active_profile_id=this.data.profiles[0].id;
   },
   save(){localStorage.setItem('pianoVisCfg',JSON.stringify(this.data));},
   _merge(t,s){
@@ -673,6 +703,8 @@ class MidiHandler{
     this._access=null;
     this._port=null;
     this._qwerty=false;
+    this._app=null;
+    this._onLearn=null;
   }
   async init(portId){
     this._stopQwerty();
@@ -724,6 +756,19 @@ class MidiHandler{
         if(this._sustainTaps.length>=3){this._sustainTaps=[];if(typeof onTripleSustainTap==='function')onTripleSustainTap();}
       }
     }
+    // General CC mapping: learn capture + live apply
+    if(st===0xB0){
+      const mappings=Config.data?.hardware?.midi_cc_mappings||[];
+      if(this._onLearn){const cb=this._onLearn;this._onLearn=null;cb(n);return;}
+      if(this._app){
+        for(const m of mappings){
+          if(m.cc!==n)continue;
+          if(m.target.startsWith('scene:')){if(v>0)applyMappedParam(m.target,v,this._app);}
+          else if(m.toggle){applyMappedParam(m.target,v>=64?1:0,this._app);}
+          else{applyMappedParam(m.target,m.min+(v/127)*(m.max-m.min),this._app);}
+        }
+      }
+    }
   }
   _startQwerty(){
     this._qwerty=true; this.portName='Computer Keyboard'; this.connected=true;
@@ -747,6 +792,156 @@ class MidiHandler{
   }
   close(){this._stopQwerty();if(this._port)this._port.onmidimessage=null;this.activeNotes.clear();this.noteChannel.clear();}
 }
+
+// ═══════════════════════════════════════════════════════
+// SCENE IMAGE DB
+// ═══════════════════════════════════════════════════════
+const SceneImageDB={
+  _db:null,
+  async _open(){
+    if(this._db)return this._db;
+    return new Promise((res,rej)=>{
+      const req=indexedDB.open('piano-vis-scene-images',1);
+      req.onupgradeneeded=e=>e.target.result.createObjectStore('images');
+      req.onsuccess=e=>{this._db=e.target.result;res(this._db);};
+      req.onerror=e=>rej(e.target.error);
+    });
+  },
+  async put(id,blob){
+    const db=await this._open();
+    return new Promise((res,rej)=>{
+      const tx=db.transaction('images','readwrite');
+      tx.objectStore('images').put(blob,id);
+      tx.oncomplete=res;tx.onerror=e=>rej(e.target.error);
+    });
+  },
+  async get(id){
+    const db=await this._open();
+    return new Promise((res,rej)=>{
+      const tx=db.transaction('images','readonly');
+      const req=tx.objectStore('images').get(id);
+      req.onsuccess=()=>res(req.result||null);
+      req.onerror=e=>rej(e.target.error);
+    });
+  },
+  async deleteMany(ids){
+    if(!ids||!ids.length)return;
+    const db=await this._open();
+    return new Promise((res,rej)=>{
+      const tx=db.transaction('images','readwrite');
+      const st=tx.objectStore('images');
+      ids.forEach(id=>st.delete(id));
+      tx.oncomplete=res;tx.onerror=e=>rej(e.target.error);
+    });
+  },
+};
+
+// ═══════════════════════════════════════════════════════
+// SCENE MANAGER
+// ═══════════════════════════════════════════════════════
+const SceneManager={
+  getProfiles(){return Config.data.profiles||[];},
+  getActiveProfile(){
+    const id=Config.data.active_profile_id;
+    return this.getProfiles().find(p=>p.id===id)||this.getProfiles()[0]||null;
+  },
+  setActiveProfile(id){Config.data.active_profile_id=id;Config.save();},
+  createProfile(name){
+    if(!Config.data.profiles)Config.data.profiles=[];
+    const p={id:crypto.randomUUID(),name,created:new Date().toLocaleDateString(),scenes:[]};
+    Config.data.profiles.push(p);
+    Config.data.active_profile_id=p.id;
+    Config.save();return p;
+  },
+  renameProfile(id,name){
+    const p=this.getProfiles().find(q=>q.id===id);if(!p)return;
+    p.name=name;Config.save();
+  },
+  deleteProfile(id){
+    const p=this.getProfiles().find(q=>q.id===id);
+    if(p){const ids=(p.scenes||[]).flatMap(s=>(s.bgImages||[]).map(b=>b.id));SceneImageDB.deleteMany(ids);}
+    Config.data.profiles=Config.data.profiles.filter(q=>q.id!==id);
+    if(Config.data.active_profile_id===id)Config.data.active_profile_id=Config.data.profiles[0]?.id||'';
+    Config.save();
+  },
+  exportProfile(id){
+    const p=this.getProfiles().find(q=>q.id===id);if(!p)return;
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([JSON.stringify(p,null,2)],{type:'application/json'}));
+    a.download=p.name.replace(/\s+/g,'-')+'-profile.json';
+    a.click();URL.revokeObjectURL(a.href);
+  },
+  importProfile(json){
+    const p=JSON.parse(json);
+    p.id=crypto.randomUUID();
+    (p.scenes||[]).forEach(s=>{s.id=crypto.randomUUID();s.bgImages=[];});
+    if(!Config.data.profiles)Config.data.profiles=[];
+    Config.data.profiles.push(p);
+    Config.data.active_profile_id=p.id;
+    Config.save();return p;
+  },
+  async saveScene(name,app){
+    const profile=this.getActiveProfile();if(!profile)return null;
+    const snap=JSON.parse(JSON.stringify(Config.data));
+    delete snap.profiles;delete snap.active_profile_id;
+    // Strip MIDI CC mappings — hardware config, not per-scene
+    if(snap.hardware)delete snap.hardware.midi_cc_mappings;
+    // Sanitise script-result objects that can't round-trip
+    if(typeof snap.note_style?.note_colors==='object'&&snap.note_style?.note_colors!==null)
+      snap.note_style.note_colors=null;
+    if(typeof snap.note_style?.split_lower_note_colors==='object')
+      snap.note_style.split_lower_note_colors=null;
+    const bgImages=[];
+    for(const e of(app._bgImages||[])){
+      const id=crypto.randomUUID();
+      await SceneImageDB.put(id,e.blob);
+      bgImages.push({id,name:e.name,isGif:e.isGif,
+        slide_ms:e.slide_ms??Config.ds.bg_slide_ms,
+        fade_ms:e.fade_ms??Config.ds.bg_fade_ms,
+        gif_speed_pct:e.gif_speed_pct??100});
+    }
+    const scene={id:crypto.randomUUID(),name,created:new Date().toLocaleDateString(),data:snap,bgImages};
+    profile.scenes.push(scene);Config.save();return scene;
+  },
+  async loadScene(profileId,sceneId,app){
+    const profile=this.getProfiles().find(p=>p.id===profileId);if(!profile)return;
+    const scene=(profile.scenes||[]).find(s=>s.id===sceneId);if(!scene)return;
+    const merged=Config._merge(JSON.parse(JSON.stringify(Config._d)),scene.data);
+    merged.profiles=Config.data.profiles;
+    merged.active_profile_id=Config.data.active_profile_id;
+    // Preserve MIDI CC mappings (hardware config, not per-scene)
+    if(!merged.hardware)merged.hardware={};
+    merged.hardware.midi_cc_mappings=Config.data.hardware?.midi_cc_mappings||[];
+    Config.data=merged;Config.save();
+    // Restore background images from IndexedDB
+    app.clearBgImages();
+    const toAdd=[];
+    for(const meta of(scene.bgImages||[])){
+      const blob=await SceneImageDB.get(meta.id);if(!blob)continue;
+      toAdd.push({file:new File([blob],meta.name,{type:blob.type}),meta});
+    }
+    if(toAdd.length){
+      app.addBgImages(toAdd.map(x=>x.file));
+      // Restore per-image timing overrides
+      toAdd.forEach((x,i)=>{
+        const e=app._bgImages[i];if(!e)return;
+        e.slide_ms=x.meta.slide_ms;
+        e.fade_ms=x.meta.fade_ms;
+        e.gif_speed_pct=x.meta.gif_speed_pct;
+      });
+    }
+    app.fluid.setEnabled(Config.ns.effect_fluid_enabled);
+    app.fluid.updateConfig(Config.ns);
+    app.rebuildLayout=true;
+  },
+  async deleteScene(profileId,sceneId){
+    const profile=this.getProfiles().find(p=>p.id===profileId);if(!profile)return;
+    const idx=(profile.scenes||[]).findIndex(s=>s.id===sceneId);if(idx<0)return;
+    const scene=profile.scenes[idx];
+    await SceneImageDB.deleteMany((scene.bgImages||[]).map(b=>b.id));
+    profile.scenes.splice(idx,1);Config.save();
+  },
+};
 
 // ═══════════════════════════════════════════════════════
 // MIDI FILE PLAYER
@@ -1491,6 +1686,46 @@ function colourCard(side,ns){
 </div></div></div>`;
 }
 
+// ═══════════════════════════════════════════════════════
+// MIDI CC MAPPABLE PARAMETERS
+// ═══════════════════════════════════════════════════════
+const MIDI_PARAMS=[
+  {g:'Effects',label:'Glow Strength',        target:'ns.glow_strength_percent',       min:0,  max:180},
+  {g:'Effects',label:'Highlight Strength',   target:'ns.highlight_strength_percent',  min:0,  max:170},
+  {g:'Effects',label:'Sparks Amount',        target:'ns.spark_amount_percent',        min:0,  max:300},
+  {g:'Effects',label:'Smoke Amount',         target:'ns.smoke_amount_percent',        min:0,  max:300},
+  {g:'Effects',label:'Moon Dust Amount',     target:'ns.moon_dust_amount_percent',    min:0,  max:300},
+  {g:'Effects',label:'Moon Dust Opacity',    target:'ns.moon_dust_opacity_percent',   min:0,  max:200},
+  {g:'Effects',label:'Press Mist Amount',    target:'ns.press_smoke_amount_percent',  min:0,  max:250},
+  {g:'Fluid',  label:'Fluid Intensity',      target:'ns.fluid_intensity',             min:0,  max:200},
+  {g:'Fluid',  label:'Fluid Curl',           target:'ns.fluid_curl',                  min:0,  max:100},
+  {g:'Fluid',  label:'Fluid Density Dissip.',target:'ns.fluid_density_dissipation',   min:1,  max:100},
+  {g:'Fluid',  label:'Fluid Velocity Dissip.',target:'ns.fluid_velocity_dissipation', min:1,  max:40 },
+  {g:'Fluid',  label:'Fluid Pressure',       target:'ns.fluid_pressure',              min:0,  max:100},
+  {g:'Fluid',  label:'Fluid Splat Size',     target:'ns.fluid_splat_size',            min:1,  max:100},
+  {g:'Fluid',  label:'Fluid Opacity',        target:'ns.fluid_opacity',               min:0,  max:100},
+  {g:'Notes',  label:'Note Speed',           target:'ns.speed_px_per_sec',            min:80, max:1200},
+  {g:'Notes',  label:'Note Width',           target:'ns.width_px',                    min:4,  max:40 },
+  {g:'Notes',  label:'Edge Roundness',       target:'ns.edge_roundness_px',           min:0,  max:20 },
+  {g:'Notes',  label:'Decay Speed',          target:'ns.decay_speed',                 min:0,  max:240},
+  {g:'Notes',  label:'Decay Value',          target:'ns.decay_value',                 min:0,  max:100},
+  {g:'Keyboard',label:'Keyboard Height',     target:'ks.height_percent',              min:8,  max:45 },
+  {g:'Keyboard',label:'Keyboard Width',      target:'ks.width_percent',               min:60, max:100},
+  {g:'Keyboard',label:'Keyboard Brightness', target:'ks.brightness',                  min:15, max:150},
+  {g:'Display',label:'BG Slide Duration(ms)',target:'ds.bg_slide_ms',                 min:500,max:30000},
+  {g:'Display',label:'BG Fade Duration(ms)', target:'ds.bg_fade_ms',                  min:0,  max:5000},
+  {g:'Toggles',label:'Toggle: Glow',         target:'ns.effect_glow_enabled',         toggle:true},
+  {g:'Toggles',label:'Toggle: Highlight',    target:'ns.effect_highlight_enabled',    toggle:true},
+  {g:'Toggles',label:'Toggle: Sparks',       target:'ns.effect_sparks_enabled',       toggle:true},
+  {g:'Toggles',label:'Toggle: Smoke',        target:'ns.effect_smoke_enabled',        toggle:true},
+  {g:'Toggles',label:'Toggle: Fluid',        target:'ns.effect_fluid_enabled',        toggle:true},
+  {g:'Toggles',label:'Toggle: Moon Dust',    target:'ns.effect_moon_dust_enabled',    toggle:true},
+  {g:'Toggles',label:'Toggle: Steam',        target:'ns.effect_steam_smoke_enabled',  toggle:true},
+  {g:'Toggles',label:'Toggle: Halo Pulse',   target:'ns.effect_halo_pulse_enabled',   toggle:true},
+  {g:'Toggles',label:'Toggle: Press Mist',   target:'ns.effect_press_smoke_enabled',  toggle:true},
+  {g:'Toggles',label:'Toggle: Keyboard',     target:'ks.visible',                     toggle:true},
+];
+
 function buildSettingsHTML(tab){
   const ns=Config.ns,ks=Config.ks,ds=Config.ds,lo=Config.lo,ac=Config.ac,kc=Config.kc||{},hw=Config.data.hardware||{};
   const row=(lbl,id,min,max,step,ns_key)=>`<div class="row"><label>${lbl}</label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${ns[ns_key]}" data-cfk="${ns_key}" data-cfg="ns"><span class="val" id="v-${id}">${ns[ns_key]}</span></div>`;
@@ -1677,15 +1912,78 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="toggle-btn${hw.sustain_enabled?' on':''}" id="btn-hw-sustain">${hw.sustain_enabled?'On':'Off'}</div></div>
 <p style="font-size:12px;color:var(--muted);margin-top:8px">When enabled, notes held while the sustain pedal is pressed stay active until the pedal is released.</p>
 <p style="font-size:12px;color:var(--muted);margin-top:6px">Triple-tapping the sustain pedal to cycle themes always works regardless of this setting.</p>
-</div>`,
-    profiles:`<div class="section"><h2>Profiles</h2>
-<p style="font-size:12px;color:var(--muted);margin-bottom:12px">Save and load named settings snapshots stored in your browser.</p>
-<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
-<input type="text" id="profile-name-inp" placeholder="Profile name…" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-family:inherit;font-size:13px">
-<button class="action-btn" id="btn-profile-save">Save</button>
 </div>
-<div id="profile-list"></div>
+<div class="section"><h2>MIDI CC Mappings</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:8px">Assign any CC knob or slider to a visual parameter or scene trigger. Press <b>Learn</b> then move a control on your device.</p>
+<table class="midi-cc-table"><thead><tr><th>Parameter</th><th style="min-width:36px">CC</th><th style="min-width:32px">Min</th><th style="min-width:32px">Max</th><th></th><th></th></tr></thead>
+<tbody id="midi-cc-rows">${(()=>{const m=hw.midi_cc_mappings||[];if(!m.length)return'<tr><td colspan="6" style="color:var(--muted);font-size:11px;font-style:italic;padding:6px 0">No mappings — click + Add below.</td></tr>';return m.map((mp,i)=>`<tr><td style="font-size:11px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${mp.label||mp.target}">${mp.label||mp.target}</td><td style="font-size:11px">${mp.cc!=null?mp.cc:'—'}</td><td style="font-size:11px">${mp.toggle||String(mp.target).startsWith('scene:')?'—':mp.min}</td><td style="font-size:11px">${mp.toggle||String(mp.target).startsWith('scene:')?'—':mp.max}</td><td><button class="midi-learn-btn" data-mlearn="${i}">Learn</button></td><td><button class="scene-del-btn" data-mdel="${i}" title="Remove">×</button></td></tr>`).join('');})()}</tbody>
+</table>
+<button class="action-btn" id="midi-cc-add" style="font-size:11px;padding:4px 10px;margin-bottom:6px">+ Add Mapping</button>
+<div id="midi-cc-add-form" style="display:none"><div class="midi-add-form">
+<div class="midi-form-row"><label>Parameter</label>
+<select id="midi-param-sel" style="flex:1">${(()=>{const groups={};MIDI_PARAMS.forEach(p=>{if(!groups[p.g])groups[p.g]=[];groups[p.g].push(p);});const active=SceneManager.getActiveProfile();(active?.scenes||[]).forEach((s,i)=>{if(!groups['Scenes'])groups['Scenes']=[];groups['Scenes'].push({g:'Scenes',label:'Load Scene: '+s.name,target:'scene:'+i});});return Object.entries(groups).map(([g,ps])=>`<optgroup label="${g}">${ps.map(p=>`<option value="${p.target}">${p.label}</option>`).join('')}</optgroup>`).join('');})()}</select>
+</div>
+<div class="midi-form-row"><label>CC Number</label>
+<input type="number" id="midi-cc-num-inp" min="0" max="127" placeholder="0–127" style="width:64px">
+<button class="midi-learn-btn" id="midi-cc-learn-new">Learn CC</button>
+</div>
+<div class="midi-form-row">
+<button class="action-btn" id="midi-cc-confirm" style="font-size:11px;padding:4px 10px">Add</button>
+<button class="action-btn" id="midi-cc-cancel" style="font-size:11px;padding:4px 10px">Cancel</button>
+</div></div></div>
 </div>`,
+    profiles:`<div class="section"><h2>Scenes &amp; Profiles</h2>
+${(()=>{
+  const profiles=SceneManager.getProfiles();
+  const active=SceneManager.getActiveProfile();
+  const profileRow=`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+<label style="font-size:12px;color:var(--muted);min-width:90px">Active Profile</label>
+<select id="fp-profile-sel" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px">${profiles.map(p=>`<option value="${p.id}"${p.id===active?.id?' selected':''}>${p.name}</option>`).join('')}${!profiles.length?'<option value="">— none —</option>':''}</select>
+<button class="action-btn" id="fp-profile-new" style="padding:4px 8px;font-size:11px">+ New</button>
+<button class="action-btn" id="fp-profile-rename" style="padding:4px 8px;font-size:11px">Rename</button>
+<button class="action-btn" id="fp-profile-del" style="padding:4px 8px;font-size:11px;color:#dc8c8c;border-color:#7a3a3a">Delete</button>
+</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+<button class="action-btn" id="fp-profile-export" style="font-size:11px;padding:4px 10px">Export Profile JSON…</button>
+<label class="action-btn" style="font-size:11px;padding:4px 10px;cursor:pointer">Import Profile JSON… <input type="file" id="fp-profile-import" accept=".json" style="display:none"></label>
+</div>
+<p style="font-size:11px;color:var(--muted);margin-bottom:10px">Exporting saves scene settings only — background images are stored in this browser and won't be included.</p>`;
+  const scenes=active?.scenes||[];
+  const sceneItems=scenes.length
+    ?scenes.map(s=>`<div class="scene-item"><span class="scene-item-name">${s.name}</span><span class="scene-item-date">${s.created}</span><button class="scene-load-btn" data-pid="${active.id}" data-sid="${s.id}">▶ Load</button><button class="scene-del-btn" data-pid="${active.id}" data-sid="${s.id}" title="Delete">×</button></div>`).join('')
+    :`<p style="font-size:12px;color:var(--muted);font-style:italic;margin:6px 0">No scenes saved.</p>`;
+  const sceneSection=`<div style="font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Scenes in "${active?.name||'…'}"</div>
+<div id="fp-scene-list">${sceneItems}</div>
+<div style="margin-top:10px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Save Current As Scene</div>
+<div style="display:flex;gap:6px">
+<input type="text" id="fp-save-name" placeholder="Scene name…" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:12px;font-family:inherit">
+<button class="action-btn" id="fp-save-btn">Save Scene</button>
+</div>`;
+  return profileRow+sceneSection;
+})()}
+</div>`,
+    scenes:`<div class="section"><h2>Scenes</h2>
+${(()=>{
+  const profiles=SceneManager.getProfiles();
+  const active=SceneManager.getActiveProfile();
+  const profileRow=profiles.length
+    ?`<div style="display:flex;gap:6px;align-items:center;margin-bottom:10px">
+<label style="font-size:12px;color:var(--muted);min-width:50px;flex-shrink:0">Profile</label>
+<select id="sc-profile-sel" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px">${profiles.map(p=>`<option value="${p.id}"${p.id===active?.id?' selected':''}>${p.name}</option>`).join('')}</select>
+<button class="action-btn" id="sc-profile-new" style="padding:4px 8px;font-size:11px" title="New Profile">+</button>
+</div>`
+    :`<p style="font-size:12px;color:var(--muted);margin-bottom:8px">No profiles yet. <button class="action-btn" id="sc-profile-new" style="font-size:11px;padding:3px 8px">+ Create Profile</button></p>`;
+  const scenes=active?.scenes||[];
+  const sceneItems=scenes.length
+    ?scenes.map(s=>`<div class="scene-item"><span class="scene-item-name">${s.name}</span><span class="scene-item-date">${s.created}</span><button class="scene-load-btn" data-pid="${active.id}" data-sid="${s.id}">▶ Load</button><button class="scene-del-btn" data-pid="${active.id}" data-sid="${s.id}" title="Delete">×</button></div>`).join('')
+    :`<p style="font-size:12px;color:var(--muted);font-style:italic">No scenes saved yet.</p>`;
+  return profileRow+`<div id="sc-scene-list">${sceneItems}</div>`;
+})()}
+<div style="border-top:1px solid var(--border);padding-top:8px;margin-top:6px">
+<div style="display:flex;gap:6px">
+<input type="text" id="sc-save-name" placeholder="Scene name…" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:inherit">
+<button class="action-btn" id="sc-save-btn" style="padding:4px 8px;font-size:11px">Save</button>
+</div></div></div>`,
   };
   return tabs[tab]||'';
 }
@@ -2015,6 +2313,234 @@ function wireFluidPresets(root,app){
   });
 }
 
+// ═══════════════════════════════════════════════════════
+// MIDI CC PARAM APPLY
+// ═══════════════════════════════════════════════════════
+function applyMappedParam(target,rawVal,app){
+  if(target.startsWith('scene:')){
+    const idx=parseInt(target.slice(6),10);
+    const profile=SceneManager.getActiveProfile();
+    const scene=profile?.scenes?.[idx];
+    if(scene)SceneManager.loadScene(profile.id,scene.id,app).then(()=>app.rebuildSettingsPanels());
+    return;
+  }
+  const sep=target.indexOf('.');
+  const ns=target.slice(0,sep),key=target.slice(sep+1);
+  const obj={ns:Config.ns,ks:Config.ks,ds:Config.ds,lo:Config.lo}[ns];
+  if(!obj||!(key in obj))return;
+  obj[key]=rawVal;
+  if(key==='effect_fluid_enabled')app.fluid?.setEnabled(rawVal);
+  if(key.startsWith('fluid_'))app.fluid?.updateConfig(Config.ns);
+  if(key==='visible')app.rebuildLayout=true;
+  schedSave();
+}
+
+// ═══════════════════════════════════════════════════════
+// SCENE WIRING
+// ═══════════════════════════════════════════════════════
+function wireScenes(root,app){
+  function wireSceneButtons(container){
+    if(!container)return;
+    container.querySelectorAll('.scene-load-btn').forEach(btn=>{
+      btn.addEventListener('click',async()=>{
+        const{pid,sid}=btn.dataset;
+        const orig=btn.textContent; btn.textContent='…'; btn.disabled=true;
+        await SceneManager.loadScene(pid,sid,app);
+        app.rebuildSettingsPanels();
+      });
+    });
+    container.querySelectorAll('.scene-del-btn[data-sid]').forEach(btn=>{
+      btn.addEventListener('click',async()=>{
+        const{pid,sid}=btn.dataset;
+        if(!confirm('Delete this scene?'))return;
+        await SceneManager.deleteScene(pid,sid);
+        renderFpSceneList();renderScSceneList();
+      });
+    });
+  }
+
+  function renderScSceneList(){
+    const list=root.querySelector('#sc-scene-list');if(!list)return;
+    const active=SceneManager.getActiveProfile();
+    const scenes=active?.scenes||[];
+    list.innerHTML=scenes.length
+      ?scenes.map(s=>`<div class="scene-item"><span class="scene-item-name">${s.name}</span><span class="scene-item-date">${s.created}</span><button class="scene-load-btn" data-pid="${active.id}" data-sid="${s.id}">▶ Load</button><button class="scene-del-btn" data-pid="${active.id}" data-sid="${s.id}" title="Delete">×</button></div>`).join('')
+      :`<p style="font-size:12px;color:var(--muted);font-style:italic">No scenes saved yet.</p>`;
+    wireSceneButtons(list);
+  }
+
+  function renderFpSceneList(){
+    const list=root.querySelector('#fp-scene-list');if(!list)return;
+    const active=SceneManager.getActiveProfile();
+    const scenes=active?.scenes||[];
+    list.innerHTML=scenes.length
+      ?scenes.map(s=>`<div class="scene-item"><span class="scene-item-name">${s.name}</span><span class="scene-item-date">${s.created}</span><button class="scene-load-btn" data-pid="${active.id}" data-sid="${s.id}">▶ Load</button><button class="scene-del-btn" data-pid="${active.id}" data-sid="${s.id}" title="Delete">×</button></div>`).join('')
+      :`<p style="font-size:12px;color:var(--muted);font-style:italic">No scenes saved.</p>`;
+    wireSceneButtons(list);
+  }
+
+  // Sidebar: profile selector + new profile button
+  const scProfileSel=root.querySelector('#sc-profile-sel');
+  if(scProfileSel)scProfileSel.addEventListener('change',()=>{
+    SceneManager.setActiveProfile(scProfileSel.value);
+    renderScSceneList();renderFpSceneList();
+  });
+  const scProfileNew=root.querySelector('#sc-profile-new');
+  if(scProfileNew)scProfileNew.addEventListener('click',()=>{
+    const name=prompt('New profile name:');if(!name)return;
+    SceneManager.createProfile(name);
+    app.rebuildSettingsPanels();
+  });
+
+  // Sidebar: save scene
+  const scSaveBtn=root.querySelector('#sc-save-btn');
+  const scSaveName=root.querySelector('#sc-save-name');
+  if(scSaveBtn)scSaveBtn.addEventListener('click',async()=>{
+    const name=(scSaveName?.value||'').trim();if(!name)return;
+    if(!SceneManager.getActiveProfile())SceneManager.createProfile('Default');
+    const orig=scSaveBtn.textContent; scSaveBtn.textContent='…'; scSaveBtn.disabled=true;
+    await SceneManager.saveScene(name,app);
+    if(scSaveName)scSaveName.value='';
+    scSaveBtn.textContent=orig; scSaveBtn.disabled=false;
+    renderScSceneList();renderFpSceneList();
+  });
+
+  // Full settings: profile selector
+  const fpProfileSel=root.querySelector('#fp-profile-sel');
+  if(fpProfileSel)fpProfileSel.addEventListener('change',()=>{
+    SceneManager.setActiveProfile(fpProfileSel.value);
+    renderFpSceneList();renderScSceneList();
+  });
+  const fpProfileNew=root.querySelector('#fp-profile-new');
+  if(fpProfileNew)fpProfileNew.addEventListener('click',()=>{
+    const name=prompt('New profile name:');if(!name)return;
+    SceneManager.createProfile(name);
+    app.rebuildSettingsPanels();
+  });
+  const fpProfileRename=root.querySelector('#fp-profile-rename');
+  if(fpProfileRename)fpProfileRename.addEventListener('click',()=>{
+    const active=SceneManager.getActiveProfile();if(!active)return;
+    const name=prompt('Rename profile:',active.name);if(!name)return;
+    SceneManager.renameProfile(active.id,name);
+    app.rebuildSettingsPanels();
+  });
+  const fpProfileDel=root.querySelector('#fp-profile-del');
+  if(fpProfileDel)fpProfileDel.addEventListener('click',()=>{
+    const active=SceneManager.getActiveProfile();if(!active)return;
+    if(!confirm(`Delete profile "${active.name}" and all its scenes?`))return;
+    SceneManager.deleteProfile(active.id);
+    app.rebuildSettingsPanels();
+  });
+  const fpProfileExport=root.querySelector('#fp-profile-export');
+  if(fpProfileExport)fpProfileExport.addEventListener('click',()=>{
+    const active=SceneManager.getActiveProfile();if(active)SceneManager.exportProfile(active.id);
+  });
+  const fpProfileImport=root.querySelector('#fp-profile-import');
+  if(fpProfileImport)fpProfileImport.addEventListener('change',e=>{
+    const f=e.target.files[0];if(!f)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      try{SceneManager.importProfile(ev.target.result);app.rebuildSettingsPanels();}
+      catch(err){alert('Invalid profile file: '+err.message);}
+    };
+    reader.readAsText(f);
+  });
+
+  // Full settings: save scene
+  const fpSaveBtn=root.querySelector('#fp-save-btn');
+  const fpSaveName=root.querySelector('#fp-save-name');
+  if(fpSaveBtn)fpSaveBtn.addEventListener('click',async()=>{
+    const name=(fpSaveName?.value||'').trim();if(!name)return;
+    if(!SceneManager.getActiveProfile())SceneManager.createProfile('Default');
+    const orig=fpSaveBtn.textContent; fpSaveBtn.textContent='…'; fpSaveBtn.disabled=true;
+    await SceneManager.saveScene(name,app);
+    if(fpSaveName)fpSaveName.value='';
+    fpSaveBtn.textContent=orig; fpSaveBtn.disabled=false;
+    renderFpSceneList();renderScSceneList();
+  });
+
+  // Wire scene buttons that are already in the static HTML (rendered by buildSettingsHTML)
+  wireSceneButtons(root.querySelector('#sc-scene-list'));
+  wireSceneButtons(root.querySelector('#fp-scene-list'));
+}
+
+// ═══════════════════════════════════════════════════════
+// MIDI CC MAPPING WIRING
+// ═══════════════════════════════════════════════════════
+function wireMidiCCMappings(root,app){
+  function getMappings(){return Config.data?.hardware?.midi_cc_mappings||[];}
+
+  function renderRows(){
+    const tbody=root.querySelector('#midi-cc-rows');if(!tbody)return;
+    const mappings=getMappings();
+    if(!mappings.length){
+      tbody.innerHTML='<tr><td colspan="6" style="color:var(--muted);font-size:11px;font-style:italic;padding:6px 0">No mappings — click + Add below.</td></tr>';
+      return;
+    }
+    tbody.innerHTML=mappings.map((m,i)=>`<tr><td style="font-size:11px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${m.label||m.target}">${m.label||m.target}</td><td style="font-size:11px">${m.cc!=null?m.cc:'—'}</td><td style="font-size:11px">${m.toggle||String(m.target).startsWith('scene:')?'—':m.min}</td><td style="font-size:11px">${m.toggle||String(m.target).startsWith('scene:')?'—':m.max}</td><td><button class="midi-learn-btn" data-mlearn="${i}">Learn</button></td><td><button class="scene-del-btn" data-mdel="${i}" title="Remove">×</button></td></tr>`).join('');
+
+    tbody.querySelectorAll('[data-mlearn]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        const i=+btn.dataset.mlearn;
+        btn.textContent='● listening…'; btn.classList.add('listening');
+        app.midi._onLearn=(cc)=>{
+          const m=getMappings()[i];if(m)m.cc=cc;
+          Config.save(); renderRows();
+        };
+      });
+    });
+    tbody.querySelectorAll('[data-mdel]').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        getMappings().splice(+btn.dataset.mdel,1);
+        Config.save(); renderRows();
+      });
+    });
+  }
+
+  const addBtn=root.querySelector('#midi-cc-add');
+  const addForm=root.querySelector('#midi-cc-add-form');
+  const learnNewBtn=root.querySelector('#midi-cc-learn-new');
+  const ccNumInp=root.querySelector('#midi-cc-num-inp');
+  const paramSel=root.querySelector('#midi-param-sel');
+  const confirmBtn=root.querySelector('#midi-cc-confirm');
+  const cancelBtn=root.querySelector('#midi-cc-cancel');
+
+  if(addBtn)addBtn.addEventListener('click',()=>{if(addForm)addForm.style.display='';});
+  if(cancelBtn)cancelBtn.addEventListener('click',()=>{
+    if(addForm)addForm.style.display='none';
+    app.midi._onLearn=null;
+    if(learnNewBtn){learnNewBtn.textContent='Learn CC';learnNewBtn.classList.remove('listening');}
+  });
+  if(learnNewBtn)learnNewBtn.addEventListener('click',()=>{
+    learnNewBtn.textContent='● listening…'; learnNewBtn.classList.add('listening');
+    app.midi._onLearn=(cc)=>{
+      if(ccNumInp)ccNumInp.value=cc;
+      learnNewBtn.textContent='Learn CC'; learnNewBtn.classList.remove('listening');
+    };
+  });
+  if(confirmBtn)confirmBtn.addEventListener('click',()=>{
+    const target=paramSel?.value;if(!target)return;
+    const cc=parseInt(ccNumInp?.value??'');
+    if(isNaN(cc)||cc<0||cc>127){alert('Enter a CC number 0–127.');return;}
+    const param=MIDI_PARAMS.find(p=>p.target===target);
+    const isScene=target.startsWith('scene:');
+    const mapping={cc,target,
+      label:param?.label||(isScene?'Load Scene #'+target.slice(6):target),
+      ...(param?.toggle?{toggle:true}:{}),
+      ...(!param?.toggle&&!isScene?{min:param?.min??0,max:param?.max??127}:{}),
+    };
+    if(!Config.data.hardware)Config.data.hardware={};
+    if(!Config.data.hardware.midi_cc_mappings)Config.data.hardware.midi_cc_mappings=[];
+    Config.data.hardware.midi_cc_mappings.push(mapping);
+    Config.save();
+    if(addForm)addForm.style.display='none';
+    if(ccNumInp)ccNumInp.value='';
+    renderRows();
+  });
+
+  renderRows();
+}
+
 function wireProfiles(root){
   const list=root.querySelector('#profile-list');
   const nameInp=root.querySelector('#profile-name-inp');
@@ -2239,8 +2765,10 @@ function wireSettings(root, app){
     hwSustainBtn.textContent=on?'On':'Off';
     schedSave();
   });
-  // Profiles
-  wireProfiles(root);
+  // MIDI CC mappings
+  wireMidiCCMappings(root,app);
+  // Scenes & Profiles
+  wireScenes(root,app);
   // LED fade sliders
   [['sl-led-fade-amt','led_fade_amount'],['sl-led-fade-spd','led_fade_speed']].forEach(([id,key])=>{
     const sl=root.querySelector(`#${id}`); if(!sl)return;
@@ -3212,10 +3740,15 @@ class App{
       {id:'notes',label:'Notes',active:true},{id:'effects',label:'FX'},{id:'fluid',label:'Fluid'},
       {id:'keyboard',label:'Keys'},{id:'display',label:'Display'},{id:'led',label:'LED'},
       {id:'audience',label:'Aud.'},{id:'themes',label:'Themes'},{id:'tracks',label:'Tracks'},
+      {id:'scenes',label:'Scenes'},
     ];
     buildPanel(document.getElementById('ptab-panels'),document.getElementById('ptab-bar'),PANEL_TABS,this);
     document.querySelector('#ptab-bar button[data-t="tracks"]')
       ?.addEventListener('click',()=>this._refreshTracksTab());
+  }
+
+  rebuildSettingsPanels(){
+    try{this._buildSettingsScreens();}catch(e){console.error('Panel rebuild error:',e);}
   }
 
   async _loadMidiFile(file){
@@ -3496,6 +4029,7 @@ function _fluidGetUniforms(gl,prog){const u={},n=gl.getProgramParameter(prog,gl.
 // ═══════════════════════════════════════════════════════
 const app=new App();
 app.start();
+app.midi._app=app;
 // Patch device select to start file playback
 const _origStartFile=app._loadMidiFile.bind(app);
 </script>
