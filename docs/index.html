@@ -1156,8 +1156,10 @@ class KickChatClient{
           if(msg.event==='App\\Events\\ChatMessageEvent'||msg.event==='App\\Events\\ChatMessageSentEvent'){
             const d=typeof msg.data==='string'?JSON.parse(msg.data):msg.data;
             const text=((d&&d.content)||'').trim();
+            console.log('[kick msg]',msg.event, text, d);
             const user=(d&&(d.sender?.username||d.user?.username))||'viewer';
             const toast=(label)=>this._app?._showToast?.(`@${user} → ${label}`);
+            if(text.toLowerCase()==='!ping'){toast('pong — chat is working!');}
             // !color / !colour / !light / !lights / !led
             const mColor=text.match(/^!(colou?r|lights?|led)\s+(.+)$/i);
             if(mColor){const col=_parseKickColor(mColor[2]);if(col&&this._audience){this._audience._pending.push({r:col[0],g:col[1],b:col[2],ms:this._transMs});toast(mColor[2].trim());}}
@@ -1190,7 +1192,7 @@ class KickChatClient{
               else{const note=_noteNameToMidi(arg);if(note!==null){Config.ns.split_note=note;_applySplit();toast('split '+arg);}}
             }
           }
-        }catch(ex){}
+        }catch(ex){console.error('[kick]',ex,e.data);}
       };
       this._ws.onclose=()=>{this.connected=false;this._setStatus('disconnected');};
       this._ws.onerror=()=>{this.connected=false;this._setStatus('error: ws failed');};
