@@ -1162,7 +1162,12 @@ class KickChatClient{
             if(text.toLowerCase()==='!ping'){toast('pong — chat is working!');}
             // !color / !colour / !light / !lights / !led
             const mColor=text.match(/^!(colou?r|lights?|led)\s+(.+)$/i);
-            if(mColor){const col=_parseKickColor(mColor[2]);if(col&&this._audience){this._audience._pending.push({r:col[0],g:col[1],b:col[2],ms:this._transMs});toast(mColor[2].trim());}}
+            if(mColor){
+              const col=_parseKickColor(mColor[2]);
+              console.log('[kick colour]',{arg:mColor[2],col,audience:this._audience});
+              toast('colour: '+mColor[2].trim()+(col?'':' (unknown color)'));
+              if(col&&this._audience){this._audience._pending.push({r:col[0],g:col[1],b:col[2],ms:this._transMs});}
+            }
             // !inner <color>
             const mInner=text.match(/^!inner\s+(.+)$/i);
             if(mInner){const c=_parseKickColor(mInner[1]);if(c){Config.ns.interior_r=c[0];Config.ns.interior_g=c[1];Config.ns.interior_b=c[2];toast('inner '+mInner[1].trim());}}
