@@ -1127,7 +1127,7 @@ class LedOutput{
     if(this._writer){try{this._writer.releaseLock();}catch(e){} this._writer=null;}
     if(this._ser){try{this._ser.close();}catch(e){} this._ser=null;}
     this._ble=null;this._char=null;this.connected=false;
-    this._serSending=false;this._bleSending=false;
+    this._serSending=false;this._bleSending=false;this._pendingBle=null;
   }
   reattack(notes,now){for(const n of notes)this._gapUntil[n]=now+50;}
   _send(enc){
@@ -1138,20 +1138,27 @@ class LedOutput{
     }else if(this._char)this._sendBle(enc);
   }
   async _sendBle(enc){
-    if(this._bleSending)return; // drop frame — previous send still in flight
+    if(this._bleSending){this._pendingBle=enc;return;} // save latest, discard older pending
     this._bleSending=true;
-    const CHUNK=200;
+    await this._doSendBle(enc);
+    // Immediately send the most-recent frame that arrived while we were busy
+    while(this._pendingBle){
+      const next=this._pendingBle; this._pendingBle=null;
+      await this._doSendBle(next);
+    }
+    this._bleSending=false;
+  }
+  async _doSendBle(enc){
+    const CHUNK=512; // larger chunk = fewer round-trips per frame
     for(let off=0;off<enc.length;off+=CHUNK){
       try{await this._char.writeValueWithoutResponse(enc.slice(off,off+CHUNK));}
       catch(e){
         const msg='BLE write: '+(e.message||String(e));
         this._lastError=msg;
         if(this._onError)this._onError(msg);
-        this._bleSending=false;
         return;
       }
     }
-    this._bleSending=false;
   }
   startSweep(lo){
     if(this._sweepTimer)this.stopSweep();
