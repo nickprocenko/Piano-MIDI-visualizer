@@ -1149,7 +1149,7 @@ class LedOutput{
     this._bleSending=false;
   }
   async _doSendBle(enc){
-    const CHUNK=512; // larger chunk = fewer round-trips per frame
+    const CHUNK=200;
     for(let off=0;off<enc.length;off+=CHUNK){
       try{await this._char.writeValueWithoutResponse(enc.slice(off,off+CHUNK));}
       catch(e){
