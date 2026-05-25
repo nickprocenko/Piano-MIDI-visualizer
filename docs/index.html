@@ -1087,7 +1087,7 @@ class FluidController{
 // LED OUTPUT
 // ═══════════════════════════════════════════════════════
 class LedOutput{
-  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._prevLit=new Uint8Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;this._gapUntil=new Float32Array(128);this._bleSending=false;}
+  constructor(){this._ser=null;this._ble=null;this._char=null;this._writer=null;this.connected=false;this._lastMs=0;this._bright=new Float32Array(128);this._prevLit=new Uint8Array(128);this._sweepTimer=null;this._lastError='';this._reader=null;this._consoleCb=null;this._onError=null;this._gapUntil=new Float32Array(128);this._bleSending=false;this._serSending=false;}
   async connectSerial(){
     if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
       this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
@@ -1127,11 +1127,15 @@ class LedOutput{
     if(this._writer){try{this._writer.releaseLock();}catch(e){} this._writer=null;}
     if(this._ser){try{this._ser.close();}catch(e){} this._ser=null;}
     this._ble=null;this._char=null;this.connected=false;
+    this._serSending=false;this._bleSending=false;
   }
   reattack(notes,now){for(const n of notes)this._gapUntil[n]=now+50;}
   _send(enc){
-    if(this._writer)this._writer.write(enc).catch(()=>{});
-    else if(this._char)this._sendBle(enc);
+    if(this._writer){
+      if(this._serSending)return;
+      this._serSending=true;
+      this._writer.write(enc).then(()=>{this._serSending=false;},()=>{this._serSending=false;});
+    }else if(this._char)this._sendBle(enc);
   }
   async _sendBle(enc){
     if(this._bleSending)return; // drop frame — previous send still in flight
