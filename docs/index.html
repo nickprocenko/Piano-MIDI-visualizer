@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; connect-src 'self' wss://ws-us2.pusher.com https://kick.com blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; connect-src 'self' wss://ws-us2.pusher.com https://kick.com https: blob: data:;">
 <title>Piano MIDI Visualizer</title>
 <style>
 :root {
@@ -285,7 +285,7 @@ const Config = {
       split_lower_note_colors:null, split_lower_script:'', split_lower_active_theme:'b0',
     },
     keyboard_style:{height_percent:18, brightness:100, visible:1, width_percent:100},
-    display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000, gif_speed_percent:100},
+    display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000, gif_speed_percent:100, giphy_api_key:''},
     led_output:{
       enabled:0, transport:'none', led_count:177, mirror_per_key:2,
       ble_service_uuid:'6E400001-B5A3-F393-E0A9-E50E24DCCA9E',
@@ -1402,6 +1402,9 @@ class KickChatClient{
               if(arg.toLowerCase()==='off'){Config.ns.split_enabled=0;Config.ns.note_colors=null;Config.save();toast('split off');}
               else{const note=_noteNameToMidi(arg);if(note!==null){Config.ns.split_note=note;_applySplit();toast('split '+arg);}}
             }
+            // !bg <url>
+            const mBg=text.match(/^!bg\s+(\S+)$/i);
+            if(mBg&&this._app){toast('Adding background…');fetchUrlAsBg(mBg[1],this._app).then(ok=>{if(ok)toast('Background added!');});}
           }
         }catch(ex){console.error('[kick]',ex,e.data);}
       };
@@ -1857,6 +1860,22 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 </div>
 <div class="bg-item-list"></div>
 <div class="row"><label></label><button class="action-btn" id="btn-clear-bg">Clear All</button></div>
+<div class="row" style="gap:6px;margin-top:4px">
+  <label>Add by URL</label>
+  <input type="text" id="bg-url-input" placeholder="https://…" style="flex:1;min-width:0;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px">
+  <button class="action-btn" id="btn-bg-url-add">Add</button>
+</div>
+</div>
+<div class="section"><h2>GIF Search (Giphy)</h2>
+<div class="row"><label>API Key</label>
+  <input type="text" id="giphy-key-input" placeholder="Get a free key at developers.giphy.com" value="${ds.giphy_api_key||''}" style="flex:1;min-width:0;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px">
+</div>
+<div class="row" id="giphy-search-row" style="gap:6px;${ds.giphy_api_key?'':'display:none'}">
+  <input type="text" id="giphy-query" placeholder="Song title or theme…" style="flex:1;min-width:0;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px">
+  <button class="action-btn" id="btn-giphy-search">Search</button>
+</div>
+<p id="giphy-help" style="font-size:11px;color:var(--muted);margin-top:6px;${ds.giphy_api_key?'display:none':''}">Enter your Giphy API key above to search GIFs by song title or theme.</p>
+<div id="giphy-results" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
 </div>`,
     led:`<div class="section"><h2>LED Strip Output</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Requires Chrome or Edge. Uses Web Serial or Web Bluetooth.</p>
@@ -2604,6 +2623,30 @@ function wireProfiles(root){
   renderProfiles();
 }
 
+async function fetchUrlAsBg(url, app) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!blob.type.startsWith('image/')) throw new Error('Not an image');
+    const name = url.split('/').pop().split('?')[0] || 'image';
+    app.addBgImages([new File([blob], name, { type: blob.type })]);
+    return true;
+  } catch (e) {
+    app._showToast('Could not load image: ' + e.message);
+    return false;
+  }
+}
+
+async function searchGiphy(query, apiKey, limit = 24) {
+  const res = await fetch(
+    `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(apiKey)}&q=${encodeURIComponent(query)}&limit=${limit}&rating=g`
+  );
+  if (!res.ok) throw new Error(`Giphy API ${res.status}`);
+  const json = await res.json();
+  return json.data;
+}
+
 function wireSettings(root, app){
   // Range sliders
   root.querySelectorAll('input[type=range][data-cfg]').forEach(el=>{
@@ -2713,6 +2756,63 @@ function wireSettings(root, app){
   if(shuffleBgBtn) shuffleBgBtn.onclick=()=>app.shuffleBgImages();
   const clearBg=root.querySelector('#btn-clear-bg');
   if(clearBg) clearBg.addEventListener('click',()=>{app.clearBgImages();});
+  // URL-to-background
+  const bgUrlInput=root.querySelector('#bg-url-input');
+  const bgUrlAddBtn=root.querySelector('#btn-bg-url-add');
+  if(bgUrlInput&&bgUrlAddBtn){
+    bgUrlInput.addEventListener('keydown',e=>{if(e.key==='Enter')bgUrlAddBtn.click();});
+    bgUrlAddBtn.addEventListener('click',()=>{
+      const url=bgUrlInput.value.trim();
+      if(url){bgUrlInput.value='';fetchUrlAsBg(url,app);}
+    });
+  }
+  // Giphy search
+  const giphyKeyInput=root.querySelector('#giphy-key-input');
+  const giphySearchRow=root.querySelector('#giphy-search-row');
+  const giphyHelp=root.querySelector('#giphy-help');
+  if(giphyKeyInput){
+    giphyKeyInput.addEventListener('change',()=>{
+      Config.ds.giphy_api_key=giphyKeyInput.value.trim();
+      schedSave();
+      const hasKey=!!Config.ds.giphy_api_key;
+      if(giphySearchRow)giphySearchRow.style.display=hasKey?'':'none';
+      if(giphyHelp)giphyHelp.style.display=hasKey?'none':'';
+    });
+  }
+  const giphyQueryInput=root.querySelector('#giphy-query');
+  const giphySearchBtn=root.querySelector('#btn-giphy-search');
+  const giphyResults=root.querySelector('#giphy-results');
+  if(giphySearchBtn){
+    const doSearch=async()=>{
+      const query=(giphyQueryInput?.value||'').trim();
+      const key=Config.ds.giphy_api_key;
+      if(!query||!key)return;
+      giphySearchBtn.textContent='…';giphySearchBtn.disabled=true;
+      try{
+        const items=await searchGiphy(query,key);
+        if(giphyResults){
+          giphyResults.innerHTML='';
+          if(!items.length){giphyResults.innerHTML='<span style="color:var(--muted);font-size:12px">No results</span>';}
+          for(const item of items){
+            const src=item.images?.fixed_height_small?.url||item.images?.downsized?.url||'';
+            const full=item.images?.downsized?.url||src;
+            if(!src)continue;
+            const img=document.createElement('img');
+            img.src=src; img.title=item.title||'';
+            img.style.cssText='width:80px;height:60px;object-fit:cover;cursor:pointer;border-radius:4px;border:2px solid transparent;transition:border-color 0.2s';
+            img.addEventListener('click',()=>{
+              img.style.borderColor='var(--accent)';
+              fetchUrlAsBg(full,app).then(ok=>{if(!ok)img.style.borderColor='var(--off-color)';});
+            });
+            giphyResults.appendChild(img);
+          }
+        }
+      }catch(e){app._showToast('Giphy error: '+e.message);}
+      finally{giphySearchBtn.textContent='Search';giphySearchBtn.disabled=false;}
+    };
+    giphySearchBtn.addEventListener('click',doSearch);
+    giphyQueryInput?.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+  }
   // LED
   const ledTrans=root.querySelector('#led-transport');
   if(ledTrans) ledTrans.addEventListener('change',()=>{Config.lo.transport=ledTrans.value;schedSave();});
