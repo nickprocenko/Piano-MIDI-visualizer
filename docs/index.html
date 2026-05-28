@@ -1954,7 +1954,11 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 </div>`,
     tracks:`<div class="section"><h2>Tracks</h2><div id="tracks-tab-content"><p style="color:var(--muted);font-size:12px">No file loaded.</p></div></div>`,
     learn:(()=>{const lrn=Config.lrn||{};return`<div class="section"><h2>Learn Mode</h2>
-<div class="row" id="learn-file-row" style="font-size:12px;color:var(--muted)">Load a .mid file to begin</div>
+<div class="row" style="gap:6px">
+<button class="action-btn" id="btn-learn-browse">Browse MIDI…</button>
+<input type="file" id="learn-file-input" accept=".mid,.midi" style="display:none">
+<span id="learn-file-row" style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No file loaded</span>
+</div>
 <div class="row"><label>Mode</label>
 <button class="toggle-btn${lrn.mode==='wait'?' on':''}" data-lm="wait">Wait</button>
 <button class="toggle-btn${lrn.mode==='freeplay'?' on':''}" data-lm="freeplay">Free-play</button>
@@ -3029,6 +3033,16 @@ function wireSettings(root, app){
   cardRefreshFns.push(wireColourCard(root,'lower',onCardChange));
 
   // ── Learn tab ──
+  const learnFileInput=root.querySelector('#learn-file-input');
+  root.querySelector('#btn-learn-browse')?.addEventListener('click',()=>learnFileInput?.click());
+  learnFileInput?.addEventListener('change',e=>{
+    const f=e.target.files[0]; if(!f)return;
+    app._loadMidiFileForLearn(f).then(()=>{
+      const row=root.querySelector('#learn-file-row');
+      if(row)row.textContent=f.name;
+    });
+    e.target.value='';
+  });
   root.querySelectorAll('[data-lm]').forEach(btn=>{
     btn.addEventListener('click',()=>{
       Config.lrn.mode=btn.dataset.lm;
@@ -4140,6 +4154,24 @@ class App{
     this._buildLearnEvents();
     this.showTrackConfig();
     this._refreshTracksTab();
+  }
+
+  // Load a MIDI file for learn mode without navigating to the track config screen.
+  // Used by the sidebar Learn tab file picker.
+  async _loadMidiFileForLearn(file){
+    const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
+    const buf=await file.arrayBuffer();
+    this.midiFile.load(buf,file.name);
+    this._addRecent(file.name);
+    this._mode='file';
+    document.getElementById('hud-song').textContent=file.name;
+    if(!this._channelConfig||this._channelConfig._file!==file.name){
+      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig._file=file.name;
+    }
+    this._buildLearnEvents();
+    this._refreshTracksTab();
+    this._showToast(file.name);
   }
 
   startFilePlayback(){
