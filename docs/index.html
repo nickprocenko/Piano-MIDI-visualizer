@@ -323,7 +323,7 @@ const Config = {
     hardware:{sustain_enabled:1,midi_cc_mappings:[]},
     profiles:[],
     active_profile_id:'',
-    learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:false, notation_y:200},
+    learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:true, notation_y:200},
     user_themes:[], active_user_theme_index:0,
     note_color_themes:[], active_note_theme:{type:'builtin',index:0},
     fluid_themes:[],
@@ -3972,9 +3972,11 @@ class App{
     const barDurationMs=beatsPerBar*microsPerBeat/1000;
     const totalMs=this._learn._totalMs||1;
     const numBars=Math.max(1,Math.ceil(totalMs/barDurationMs));
-    // Separate channels 0 (treble) and 1 (bass)
-    const trebleEvents=events.filter(e=>e.channel===0);
-    const bassEvents=events.filter(e=>e.channel===1);
+    // Use hand assignments: right → treble, left → bass. If none assigned, treble=all.
+    const cfg=this._channelConfig;
+    const hasLeftHand=cfg&&Array.from({length:16},(_,i)=>i).some(i=>cfg[i]?.hand==='left'&&!cfg[i]?.muted);
+    const trebleEvents=events.filter(e=>!cfg||!cfg[e.channel]?.muted&&cfg[e.channel]?.hand!=='left');
+    const bassEvents=hasLeftHand?events.filter(e=>cfg&&cfg[e.channel]?.hand==='left'&&!cfg[e.channel]?.muted):[];
     const groupIntoBar=(evts,barIdx)=>{
       const barStart=barIdx*barDurationMs;
       const barEnd=barStart+barDurationMs;
@@ -4015,7 +4017,28 @@ class App{
     if(!strip)return;
     const show=this._learn.active&&!!Config.lrn.notation;
     strip.classList.toggle('visible',show);
-    if(show&&!this._notationRenderer._ready)this._buildNotation();
+    if(!show)return;
+    if(typeof Vex==='undefined'){
+      // VexFlow CDN not yet loaded — show placeholder
+      const wrap=document.getElementById('notation-svg-wrap');
+      if(wrap&&!wrap.querySelector('.vex-loading-msg')){
+        const msg=document.createElement('div');
+        msg.className='vex-loading-msg';
+        msg.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(200,200,200,.6);font-size:13px;pointer-events:none';
+        msg.textContent='Loading sheet music library…';
+        wrap.appendChild(msg);
+        // Retry once VexFlow arrives (poll briefly)
+        let tries=0;
+        const poll=setInterval(()=>{
+          if(typeof Vex!=='undefined'||++tries>30){
+            clearInterval(poll);msg.remove();
+            if(typeof Vex!=='undefined'&&!this._notationRenderer._ready)this._buildNotation();
+          }
+        },500);
+      }
+      return;
+    }
+    if(!this._notationRenderer._ready)this._buildNotation();
   }
 
   _learnHandFilter(ch){
@@ -4027,14 +4050,12 @@ class App{
     const l=this._learn;
     l._pendingChord.clear();
     const sps=Config.ns.speed_px_per_sec;
-    // Time for a note to travel from top of canvas to piano — used as scroll lead-in
+    // Time for a note to travel from the top of canvas down to the piano top
     const leadInMs=this.layout?this.layout.pianoY/sps*1000:3000;
     const first=l._events.find(ev=>this._learnHandFilter(ev.channel));
     l._currentNoteMs=first?first.ms:0;
-    // Freeplay: start before first note so it enters from the top of canvas and scrolls down.
-    // Wait: start at 50 % of lead-in so pending note is visible at mid-canvas, not at piano.
-    const offset=Config.lrn.mode==='wait'?leadInMs*0.5:leadInMs;
-    l.cursorMs=l._currentNoteMs-offset;
+    // Both modes: start above the canvas so notes enter from the top edge
+    l.cursorMs=l._currentNoteMs-leadInMs;
     if(Config.lrn.mode==='wait'&&first){
       for(const ev of l._events){
         if(ev.ms>=first.ms-30&&ev.ms<=first.ms+50&&this._learnHandFilter(ev.channel))
@@ -4046,7 +4067,6 @@ class App{
   _learnAdvanceCursor(){
     const l=this._learn;
     let nextMs=null;
-    // Search from the actual note position, not the display cursor offset
     for(const ev of l._events){
       if(ev.ms>l._currentNoteMs+50&&this._learnHandFilter(ev.channel)){nextMs=ev.ms;break;}
     }
@@ -4056,9 +4076,7 @@ class App{
       return;
     }
     l._currentNoteMs=nextMs;
-    const sps=Config.ns.speed_px_per_sec;
-    const leadInMs=this.layout?this.layout.pianoY/sps*1000:3000;
-    l.cursorMs=nextMs-leadInMs*0.5; // position next pending note at mid-canvas
+    // Don't teleport cursorMs — _learnTick advances it naturally so notes fall smoothly
     l._pendingChord.clear();
     for(const ev of l._events){
       if(ev.ms>=nextMs-30&&ev.ms<=nextMs+50&&this._learnHandFilter(ev.channel))
@@ -4087,13 +4105,24 @@ class App{
 
   _learnTick(now){
     const l=this._learn;
-    if(!l.active||Config.lrn.mode!=='freeplay')return;
+    if(!l.active)return;
     const dt=(now-l._lastFrameWall)*Config.lrn.speed;
     l._lastFrameWall=now;
-    if(dt>0&&dt<500){l.cursorMs+=dt;l._currentNoteMs=l.cursorMs;}
-    if(l.cursorMs>=l._totalMs){
-      if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=now;}
-      else this._learnStop();
+    if(dt<=0||dt>=500)return;
+    if(Config.lrn.mode==='freeplay'){
+      l.cursorMs+=dt; l._currentNoteMs=l.cursorMs;
+      if(l.cursorMs>=l._totalMs){
+        if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=now;}
+        else this._learnStop();
+      }
+    } else {
+      // Wait mode: advance cursor toward the current pending note, then hold until user plays it
+      if(l.cursorMs<l._currentNoteMs)
+        l.cursorMs=Math.min(l.cursorMs+dt,l._currentNoteMs);
+      if(l.cursorMs>=l._totalMs){
+        if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=now;}
+        else this._learnStop();
+      }
     }
   }
 
@@ -4113,7 +4142,7 @@ class App{
       const yBottom=pianoY-Math.max(0,timeTillStart)/1000*sps;
       const yTop=pianoY-timeTillEnd/1000*sps;
       if(yTop>=pianoY)continue;
-      if(yBottom<=0)continue;
+      if(yBottom<0)continue;
       const key=getRect(layout,ev.note);
       if(!key)continue;
       const {r,g,b}=resolveNoteColor(ev.note,ev.channel,ns);
