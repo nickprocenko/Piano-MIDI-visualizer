@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; connect-src 'self' wss://ws-us2.pusher.com https://kick.com blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; connect-src 'self' wss://ws-us2.pusher.com https://kick.com https: blob: data:;">
 <title>Piano MIDI Visualizer</title>
 <style>
 :root {
@@ -129,7 +129,19 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .track-player-btn{background:var(--btn-bg);color:var(--muted)}
 .track-player-btn.active{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
 .tracks-actions{display:flex;gap:12px;margin-top:24px;align-items:center}
-#btn-tracks-play{width:auto;padding:0 36px;height:52px;font-size:16px}
+#btn-tracks-play,#btn-tracks-learn{width:auto;padding:0 28px;height:52px;font-size:16px}
+/* Learn mode — hand selector in track config */
+.track-hand-sel{display:flex;gap:4px;margin-left:4px}
+.track-hand-btn{padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid var(--border);background:var(--btn-bg);color:var(--muted);font-family:inherit;font-weight:700}
+.track-hand-btn.active{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
+/* Learn mode — floating transport HUD */
+#learn-hud{display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(12,14,20,.88);border-radius:10px;padding:8px 18px;align-items:center;gap:14px;z-index:999;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1);box-shadow:0 4px 24px rgba(0,0,0,.5)}
+#learn-hud.visible{display:flex}
+#learn-hud label{font-size:11px;opacity:.7;white-space:nowrap}
+#learn-hud button{padding:5px 12px;border-radius:5px;border:1px solid var(--border);background:var(--btn-bg);color:var(--text);cursor:pointer;font-family:inherit}
+#learn-hud button.on{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
+#lhud-speed{width:80px}
+#lhud-speed-val,#lhud-progress{font-size:11px;opacity:.7;white-space:nowrap}
 /* Scenes sidebar tab */
 .scene-item{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border)}
 .scene-item:last-child{border-bottom:none}
@@ -181,6 +193,15 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <div class="tab-panels" id="ptab-panels"></div>
 </div>
 <div id="toast"></div>
+<div id="learn-hud">
+  <button id="lhud-playpause">⏸</button>
+  <button id="lhud-reset">↺</button>
+  <label>Speed</label>
+  <input type="range" id="lhud-speed" min="25" max="150" step="5" value="100">
+  <span id="lhud-speed-val">100%</span>
+  <button id="lhud-loop">Loop</button>
+  <span id="lhud-progress">0:00 / 0:00</span>
+</div>
 
 <!-- MENU SCREEN -->
 <div class="screen active" id="screen-menu">
@@ -220,6 +241,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <div id="track-channel-list"></div>
   <div class="tracks-actions">
     <button class="screen-back" id="btn-tracks-back">← Back</button>
+    <button class="menu-btn" id="btn-tracks-learn">📖 Learn</button>
     <button class="menu-btn" id="btn-tracks-play">▶ Play</button>
   </div>
 </div>
@@ -285,7 +307,7 @@ const Config = {
       split_lower_note_colors:null, split_lower_script:'', split_lower_active_theme:'b0',
     },
     keyboard_style:{height_percent:18, brightness:100, visible:1, width_percent:100},
-    display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000, gif_speed_percent:100},
+    display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000, gif_speed_percent:100, giphy_api_key:''},
     led_output:{
       enabled:0, transport:'none', led_count:177, mirror_per_key:2,
       ble_service_uuid:'6E400001-B5A3-F393-E0A9-E50E24DCCA9E',
@@ -297,6 +319,7 @@ const Config = {
     hardware:{sustain_enabled:1,midi_cc_mappings:[]},
     profiles:[],
     active_profile_id:'',
+    learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000},
     user_themes:[], active_user_theme_index:0,
     note_color_themes:[], active_note_theme:{type:'builtin',index:0},
     fluid_themes:[],
@@ -335,6 +358,7 @@ const Config = {
   get lo(){return this.data.led_output;},
   get ac(){return this.data.audience_control;},
   get kc(){return this.data.kick_chat;},
+  get lrn(){return this.data.learn;},
 };
 Config.load();
 
@@ -383,7 +407,7 @@ function sc(r,g,b,f){return[Math.max(0,Math.min(255,r*f|0)),Math.max(0,Math.min(
 function rgb(r,g,b){return`rgb(${r},${g},${b})`;}
 function rgba(r,g,b,a){return`rgba(${r},${g},${b},${a})`;}
 
-function drawPiano(ctx,lay,active,ks){
+function drawPiano(ctx,lay,active,ks,wrongKeys){
   if(!ks.visible)return;
   const{wkeys,bkeys,pianoY,pianoH,offsetX,pw}=lay;
   const W=ctx.canvas.width;
@@ -413,6 +437,7 @@ function drawPiano(ctx,lay,active,ks){
       ctx.textAlign='center';
       ctx.fillText('C'+(n/12|0-1),k.x+k.w/2,ky+kh-Math.max(3,kh*.06|0));
     }
+    if(wrongKeys?.has(n)&&performance.now()<wrongKeys.get(n)){ctx.globalAlpha=.55;ctx.fillStyle='rgb(255,60,60)';ctx.fillRect(k.x,ky,k.w,kh);ctx.globalAlpha=1;}
   }
   // Black keys
   const brad=Math.max(3,pianoH*.035|0);
@@ -430,6 +455,7 @@ function drawPiano(ctx,lay,active,ks){
     }
     ctx.strokeStyle=rgb(...sc(10,12,16,br)); ctx.lineWidth=1;
     ctx.beginPath();ctx.roundRect(k.x+.5,ky+.5,k.w-1,kh-1,brad);ctx.stroke();
+    if(wrongKeys?.has(n)&&performance.now()<wrongKeys.get(n)){ctx.globalAlpha=.55;ctx.fillStyle='rgb(255,60,60)';ctx.beginPath();ctx.roundRect(k.x,ky,k.w,kh,brad);ctx.fill();ctx.globalAlpha=1;}
   }
 }
 
@@ -736,6 +762,7 @@ class MidiHandler{
       this.noteVelocity.set(n,v);
       this.noteChannel.set(n,ch);
       this.sustainedNotes.delete(n);
+      if(this._app?._learn?.active)this._app._onLearnNoteOn(n,ch);
     } else if(st===0x80||(st===0x90&&v===0)){
       if(this._sustain){this.sustainedNotes.add(n);}
       else{this.activeNotes.delete(n);this.noteChannel.delete(n);this.noteVelocity.delete(n);}
@@ -1402,6 +1429,9 @@ class KickChatClient{
               if(arg.toLowerCase()==='off'){Config.ns.split_enabled=0;Config.ns.note_colors=null;Config.save();toast('split off');}
               else{const note=_noteNameToMidi(arg);if(note!==null){Config.ns.split_note=note;_applySplit();toast('split '+arg);}}
             }
+            // !bg <url>
+            const mBg=text.match(/^!bg\s+(\S+)$/i);
+            if(mBg&&this._app){toast('Adding background…');fetchUrlAsBg(mBg[1],this._app).then(ok=>{if(ok)toast('Background added!');});}
           }
         }catch(ex){console.error('[kick]',ex,e.data);}
       };
@@ -1857,6 +1887,22 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 </div>
 <div class="bg-item-list"></div>
 <div class="row"><label></label><button class="action-btn" id="btn-clear-bg">Clear All</button></div>
+<div class="row" style="gap:6px;margin-top:4px">
+  <label>Add by URL</label>
+  <input type="text" id="bg-url-input" placeholder="https://…" style="flex:1;min-width:0;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px">
+  <button class="action-btn" id="btn-bg-url-add">Add</button>
+</div>
+</div>
+<div class="section"><h2>GIF Search (Giphy)</h2>
+<div class="row"><label>API Key</label>
+  <input type="text" id="giphy-key-input" placeholder="Get a free key at developers.giphy.com" value="${ds.giphy_api_key||''}" style="flex:1;min-width:0;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px">
+</div>
+<div class="row" id="giphy-search-row" style="gap:6px;${ds.giphy_api_key?'':'display:none'}">
+  <input type="text" id="giphy-query" placeholder="Song title or theme…" style="flex:1;min-width:0;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px">
+  <button class="action-btn" id="btn-giphy-search">Search</button>
+</div>
+<p id="giphy-help" style="font-size:11px;color:var(--muted);margin-top:6px;${ds.giphy_api_key?'display:none':''}">Enter your Giphy API key above to search GIFs by song title or theme.</p>
+<div id="giphy-results" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
 </div>`,
     led:`<div class="section"><h2>LED Strip Output</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Requires Chrome or Edge. Uses Web Serial or Web Bluetooth.</p>
@@ -1907,6 +1953,18 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="row"><label></label><button class="action-btn" id="btn-aud-connect">Connect</button><button class="action-btn" id="btn-aud-disconnect" style="margin-left:6px">Disconnect</button></div>
 </div>`,
     tracks:`<div class="section"><h2>Tracks</h2><div id="tracks-tab-content"><p style="color:var(--muted);font-size:12px">No file loaded.</p></div></div>`,
+    learn:(()=>{const lrn=Config.lrn||{};return`<div class="section"><h2>Learn Mode</h2>
+<div class="row" id="learn-file-row" style="font-size:12px;color:var(--muted)">Load a .mid file to begin</div>
+<div class="row"><label>Mode</label>
+<button class="toggle-btn${lrn.mode==='wait'?' on':''}" data-lm="wait">Wait</button>
+<button class="toggle-btn${lrn.mode==='freeplay'?' on':''}" data-lm="freeplay">Free-play</button>
+</div>
+<div class="row" style="gap:6px">
+<button class="action-btn" id="btn-learn-start">▶ Start</button>
+<button class="action-btn" id="btn-learn-reset">↺ Reset</button>
+</div>
+<div class="row" style="font-size:12px;color:var(--muted)" id="learn-info"></div>
+</div>`;})(),
     themes:`<div class="section"><h2>User Themes</h2>
 <div class="theme-grid" id="theme-grid"></div>
 <div style="display:flex;gap:8px;margin-top:8px">
@@ -2604,6 +2662,30 @@ function wireProfiles(root){
   renderProfiles();
 }
 
+async function fetchUrlAsBg(url, app) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!blob.type.startsWith('image/')) throw new Error('Not an image');
+    const name = url.split('/').pop().split('?')[0] || 'image';
+    app.addBgImages([new File([blob], name, { type: blob.type })]);
+    return true;
+  } catch (e) {
+    app._showToast('Could not load image: ' + e.message);
+    return false;
+  }
+}
+
+async function searchGiphy(query, apiKey, limit = 24) {
+  const res = await fetch(
+    `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(apiKey)}&q=${encodeURIComponent(query)}&limit=${limit}&rating=g`
+  );
+  if (!res.ok) throw new Error(`Giphy API ${res.status}`);
+  const json = await res.json();
+  return json.data;
+}
+
 function wireSettings(root, app){
   // Range sliders
   root.querySelectorAll('input[type=range][data-cfg]').forEach(el=>{
@@ -2713,6 +2795,63 @@ function wireSettings(root, app){
   if(shuffleBgBtn) shuffleBgBtn.onclick=()=>app.shuffleBgImages();
   const clearBg=root.querySelector('#btn-clear-bg');
   if(clearBg) clearBg.addEventListener('click',()=>{app.clearBgImages();});
+  // URL-to-background
+  const bgUrlInput=root.querySelector('#bg-url-input');
+  const bgUrlAddBtn=root.querySelector('#btn-bg-url-add');
+  if(bgUrlInput&&bgUrlAddBtn){
+    bgUrlInput.addEventListener('keydown',e=>{if(e.key==='Enter')bgUrlAddBtn.click();});
+    bgUrlAddBtn.addEventListener('click',()=>{
+      const url=bgUrlInput.value.trim();
+      if(url){bgUrlInput.value='';fetchUrlAsBg(url,app);}
+    });
+  }
+  // Giphy search
+  const giphyKeyInput=root.querySelector('#giphy-key-input');
+  const giphySearchRow=root.querySelector('#giphy-search-row');
+  const giphyHelp=root.querySelector('#giphy-help');
+  if(giphyKeyInput){
+    giphyKeyInput.addEventListener('change',()=>{
+      Config.ds.giphy_api_key=giphyKeyInput.value.trim();
+      schedSave();
+      const hasKey=!!Config.ds.giphy_api_key;
+      if(giphySearchRow)giphySearchRow.style.display=hasKey?'':'none';
+      if(giphyHelp)giphyHelp.style.display=hasKey?'none':'';
+    });
+  }
+  const giphyQueryInput=root.querySelector('#giphy-query');
+  const giphySearchBtn=root.querySelector('#btn-giphy-search');
+  const giphyResults=root.querySelector('#giphy-results');
+  if(giphySearchBtn){
+    const doSearch=async()=>{
+      const query=(giphyQueryInput?.value||'').trim();
+      const key=Config.ds.giphy_api_key;
+      if(!query||!key)return;
+      giphySearchBtn.textContent='…';giphySearchBtn.disabled=true;
+      try{
+        const items=await searchGiphy(query,key);
+        if(giphyResults){
+          giphyResults.innerHTML='';
+          if(!items.length){giphyResults.innerHTML='<span style="color:var(--muted);font-size:12px">No results</span>';}
+          for(const item of items){
+            const src=item.images?.fixed_height_small?.url||item.images?.downsized?.url||'';
+            const full=item.images?.downsized?.url||src;
+            if(!src)continue;
+            const img=document.createElement('img');
+            img.src=src; img.title=item.title||'';
+            img.style.cssText='width:80px;height:60px;object-fit:cover;cursor:pointer;border-radius:4px;border:2px solid transparent;transition:border-color 0.2s';
+            img.addEventListener('click',()=>{
+              img.style.borderColor='var(--accent)';
+              fetchUrlAsBg(full,app).then(ok=>{if(!ok)img.style.borderColor='var(--off-color)';});
+            });
+            giphyResults.appendChild(img);
+          }
+        }
+      }catch(e){app._showToast('Giphy error: '+e.message);}
+      finally{giphySearchBtn.textContent='Search';giphySearchBtn.disabled=false;}
+    };
+    giphySearchBtn.addEventListener('click',doSearch);
+    giphyQueryInput?.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+  }
   // LED
   const ledTrans=root.querySelector('#led-transport');
   if(ledTrans) ledTrans.addEventListener('change',()=>{Config.lo.transport=ledTrans.value;schedSave();});
@@ -2888,6 +3027,39 @@ function wireSettings(root, app){
   function onCardChange(){refreshAllCards();refreshAllNcDropdowns();}
   cardRefreshFns.push(wireColourCard(root,'upper',onCardChange));
   cardRefreshFns.push(wireColourCard(root,'lower',onCardChange));
+
+  // ── Learn tab ──
+  root.querySelectorAll('[data-lm]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      Config.lrn.mode=btn.dataset.lm;
+      root.querySelectorAll('[data-lm]').forEach(b=>b.classList.toggle('on',b===btn));
+      schedSave();
+    });
+  });
+  root.querySelector('#btn-learn-start')?.addEventListener('click',()=>app.startLearn());
+  root.querySelector('#btn-learn-reset')?.addEventListener('click',()=>app.resetLearn());
+
+  // ── Learn HUD (wired once; always present in DOM) ──
+  const hud=document.getElementById('learn-hud');
+  if(hud&&!hud._wired){
+    hud._wired=true;
+    document.getElementById('lhud-playpause')?.addEventListener('click',()=>{
+      if(app._learn?.active) app.pauseLearn(); else app.startLearn();
+    });
+    document.getElementById('lhud-reset')?.addEventListener('click',()=>app.resetLearn());
+    const speedSlider=document.getElementById('lhud-speed');
+    const speedVal=document.getElementById('lhud-speed-val');
+    speedSlider?.addEventListener('input',()=>{
+      Config.lrn.speed=speedSlider.value/100;
+      speedVal.textContent=speedSlider.value+'%';
+      schedSave();
+    });
+    document.getElementById('lhud-loop')?.addEventListener('click',()=>{
+      Config.lrn.loop=!Config.lrn.loop;
+      document.getElementById('lhud-loop').classList.toggle('on',Config.lrn.loop);
+      schedSave();
+    });
+  }
 }
 
 function updateLedStatus(root,app){
@@ -3038,6 +3210,8 @@ class App{
     this.rebuildLayout=false;
     this._bgImages=[];   // [{url:string, name:string, isGif:bool}]
     this._mode='freeplay'; // 'freeplay' or 'file'
+    this._learn={active:false,cursorMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set()};
+    this._learnWrongKeys=new Map();
     this._vizActive=false;
     this._panelOpen=false;
     this._selectedPortId='keyboard';
@@ -3079,11 +3253,13 @@ class App{
     this.smoothedDt=this.smoothedDt*.85+dt*.15;
     this.fpsCount++; if(now-this.fpsTime>=1000){this.fps=this.fpsCount;this.fpsCount=0;this.fpsTime=now;this._hudFps.textContent=this.fps+' fps';}
     if(this.rebuildLayout){this.layout=buildLayout(this.mainCanvas.width,this.mainCanvas.height,Config.ks.height_percent,Config.ks.width_percent??100);this.rebuildLayout=false;}
+    this._frameNow=now;
     if(this._vizActive)this._update(dt);
     this._draw();
   }
 
   _update(dt){
+    this._learnTick(this._frameNow);
     const ns=Config.ns, ks=Config.ks;
     // Audience color
     this.audience.update(dt,ns);
@@ -3168,7 +3344,15 @@ class App{
       this.fx.drawTrail(ctx,t,ns);
     }
     this.fx.endFrame(ctx);
-    drawPiano(ctx,this.layout,this.prevNotes,Config.ks);
+    if(this._learn?.active)this._drawLearnNotes(ctx,this.layout);
+    drawPiano(ctx,this.layout,this.prevNotes,Config.ks,this._learnWrongKeys);
+    // Update learn HUD progress every frame
+    if(this._learn?.active){
+      const l=this._learn;
+      const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+      const prog=document.getElementById('lhud-progress');
+      if(prog)prog.textContent=fmt(l.cursorMs)+' / '+fmt(l._totalMs);
+    }
   }
 
   _setupKeyboardMouse(){
@@ -3579,7 +3763,7 @@ class App{
     const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
     // Build config — preserve existing or create fresh
     if(!this._channelConfig||this._channelConfig._file!==this.midiFile.filename){
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
       this._channelConfig._file=this.midiFile.filename;
     }
     const list=document.getElementById('track-channel-list');
@@ -3593,7 +3777,12 @@ class App{
         <span class="track-ch-meta">${count} notes &nbsp;·&nbsp; ${noteName(minNote)}–${noteName(maxNote)}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
         <button class="track-player-btn${cfg.isPlayer?' active':''}" title="Mark as your part">You play</button>
-        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>`;
+        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
+        <span class="track-hand-sel" title="Hand assignment for Learn mode">
+          <button class="track-hand-btn${cfg.hand==='right'?' active':''}" data-hand="right">R</button>
+          <button class="track-hand-btn${cfg.hand==='left'?' active':''}" data-hand="left">L</button>
+          <button class="track-hand-btn${cfg.hand==='none'?' active':''}" data-hand="none">—</button>
+        </span>`;
       const colorEl=row.querySelector('.track-color-swatch');
       colorEl.oninput=e=>{
         const hex=e.target.value;
@@ -3608,9 +3797,183 @@ class App{
         muteBtn.classList.toggle('muted',cfg.muted);
         row.classList.toggle('muted',cfg.muted);
       };
+      row.querySelectorAll('.track-hand-btn').forEach(btn=>{
+        btn.addEventListener('click',()=>{
+          cfg.hand=btn.dataset.hand;
+          row.querySelectorAll('.track-hand-btn').forEach(b=>b.classList.toggle('active',b===btn));
+          if(this._learn?.active)this._learnResetCursor();
+        });
+      });
       list.appendChild(row);
     });
   }
+
+  // ─── Learn Mode ──────────────────────────────────────────────────────────────
+
+  _buildLearnEvents(){
+    const l=this._learn;
+    const rawEvents=this.midiFile.events; // already parsed, [{timeMs,type,note,velocity,channel}]
+    const active=new Map();
+    const events=[];
+    for(const ev of rawEvents){
+      const k=`${ev.note}-${ev.channel}`;
+      if(ev.type==='noteon'&&ev.velocity>0){
+        active.set(k,ev);
+      } else if(ev.type==='noteoff'||(ev.type==='noteon'&&ev.velocity===0)){
+        const start=active.get(k);
+        if(start){
+          events.push({ms:start.timeMs,durationMs:Math.max(50,ev.timeMs-start.timeMs),note:ev.note,channel:ev.channel});
+          active.delete(k);
+        }
+      }
+    }
+    events.sort((a,b)=>a.ms-b.ms);
+    l._events=events;
+    l._totalMs=events.length?events[events.length-1].ms+events[events.length-1].durationMs:0;
+    // Update sidebar learn tab info
+    const fileRow=document.getElementById('learn-file-row');
+    if(fileRow)fileRow.textContent=this.midiFile.filename||'File loaded';
+    const infoEl=document.getElementById('learn-info');
+    const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+    if(infoEl)infoEl.textContent=events.length?events.length+' notes · '+fmt(l._totalMs):'No notes found';
+  }
+
+  _learnHandFilter(ch){
+    const cfg=this._channelConfig?.[ch];
+    return !!cfg&&cfg.hand!=='none'&&!cfg.muted;
+  }
+
+  _learnResetCursor(){
+    const l=this._learn;
+    l.cursorMs=0; l._pendingChord.clear();
+    if(Config.lrn.mode==='wait'){
+      const first=l._events.find(ev=>this._learnHandFilter(ev.channel));
+      if(first){
+        for(const ev of l._events){
+          if(ev.ms>=first.ms-30&&ev.ms<=first.ms+50&&this._learnHandFilter(ev.channel))
+            l._pendingChord.add(ev.note);
+        }
+      }
+    }
+  }
+
+  _learnAdvanceCursor(){
+    const l=this._learn;
+    let nextMs=null;
+    for(const ev of l._events){
+      if(ev.ms>l.cursorMs+50&&this._learnHandFilter(ev.channel)){nextMs=ev.ms;break;}
+    }
+    if(nextMs===null){
+      if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=this._frameNow;}
+      else this._learnStop();
+      return;
+    }
+    l.cursorMs=nextMs; l._pendingChord.clear();
+    for(const ev of l._events){
+      if(ev.ms>=nextMs-30&&ev.ms<=nextMs+50&&this._learnHandFilter(ev.channel))
+        l._pendingChord.add(ev.note);
+    }
+  }
+
+  _learnStop(){
+    const l=this._learn; l.active=false;
+    document.getElementById('lhud-playpause').textContent='▶';
+    document.getElementById('learn-hud').classList.remove('visible');
+  }
+
+  _onLearnNoteOn(note,ch){
+    const l=this._learn;
+    if(!l.active||Config.lrn.mode!=='wait')return;
+    if(!this._learnHandFilter(ch))return;
+    if(l._pendingChord.has(note)){
+      l._pendingChord.delete(note);
+      if(l._pendingChord.size===0)this._learnAdvanceCursor();
+    } else {
+      this._learnWrongKeys.set(note,performance.now()+450);
+    }
+  }
+
+  _learnTick(now){
+    const l=this._learn;
+    if(!l.active||Config.lrn.mode!=='freeplay')return;
+    const dt=(now-l._lastFrameWall)*Config.lrn.speed;
+    l._lastFrameWall=now;
+    if(dt>0&&dt<500)l.cursorMs+=dt; // guard against first-frame spike
+    if(l.cursorMs>=l._totalMs){
+      if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=now;}
+      else this._learnStop();
+    }
+  }
+
+  _drawLearnNotes(ctx,layout){
+    const l=this._learn;
+    if(!l._events.length||!layout)return;
+    const{pianoY}=layout;
+    const sps=Config.ns.speed_px_per_sec;
+    const ns=Config.ns;
+    const windowEnd=l.cursorMs+Config.lrn.lookahead_ms;
+    for(const ev of l._events){
+      if(ev.ms>windowEnd)break;
+      const timeTillEnd=ev.ms+ev.durationMs-l.cursorMs;
+      if(timeTillEnd<0)continue;
+      if(!this._channelConfig?.[ev.channel]||this._channelConfig[ev.channel].muted)continue;
+      const timeTillStart=ev.ms-l.cursorMs;
+      const yBottom=pianoY-Math.max(0,timeTillStart)/1000*sps;
+      const yTop=pianoY-timeTillEnd/1000*sps;
+      if(yTop>=pianoY)continue;
+      if(yBottom<=0)continue;
+      const key=getRect(layout,ev.note);
+      if(!key)continue;
+      const {r,g,b}=resolveNoteColor(ev.note,ev.channel,ns);
+      const isPending=l._pendingChord.has(ev.note);
+      const isIgnored=this._channelConfig?.[ev.channel]?.hand==='none';
+      ctx.globalAlpha=isIgnored?0.2:(isPending?0.92:0.5);
+      const clampTop=Math.max(0,yTop), clampBot=Math.min(yBottom,pianoY);
+      ctx.fillStyle=`rgb(${r},${g},${b})`;
+      ctx.beginPath();ctx.roundRect(key.x+1,clampTop,key.w-2,clampBot-clampTop,3);ctx.fill();
+      if(isPending){
+        ctx.globalAlpha=1;
+        ctx.strokeStyle=`rgb(${Math.min(255,r+90)},${Math.min(255,g+90)},${Math.min(255,b+90)})`;
+        ctx.lineWidth=2;
+        ctx.beginPath();ctx.roundRect(key.x+1,clampTop,key.w-2,clampBot-clampTop,3);ctx.stroke();
+      }
+    }
+    ctx.globalAlpha=1;
+  }
+
+  startLearn(){
+    const l=this._learn;
+    if(!l._events.length){this._showToast('Load a .mid file first');return;}
+    l.active=true;
+    l._lastFrameWall=this._frameNow;
+    if(l.cursorMs===0||l.cursorMs>=l._totalMs)this._learnResetCursor();
+    const hud=document.getElementById('learn-hud');
+    if(hud)hud.classList.add('visible');
+    const pp=document.getElementById('lhud-playpause');
+    if(pp)pp.textContent='⏸';
+    const loopBtn=document.getElementById('lhud-loop');
+    if(loopBtn)loopBtn.classList.toggle('on',!!Config.lrn.loop);
+    const spd=document.getElementById('lhud-speed');
+    const spdVal=document.getElementById('lhud-speed-val');
+    if(spd){spd.value=Math.round(Config.lrn.speed*100);if(spdVal)spdVal.textContent=spd.value+'%';}
+  }
+
+  pauseLearn(){
+    const l=this._learn; l.active=false;
+    const pp=document.getElementById('lhud-playpause');
+    if(pp)pp.textContent='▶';
+  }
+
+  resetLearn(){
+    this.pauseLearn();
+    this._learnResetCursor();
+    const l=this._learn;
+    const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+    const prog=document.getElementById('lhud-progress');
+    if(prog)prog.textContent='0:00 / '+fmt(l._totalMs);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
 
   _applyChannelConfig(){
     if(!this._channelConfig)return;
@@ -3690,6 +4053,12 @@ class App{
       this.showVisualizer();
       this.startFilePlayback();
     };
+    document.getElementById('btn-tracks-learn').onclick=()=>{
+      this._applyChannelConfig();
+      this.prevNotes.clear();this._activeNotes?.clear();
+      this.showVisualizer();
+      this.startLearn();
+    };
     // File select
     document.getElementById('btn-file-back').onclick=()=>this.showMenu();
     document.getElementById('btn-browse').onclick=()=>document.getElementById('file-input').click();
@@ -3751,7 +4120,7 @@ class App{
       {id:'notes',label:'Notes',active:true},{id:'effects',label:'FX'},{id:'fluid',label:'Fluid'},
       {id:'keyboard',label:'Keys'},{id:'display',label:'Display'},{id:'led',label:'LED'},
       {id:'audience',label:'Aud.'},{id:'themes',label:'Themes'},{id:'tracks',label:'Tracks'},
-      {id:'scenes',label:'Scenes'},
+      {id:'scenes',label:'Scenes'},{id:'learn',label:'Learn'},
     ];
     buildPanel(document.getElementById('ptab-panels'),document.getElementById('ptab-bar'),PANEL_TABS,this);
     document.querySelector('#ptab-bar button[data-t="tracks"]')
@@ -3768,6 +4137,7 @@ class App{
     this._addRecent(file.name);
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
+    this._buildLearnEvents();
     this.showTrackConfig();
     this._refreshTracksTab();
   }
@@ -3788,9 +4158,10 @@ class App{
     this._addRecent(file.name);
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
-    this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+    this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
     this._channelConfig._file=file.name;
     this._applyChannelConfig();
+    this._buildLearnEvents();
     this.prevNotes.clear();
     this.trails.active.clear();
     this.midiFile.play();
@@ -3806,7 +4177,7 @@ class App{
     const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
     const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
     if(!this._channelConfig||this._channelConfig._file!==this.midiFile.filename){
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
       this._channelConfig._file=this.midiFile.filename;
     }
     wrap.innerHTML='';
