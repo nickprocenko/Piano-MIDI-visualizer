@@ -1,5 +1,7 @@
 # AI Prompt — Generate a Preset Save File
 
+> For unified song-title/mood/energy requests with slideshow planning, use `song-request-preset.md` (canonical).
+
 Copy everything below this line and paste it into any AI (Claude, ChatGPT, Gemini, etc.), then add your request at the bottom.
 
 ---

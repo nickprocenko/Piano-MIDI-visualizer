@@ -1532,6 +1532,190 @@ YOUR REQUEST:
 [describe the colour effect you want here]`;
 }
 
+function _aiClamp(v,min,max,fallback){
+  const n=Number(v);
+  if(!Number.isFinite(n))return fallback;
+  return Math.max(min,Math.min(max,n));
+}
+function _aiClampInt(v,min,max,fallback){
+  return Math.round(_aiClamp(v,min,max,fallback));
+}
+function _aiIsObj(v){return !!v&&typeof v==='object'&&!Array.isArray(v);}
+function _aiSongRequestText(req){
+  const title=(req.song_title||'').trim();
+  const mood=(req.mood||'').trim();
+  const energy=_aiClampInt(req.energy,1,10,5);
+  const refs=(req.references||'').trim();
+  return [
+    `song_title: ${title||'[required]'}`,
+    `mood: ${mood||'[required]'}`,
+    `energy: ${energy}`,
+    `references: ${refs||'none'}`,
+  ].join('\n');
+}
+function buildSongPresetPrompt(songRequestText){
+  return `You are generating a JSON preset file for the Piano MIDI Visualiser web app.
+
+Return STRICT JSON only. No markdown fences. No comments.
+
+SONG REQUEST FORMAT (always provided exactly as):
+song_title: <text>
+mood: <text>
+energy: <1-10>
+references: <optional text, or "none">
+
+Use the request to generate one cohesive output:
+1) note/effect/fluid settings
+2) color script text in note_style.user_script
+3) slideshow plan for background media
+
+Allowed top-level keys:
+- note_style
+- keyboard_style
+- display_style
+- led_output
+- audience_control
+- note_color_themes
+- active_note_theme
+- slideshow
+
+Slideshow contract:
+"slideshow": {
+  "clear_existing": true,
+  "items": [
+    {
+      "source": "giphy",
+      "query": "search terms",
+      "limit": 1,
+      "slide_ms": 7000,
+      "fade_ms": 1200,
+      "gif_speed_pct": 100
+    },
+    {
+      "source": "url",
+      "url": "https://...",
+      "slide_ms": 6000,
+      "fade_ms": 1000
+    }
+  ]
+}
+
+Rules:
+- Prefer 3-8 slideshow items.
+- For giphy items, include source="giphy", query, and limit (1-3).
+- slide_ms must be 500-30000.
+- fade_ms must be 0-5000.
+- gif_speed_pct optional, 10-300.
+- Keep values realistic for live visuals.
+
+Example response shape:
+{
+  "note_style": { "color_mode": "script", "user_script": "..." },
+  "display_style": { "background_color": "#080200", "bg_slide_ms": 7000, "bg_fade_ms": 1200 },
+  "slideshow": { "clear_existing": true, "items": [ ... ] }
+}
+
+SONG REQUEST:
+${songRequestText||'[fill song request here]'}`;
+}
+
+function _aiSanitizeByTemplate(input, template, path, warnings){
+  if(Array.isArray(template)){
+    if(!Array.isArray(input)){warnings.push(`${path}: expected array`);return undefined;}
+    return input;
+  }
+  if(_aiIsObj(template)){
+    if(!_aiIsObj(input)){warnings.push(`${path}: expected object`);return undefined;}
+    const out={};
+    for(const [k,v] of Object.entries(input)){
+      if(!(k in template)){warnings.push(`${path}.${k}: unknown key ignored`);continue;}
+      const next=_aiSanitizeByTemplate(v,template[k],`${path}.${k}`,warnings);
+      if(next!==undefined)out[k]=next;
+    }
+    return out;
+  }
+  if(typeof template==='number'){
+    const n=Number(input);
+    if(!Number.isFinite(n)){warnings.push(`${path}: expected number`);return undefined;}
+    return n;
+  }
+  if(typeof template==='string'){
+    if(typeof input!=='string'){warnings.push(`${path}: expected string`);return undefined;}
+    return input;
+  }
+  if(typeof template==='boolean')return !!input;
+  return input;
+}
+
+function _aiClampConfigPatch(patch){
+  if(!_aiIsObj(patch))return;
+  const ns=patch.note_style||{};
+  const ds=patch.display_style||{};
+  const ks=patch.keyboard_style||{};
+  if('speed_px_per_sec' in ns)ns.speed_px_per_sec=_aiClampInt(ns.speed_px_per_sec,80,1200,420);
+  if('fluid_intensity' in ns)ns.fluid_intensity=_aiClampInt(ns.fluid_intensity,0,200,80);
+  if('fluid_curl' in ns)ns.fluid_curl=_aiClampInt(ns.fluid_curl,0,100,30);
+  if('fluid_density_dissipation' in ns)ns.fluid_density_dissipation=_aiClampInt(ns.fluid_density_dissipation,1,100,15);
+  if('fluid_velocity_dissipation' in ns)ns.fluid_velocity_dissipation=_aiClampInt(ns.fluid_velocity_dissipation,1,40,7);
+  if('fluid_pressure' in ns)ns.fluid_pressure=_aiClampInt(ns.fluid_pressure,0,100,80);
+  if('fluid_splat_size' in ns)ns.fluid_splat_size=_aiClampInt(ns.fluid_splat_size,1,100,20);
+  if('fluid_opacity' in ns)ns.fluid_opacity=_aiClampInt(ns.fluid_opacity,0,100,80);
+  if('fluid_color_strength' in ns)ns.fluid_color_strength=_aiClampInt(ns.fluid_color_strength,0,200,100);
+  if('bg_slide_ms' in ds)ds.bg_slide_ms=_aiClampInt(ds.bg_slide_ms,500,30000,5000);
+  if('bg_fade_ms' in ds)ds.bg_fade_ms=_aiClampInt(ds.bg_fade_ms,0,5000,1000);
+  if('gif_speed_percent' in ds)ds.gif_speed_percent=_aiClampInt(ds.gif_speed_percent,10,300,100);
+  if('height_percent' in ks)ks.height_percent=_aiClampInt(ks.height_percent,8,45,18);
+  if('width_percent' in ks)ks.width_percent=_aiClampInt(ks.width_percent,60,100,100);
+}
+
+function _aiNormalizeSlideshow(raw,warnings){
+  if(raw==null)return null;
+  const src=Array.isArray(raw)?{items:raw}:raw;
+  if(!_aiIsObj(src)){warnings.push('slideshow: expected object');return null;}
+  const out={clear_existing:src.clear_existing!==false,items:[]};
+  const items=Array.isArray(src.items)?src.items:[];
+  if(!items.length)warnings.push('slideshow.items: empty or missing');
+  for(let i=0;i<items.length;i++){
+    const it=items[i];
+    if(!_aiIsObj(it)){warnings.push(`slideshow.items[${i}]: expected object`);continue;}
+    const source=((it.source||'').toString().trim().toLowerCase()||((it.url&&'url')||'giphy'));
+    const item={
+      source:source==='url'?'url':'giphy',
+      query:(it.query||it.giphy_query||it.keyword||'').toString().trim(),
+      url:(it.url||'').toString().trim(),
+      limit:_aiClampInt(it.limit,1,3,1),
+      slide_ms:_aiClampInt(it.slide_ms,500,30000,Math.max(500,Config.ds.bg_slide_ms??5000)),
+      fade_ms:_aiClampInt(it.fade_ms,0,5000,Math.max(0,Config.ds.bg_fade_ms??1000)),
+      gif_speed_pct:('gif_speed_pct' in it)?_aiClampInt(it.gif_speed_pct,10,300,100):undefined,
+      name:(it.name||'').toString().trim(),
+    };
+    if(item.source==='url'&&!item.url){warnings.push(`slideshow.items[${i}]: url missing`);continue;}
+    if(item.source==='giphy'&&!item.query){warnings.push(`slideshow.items[${i}]: query missing`);continue;}
+    out.items.push(item);
+  }
+  return out;
+}
+
+function _aiParseJsonInput(text){
+  const raw=(text||'').trim();
+  if(!raw)throw new Error('JSON is empty');
+  const cleaned=raw.replace(/^```(?:json)?/i,'').replace(/```$/,'').trim();
+  return JSON.parse(cleaned);
+}
+
+function _aiAnalyzePresetPayload(payload){
+  const warnings=[];
+  const patch=_aiSanitizeByTemplate(payload,Config._d,'root',warnings)||{};
+  _aiClampConfigPatch(patch);
+  const slideshow=_aiNormalizeSlideshow(payload?.slideshow,warnings);
+  const summary=[
+    `settings keys: ${Object.keys(patch).length||0}`,
+    `slideshow items: ${slideshow?.items?.length||0}`,
+    `warnings: ${warnings.length}`,
+  ].join(' · ');
+  return{patch,slideshow,warnings,summary};
+}
+
 function runUserScript(code){
   const notes=new Array(128).fill(null);
   const channelColors=new Array(16).fill(null);
@@ -1911,7 +2095,26 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div style="display:flex;gap:8px;flex-wrap:wrap">
 <button class="action-btn" id="btn-cfg-export">Export…</button>
 <label class="action-btn" style="cursor:pointer">Import… <input type="file" id="inp-cfg-import" accept=".json" style="display:none"></label>
-</div></div>`,
+</div></div>
+<div class="section"><h2>Song Request → AI JSON</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:8px">Use this format for one-shot song requests that drive notes, fluid, and slideshow together.</p>
+<div class="row"><label>Song Title</label><input type="text" id="ai-song-title" placeholder="Light My Fire" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
+<div class="row"><label>Mood</label><input type="text" id="ai-song-mood" placeholder="psychedelic, fiery, dramatic" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
+<div class="row"><label>Energy (1-10)</label><input type="number" id="ai-song-energy" value="7" min="1" max="10" style="width:72px;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
+<div class="row" style="align-items:flex-start"><label>References</label><textarea id="ai-song-refs" rows="2" placeholder="Optional visual references, era, instruments, vibe..." style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:inherit;font-size:12px"></textarea></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+<button class="action-btn" id="btn-ai-copy-prompt">Copy Song Prompt</button>
+</div>
+<div style="margin-top:8px">
+<textarea id="ai-json-input" rows="8" placeholder='Paste AI JSON output here, then click Preview.' style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px;border-radius:4px;font-family:monospace;font-size:11px;resize:vertical"></textarea>
+</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+<button class="action-btn" id="btn-ai-preview">Preview</button>
+<button class="action-btn" id="btn-ai-apply">Apply JSON</button>
+</div>
+<div id="ai-preview-summary" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+<pre id="ai-preview-warnings" style="display:none;margin-top:6px;max-height:120px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px;font-size:10px;white-space:pre-wrap"></pre>
+</div>`,
     hardware:`<div class="section"><h2>Sustain Pedal (CC 64)</h2>
 <div class="row"><label>Enable Piano Sustain</label>
 <div class="toggle-btn${hw.sustain_enabled?' on':''}" id="btn-hw-sustain">${hw.sustain_enabled?'On':'Off'}</div></div>
@@ -2598,18 +2801,29 @@ function wireProfiles(root){
   renderProfiles();
 }
 
-async function fetchUrlAsBg(url, app) {
+function applyBgEntryMeta(entry,meta){
+  if(!entry||!meta)return;
+  entry.slide_ms=_aiClampInt(meta.slide_ms,500,30000,entry.slide_ms??Math.max(500,Config.ds.bg_slide_ms??5000));
+  entry.fade_ms=_aiClampInt(meta.fade_ms,0,5000,entry.fade_ms??Math.max(0,Config.ds.bg_fade_ms??1000));
+  if(meta.gif_speed_pct!=null)entry.gif_speed_pct=_aiClampInt(meta.gif_speed_pct,10,300,entry.gif_speed_pct??100);
+}
+async function fetchUrlAsBg(url, app, meta={}) {
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
     if (!blob.type.startsWith('image/')) throw new Error('Not an image');
     const name = url.split('/').pop().split('?')[0] || 'image';
-    app.addBgImages([new File([blob], name, { type: blob.type })]);
-    return true;
+    const added=app.addBgImages([new File([blob], name, { type: blob.type })])||[];
+    const entry=added[0];
+    applyBgEntryMeta(entry,meta);
+    if(meta?.name)entry.name=meta.name;
+    if(entry&&entry.isGif&&meta?.gif_speed_pct!=null)entry.gif_speed_pct=_aiClampInt(meta.gif_speed_pct,10,300,entry.gif_speed_pct??100);
+    app._refreshBgThumbs?.();
+    return {ok:true,entry};
   } catch (e) {
     app._showToast('Could not load image: ' + e.message);
-    return false;
+    return {ok:false,error:e};
   }
 }
 
@@ -2620,6 +2834,35 @@ async function searchGiphy(query, apiKey, limit = 24) {
   if (!res.ok) throw new Error(`Giphy API ${res.status}`);
   const json = await res.json();
   return json.data;
+}
+
+async function applyAiSlideshowPlan(plan, app, warnings){
+  if(!plan?.items?.length)return;
+  if(plan.clear_existing)app.clearBgImages();
+  for(const item of plan.items){
+    if(item.source==='url'){
+      const r=await fetchUrlAsBg(item.url,app,item);
+      if(!r.ok)warnings.push(`slideshow url failed: ${item.url}`);
+      continue;
+    }
+    const key=(Config.ds.giphy_api_key||'').trim();
+    if(!key){warnings.push(`missing Giphy API key for query "${item.query}"`);continue;}
+    try{
+      const hits=await searchGiphy(item.query,key,item.limit||1);
+      if(!hits.length){warnings.push(`no Giphy results for "${item.query}"`);continue;}
+      const take=Math.max(1,Math.min(item.limit||1,hits.length));
+      for(let i=0;i<take;i++){
+        const h=hits[i];
+        const full=h.images?.downsized?.url||h.images?.original?.url||h.images?.fixed_height?.url||'';
+        if(!full){warnings.push(`missing media URL for "${item.query}"`);continue;}
+        const name=item.name||h.title||`${item.query} ${i+1}`;
+        const r=await fetchUrlAsBg(full,app,{...item,name});
+        if(!r.ok)warnings.push(`failed to fetch Giphy media for "${item.query}"`);
+      }
+    }catch(err){
+      warnings.push(`Giphy query failed "${item.query}": ${err.message}`);
+    }
+  }
 }
 
 function wireSettings(root, app){
@@ -2876,16 +3119,84 @@ function wireSettings(root, app){
   if(inpImport) inpImport.addEventListener('change',e=>{
     const f=e.target.files[0]; if(!f)return;
     const reader=new FileReader();
-    reader.onload=ev=>{
+    reader.onload=async ev=>{
       try{
         const loaded=JSON.parse(ev.target.result);
         // Deep-merge loaded data onto defaults so missing keys get filled
         Config.data=Config._merge(JSON.parse(JSON.stringify(Config._d)),loaded);
+        const importWarnings=[];
+        const importSlideshow=_aiNormalizeSlideshow(loaded?.slideshow,importWarnings);
+        await applyAiSlideshowPlan(importSlideshow,app,importWarnings);
+        if(importWarnings.length)console.warn('Import warnings:',importWarnings);
         Config.save();
         location.reload();
       }catch(err){alert('Invalid save file: '+err.message);}
     };
     reader.readAsText(f);
+  });
+  // Song Request → AI JSON
+  const aiTitle=root.querySelector('#ai-song-title');
+  const aiMood=root.querySelector('#ai-song-mood');
+  const aiEnergy=root.querySelector('#ai-song-energy');
+  const aiRefs=root.querySelector('#ai-song-refs');
+  const aiCopyPromptBtn=root.querySelector('#btn-ai-copy-prompt');
+  const aiJsonInput=root.querySelector('#ai-json-input');
+  const aiPreviewBtn=root.querySelector('#btn-ai-preview');
+  const aiApplyBtn=root.querySelector('#btn-ai-apply');
+  const aiSummaryEl=root.querySelector('#ai-preview-summary');
+  const aiWarnEl=root.querySelector('#ai-preview-warnings');
+  let aiPreviewState=null;
+  const getSongReq=()=>({
+    song_title:(aiTitle?.value||'').trim(),
+    mood:(aiMood?.value||'').trim(),
+    energy:_aiClampInt(aiEnergy?.value,1,10,5),
+    references:(aiRefs?.value||'').trim(),
+  });
+  const renderAiWarnings=(warnings)=>{
+    if(!aiWarnEl)return;
+    if(!warnings?.length){aiWarnEl.style.display='none';aiWarnEl.textContent='';return;}
+    aiWarnEl.style.display='block';
+    aiWarnEl.textContent=warnings.map(w=>`• ${w}`).join('\n');
+  };
+  const previewAiPayload=()=>{
+    try{
+      const payload=_aiParseJsonInput(aiJsonInput?.value||'');
+      const info=_aiAnalyzePresetPayload(payload);
+      aiPreviewState=info;
+      if(aiSummaryEl)aiSummaryEl.textContent='Preview: '+info.summary;
+      renderAiWarnings(info.warnings);
+      return info;
+    }catch(err){
+      aiPreviewState=null;
+      if(aiSummaryEl)aiSummaryEl.textContent='Preview failed: '+err.message;
+      renderAiWarnings([err.message]);
+      return null;
+    }
+  };
+  if(aiCopyPromptBtn)aiCopyPromptBtn.addEventListener('click',()=>{
+    const reqText=_aiSongRequestText(getSongReq());
+    navigator.clipboard.writeText(buildSongPresetPrompt(reqText)).then(()=>{
+      app._showToast?.('Song prompt copied');
+    });
+  });
+  if(aiPreviewBtn)aiPreviewBtn.addEventListener('click',()=>{previewAiPayload();});
+  if(aiApplyBtn)aiApplyBtn.addEventListener('click',async()=>{
+    const info=aiPreviewState||previewAiPayload();
+    if(!info)return;
+    const rootClone=JSON.parse(JSON.stringify(Config._d));
+    Config.data=Config._merge(rootClone,Config.data);
+    Config.data=Config._merge(Config.data,info.patch);
+    const applyWarnings=[...info.warnings];
+    await applyAiSlideshowPlan(info.slideshow,app,applyWarnings);
+    Config.save();
+    app.fluid.setEnabled(Config.ns.effect_fluid_enabled);
+    app.fluid.updateConfig(Config.ns);
+    app.rebuildLayout=true;
+    app._refreshBgThumbs?.();
+    app.rebuildSettingsPanels();
+    if(aiSummaryEl)aiSummaryEl.textContent=`Applied. ${Object.keys(info.patch||{}).length} root setting groups updated; ${info.slideshow?.items?.length||0} slideshow intents processed.`;
+    renderAiWarnings(applyWarnings);
+    app._showToast?.('AI preset applied');
   });
   // Note color theme dropdowns — Effects and Fluid tabs use the dropdown selector
   const ncRefreshers=[];
@@ -3459,10 +3770,12 @@ class App{
   }
   setBgImages(files){ this.clearBgImages(); this.addBgImages(files); }
   addBgImages(files){
+    const added=[];
     for(const f of files)
-      this._bgImages.push(this._makeBgEntry(f));
+      {const e=this._makeBgEntry(f);this._bgImages.push(e);added.push(e);}
     if(!this._bgSlideTimer&&this._bgImages.length>0)this._startBgSlide();
     this._refreshBgThumbs();
+    return added;
   }
   removeBgImage(index){
     const e=this._bgImages[index]; if(!e)return;

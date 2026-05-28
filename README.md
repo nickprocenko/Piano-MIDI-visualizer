@@ -191,8 +191,40 @@ Behavior:
 
 - `script.md` — generates a colour script with the full API reference embedded
 - `preset.md` — generates a JSON settings preset with the full schema embedded
+- `song-request-preset.md` — canonical song request → preset JSON (note/effect/fluid + slideshow plan)
 
 Click **Copy AI Prompt** in the script editor to copy a prompt that already includes your current script for the AI to iterate on.
+
+### Song Request → AI JSON workflow
+
+In **Settings → Themes → Song Request → AI JSON**:
+1. Fill `Song Title`, `Mood`, `Energy (1-10)`, and optional `References`.
+2. Click **Copy Song Prompt** and paste into your AI.
+3. Paste AI JSON output into the textbox.
+4. Click **Preview** (shows what will be applied + warnings).
+5. Click **Apply JSON**.
+
+The AI JSON supports a slideshow media plan:
+
+```json
+{
+  "display_style": { "bg_slide_ms": 7000, "bg_fade_ms": 1200 },
+  "slideshow": {
+    "clear_existing": true,
+    "items": [
+      { "source": "giphy", "query": "light my fire psychedelic flames", "limit": 2, "slide_ms": 7000, "fade_ms": 1200, "gif_speed_pct": 110 },
+      { "source": "url", "url": "https://...", "slide_ms": 6000, "fade_ms": 1000 }
+    ]
+  }
+}
+```
+
+If `source` is `"giphy"`, the app resolves media using your configured Giphy API key and auto-populates slideshow entries.
+
+Rollout status:
+- **Phase 1**: prompt + docs + manual paste/apply workflow ✅
+- **Phase 2**: slideshow Giphy resolution from JSON import/apply ✅
+- **Phase 3**: direct in-app AI API calls (optional, not implemented yet)
 
 ---
 

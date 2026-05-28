@@ -19,5 +19,8 @@ The `prompts/` folder contains ready-made prompts you can paste into any AI (Cla
 |--------|-----------|
 | `prompts/script.md` | JavaScript colour script for the Script editor |
 | `prompts/preset.md` | JSON save file importable via Import Settings |
+| `prompts/song-request-preset.md` | **Canonical** song request → preset JSON (notes + fluid + slideshow plan) |
 
-The app also has a **Copy AI Prompt** button directly in the Script editor (Notes → Color Mode → Script) that copies a prompt pre-loaded with the current script and full API docs.
+The app also has:
+- **Copy AI Prompt** in the Script editor (Notes → Color Mode → Script), and
+- **Copy Song Prompt** in Themes → Song Request → AI JSON for unified song-title/mood/energy request flow.
