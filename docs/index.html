@@ -3146,11 +3146,14 @@ class NotationRenderer{
   }
   render(bars,meta){
     if(typeof Vex==='undefined'||!this._wrap)return;
-    // Clear old SVG
     const old=this._wrap.querySelector('svg');
     if(old)old.remove();
+    this._wrap.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
+    this._ready=false;
     if(!bars||!bars.length)return;
     const{VF}=Vex;
+    if(!VF?.Renderer){console.error('VexFlow VF namespace missing');return;}
+    try{
     const stripH=document.getElementById('notation-strip').offsetHeight||170;
     const staveH=Math.floor((stripH-20)/2); // rough per-stave height
     const PX_PER_BEAT=72;
@@ -3232,6 +3235,14 @@ class NotationRenderer{
     this._totalMs=totalMs||1;
     this._pxPerMs=totalW/this._totalMs;
     this._ready=true;
+    }catch(err){
+      console.error('VexFlow render failed:',err);
+      const msg=document.createElement('div');
+      msg.className='vex-loading-msg';
+      msg.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,100,100,.7);font-size:12px;pointer-events:none';
+      msg.textContent='Sheet music unavailable';
+      this._wrap.appendChild(msg);
+    }
   }
   scrollTo(cursorMs){
     if(!this._ready||!this._svgEl)return;
@@ -3971,12 +3982,20 @@ class App{
     const beatsPerBar=meta?.timeSig?.num||4;
     const barDurationMs=beatsPerBar*microsPerBeat/1000;
     const totalMs=this._learn._totalMs||1;
-    const numBars=Math.max(1,Math.ceil(totalMs/barDurationMs));
-    // Use hand assignments: right → treble, left → bass. If none assigned, treble=all.
+    const numBars=Math.min(400,Math.max(1,Math.ceil(totalMs/barDurationMs)));
+    // Use hand assignments if configured; otherwise auto-split at middle C.
     const cfg=this._channelConfig;
     const hasLeftHand=cfg&&Array.from({length:16},(_,i)=>i).some(i=>cfg[i]?.hand==='left'&&!cfg[i]?.muted);
-    const trebleEvents=events.filter(e=>!cfg||!cfg[e.channel]?.muted&&cfg[e.channel]?.hand!=='left');
-    const bassEvents=hasLeftHand?events.filter(e=>cfg&&cfg[e.channel]?.hand==='left'&&!cfg[e.channel]?.muted):[];
+    const notMuted=e=>e.channel!==9&&(!cfg||!cfg[e.channel]?.muted);
+    let trebleEvents,bassEvents;
+    if(hasLeftHand){
+      trebleEvents=events.filter(e=>notMuted(e)&&cfg[e.channel]?.hand!=='left');
+      bassEvents=events.filter(e=>notMuted(e)&&cfg[e.channel]?.hand==='left');
+    }else{
+      // Auto-split: notes ≥ MIDI 60 (middle C) → treble, below → bass
+      trebleEvents=events.filter(e=>notMuted(e)&&e.note>=60);
+      bassEvents=events.filter(e=>notMuted(e)&&e.note<60);
+    }
     const groupIntoBar=(evts,barIdx)=>{
       const barStart=barIdx*barDurationMs;
       const barEnd=barStart+barDurationMs;
