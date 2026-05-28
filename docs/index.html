@@ -3224,7 +3224,7 @@ class App{
     this.rebuildLayout=false;
     this._bgImages=[];   // [{url:string, name:string, isGif:bool}]
     this._mode='freeplay'; // 'freeplay' or 'file'
-    this._learn={active:false,cursorMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set()};
+    this._learn={active:false,cursorMs:0,_currentNoteMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set()};
     this._learnWrongKeys=new Map();
     this._vizActive=false;
     this._panelOpen=false;
@@ -3365,7 +3365,7 @@ class App{
       const l=this._learn;
       const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
       const prog=document.getElementById('lhud-progress');
-      if(prog)prog.textContent=fmt(l.cursorMs)+' / '+fmt(l._totalMs);
+      if(prog)prog.textContent=fmt(Math.max(0,l._currentNoteMs))+' / '+fmt(l._totalMs);
     }
   }
 
@@ -3859,14 +3859,20 @@ class App{
 
   _learnResetCursor(){
     const l=this._learn;
-    l.cursorMs=0; l._pendingChord.clear();
-    if(Config.lrn.mode==='wait'){
-      const first=l._events.find(ev=>this._learnHandFilter(ev.channel));
-      if(first){
-        for(const ev of l._events){
-          if(ev.ms>=first.ms-30&&ev.ms<=first.ms+50&&this._learnHandFilter(ev.channel))
-            l._pendingChord.add(ev.note);
-        }
+    l._pendingChord.clear();
+    const sps=Config.ns.speed_px_per_sec;
+    // Time for a note to travel from top of canvas to piano — used as scroll lead-in
+    const leadInMs=this.layout?this.layout.pianoY/sps*1000:3000;
+    const first=l._events.find(ev=>this._learnHandFilter(ev.channel));
+    l._currentNoteMs=first?first.ms:0;
+    // Freeplay: start before first note so it enters from the top of canvas and scrolls down.
+    // Wait: start at 50 % of lead-in so pending note is visible at mid-canvas, not at piano.
+    const offset=Config.lrn.mode==='wait'?leadInMs*0.5:leadInMs;
+    l.cursorMs=l._currentNoteMs-offset;
+    if(Config.lrn.mode==='wait'&&first){
+      for(const ev of l._events){
+        if(ev.ms>=first.ms-30&&ev.ms<=first.ms+50&&this._learnHandFilter(ev.channel))
+          l._pendingChord.add(ev.note);
       }
     }
   }
@@ -3874,15 +3880,20 @@ class App{
   _learnAdvanceCursor(){
     const l=this._learn;
     let nextMs=null;
+    // Search from the actual note position, not the display cursor offset
     for(const ev of l._events){
-      if(ev.ms>l.cursorMs+50&&this._learnHandFilter(ev.channel)){nextMs=ev.ms;break;}
+      if(ev.ms>l._currentNoteMs+50&&this._learnHandFilter(ev.channel)){nextMs=ev.ms;break;}
     }
     if(nextMs===null){
       if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=this._frameNow;}
       else this._learnStop();
       return;
     }
-    l.cursorMs=nextMs; l._pendingChord.clear();
+    l._currentNoteMs=nextMs;
+    const sps=Config.ns.speed_px_per_sec;
+    const leadInMs=this.layout?this.layout.pianoY/sps*1000:3000;
+    l.cursorMs=nextMs-leadInMs*0.5; // position next pending note at mid-canvas
+    l._pendingChord.clear();
     for(const ev of l._events){
       if(ev.ms>=nextMs-30&&ev.ms<=nextMs+50&&this._learnHandFilter(ev.channel))
         l._pendingChord.add(ev.note);
@@ -3912,7 +3923,7 @@ class App{
     if(!l.active||Config.lrn.mode!=='freeplay')return;
     const dt=(now-l._lastFrameWall)*Config.lrn.speed;
     l._lastFrameWall=now;
-    if(dt>0&&dt<500)l.cursorMs+=dt; // guard against first-frame spike
+    if(dt>0&&dt<500){l.cursorMs+=dt;l._currentNoteMs=l.cursorMs;}
     if(l.cursorMs>=l._totalMs){
       if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=now;}
       else this._learnStop();
@@ -3960,7 +3971,7 @@ class App{
     if(!l._events.length){this._showToast('Load a .mid file first');return;}
     l.active=true;
     l._lastFrameWall=this._frameNow;
-    if(l.cursorMs===0||l.cursorMs>=l._totalMs)this._learnResetCursor();
+    if(l._currentNoteMs<=0||l._currentNoteMs>=l._totalMs)this._learnResetCursor();
     const hud=document.getElementById('learn-hud');
     if(hud)hud.classList.add('visible');
     const pp=document.getElementById('lhud-playpause');
