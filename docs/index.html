@@ -1957,6 +1957,11 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <span style="font-size:11px;color:var(--muted);margin-left:4px">${typeof Vex==='undefined'?'(loading…)':''}</span>
 </div>
 <div class="row" style="gap:6px">
+<button class="action-btn" id="btn-xml-browse">Load MusicXML…</button>
+<input type="file" id="xml-file-input" accept=".xml,.musicxml" style="display:none">
+</div>
+<div class="row" style="font-size:11px;color:var(--muted)" id="xml-file-row">No MusicXML loaded</div>
+<div class="row" style="gap:6px">
 <button class="action-btn" id="btn-learn-start">▶ Start</button>
 <button class="action-btn" id="btn-learn-reset">↺ Reset</button>
 </div>
@@ -2992,6 +2997,13 @@ function wireSettings(root, app){
     app._updateNotationVisibility();
     schedSave();
   });
+  const xmlFileInput=root.querySelector('#xml-file-input');
+  root.querySelector('#btn-xml-browse')?.addEventListener('click',()=>xmlFileInput?.click());
+  xmlFileInput?.addEventListener('change',e=>{
+    const f=e.target.files[0]; if(!f)return;
+    app._loadMusicXmlFile(f);
+    e.target.value='';
+  });
 
   // ── Learn HUD (wired once; always present in DOM) ──
   const hud=document.getElementById('learn-hud');
@@ -3107,6 +3119,75 @@ class AudioSynth{
   }
 }
 
+// ─────────────────── MusicXML parser ────────────────────
+function _parseMusicXmlDoc(doc){
+  const STEP_SEMI={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+  const firstPart=doc.querySelector('part');
+  const firstMeasure=firstPart?.querySelector('measure');
+  const firstAttrib=firstMeasure?.querySelector('attributes');
+  let globalDivs=parseInt(firstAttrib?.querySelector('divisions')?.textContent||'4');
+  const beats=parseInt(firstAttrib?.querySelector('time beats')?.textContent||'4');
+  const beatType=parseInt(firstAttrib?.querySelector('time beat-type')?.textContent||'4');
+  const fifths=parseInt(firstAttrib?.querySelector('key fifths')?.textContent||'0');
+  let tempoBpm=120;
+  const soundEl=firstMeasure?.querySelector('direction sound[tempo]')||doc.querySelector('sound[tempo]');
+  if(soundEl)tempoBpm=parseFloat(soundEl.getAttribute('tempo'));
+  const microsPerBeat=Math.round(60000000/tempoBpm);
+  const meta={
+    tempoMap:[{tick:0,microsPerBeat}],
+    timeSig:{num:beats,denom:beatType},
+    keySig:{sharps:fifths,mode:0}
+  };
+  const barDurationMs=beats*(microsPerBeat/1000);
+  const parsePart=(part)=>{
+    const measures=[];
+    let divs=globalDivs;
+    let usBeat=microsPerBeat;
+    Array.from(part.querySelectorAll('measure')).forEach(measure=>{
+      const mDiv=measure.querySelector('attributes divisions');
+      if(mDiv)divs=parseInt(mDiv.textContent);
+      const mTempo=measure.querySelector('direction sound[tempo],sound[tempo]');
+      if(mTempo)usBeat=Math.round(60000000/parseFloat(mTempo.getAttribute('tempo')));
+      const chords=[];
+      let tick=0; let lastDur=0; let first=true;
+      Array.from(measure.querySelectorAll('note')).forEach(noteEl=>{
+        const isChord=!!noteEl.querySelector('chord');
+        const isRest=!!noteEl.querySelector('rest');
+        const dur=parseInt(noteEl.querySelector('duration')?.textContent||'0');
+        if(!isChord){if(!first)tick+=lastDur; first=false; lastDur=dur;}
+        if(isRest)return;
+        const pitchEl=noteEl.querySelector('pitch');
+        if(!pitchEl)return;
+        const step=pitchEl.querySelector('step')?.textContent||'C';
+        const alter=Math.round(parseFloat(pitchEl.querySelector('alter')?.textContent||'0'));
+        const octave=parseInt(pitchEl.querySelector('octave')?.textContent||'4');
+        const midi=Math.max(21,Math.min(108,(octave+1)*12+(STEP_SEMI[step]||0)+alter));
+        const durationMs=Math.max(50,dur/divs*(usBeat/1000));
+        if(isChord&&chords.length>0){chords[chords.length-1].notes.push(midi);}
+        else{chords.push({notes:[midi],durationMs});}
+      });
+      measures.push(chords);
+    });
+    return measures;
+  };
+  const parts=Array.from(doc.querySelectorAll('part'));
+  const getClef=p=>p.querySelector('measure attributes clef sign')?.textContent==='F'?'bass':'treble';
+  const treblePart=parts.find(p=>getClef(p)==='treble')||parts[0]||null;
+  const bassPart=parts.find(p=>p!==treblePart&&getClef(p)==='bass')||(parts.length>1?parts.find(p=>p!==treblePart):null);
+  const trebleMeasures=treblePart?parsePart(treblePart):[];
+  const bassMeasures=bassPart?parsePart(bassPart):[];
+  const numBars=Math.min(400,Math.max(trebleMeasures.length,bassMeasures.length));
+  const bars=[];
+  for(let b=0;b<numBars;b++){
+    bars.push({
+      startMs:b*barDurationMs,
+      treble:trebleMeasures[b]?.length?trebleMeasures[b]:null,
+      bass:bassMeasures[b]?.length?bassMeasures[b]:null
+    });
+  }
+  return{bars,meta};
+}
+
 // ─────────────────── Notation helpers ───────────────────
 const SHARP_NAMES=['c','c#','d','d#','e','f','f#','g','g#','a','a#','b'];
 const FLAT_NAMES=['c','db','d','eb','e','f','gb','g','ab','a','bb','b'];
@@ -3146,11 +3227,14 @@ class NotationRenderer{
   }
   render(bars,meta){
     if(typeof Vex==='undefined'||!this._wrap)return;
-    // Clear old SVG
     const old=this._wrap.querySelector('svg');
     if(old)old.remove();
+    this._wrap.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
+    this._ready=false;
     if(!bars||!bars.length)return;
     const{VF}=Vex;
+    if(!VF?.Renderer){console.error('VexFlow VF namespace missing');return;}
+    try{
     const stripH=document.getElementById('notation-strip').offsetHeight||170;
     const staveH=Math.floor((stripH-20)/2); // rough per-stave height
     const PX_PER_BEAT=72;
@@ -3232,6 +3316,14 @@ class NotationRenderer{
     this._totalMs=totalMs||1;
     this._pxPerMs=totalW/this._totalMs;
     this._ready=true;
+    }catch(err){
+      console.error('VexFlow render failed:',err);
+      const msg=document.createElement('div');
+      msg.className='vex-loading-msg';
+      msg.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,100,100,.7);font-size:12px;pointer-events:none';
+      msg.textContent='Sheet music unavailable';
+      this._wrap.appendChild(msg);
+    }
   }
   scrollTo(cursorMs){
     if(!this._ready||!this._svgEl)return;
@@ -3306,6 +3398,8 @@ class App{
     this._learn={active:false,cursorMs:0,_currentNoteMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set()};
     this._learnWrongKeys=new Map();
     this._notationRenderer=new NotationRenderer();
+    this._musicXmlBars=null;
+    this._musicXmlMeta=null;
     this._vizActive=false;
     this._panelOpen=false;
     this._selectedPortId='keyboard';
@@ -3964,6 +4058,10 @@ class App{
   _buildNotation(){
     if(typeof Vex==='undefined')return;
     if(!Config.lrn.notation)return;
+    if(this._musicXmlBars){
+      this._notationRenderer.render(this._musicXmlBars,this._musicXmlMeta);
+      return;
+    }
     const meta=this.midiFile?.meta;
     const events=this._learn?._events;
     if(!events||!events.length)return;
@@ -3971,12 +4069,20 @@ class App{
     const beatsPerBar=meta?.timeSig?.num||4;
     const barDurationMs=beatsPerBar*microsPerBeat/1000;
     const totalMs=this._learn._totalMs||1;
-    const numBars=Math.max(1,Math.ceil(totalMs/barDurationMs));
-    // Use hand assignments: right → treble, left → bass. If none assigned, treble=all.
+    const numBars=Math.min(400,Math.max(1,Math.ceil(totalMs/barDurationMs)));
+    // Use hand assignments if configured; otherwise auto-split at middle C.
     const cfg=this._channelConfig;
     const hasLeftHand=cfg&&Array.from({length:16},(_,i)=>i).some(i=>cfg[i]?.hand==='left'&&!cfg[i]?.muted);
-    const trebleEvents=events.filter(e=>!cfg||!cfg[e.channel]?.muted&&cfg[e.channel]?.hand!=='left');
-    const bassEvents=hasLeftHand?events.filter(e=>cfg&&cfg[e.channel]?.hand==='left'&&!cfg[e.channel]?.muted):[];
+    const notMuted=e=>e.channel!==9&&(!cfg||!cfg[e.channel]?.muted);
+    let trebleEvents,bassEvents;
+    if(hasLeftHand){
+      trebleEvents=events.filter(e=>notMuted(e)&&cfg[e.channel]?.hand!=='left');
+      bassEvents=events.filter(e=>notMuted(e)&&cfg[e.channel]?.hand==='left');
+    }else{
+      // Auto-split: notes ≥ MIDI 60 (middle C) → treble, below → bass
+      trebleEvents=events.filter(e=>notMuted(e)&&e.note>=60);
+      bassEvents=events.filter(e=>notMuted(e)&&e.note<60);
+    }
     const groupIntoBar=(evts,barIdx)=>{
       const barStart=barIdx*barDurationMs;
       const barEnd=barStart+barDurationMs;
@@ -4382,8 +4488,33 @@ class App{
     this._buildLearnEvents();
     this._applyChannelConfig();
     this._notationRenderer.destroy();
+    this._musicXmlBars=null; this._musicXmlMeta=null;
+    const xmlRow=document.getElementById('xml-file-row');
+    if(xmlRow)xmlRow.textContent='No MusicXML loaded';
     this._refreshTracksTab();
     this._showToast(file.name);
+  }
+
+  async _loadMusicXmlFile(file){
+    try{
+      const text=await file.text();
+      const doc=new DOMParser().parseFromString(text,'application/xml');
+      if(doc.querySelector('parsererror')){this._showToast('Invalid XML file');return;}
+      const{bars,meta}=_parseMusicXmlDoc(doc);
+      if(!bars.length){this._showToast('No notes found in MusicXML');return;}
+      this._musicXmlBars=bars;
+      this._musicXmlMeta=meta;
+      const row=document.getElementById('xml-file-row');
+      if(row)row.textContent=file.name;
+      this._showToast(file.name+' loaded');
+      if(Config.lrn.notation&&this._learn?.active){
+        this._notationRenderer.destroy();
+        this._buildNotation();
+      }
+    }catch(e){
+      console.error('MusicXML load error:',e);
+      this._showToast('Failed to load MusicXML');
+    }
   }
 
   startFilePlayback(){
@@ -4407,6 +4538,7 @@ class App{
     this._applyChannelConfig();
     this._buildLearnEvents();
     this._notationRenderer.destroy();
+    this._musicXmlBars=null; this._musicXmlMeta=null;
     this.prevNotes.clear();
     this.trails.active.clear();
     this.midiFile.play();
