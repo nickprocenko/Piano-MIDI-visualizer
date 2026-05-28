@@ -284,9 +284,6 @@ const Config = {
       press_smoke_amount_percent:100, decay_speed:80, decay_value:20,
       color_r:0, color_g:230, color_b:230,
       interior_r:120, interior_g:255, interior_b:255,
-      split_enabled:0, split_note:60,
-      split_upper_r:0, split_upper_g:230, split_upper_b:230,
-      split_lower_r:255, split_lower_g:0, split_lower_b:128,
       color_mode:'solid', note_colors:null, user_script:'',
       effect_glow_enabled:1, effect_highlight_enabled:1,
       effect_sparks_enabled:1, effect_smoke_enabled:1,
@@ -298,13 +295,6 @@ const Config = {
       fluid_density_dissipation:15, fluid_velocity_dissipation:7, fluid_pressure:80,
       fluid_splat_size:20, fluid_opacity:80, fluid_color_strength:100,
       fluid_own_color:0, fluid_own_r:0, fluid_own_g:230, fluid_own_b:230,
-      split_enabled:0, split_point:60,
-      split_upper_inner_r:255, split_upper_inner_g:220, split_upper_inner_b:100,
-      split_upper_inner_blend:25,
-      split_lower_outer_r:30,  split_lower_outer_g:80,  split_lower_outer_b:255,
-      split_lower_inner_r:255, split_lower_inner_g:255, split_lower_inner_b:255,
-      split_lower_inner_blend:25,
-      split_lower_note_colors:null, split_lower_script:'', split_lower_active_theme:'b0',
     },
     keyboard_style:{height_percent:18, brightness:100, visible:1, width_percent:100},
     display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000, gif_speed_percent:100, giphy_api_key:''},
@@ -600,10 +590,6 @@ class FXRenderer{
     const hw=w/2;
     const{r,g,b}=resolveNoteColor(t.note,t.channel,ns);
     let intR=ns.interior_r,intG=ns.interior_g,intB=ns.interior_b,bl=ns.inner_blend_percent/100;
-    if(ns.split_enabled){
-      if(t.note<ns.split_point){intR=ns.split_lower_inner_r;intG=ns.split_lower_inner_g;intB=ns.split_lower_inner_b;bl=ns.split_lower_inner_blend/100;}
-      else{intR=ns.split_upper_inner_r;intG=ns.split_upper_inner_g;intB=ns.split_upper_inner_b;bl=ns.split_upper_inner_blend/100;}
-    }
     const ir=Math.round(intR*(1-bl)+r*bl);
     const ig=Math.round(intG*(1-bl)+g*bl);
     const ib=Math.round(intB*(1-bl)+b*bl);
@@ -1341,16 +1327,6 @@ function _noteNameToMidi(s){
   return(midi>=0&&midi<=127)?midi:null;
 }
 
-function _applySplit(){
-  const ns=Config.ns;
-  const split=ns.split_note??60;
-  const ur=ns.split_upper_r??0, ug=ns.split_upper_g??230, ub=ns.split_upper_b??230;
-  const lr=ns.split_lower_r??255, lg=ns.split_lower_g??0, lb=ns.split_lower_b??128;
-  ns.note_colors=Array.from({length:128},(_,i)=>i<split?{r:lr,g:lg,b:lb}:{r:ur,g:ug,b:ub});
-  ns.split_enabled=1;
-  Config.save();
-}
-
 function _parseKickColor(arg){
   arg=arg.trim().toLowerCase();
   const h6=arg.match(/^#?([0-9a-f]{6})$/i);
@@ -1416,19 +1392,6 @@ class KickChatClient{
             // !fluid on/off
             const mFluid=text.match(/^!fluid\s+(on|off)$/i);
             if(mFluid){const v=mFluid[1].toLowerCase()==='on'?1:0;Config.ns.effect_fluid_enabled=v;if(this._app){this._app.fluid.setEnabled(v);this._app.fluid.updateConfig(Config.ns);}toast('fluid '+mFluid[1]);}
-            // !upper <color>
-            const mUpper=text.match(/^!upper\s+(.+)$/i);
-            if(mUpper){const c=_parseKickColor(mUpper[1]);if(c){Config.ns.split_upper_r=c[0];Config.ns.split_upper_g=c[1];Config.ns.split_upper_b=c[2];if(Config.ns.split_enabled)_applySplit();toast('upper '+mUpper[1].trim());}}
-            // !lower <color>
-            const mLower=text.match(/^!lower\s+(.+)$/i);
-            if(mLower){const c=_parseKickColor(mLower[1]);if(c){Config.ns.split_lower_r=c[0];Config.ns.split_lower_g=c[1];Config.ns.split_lower_b=c[2];if(Config.ns.split_enabled)_applySplit();toast('lower '+mLower[1].trim());}}
-            // !split off / !split 60 / !split C4
-            const mSplit=text.match(/^!split\s+(\S+)$/i);
-            if(mSplit){
-              const arg=mSplit[1];
-              if(arg.toLowerCase()==='off'){Config.ns.split_enabled=0;Config.ns.note_colors=null;Config.save();toast('split off');}
-              else{const note=_noteNameToMidi(arg);if(note!==null){Config.ns.split_note=note;_applySplit();toast('split '+arg);}}
-            }
             // !bg <url>
             const mBg=text.match(/^!bg\s+(\S+)$/i);
             if(mBg&&this._app){toast('Adding background…');fetchUrlAsBg(mBg[1],this._app).then(ok=>{if(ok)toast('Background added!');});}
@@ -1507,11 +1470,6 @@ function _resolveNC(note,ch,nc,fallback){
 }
 function resolveNoteColor(note,channel,ns){
   const ch=channel??0;
-  if(ns.split_enabled){
-    if(note<ns.split_point)
-      return _resolveNC(note,ch,ns.split_lower_note_colors,{r:ns.split_lower_outer_r,g:ns.split_lower_outer_g,b:ns.split_lower_outer_b});
-    // Upper hand: uses global note_colors with color_r/g/b fallback
-  }
   return _resolveNC(note,ch,ns.note_colors,{r:ns.color_r,g:ns.color_g,b:ns.color_b});
 }
 
@@ -1796,38 +1754,12 @@ function buildSettingsHTML(tab){
 </div></div>`;
 
   const tabs={
-    notes:`<div class="section">
-<div class="row"><label style="font-weight:600">Key Split</label><button id="split-toggle" class="action-btn${ns.split_enabled?' on':''}">${ns.split_enabled?'ON':'OFF'}</button></div>
-<div id="split-point-row" style="${ns.split_enabled?'':'display:none;'}margin-top:8px">
-<div class="row"><label>Split Point</label><select id="split-point-sel" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px">
-${Array.from({length:87},(_,i)=>{const n=21+i;return `<option value="${n}"${n===ns.split_point?' selected':''}>${noteName(n)} (${n})</option>`;}).join('')}
-</select></div></div></div>
-<p id="upper-card-label" style="margin:0 0 3px 2px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em">${ns.split_enabled?'Colours Upper':'Colours'}</p>
+    notes:`
+<p style="margin:0 0 3px 2px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Colours</p>
 ${colourCard('upper',ns)}
-<div id="lower-card-wrap" style="${ns.split_enabled?'':'display:none;'}margin-top:2px">
-<p style="margin:10px 0 3px 2px;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Colours Lower</p>
-${colourCard('lower',ns)}
-</div>
 <div class="section"><h2>Global</h2>
 ${row('Glow Strength %','r-gs',0,180,5,'glow_strength_percent')}
 ${row('Edge Width px','r-ew',1,8,1,'outer_edge_width_px')}
-</div>
-<div class="section"><h2>Split</h2>
-<p style="font-size:11px;color:var(--muted);margin-bottom:8px">Different colours above and below a split point on the keyboard.</p>
-<div class="color-row"><label>Upper</label><input type="color" id="cp-upper" value="${hex(ns.split_upper_r??0,ns.split_upper_g??230,ns.split_upper_b??230)}">
-<div class="rgb-wrap">
-<input type="range" min="0" max="255" value="${ns.split_upper_r??0}" data-cfk="split_upper_r" data-cfg="ns" style="accent-color:#ff6a6a">
-<input type="range" min="0" max="255" value="${ns.split_upper_g??230}" data-cfk="split_upper_g" data-cfg="ns" style="accent-color:#6ed76e">
-<input type="range" min="0" max="255" value="${ns.split_upper_b??230}" data-cfk="split_upper_b" data-cfg="ns" style="accent-color:#6a8aff">
-</div></div>
-<div class="color-row"><label>Lower</label><input type="color" id="cp-lower" value="${hex(ns.split_lower_r??255,ns.split_lower_g??0,ns.split_lower_b??128)}">
-<div class="rgb-wrap">
-<input type="range" min="0" max="255" value="${ns.split_lower_r??255}" data-cfk="split_lower_r" data-cfg="ns" style="accent-color:#ff6a6a">
-<input type="range" min="0" max="255" value="${ns.split_lower_g??0}" data-cfk="split_lower_g" data-cfg="ns" style="accent-color:#6ed76e">
-<input type="range" min="0" max="255" value="${ns.split_lower_b??128}" data-cfk="split_lower_b" data-cfg="ns" style="accent-color:#6a8aff">
-</div></div>
-<div class="row"><label>Split note</label><input type="text" id="split-note-inp" value="${ns.split_note??60}" placeholder="60 or C4" style="width:80px;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"><span style="font-size:11px;color:var(--muted);margin-left:8px" id="split-note-name"></span></div>
-<div class="row"><label></label><button class="action-btn" id="btn-split-on">Enable Split</button><button class="action-btn" id="btn-split-off" style="margin-left:6px">Off</button><span style="font-size:11px;color:var(--muted);margin-left:10px" id="split-status">${ns.split_enabled?'Active':'Off'}</span></div>
 </div>
 <div class="section"><h2>Motion &amp; Shape</h2>
 ${row('Rise Speed','r-spd',80,1200,20,'speed_px_per_sec')}
@@ -2703,14 +2635,6 @@ function wireSettings(root, app){
       if(['fluid_own_r','fluid_own_g','fluid_own_b'].includes(k)){
         const cp=root.querySelector('#cp-fluid'); if(cp)cp.value=hex(ns.fluid_own_r??0,ns.fluid_own_g??230,ns.fluid_own_b??230);
       }
-      if(['split_upper_r','split_upper_g','split_upper_b'].includes(k)){
-        const cp=root.querySelector('#cp-upper'); if(cp)cp.value=hex(ns.split_upper_r??0,ns.split_upper_g??230,ns.split_upper_b??230);
-        if(ns.split_enabled)_applySplit();
-      }
-      if(['split_lower_r','split_lower_g','split_lower_b'].includes(k)){
-        const cp=root.querySelector('#cp-lower'); if(cp)cp.value=hex(ns.split_lower_r??255,ns.split_lower_g??0,ns.split_lower_b??128);
-        if(ns.split_enabled)_applySplit();
-      }
       if(k==='effect_fluid_enabled')app.fluid.setEnabled(v);
       if(k.startsWith('fluid_'))app.fluid.updateConfig(ns);
       schedSave();
@@ -2725,44 +2649,6 @@ function wireSettings(root, app){
     ['fluid_own_r','fluid_own_g','fluid_own_b'].forEach((k,i)=>{
       const sl=root.querySelector(`input[data-cfk="${k}"]`);if(sl){sl.value=[Config.ns.fluid_own_r,Config.ns.fluid_own_g,Config.ns.fluid_own_b][i];const ve=root.querySelector(`#v-${sl.id}`);if(ve)ve.textContent=sl.value;}
     }); schedSave();
-  });
-  const cpUpper=root.querySelector('#cp-upper');
-  if(cpUpper) cpUpper.addEventListener('input',e=>{
-    const h=e.target.value;
-    Config.ns.split_upper_r=parseInt(h.slice(1,3),16);
-    Config.ns.split_upper_g=parseInt(h.slice(3,5),16);
-    Config.ns.split_upper_b=parseInt(h.slice(5,7),16);
-    if(Config.ns.split_enabled)_applySplit(); else Config.save();
-  });
-  const cpLower=root.querySelector('#cp-lower');
-  if(cpLower) cpLower.addEventListener('input',e=>{
-    const h=e.target.value;
-    Config.ns.split_lower_r=parseInt(h.slice(1,3),16);
-    Config.ns.split_lower_g=parseInt(h.slice(3,5),16);
-    Config.ns.split_lower_b=parseInt(h.slice(5,7),16);
-    if(Config.ns.split_enabled)_applySplit(); else Config.save();
-  });
-  const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-  function midiToName(n){return NOTE_NAMES[n%12]+(Math.floor(n/12)-1);}
-  const splitNoteInp=root.querySelector('#split-note-inp');
-  const splitNoteName=root.querySelector('#split-note-name');
-  function updateSplitName(){
-    const n=_noteNameToMidi(splitNoteInp?.value||'60');
-    if(n!==null&&splitNoteName)splitNoteName.textContent=midiToName(n)+' ('+n+')';
-  }
-  if(splitNoteInp){splitNoteInp.addEventListener('input',updateSplitName);updateSplitName();}
-  const btnSplitOn=root.querySelector('#btn-split-on');
-  if(btnSplitOn) btnSplitOn.addEventListener('click',()=>{
-    const n=_noteNameToMidi(splitNoteInp?.value||'60');
-    if(n===null){alert('Unrecognised note — use a number (0–127) or name like C4, D#3');return;}
-    Config.ns.split_note=n;
-    _applySplit();
-    const st=root.querySelector('#split-status'); if(st)st.textContent='Active';
-  });
-  const btnSplitOff=root.querySelector('#btn-split-off');
-  if(btnSplitOff) btnSplitOff.addEventListener('click',()=>{
-    Config.ns.split_enabled=0; Config.ns.note_colors=null; Config.save();
-    const st=root.querySelector('#split-status'); if(st)st.textContent='Off';
   });
   // Toggle buttons
   root.querySelectorAll('[data-ns-tog]').forEach(el=>{
@@ -3008,29 +2894,11 @@ function wireSettings(root, app){
     ncRefreshers.push(wireNoteThemeDropdown(root,p,refreshAllNcDropdowns));
   });
 
-  // ── Key Split toggle & point ──
-  const splitToggle  =root.querySelector('#split-toggle');
-  const splitPointRow=root.querySelector('#split-point-row');
-  const upperLabel   =root.querySelector('#upper-card-label');
-  const lowerWrap    =root.querySelector('#lower-card-wrap');
-  const splitPointSel=root.querySelector('#split-point-sel');
-  function applySplitState(on){
-    Config.ns.split_enabled=on?1:0;
-    if(splitToggle){splitToggle.textContent=on?'ON':'OFF';splitToggle.classList.toggle('on',!!on);}
-    if(splitPointRow)splitPointRow.style.display=on?'':'none';
-    if(upperLabel)upperLabel.textContent=on?'Colours Upper':'Colours';
-    if(lowerWrap)lowerWrap.style.display=on?'':'none';
-    schedSave();
-  }
-  if(splitToggle)splitToggle.addEventListener('click',()=>applySplitState(!Config.ns.split_enabled));
-  if(splitPointSel)splitPointSel.addEventListener('change',()=>{Config.ns.split_point=+splitPointSel.value;schedSave();});
-
   // ── Colour cards (Notes tab) ──
   function refreshAllCards(){cardRefreshFns.forEach(fn=>fn());}
   const cardRefreshFns=[];
   function onCardChange(){refreshAllCards();refreshAllNcDropdowns();}
   cardRefreshFns.push(wireColourCard(root,'upper',onCardChange));
-  cardRefreshFns.push(wireColourCard(root,'lower',onCardChange));
 
   // ── Learn tab ──
   const learnFileInput=root.querySelector('#learn-file-input');
@@ -3777,7 +3645,7 @@ class App{
     const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
     // Build config — preserve existing or create fresh
     if(!this._channelConfig||this._channelConfig._file!==this.midiFile.filename){
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
       this._channelConfig._file=this.midiFile.filename;
     }
     const list=document.getElementById('track-channel-list');
@@ -3790,7 +3658,6 @@ class App{
         <span class="track-ch-label">Ch ${ch+1}</span>
         <span class="track-ch-meta">${count} notes &nbsp;·&nbsp; ${noteName(minNote)}–${noteName(maxNote)}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
-        <button class="track-player-btn${cfg.isPlayer?' active':''}" title="Mark as your part">You play</button>
         <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
         <span class="track-hand-sel" title="Hand assignment for Learn mode">
           <button class="track-hand-btn${cfg.hand==='right'?' active':''}" data-hand="right">R</button>
@@ -3802,8 +3669,6 @@ class App{
         const hex=e.target.value;
         cfg.r=parseInt(hex.slice(1,3),16);cfg.g=parseInt(hex.slice(3,5),16);cfg.b=parseInt(hex.slice(5,7),16);
       };
-      const playerBtn=row.querySelector('.track-player-btn');
-      playerBtn.onclick=()=>{cfg.isPlayer=!cfg.isPlayer;playerBtn.classList.toggle('active',cfg.isPlayer);};
       const muteBtn=row.querySelector('.track-mute-btn');
       muteBtn.onclick=()=>{
         cfg.muted=!cfg.muted;
@@ -4006,7 +3871,7 @@ class App{
     for(let ch=0;ch<16;ch++){
       const c=this._channelConfig[ch];
       if(!c||c.muted)continue;
-      const dim=c.isPlayer?1:0.35;
+      const dim=(c.hand&&c.hand!=='none')?1:0.35;
       channelColors[ch]={r:Math.round(c.r*dim),g:Math.round(c.g*dim),b:Math.round(c.b*dim)};
     }
     Config.ns.note_colors={notes:new Array(128).fill(null),channelColors,zones:[]};
@@ -4177,7 +4042,7 @@ class App{
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
     if(!this._channelConfig||this._channelConfig._file!==file.name){
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
       this._channelConfig._file=file.name;
     }
     this._buildLearnEvents();
@@ -4201,7 +4066,7 @@ class App{
     this._addRecent(file.name);
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
-    this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+    this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
     this._channelConfig._file=file.name;
     this._applyChannelConfig();
     this._buildLearnEvents();
@@ -4220,7 +4085,7 @@ class App{
     const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
     const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
     if(!this._channelConfig||this._channelConfig._file!==this.midiFile.filename){
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,isPlayer:true,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
       this._channelConfig._file=this.midiFile.filename;
     }
     wrap.innerHTML='';
@@ -4231,17 +4096,27 @@ class App{
       row.style.cssText='margin-bottom:6px';
       row.innerHTML=`<span class="track-ch-label">Ch ${ch+1}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
-        <button class="track-player-btn${cfg.isPlayer?' active':''}">You play</button>
-        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>`;
+        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
+        <span class="track-hand-sel" title="Hand assignment for Learn mode">
+          <button class="track-hand-btn${cfg.hand==='right'?' active':''}" data-hand="right">R</button>
+          <button class="track-hand-btn${cfg.hand==='left'?' active':''}" data-hand="left">L</button>
+          <button class="track-hand-btn${cfg.hand==='none'?' active':''}" data-hand="none">—</button>
+        </span>`;
       row.querySelector('.track-color-swatch').oninput=e=>{
         const h=e.target.value;
         cfg.r=parseInt(h.slice(1,3),16);cfg.g=parseInt(h.slice(3,5),16);cfg.b=parseInt(h.slice(5,7),16);
         this._applyChannelConfig();
       };
-      const pb=row.querySelector('.track-player-btn');
-      pb.onclick=()=>{cfg.isPlayer=!cfg.isPlayer;pb.classList.toggle('active',cfg.isPlayer);this._applyChannelConfig();};
       const mb=row.querySelector('.track-mute-btn');
       mb.onclick=()=>{cfg.muted=!cfg.muted;mb.textContent=cfg.muted?'Muted':'Active';mb.classList.toggle('muted',cfg.muted);row.classList.toggle('muted',cfg.muted);this._applyChannelConfig();};
+      row.querySelectorAll('.track-hand-btn').forEach(btn=>{
+        btn.addEventListener('click',()=>{
+          cfg.hand=btn.dataset.hand;
+          row.querySelectorAll('.track-hand-btn').forEach(b=>b.classList.toggle('active',b===btn));
+          this._applyChannelConfig();
+          if(this._learn?.active)this._learnResetCursor();
+        });
+      });
       wrap.appendChild(row);
     });
   }
