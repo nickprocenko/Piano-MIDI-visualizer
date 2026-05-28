@@ -799,7 +799,7 @@ class MidiHandler{
   }
   _startQwerty(){
     this._qwerty=true; this.portName='Computer Keyboard'; this.connected=true;
-    window.addEventListener('keydown',this._kd=e=>{if(e.repeat)return;const n=QWERTY[e.code];if(n!=null){e.preventDefault();this.activeNotes.add(n);}});
+    window.addEventListener('keydown',this._kd=e=>{if(e.repeat)return;const n=QWERTY[e.code];if(n!=null){e.preventDefault();this.activeNotes.add(n);if(this._app?._learn?.active)this._app._onLearnNoteOn(n,0);}});
     window.addEventListener('keyup',this._ku=e=>{const n=QWERTY[e.code];if(n!=null)this.activeNotes.delete(n);});
   }
   _stopQwerty(){
@@ -3503,6 +3503,7 @@ class App{
       _mouseNote=note;
       this.midi.activeNotes.add(note);
       this._synth.noteOn(note);
+      if(this._learn?.active)this._onLearnNoteOn(note,0);
       canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener('pointermove',e=>{
@@ -3512,7 +3513,7 @@ class App{
       if(note===_mouseNote)return;
       if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._synth.noteOff(_mouseNote);}
       _mouseNote=note;
-      if(note!=null){this.midi.activeNotes.add(note);this._synth.noteOn(note);}
+      if(note!=null){this.midi.activeNotes.add(note);this._synth.noteOn(note);if(this._learn?.active)this._onLearnNoteOn(note,0);}
     });
     const release=()=>{
       if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._synth.noteOff(_mouseNote);_mouseNote=null;}
@@ -4135,6 +4136,7 @@ class App{
   startLearn(){
     const l=this._learn;
     if(!l._events.length){this._showToast('Load a .mid file first');return;}
+    if(!this._vizActive)this.showVisualizer();
     l.active=true;
     l._lastFrameWall=this._frameNow;
     if(l._currentNoteMs<=0||l._currentNoteMs>=l._totalMs)this._learnResetCursor();
@@ -4349,6 +4351,7 @@ class App{
       this._channelConfig._file=file.name;
     }
     this._buildLearnEvents();
+    this._applyChannelConfig();
     this._notationRenderer.destroy();
     this._refreshTracksTab();
     this._showToast(file.name);
