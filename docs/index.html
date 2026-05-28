@@ -129,6 +129,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .track-player-btn{background:var(--btn-bg);color:var(--muted)}
 .track-player-btn.active{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
 .tracks-actions{display:flex;gap:12px;margin-top:24px;align-items:center}
+#tracks-learn-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:18px;padding:10px 12px;background:rgba(255,255,255,.04);border-radius:8px;border:1px solid var(--border)}
+#tracks-learn-bar .tlb-label{font-size:11px;opacity:.65;white-space:nowrap}
+#tracks-learn-bar #xml-file-row{font-size:11px;color:var(--muted);flex:1;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #btn-tracks-play,#btn-tracks-learn{width:auto;padding:0 28px;height:52px;font-size:16px}
 /* Learn mode — hand selector in track config */
 .track-hand-sel{display:flex;gap:4px;margin-left:4px}
@@ -221,7 +224,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 <div class="screen active" id="screen-menu">
   <div id="menu-title">Piano MIDI Visualizer</div>
   <div class="menu-buttons">
-    <button class="menu-btn" id="btn-select-file">SELECT FILE</button>
+    <button class="menu-btn" id="btn-learn-mode">LEARN MODE</button>
     <button class="menu-btn" id="btn-freeplay">FREEPLAY</button>
     <button class="menu-btn" id="btn-midi-device">MIDI DEVICE</button>
     <button class="menu-btn" id="btn-settings">SETTINGS</button>
@@ -239,7 +242,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 
 <!-- FILE SELECT SCREEN -->
 <div class="screen" id="screen-file">
-  <div class="screen-title">Select MIDI File</div>
+  <div class="screen-title">Learn Mode</div>
   <div id="drop-zone">
     <p>Drag &amp; drop a .mid file here</p>
     <button class="browse-btn" id="btn-browse">Browse…</button>
@@ -251,12 +254,23 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 
 <!-- TRACK CONFIG SCREEN -->
 <div class="screen" id="screen-tracks">
-  <div class="screen-title" id="tracks-filename">Configure Tracks</div>
+  <div class="screen-title" id="tracks-filename">Learn Mode</div>
   <div id="track-channel-list"></div>
+  <div id="tracks-learn-bar">
+    <span class="tlb-label">Mode</span>
+    <button class="toggle-btn" id="tc-mode-wait">Wait</button>
+    <button class="toggle-btn" id="tc-mode-free">Free-play</button>
+    <span class="tlb-label" style="margin-left:4px">Sheet Music</span>
+    <button class="toggle-btn" id="tc-notation-toggle">Off</button>
+    <button class="action-btn" id="tc-xml-browse" style="margin-left:4px">Load MusicXML…</button>
+    <input type="file" id="tc-xml-input" accept=".xml,.musicxml" style="display:none">
+    <span id="xml-file-row">No MusicXML loaded</span>
+  </div>
+  <div id="learn-info" style="font-size:12px;color:var(--muted);margin:8px 0 0 0"></div>
   <div class="tracks-actions">
     <button class="screen-back" id="btn-tracks-back">← Back</button>
-    <button class="menu-btn" id="btn-tracks-learn">📖 Learn</button>
-    <button class="menu-btn" id="btn-tracks-play">▶ Play</button>
+    <button class="menu-btn" id="btn-tracks-learn">▶ Start Learning</button>
+    <button class="menu-btn" id="btn-tracks-play">▶ Watch Play</button>
   </div>
 </div>
 
@@ -1942,30 +1956,6 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="row"><label></label><button class="action-btn" id="btn-aud-connect">Connect</button><button class="action-btn" id="btn-aud-disconnect" style="margin-left:6px">Disconnect</button></div>
 </div>`,
     tracks:`<div class="section"><h2>Tracks</h2><div id="tracks-tab-content"><p style="color:var(--muted);font-size:12px">No file loaded.</p></div></div>`,
-    learn:(()=>{const lrn=Config.lrn||{};return`<div class="section"><h2>Learn Mode</h2>
-<div class="row" style="gap:6px">
-<button class="action-btn" id="btn-learn-browse">Browse MIDI…</button>
-<input type="file" id="learn-file-input" accept=".mid,.midi" style="display:none">
-<span id="learn-file-row" style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">No file loaded</span>
-</div>
-<div class="row"><label>Mode</label>
-<button class="toggle-btn${lrn.mode==='wait'?' on':''}" data-lm="wait">Wait</button>
-<button class="toggle-btn${lrn.mode==='freeplay'?' on':''}" data-lm="freeplay">Free-play</button>
-</div>
-<div class="row"><label>Sheet Music</label>
-<button class="toggle-btn${lrn.notation?' on':''}" id="btn-notation-toggle">${lrn.notation?'On':'Off'}</button>
-</div>
-<div class="row" style="gap:6px">
-<button class="action-btn" id="btn-xml-browse">Load MusicXML…</button>
-<input type="file" id="xml-file-input" accept=".xml,.musicxml" style="display:none">
-</div>
-<div class="row" style="font-size:11px;color:var(--muted)" id="xml-file-row">No MusicXML loaded</div>
-<div class="row" style="gap:6px">
-<button class="action-btn" id="btn-learn-start">▶ Start</button>
-<button class="action-btn" id="btn-learn-reset">↺ Reset</button>
-</div>
-<div class="row" style="font-size:12px;color:var(--muted)" id="learn-info"></div>
-</div>`;})(),
     themes:`<div class="section"><h2>User Themes</h2>
 <div class="theme-grid" id="theme-grid"></div>
 <div style="display:flex;gap:8px;margin-top:8px">
@@ -2965,45 +2955,6 @@ function wireSettings(root, app){
   function onCardChange(){refreshAllCards();refreshAllNcDropdowns();}
   cardRefreshFns.push(wireColourCard(root,'upper',onCardChange));
 
-  // ── Learn tab ──
-  const learnFileInput=root.querySelector('#learn-file-input');
-  root.querySelector('#btn-learn-browse')?.addEventListener('click',()=>learnFileInput?.click());
-  learnFileInput?.addEventListener('change',e=>{
-    const f=e.target.files[0]; if(!f)return;
-    app._loadMidiFileForLearn(f).then(()=>{
-      const row=root.querySelector('#learn-file-row');
-      if(row)row.textContent=f.name;
-    });
-    e.target.value='';
-  });
-  root.querySelectorAll('[data-lm]').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      Config.lrn.mode=btn.dataset.lm;
-      root.querySelectorAll('[data-lm]').forEach(b=>b.classList.toggle('on',b===btn));
-      schedSave();
-    });
-  });
-  root.querySelector('#btn-learn-start')?.addEventListener('click',()=>app.startLearn());
-  root.querySelector('#btn-learn-reset')?.addEventListener('click',()=>app.resetLearn());
-  root.querySelector('#btn-notation-toggle')?.addEventListener('click',e=>{
-    Config.lrn.notation=!Config.lrn.notation;
-    e.target.classList.toggle('on',Config.lrn.notation);
-    e.target.textContent=Config.lrn.notation?'On':'Off';
-    if(Config.lrn.notation&&app._learn?.active){
-      app._notationRenderer.destroy();
-      app._buildNotation();
-    }
-    app._updateNotationVisibility();
-    schedSave();
-  });
-  const xmlFileInput=root.querySelector('#xml-file-input');
-  root.querySelector('#btn-xml-browse')?.addEventListener('click',()=>xmlFileInput?.click());
-  xmlFileInput?.addEventListener('change',e=>{
-    const f=e.target.files[0]; if(!f)return;
-    app._loadMusicXmlFile(f);
-    e.target.value='';
-  });
-
   // ── Learn HUD (wired once; always present in DOM) ──
   const hud=document.getElementById('learn-hud');
   if(hud&&!hud._wired){
@@ -3974,7 +3925,13 @@ class App{
   showTrackConfig(){
     this._showScreen('screen-tracks');
     const info=this.midiFile.getChannelInfo();
-    document.getElementById('tracks-filename').textContent=this.midiFile.filename||'Configure Tracks';
+    document.getElementById('tracks-filename').textContent=this.midiFile.filename||'Learn Mode';
+    // Sync learn-bar button states
+    document.getElementById('tc-mode-wait')?.classList.toggle('on',Config.lrn.mode==='wait');
+    document.getElementById('tc-mode-free')?.classList.toggle('on',Config.lrn.mode==='freeplay');
+    const notationBtn=document.getElementById('tc-notation-toggle');
+    if(notationBtn){notationBtn.classList.toggle('on',!!Config.lrn.notation);notationBtn.textContent=Config.lrn.notation?'On':'Off';}
+    if(this._musicXmlBars){const r=document.getElementById('xml-file-row');if(r&&r.textContent==='No MusicXML loaded')r.textContent='MusicXML loaded';}
     const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','A♭','A','B♭','B'];
     const noteName=n=>NOTE_NAMES[n%12]+(Math.floor(n/12)-1);
     // Default palette — ch9 gets grey (drums)
@@ -4365,7 +4322,7 @@ class App{
 
   _setupScreens(){
     // Menu
-    document.getElementById('btn-select-file').onclick=()=>this.showFileSelect();
+    document.getElementById('btn-learn-mode').onclick=()=>this.showFileSelect();
     document.getElementById('btn-freeplay').onclick=()=>{this._mode='freeplay';this.showDeviceSelect();};
     document.getElementById('btn-midi-device').onclick=()=>this.showDeviceSelect();
     document.getElementById('btn-settings').onclick=()=>this.showSettings();
@@ -4386,6 +4343,32 @@ class App{
       this.prevNotes.clear();this._activeNotes?.clear();
       this.showVisualizer();
       this.startLearn();
+    };
+    // Track config learn-bar controls
+    document.getElementById('tc-mode-wait').onclick=()=>{
+      Config.lrn.mode='wait';
+      document.getElementById('tc-mode-wait').classList.add('on');
+      document.getElementById('tc-mode-free').classList.remove('on');
+      schedSave();
+    };
+    document.getElementById('tc-mode-free').onclick=()=>{
+      Config.lrn.mode='freeplay';
+      document.getElementById('tc-mode-wait').classList.remove('on');
+      document.getElementById('tc-mode-free').classList.add('on');
+      schedSave();
+    };
+    document.getElementById('tc-notation-toggle').onclick=e=>{
+      Config.lrn.notation=!Config.lrn.notation;
+      e.target.classList.toggle('on',Config.lrn.notation);
+      e.target.textContent=Config.lrn.notation?'On':'Off';
+      schedSave();
+    };
+    const tcXmlInput=document.getElementById('tc-xml-input');
+    document.getElementById('tc-xml-browse').onclick=()=>tcXmlInput?.click();
+    tcXmlInput.onchange=e=>{
+      const f=e.target.files[0]; if(!f)return;
+      this._loadMusicXmlFile(f);
+      e.target.value='';
     };
     // File select
     document.getElementById('btn-file-back').onclick=()=>this.showMenu();
@@ -4448,7 +4431,7 @@ class App{
       {id:'notes',label:'Notes',active:true},{id:'effects',label:'FX'},{id:'fluid',label:'Fluid'},
       {id:'keyboard',label:'Keys'},{id:'display',label:'Display'},{id:'led',label:'LED'},
       {id:'audience',label:'Aud.'},{id:'themes',label:'Themes'},{id:'tracks',label:'Tracks'},
-      {id:'scenes',label:'Scenes'},{id:'learn',label:'Learn'},
+      {id:'scenes',label:'Scenes'},
     ];
     buildPanel(document.getElementById('ptab-panels'),document.getElementById('ptab-bar'),PANEL_TABS,this);
     document.querySelector('#ptab-bar button[data-t="tracks"]')
