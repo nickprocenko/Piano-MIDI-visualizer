@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; connect-src 'self' wss://ws-us2.pusher.com https://kick.com https: blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: https://cdn.jsdelivr.net; connect-src 'self' wss://ws-us2.pusher.com https://kick.com https: blob: data:;">
 <title>Piano MIDI Visualizer</title>
 <style>
 :root {
@@ -162,8 +162,16 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .midi-form-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .midi-form-row label{font-size:11px;color:var(--muted);min-width:70px}
 .midi-form-row select,.midi-form-row input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:11px;font-family:inherit}
+/* ── Notation strip ── */
+#notation-strip{display:none;position:fixed;left:0;right:0;height:170px;background:rgba(8,10,16,.88);border-bottom:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);z-index:50;overflow:hidden;user-select:none}
+#notation-strip.visible{display:flex;align-items:center}
+#notation-drag-handle{writing-mode:vertical-lr;font-size:20px;opacity:.35;cursor:ns-resize;padding:0 8px;flex-shrink:0;color:#fff;line-height:1}
+#notation-svg-wrap{flex:1;height:100%;overflow:hidden;position:relative}
+#notation-svg-wrap svg{position:absolute;top:0;left:0;color:#ccc}
+#notation-cursor-line{position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(0,180,180,.55);pointer-events:none;z-index:2}
 </style>
 </head>
+<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js" defer></script>
 <body>
 <canvas id="bg-canvas" style="display:none"></canvas>
 <div id="bg-slide-a" style="position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;pointer-events:none"></div>
@@ -201,6 +209,12 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <span id="lhud-speed-val">100%</span>
   <button id="lhud-loop">Loop</button>
   <span id="lhud-progress">0:00 / 0:00</span>
+</div>
+<div id="notation-strip">
+  <div id="notation-drag-handle">⠿</div>
+  <div id="notation-svg-wrap">
+    <div id="notation-cursor-line"></div>
+  </div>
 </div>
 
 <!-- MENU SCREEN -->
@@ -309,7 +323,7 @@ const Config = {
     hardware:{sustain_enabled:1,midi_cc_mappings:[]},
     profiles:[],
     active_profile_id:'',
-    learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000},
+    learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:false, notation_y:200},
     user_themes:[], active_user_theme_index:0,
     note_color_themes:[], active_note_theme:{type:'builtin',index:0},
     fluid_themes:[],
@@ -1015,10 +1029,53 @@ function parseMidi(buf){
   return all;
 }
 
+function parseMidiMeta(buf){
+  const v=new DataView(buf); let p=0;
+  const u32=()=>{const x=v.getUint32(p);p+=4;return x;};
+  const u16=()=>{const x=v.getUint16(p);p+=2;return x;};
+  const u8=()=>v.getUint8(p++);
+  const vlq=()=>{let x=0;for(let i=0;i<4;i++){const b=u8();x=(x<<7)|(b&0x7F);if(!(b&0x80))return x;}return x;};
+  const result={ticksPerBeat:480,tempoMap:[{tick:0,microsPerBeat:500000}],timeSig:{num:4,denom:4},keySig:{sharps:0,mode:0}};
+  if(u32()!==0x4D546864)return result;
+  u32(); const fmt=u16(),ntrks=u16(),div=u16();
+  if(!(div&0x8000))result.ticksPerBeat=div;
+  for(let ti=0;ti<ntrks;ti++){
+    const tag=u32(); if(tag!==0x4D54726B){const skip=u32();p+=skip;continue;}
+    const tLen=u32(),tEnd=p+tLen;
+    let tick=0,rs=0;
+    while(p<tEnd){
+      tick+=vlq();
+      let st=v.getUint8(p);
+      if(st&0x80){rs=st;p++;}else{st=rs;}
+      const tp=st&0xF0;
+      if(tp===0x90||tp===0x80){u8();u8();}
+      else if(tp===0xB0||tp===0xA0||tp===0xE0){u8();u8();}
+      else if(tp===0xC0||tp===0xD0){u8();}
+      else if(st===0xFF){
+        const mt=u8(),ml=vlq();
+        if(mt===0x51&&ml===3){
+          const us=(u8()<<16)|(u8()<<8)|u8();
+          result.tempoMap.push({tick,microsPerBeat:us});
+        } else if(mt===0x58&&ml===4){
+          const num=u8(),denomExp=u8();u8();u8();
+          result.timeSig={num,denom:Math.pow(2,denomExp)};
+        } else if(mt===0x59&&ml===2){
+          const sharps=v.getInt8(p); const mode=u8(); u8();
+          result.keySig={sharps,mode};
+        } else {p+=ml;}
+      } else if(st===0xF0||st===0xF7){p+=vlq();}
+      else break;
+    }
+    p=tEnd;
+  }
+  return result;
+}
+
 class MidiFilePlayer{
-  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';}
+  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';this.meta=null;}
   load(buf,name){
     this.filename=name; this.events=parseMidi(buf);
+    try{this.meta=parseMidiMeta(buf);}catch(e){this.meta=null;}
     this.stop();
   }
   play(){if(!this.events.length)return;this.playing=true;this.t0=performance.now()-this.pos;this.idx=this._seek(this.pos);}
@@ -1894,6 +1951,10 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="row"><label>Mode</label>
 <button class="toggle-btn${lrn.mode==='wait'?' on':''}" data-lm="wait">Wait</button>
 <button class="toggle-btn${lrn.mode==='freeplay'?' on':''}" data-lm="freeplay">Free-play</button>
+</div>
+<div class="row"><label>Sheet Music</label>
+<button class="toggle-btn${lrn.notation?' on':''}" id="btn-notation-toggle">${lrn.notation?'On':'Off'}</button>
+<span style="font-size:11px;color:var(--muted);margin-left:4px">${typeof Vex==='undefined'?'(loading…)':''}</span>
 </div>
 <div class="row" style="gap:6px">
 <button class="action-btn" id="btn-learn-start">▶ Start</button>
@@ -2920,6 +2981,17 @@ function wireSettings(root, app){
   });
   root.querySelector('#btn-learn-start')?.addEventListener('click',()=>app.startLearn());
   root.querySelector('#btn-learn-reset')?.addEventListener('click',()=>app.resetLearn());
+  root.querySelector('#btn-notation-toggle')?.addEventListener('click',e=>{
+    Config.lrn.notation=!Config.lrn.notation;
+    e.target.classList.toggle('on',Config.lrn.notation);
+    e.target.textContent=Config.lrn.notation?'On':'Off';
+    if(Config.lrn.notation&&app._learn?.active){
+      app._notationRenderer.destroy();
+      app._buildNotation();
+    }
+    app._updateNotationVisibility();
+    schedSave();
+  });
 
   // ── Learn HUD (wired once; always present in DOM) ──
   const hud=document.getElementById('learn-hud');
@@ -3035,6 +3107,145 @@ class AudioSynth{
   }
 }
 
+// ─────────────────── Notation helpers ───────────────────
+const SHARP_NAMES=['c','c#','d','d#','e','f','f#','g','g#','a','a#','b'];
+const FLAT_NAMES=['c','db','d','eb','e','f','gb','g','ab','a','bb','b'];
+function _midiToVexKey(midi,useFlats){
+  const names=useFlats?FLAT_NAMES:SHARP_NAMES;
+  return names[midi%12]+'/'+(Math.floor(midi/12)-1);
+}
+// Returns true if this MIDI pitch needs an accidental symbol
+function _needsAccidental(midi){return[1,3,6,8,10].includes(midi%12);}
+
+// Quantize a duration in ms to the nearest VexFlow duration string
+function _quantizeDuration(durationMs,microsPerBeat){
+  const beats=durationMs*1000/microsPerBeat;
+  // [beats, vexDur, dotted]
+  const TABLE=[[4,'w',false],[3,'h',true],[2,'h',false],[1.5,'q',true],[1,'q',false],
+               [0.75,'8',true],[0.5,'8',false],[0.375,'16',true],[0.25,'16',false],[0.125,'32',false],[0.0625,'64',false]];
+  let best=TABLE[TABLE.length-1];
+  let bestDiff=Infinity;
+  for(const row of TABLE){
+    const d=Math.abs(row[0]-beats);
+    if(d<bestDiff){bestDiff=d;best=row;}
+  }
+  return {dur:best[1],dotted:best[2]};
+}
+
+class NotationRenderer{
+  constructor(){
+    this._wrap=null;
+    this._totalMs=0;
+    this._pxPerMs=0;
+    this._ready=false;
+    this._svgEl=null;
+  }
+  init(){
+    this._wrap=document.getElementById('notation-svg-wrap');
+    this._ready=false;
+  }
+  render(bars,meta){
+    if(typeof Vex==='undefined'||!this._wrap)return;
+    // Clear old SVG
+    const old=this._wrap.querySelector('svg');
+    if(old)old.remove();
+    if(!bars||!bars.length)return;
+    const{VF}=Vex;
+    const stripH=document.getElementById('notation-strip').offsetHeight||170;
+    const staveH=Math.floor((stripH-20)/2); // rough per-stave height
+    const PX_PER_BEAT=72;
+    const microsPerBeat=meta?.tempoMap?.[meta.tempoMap.length-1]?.microsPerBeat||500000;
+    const beatsPerBar=meta?.timeSig?.num||4;
+    const barDurationMs=beatsPerBar*microsPerBeat/1000;
+    const barW=beatsPerBar*PX_PER_BEAT+30;
+    const totalW=bars.length*barW+60;
+    const totalH=stripH;
+    const renderer=new VF.Renderer(this._wrap,VF.Renderer.Backends.SVG);
+    renderer.resize(totalW,totalH);
+    const ctx=renderer.getContext();
+    ctx.setFont('Arial',10);
+    // colour theme
+    ctx.setFillStyle('rgba(210,210,210,0.9)');
+    ctx.setStrokeStyle('rgba(180,180,180,0.9)');
+    const useFlats=(meta?.keySig?.sharps||0)<0;
+    let totalMs=0;
+    bars.forEach((bar,bi)=>{
+      totalMs=Math.max(totalMs,(bar.startMs||0)+barDurationMs);
+      const xOff=bi*barW+10;
+      // Treble stave
+      const trebleY=8;
+      const trebleStave=new VF.Stave(xOff,trebleY,barW-4);
+      if(bi===0){trebleStave.addClef('treble');if(meta?.timeSig)trebleStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
+      trebleStave.setContext(ctx).draw();
+      // Bass stave
+      const bassY=trebleY+staveH+12;
+      const bassStave=new VF.Stave(xOff,bassY,barW-4);
+      if(bi===0){bassStave.addClef('bass');if(meta?.timeSig)bassStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
+      bassStave.setContext(ctx).draw();
+      // Build voices
+      const buildVoice=(notes,clef,stave)=>{
+        if(!notes||!notes.length){
+          const rest=new VF.StaveNote({clef,keys:[clef==='treble'?'b/4':'d/3'],duration:'wr'});
+          const voice=new VF.Voice({num_beats:beatsPerBar,beat_value:meta?.timeSig?.denom||4});
+          voice.setStrict(false);
+          voice.addTickable(rest);
+          try{new VF.Formatter().joinVoices([voice]).format([voice],barW-24);}catch(e){}
+          voice.draw(ctx,stave);
+          return;
+        }
+        const staveNotes=[];
+        for(const chord of notes){
+          const keys=chord.notes.map(n=>_midiToVexKey(n,useFlats));
+          const {dur,dotted}=_quantizeDuration(chord.durationMs,microsPerBeat);
+          let sn;
+          try{
+            sn=new VF.StaveNote({clef,keys,duration:dur});
+            if(dotted)VF.Dot.buildAndAttach([sn]);
+            // Accidentals
+            keys.forEach((k,i)=>{
+              if(_needsAccidental(chord.notes[i])){
+                sn.addModifier(new VF.Accidental(useFlats?'b':'#'),i);
+              }
+            });
+          }catch(e){
+            // Fallback: quarter rest
+            sn=new VF.StaveNote({clef,keys:[clef==='treble'?'b/4':'d/3'],duration:'qr'});
+          }
+          staveNotes.push(sn);
+        }
+        const voice=new VF.Voice({num_beats:beatsPerBar,beat_value:meta?.timeSig?.denom||4});
+        voice.setStrict(false);
+        voice.addTickables(staveNotes);
+        try{
+          const fmt=new VF.Formatter();
+          fmt.joinVoices([voice]).format([voice],barW-24);
+          voice.draw(ctx,stave);
+          // Beams
+          const beams=VF.Beam.generateBeams(staveNotes);
+          beams.forEach(b=>b.setContext(ctx).draw());
+        }catch(e){}
+      };
+      buildVoice(bar.treble,'treble',trebleStave);
+      buildVoice(bar.bass,'bass',bassStave);
+    });
+    this._svgEl=this._wrap.querySelector('svg');
+    this._totalMs=totalMs||1;
+    this._pxPerMs=totalW/this._totalMs;
+    this._ready=true;
+  }
+  scrollTo(cursorMs){
+    if(!this._ready||!this._svgEl)return;
+    const wrapW=this._wrap?.offsetWidth||800;
+    const offset=Math.max(0,cursorMs*this._pxPerMs-wrapW/2);
+    this._svgEl.style.transform=`translateX(-${offset}px)`;
+  }
+  destroy(){
+    const el=this._wrap?.querySelector('svg');
+    if(el)el.remove();
+    this._ready=false;
+  }
+}
+
 // ═══════════════════════════════════════════════════════
 // APP
 // ═══════════════════════════════════════════════════════
@@ -3094,6 +3305,7 @@ class App{
     this._mode='freeplay'; // 'freeplay' or 'file'
     this._learn={active:false,cursorMs:0,_currentNoteMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set()};
     this._learnWrongKeys=new Map();
+    this._notationRenderer=new NotationRenderer();
     this._vizActive=false;
     this._panelOpen=false;
     this._selectedPortId='keyboard';
@@ -3124,8 +3336,38 @@ class App{
       if(ant.type==='builtin'){const t=BUILTIN_NOTE_THEMES[ant.index];if(t)Config.ns.note_colors=t.build();}
     }
     if(Config.kc.chatroom_id)this.kickChat.connect(Config.kc.chatroom_id,Config.kc.transition_ms);
+    this._notationRenderer.init();
+    this._setupNotationDrag();
     this._boundFrame=this._frame.bind(this);
     requestAnimationFrame(this._boundFrame);
+  }
+
+  _setupNotationDrag(){
+    const strip=document.getElementById('notation-strip');
+    if(!strip)return;
+    strip.style.top=(Config.lrn.notation_y||200)+'px';
+    const handle=document.getElementById('notation-drag-handle');
+    if(!handle)return;
+    let startY=0,startTop=0;
+    const onMove=e=>{
+      const dy=e.clientY-startY;
+      const maxTop=window.innerHeight-strip.offsetHeight;
+      const newTop=Math.max(0,Math.min(maxTop,startTop+dy));
+      strip.style.top=newTop+'px';
+    };
+    const onUp=()=>{
+      Config.lrn.notation_y=parseInt(strip.style.top)||0;
+      Config.save();
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+    };
+    handle.addEventListener('mousedown',e=>{
+      startY=e.clientY;
+      startTop=parseInt(strip.style.top)||0;
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+      e.preventDefault();
+    });
   }
 
   _frame(now){
@@ -3228,12 +3470,13 @@ class App{
     this.fx.endFrame(ctx);
     if(this._learn?.active)this._drawLearnNotes(ctx,this.layout);
     drawPiano(ctx,this.layout,this.prevNotes,Config.ks,this._learnWrongKeys);
-    // Update learn HUD progress every frame
+    // Update learn HUD progress and notation scroll every frame
     if(this._learn?.active){
       const l=this._learn;
       const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
       const prog=document.getElementById('lhud-progress');
       if(prog)prog.textContent=fmt(Math.max(0,l._currentNoteMs))+' / '+fmt(l._totalMs);
+      if(Config.lrn.notation)this._notationRenderer?.scrollTo(l._currentNoteMs);
     }
   }
 
@@ -3717,6 +3960,63 @@ class App{
     if(infoEl)infoEl.textContent=events.length?events.length+' notes · '+fmt(l._totalMs):'No notes found';
   }
 
+  _buildNotation(){
+    if(typeof Vex==='undefined')return;
+    if(!Config.lrn.notation)return;
+    const meta=this.midiFile?.meta;
+    const events=this._learn?._events;
+    if(!events||!events.length)return;
+    const microsPerBeat=meta?.tempoMap?.[meta.tempoMap.length-1]?.microsPerBeat||500000;
+    const beatsPerBar=meta?.timeSig?.num||4;
+    const barDurationMs=beatsPerBar*microsPerBeat/1000;
+    const totalMs=this._learn._totalMs||1;
+    const numBars=Math.max(1,Math.ceil(totalMs/barDurationMs));
+    // Separate channels 0 (treble) and 1 (bass)
+    const trebleEvents=events.filter(e=>e.channel===0);
+    const bassEvents=events.filter(e=>e.channel===1);
+    const groupIntoBar=(evts,barIdx)=>{
+      const barStart=barIdx*barDurationMs;
+      const barEnd=barStart+barDurationMs;
+      return evts.filter(e=>e.ms>=barStart&&e.ms<barEnd);
+    };
+    const clusterNotes=(barEvts)=>{
+      if(!barEvts.length)return null;
+      const sorted=[...barEvts].sort((a,b)=>a.ms-b.ms);
+      const chords=[];
+      let i=0;
+      while(i<sorted.length){
+        const ev=sorted[i];
+        const cluster=[ev];
+        while(i+1<sorted.length&&Math.abs(sorted[i+1].ms-ev.ms)<=35){
+          i++; cluster.push(sorted[i]);
+        }
+        chords.push({
+          notes:cluster.map(e=>e.note),
+          durationMs:Math.max(100,cluster.reduce((m,e)=>Math.max(m,e.durationMs),0))
+        });
+        i++;
+      }
+      return chords;
+    };
+    const bars=[];
+    for(let b=0;b<numBars;b++){
+      bars.push({
+        startMs:b*barDurationMs,
+        treble:clusterNotes(groupIntoBar(trebleEvents,b)),
+        bass:clusterNotes(groupIntoBar(bassEvents,b))
+      });
+    }
+    this._notationRenderer.render(bars,meta);
+  }
+
+  _updateNotationVisibility(){
+    const strip=document.getElementById('notation-strip');
+    if(!strip)return;
+    const show=this._learn.active&&!!Config.lrn.notation;
+    strip.classList.toggle('visible',show);
+    if(show&&!this._notationRenderer._ready)this._buildNotation();
+  }
+
   _learnHandFilter(ch){
     const cfg=this._channelConfig?.[ch];
     return !!cfg&&cfg.hand!=='none'&&!cfg.muted;
@@ -3769,6 +4069,7 @@ class App{
     const l=this._learn; l.active=false;
     document.getElementById('lhud-playpause').textContent='▶';
     document.getElementById('learn-hud').classList.remove('visible');
+    this._updateNotationVisibility();
   }
 
   _onLearnNoteOn(note,ch){
@@ -3846,6 +4147,7 @@ class App{
     const spd=document.getElementById('lhud-speed');
     const spdVal=document.getElementById('lhud-speed-val');
     if(spd){spd.value=Math.round(Config.lrn.speed*100);if(spdVal)spdVal.textContent=spd.value+'%';}
+    this._updateNotationVisibility();
   }
 
   pauseLearn(){
@@ -4028,6 +4330,7 @@ class App{
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
     this._buildLearnEvents();
+    this._notationRenderer.destroy();
     this.showTrackConfig();
     this._refreshTracksTab();
   }
@@ -4046,6 +4349,7 @@ class App{
       this._channelConfig._file=file.name;
     }
     this._buildLearnEvents();
+    this._notationRenderer.destroy();
     this._refreshTracksTab();
     this._showToast(file.name);
   }
@@ -4070,6 +4374,7 @@ class App{
     this._channelConfig._file=file.name;
     this._applyChannelConfig();
     this._buildLearnEvents();
+    this._notationRenderer.destroy();
     this.prevNotes.clear();
     this.trails.active.clear();
     this.midiFile.play();
