@@ -44,6 +44,13 @@ except ImportError:
     _FLUID_AVAILABLE = False
     _FluidWebBridge = None  # type: ignore
 
+try:
+    from src.sheet_music_overlay import SheetMusicOverlay as _SheetMusicOverlay
+    _SHEET_MUSIC_AVAILABLE = True
+except ImportError:
+    _SHEET_MUSIC_AVAILABLE = False
+    _SheetMusicOverlay = None  # type: ignore
+
 # Fluid UI params are stored as integers; dividing by this scale gives the
 # float value passed to the simulation (e.g. stored 22 → sim 2.2).
 _FLUID_DISSIPATION_SCALE = 10.0
@@ -117,6 +124,7 @@ class App:
         self._note_trails: list[dict[str, float | bool]] = []
         self._fx_renderer: Optional[NoteEffectRenderer] = None
         self._fluid_renderer: Optional[object] = None
+        self._sheet_music_overlay: Optional[object] = None
         self._led_output: Optional[LedOutput] = None
         # Background animation: list of slides, each slide is (frames, durations_ms)
         self._bg_slides: list[tuple[list[pygame.Surface], list[float], dict]] = []
@@ -341,8 +349,25 @@ class App:
         else:
             self._fluid_renderer = None
 
+        if _SHEET_MUSIC_AVAILABLE and _SheetMusicOverlay is not None and midi_file is not None:
+            sm_cfg = cfg.load().get("sheet_music", {})
+            self._sheet_music_overlay = _SheetMusicOverlay(
+                self.screen,
+                x=int(sm_cfg.get("x", 30)),
+                y=int(sm_cfg.get("y", 30)),
+                visible=bool(sm_cfg.get("visible", True)),
+                px_per_ms=float(sm_cfg.get("px_per_ms", 0.15)),
+            )
+        else:
+            self._sheet_music_overlay = None
+
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
+        if self._sheet_music_overlay is not None:
+            data = cfg.load()
+            data["sheet_music"] = self._sheet_music_overlay.get_config()
+            cfg.save(data)
+            self._sheet_music_overlay = None
         self._midi_player = None
         if self._midi is not None:
             self._midi.close()
@@ -614,6 +639,8 @@ class App:
                         self.state = State.SONG_SELECT
 
             elif self.state == State.HIGHWAY:
+                if self._sheet_music_overlay is not None:
+                    self._sheet_music_overlay.handle_event(event)
                 if event.type == pygame.MOUSEMOTION:
                     self._profile_btn_hover = self._profile_btn_rect.collidepoint(event.pos)
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -628,9 +655,15 @@ class App:
                         self._enter_profile_screen()
                         self.state = State.PROFILE_SCREEN
                     elif event.key == pygame.K_r:
-                        # Retry MIDI connection
                         if self._midi is not None and not self._midi.connected:
                             self._midi.connect(self._selected_port)
+                    elif event.key == pygame.K_s and self._sheet_music_overlay is not None:
+                        self._sheet_music_overlay.toggle()
+                        data = cfg.load()
+                        data.setdefault("sheet_music", {})["visible"] = (
+                            self._sheet_music_overlay.get_config()["visible"]
+                        )
+                        cfg.save(data)
                     elif self._midi is not None:
                         self._midi.handle_keydown(event.key)
                 elif event.type == pygame.KEYUP:
@@ -1084,6 +1117,19 @@ class App:
                 self._small_font = pygame.font.SysFont("Arial", 20)
             live = self._small_font.render("Live", True, (90, 255, 140))
             self.screen.blit(live, (10, self.screen.get_height() - live.get_height() - 8))
+
+        if self._sheet_music_overlay is not None and self._midi_player is not None:
+            current_ms = float(self._midi_player.current_ms)
+            overlay = self._sheet_music_overlay
+            lookbehind_ms = (overlay.PLAYHEAD_OFFSET - overlay.CLEF_ZONE_W) / overlay.px_per_ms
+            lookahead_ms  = (overlay.PANEL_W - overlay.PLAYHEAD_OFFSET) / overlay.px_per_ms
+            notes = self._midi_player.get_notes_in_window(lookahead_ms, lookbehind_ms=lookbehind_ms)
+            note_rgb = (
+                self._note_style["color_r"],
+                self._note_style["color_g"],
+                self._note_style["color_b"],
+            )
+            overlay.draw(self.screen, current_ms, notes, note_rgb)
 
         self._draw_profile_btn()
 
