@@ -49,8 +49,8 @@ class Button:
 class Menu:
     """Main menu screen."""
 
-    BUTTON_LABELS = ["SELECT FILE", "FREEPLAY", "SETTINGS", "QUIT"]
-    BUTTON_ACTIONS = ["select_file", "freeplay", "settings", "quit"]
+    BUTTON_LABELS = ["LEARN MODE", "FREEPLAY", "SETTINGS", "QUIT"]
+    BUTTON_ACTIONS = ["learn_mode", "freeplay", "settings", "quit"]
 
     def __init__(self, screen: pygame.Surface) -> None:
         self.screen = screen
