@@ -29,6 +29,13 @@ from src.trail_constants import TRAIL_KEY_EDGE_INSET_PX, TRAIL_MIN_WIDTH_PX
 import src.themes as themes_mod
 
 try:
+    from src.midi_player import MidiFilePlayer as _MidiFilePlayer
+    _MIDO_AVAILABLE = True
+except ImportError:
+    _MIDO_AVAILABLE = False
+    _MidiFilePlayer = None  # type: ignore
+
+try:
     from src.fluid_web_bridge import FluidWebBridge as _FluidWebBridge
     _FLUID_AVAILABLE = True
 except ImportError:
@@ -90,8 +97,10 @@ class App:
         self._profile_btn_hover: bool = False
         self._profile_btn_rect: pygame.Rect = pygame.Rect(0, 0, 120, 32)
         self._song_select: Optional[SongSelect] = None
-        self._selected_port: int = 0
+        self._selected_port: int = int(cfg.load().get("hardware", {}).get("selected_midi_port", 0))
+        self._device_select_return_state: State = State.MENU
         self._selected_midi_file: Optional[pathlib.Path] = None
+        self._midi_player: Optional[object] = None
         self._note_style: dict[str, int] = self._load_note_style()
         self._note_style_meta: dict[str, str | bool] = self._load_note_style_meta()
         self._keyboard_style: dict[str, int | bool] = self._load_keyboard_style()
@@ -274,6 +283,10 @@ class App:
         self._display_style = self._load_display_style()
         self._refresh_claire_script_state()
         self._selected_midi_file = midi_file
+        if midi_file is not None and _MIDO_AVAILABLE and _MidiFilePlayer is not None:
+            self._midi_player = _MidiFilePlayer(midi_file)
+        else:
+            self._midi_player = None
         self._piano = Piano(
             self.screen,
             height_percent=int(self._keyboard_style["height_percent"]),
@@ -314,6 +327,7 @@ class App:
 
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
+        self._midi_player = None
         if self._midi is not None:
             self._midi.close()
             self._midi = None
@@ -397,9 +411,6 @@ class App:
                 elif action == "freeplay":
                     self._enter_highway()
                     self.state = State.HIGHWAY
-                elif action == "midi_device":
-                    self._enter_device_select()
-                    self.state = State.DEVICE_SELECT
                 elif action == "settings":
                     self._enter_settings()
                     self.state = State.SETTINGS
@@ -411,11 +422,17 @@ class App:
                     result = self._device_select.handle_event(event)
                     if result == "select":
                         self._selected_port = self._device_select.selected_port
+                        data = cfg.load()
+                        data.setdefault("hardware", {})["selected_midi_port"] = self._selected_port
+                        cfg.save(data)
                         self._device_select = None
-                        self.state = State.MENU
+                        ret = self._device_select_return_state
+                        if ret == State.HARDWARE_SETTINGS:
+                            self._enter_hardware_settings()
+                        self.state = ret
                     elif result == "back":
                         self._device_select = None
-                        self.state = State.MENU
+                        self.state = self._device_select_return_state
 
             elif self.state == State.SETTINGS:
                 if self._settings_screen is not None:
@@ -455,6 +472,10 @@ class App:
                         if result == "back":
                             self._hardware_settings_screen = None
                             self.state = State.SETTINGS
+                    elif result == "midi_device":
+                        self._device_select_return_state = State.HARDWARE_SETTINGS
+                        self._enter_device_select()
+                        self.state = State.DEVICE_SELECT
 
             elif self.state == State.PROFILE_SCREEN:
                 if self._profile_screen is not None:
@@ -662,6 +683,10 @@ class App:
         self._update_audience_color(dt)
 
         if self._selected_midi_file is not None:
+            if self._midi_player is not None:
+                self._midi_player.update(dt)
+                if self._midi_player.done and _MidiFilePlayer is not None:
+                    self._midi_player = _MidiFilePlayer(self._selected_midi_file)
             return
         if self._midi is None or not self._midi.connected or self._piano is None:
             self._prev_active_notes.clear()
@@ -933,32 +958,40 @@ class App:
 
         screen_rect = self.screen.get_rect()
 
+        in_learn_mode = self._selected_midi_file is not None
+
         if self._midi is None or not self._midi.connected:
-            # No MIDI device — show retry message
-            if self._midi is not None and not self._midi.available:
-                msg = "python-rtmidi not installed. Run: pip install python-rtmidi"
+            if not in_learn_mode:
+                # Freeplay with no MIDI device — show retry message
+                if self._midi is not None and not self._midi.available:
+                    msg = "python-rtmidi not installed. Run: pip install python-rtmidi"
+                else:
+                    msg = "No MIDI device detected. Connect a MIDI device and press R to retry."
+                text = self._highway_font.render(msg, True, (220, 100, 100))
+                rect = text.get_rect(center=screen_rect.center)
+                self.screen.blit(text, rect)
+                esc_text = self._small_font.render("Press ESC to return", True, (150, 150, 150))
+                esc_rect = esc_text.get_rect(topright=(screen_rect.right - 16, 12))
+                self.screen.blit(esc_text, esc_rect)
+                self._draw_profile_btn()
+                return
+
+        # Show overlay text for song playback mode.
+        if in_learn_mode and self._selected_midi_file is not None:
+            if self._midi is not None and self._midi.connected:
+                device_label = self._small_font.render(
+                    f"MIDI: {self._midi.port_name}", True, (100, 200, 100)
+                )
+                self.screen.blit(device_label, (16, 12))
+                song_label = self._small_font.render(
+                    f"Song: {self._selected_midi_file.name}", True, (180, 180, 100)
+                )
+                self.screen.blit(song_label, (16, 36))
             else:
-                msg = "No MIDI device detected. Connect a MIDI device and press R to retry."
-            text = self._highway_font.render(msg, True, (220, 100, 100))
-            rect = text.get_rect(center=screen_rect.center)
-            self.screen.blit(text, rect)
-            esc_text = self._small_font.render("Press ESC to return", True, (150, 150, 150))
-            esc_rect = esc_text.get_rect(topright=(screen_rect.right - 16, 12))
-            self.screen.blit(esc_text, esc_rect)
-            self._draw_profile_btn()
-            return
-
-        # Show overlay text only for song playback mode.
-        if self._selected_midi_file is not None:
-            device_label = self._small_font.render(
-                f"MIDI: {self._midi.port_name}", True, (100, 200, 100)
-            )
-            self.screen.blit(device_label, (16, 12))
-
-            song_label = self._small_font.render(
-                f"Song: {self._selected_midi_file.name}", True, (180, 180, 100)
-            )
-            self.screen.blit(song_label, (16, 36))
+                song_label = self._small_font.render(
+                    f"Song: {self._selected_midi_file.name}", True, (180, 180, 100)
+                )
+                self.screen.blit(song_label, (16, 12))
 
             esc_text = self._small_font.render("Press ESC to return", True, (150, 150, 150))
             esc_rect = esc_text.get_rect(topright=(screen_rect.right - 16, 12))
@@ -968,11 +1001,19 @@ class App:
         if scaled_mode:
             render_target.fill((0, 0, 0, 0))
 
-        if self._selected_midi_file is None:
+        if in_learn_mode:
+            self._draw_learn_bars(render_target)
+        else:
             self._draw_freeplay_trails(render_target)
 
-        # Draw piano with active notes highlighted
-        active_notes = self._midi.get_active_notes()
+        # Determine active notes for piano highlighting
+        if in_learn_mode and self._midi_player is not None:
+            active_notes = self._midi_player.get_active_notes()
+        elif self._midi is not None and self._midi.connected:
+            active_notes = self._midi.get_active_notes()
+        else:
+            active_notes = set()
+
         if self._piano is not None:
             self._piano.set_target(render_target)
             self._piano.draw(active_notes)
@@ -1014,6 +1055,71 @@ class App:
         for trail in self._note_trails:
             self._fx_renderer.draw_trail(self._interpolated_trail_for_draw(trail), self._note_style)
         self._fx_renderer.end_frame()
+
+    def _draw_learn_bars(self, target: pygame.Surface) -> None:
+        """Draw Synthesia-style falling note bars for learn/file-playback mode."""
+        if self._midi_player is None or self._piano is None:
+            return
+
+        speed_px_per_ms = max(1.0, float(self._note_style["speed_px_per_sec"])) / 1000.0
+        target_h = target.get_height()
+
+        # Piano top edge: use any valid note's rect.top
+        piano_top_y: float = float(target_h)
+        ref_rect = self._piano.get_note_rect(60)
+        if ref_rect is not None:
+            piano_top_y = float(ref_rect.top)
+        elif not bool(self._keyboard_style.get("visible", True)):
+            piano_top_y = float(target_h)
+
+        lookahead_ms = piano_top_y / speed_px_per_ms if speed_px_per_ms > 0 else 5000.0
+        current_ms = float(self._midi_player.current_ms)
+        visible = self._midi_player.get_notes_in_window(lookahead_ms)
+
+        r = self._note_style["color_r"]
+        g = self._note_style["color_g"]
+        b = self._note_style["color_b"]
+        ir = min(255, self._note_style["interior_r"])
+        ig = min(255, self._note_style["interior_g"])
+        ib = min(255, self._note_style["interior_b"])
+        glow = bool(self._note_style.get("effect_glow_enabled", 1))
+
+        bar_surf = pygame.Surface((target.get_width(), target_h), pygame.SRCALPHA)
+
+        for note, start_ms, end_ms in visible:
+            note_rect = self._piano.get_note_rect(note)
+            if note_rect is None:
+                continue
+
+            bar_bottom = piano_top_y - (start_ms - current_ms) * speed_px_per_ms
+            bar_top = piano_top_y - (end_ms - current_ms) * speed_px_per_ms
+
+            draw_top = max(0.0, bar_top)
+            draw_bottom = min(piano_top_y, bar_bottom)
+            if draw_bottom <= draw_top:
+                continue
+
+            inset = max(1, int(note_rect.width * 0.08))
+            bx = note_rect.left + inset
+            bw = max(2, note_rect.width - inset * 2)
+            br = pygame.Rect(bx, int(draw_top), bw, int(draw_bottom - draw_top))
+
+            pygame.draw.rect(bar_surf, (r, g, b, 210), br, border_radius=3)
+
+            # Inner highlight strip
+            if br.height > 6:
+                hl_h = max(4, min(12, br.height // 4))
+                hl = pygame.Rect(br.left + 2, br.top + 2, br.width - 4, hl_h)
+                pygame.draw.rect(bar_surf, (ir, ig, ib, 160), hl, border_radius=2)
+
+            # Soft glow halo
+            if glow and bw > 4:
+                glow_r = pygame.Rect(bx - 3, int(draw_top) - 2, bw + 6, int(draw_bottom - draw_top) + 4)
+                glow_surf = pygame.Surface((glow_r.width, glow_r.height), pygame.SRCALPHA)
+                pygame.draw.rect(glow_surf, (r, g, b, 45), glow_surf.get_rect(), border_radius=5)
+                bar_surf.blit(glow_surf, (glow_r.x, glow_r.y))
+
+        target.blit(bar_surf, (0, 0))
 
     def _load_note_style(self) -> dict[str, int]:
         style = cfg.load().get("note_style", {})
@@ -1071,7 +1177,14 @@ class App:
         return dict(cfg.load().get("hardware", {"sustain_enabled": False}))
 
     def _enter_hardware_settings(self) -> None:
-        self._hardware_settings_screen = HardwareSettingsScreen(self.screen)
+        port_name = self._get_current_port_name()
+        self._hardware_settings_screen = HardwareSettingsScreen(self.screen, current_device_name=port_name)
+
+    def _get_current_port_name(self) -> str:
+        ports = MidiInput().list_ports()
+        if 0 <= self._selected_port < len(ports):
+            return ports[self._selected_port]
+        return f"Port {self._selected_port}"
 
     def _enter_profile_screen(self) -> None:
         self._profile_screen = ProfileScreen(self.screen)

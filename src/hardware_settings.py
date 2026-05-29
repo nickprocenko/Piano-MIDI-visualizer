@@ -1,4 +1,4 @@
-"""Hardware settings screen — sustain pedal and physical input behaviour."""
+"""Hardware settings screen — MIDI device selection, sustain pedal and physical input behaviour."""
 
 from __future__ import annotations
 
@@ -25,25 +25,33 @@ BACK_W = 160
 BACK_H = 52
 PANEL_W = 560
 PANEL_MARGIN_X = 26
+MIDI_BTN_W = 260
+MIDI_BTN_H = 44
+PANEL_GAP = 18
 
 
 class HardwareSettingsScreen:
-    """Settings screen for hardware input controls (sustain pedal, etc.)."""
+    """Settings screen for hardware input controls (MIDI device, sustain pedal, etc.)."""
 
-    def __init__(self, screen: pygame.Surface) -> None:
+    def __init__(self, screen: pygame.Surface, current_device_name: str = "") -> None:
         self.screen = screen
         self._title_font = pygame.font.SysFont("Arial", TITLE_FONT_SIZE, bold=True)
         self._label_font = pygame.font.SysFont("Arial", LABEL_FONT_SIZE)
         self._small_font = pygame.font.SysFont("Arial", SMALL_FONT_SIZE)
         self._btn_font = pygame.font.SysFont("Arial", BTN_FONT_SIZE)
 
+        self._current_device_name = current_device_name or "Computer Keyboard (Virtual MIDI)"
         self._values: dict[str, bool] = {}
+
         self._hover_back = False
         self._hover_sustain = False
+        self._hover_midi_device = False
 
         self._title_surf: pygame.Surface | None = None
         self._title_pos = (0, 0)
-        self._panel_rect = pygame.Rect(0, 0, 0, 0)
+        self._midi_panel_rect = pygame.Rect(0, 0, 0, 0)
+        self._midi_device_rect = pygame.Rect(0, 0, MIDI_BTN_W, MIDI_BTN_H)
+        self._sustain_panel_rect = pygame.Rect(0, 0, 0, 0)
         self._sustain_check_rect = pygame.Rect(0, 0, 28, 28)
         self._back_rect = pygame.Rect(0, 0, BACK_W, BACK_H)
 
@@ -61,6 +69,8 @@ class HardwareSettingsScreen:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self._back_rect.collidepoint(event.pos):
                 return "back"
+            if self._midi_device_rect.collidepoint(event.pos):
+                return "midi_device"
             if self._sustain_check_rect.inflate(60, 12).collidepoint(event.pos):
                 self._values["sustain_enabled"] = not self._values["sustain_enabled"]
                 self._save()
@@ -71,8 +81,12 @@ class HardwareSettingsScreen:
     def draw(self) -> None:
         self.screen.fill(BG_COLOR)
         self._draw_title()
-        self._draw_panel()
+        self._draw_midi_panel()
+        self._draw_sustain_panel()
         self._draw_back()
+
+    def update_device_name(self, name: str) -> None:
+        self._current_device_name = name or "Computer Keyboard (Virtual MIDI)"
 
     def _load(self) -> None:
         data = cfg.load().get("hardware", {})
@@ -90,18 +104,32 @@ class HardwareSettingsScreen:
         cx = sr.centerx
 
         title_surf = self._title_font.render("Hardware Settings", True, TITLE_COLOR)
-        title_y = sr.height // 8
+        title_y = sr.height // 10
         self._title_surf = title_surf
         self._title_pos = (cx - title_surf.get_width() // 2, title_y)
 
-        panel_top = title_y + title_surf.get_height() + 28
-        panel_h = 180
         panel_w = min(PANEL_W, sr.width - 2 * PANEL_MARGIN_X)
-        self._panel_rect = pygame.Rect(cx - panel_w // 2, panel_top, panel_w, panel_h)
+
+        # MIDI device panel
+        midi_panel_top = title_y + title_surf.get_height() + 24
+        midi_panel_h = 110
+        self._midi_panel_rect = pygame.Rect(cx - panel_w // 2, midi_panel_top, panel_w, midi_panel_h)
+
+        self._midi_device_rect = pygame.Rect(
+            self._midi_panel_rect.left + 20,
+            self._midi_panel_rect.top + 56,
+            MIDI_BTN_W,
+            MIDI_BTN_H,
+        )
+
+        # Sustain pedal panel
+        sustain_panel_top = midi_panel_top + midi_panel_h + PANEL_GAP
+        sustain_panel_h = 180
+        self._sustain_panel_rect = pygame.Rect(cx - panel_w // 2, sustain_panel_top, panel_w, sustain_panel_h)
 
         self._sustain_check_rect = pygame.Rect(
-            self._panel_rect.left + 20,
-            self._panel_rect.top + 28,
+            self._sustain_panel_rect.left + 20,
+            self._sustain_panel_rect.top + 28,
             28, 28,
         )
 
@@ -110,20 +138,53 @@ class HardwareSettingsScreen:
     def _update_hover(self, pos: tuple[int, int]) -> None:
         self._hover_back = self._back_rect.collidepoint(pos)
         self._hover_sustain = self._sustain_check_rect.inflate(60, 12).collidepoint(pos)
+        self._hover_midi_device = self._midi_device_rect.collidepoint(pos)
 
     def _draw_title(self) -> None:
         if self._title_surf:
             self.screen.blit(self._title_surf, self._title_pos)
 
-    def _draw_panel(self) -> None:
-        pygame.draw.rect(self.screen, PANEL_BG, self._panel_rect, border_radius=8)
-        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._panel_rect, width=1, border_radius=8)
+    def _draw_midi_panel(self) -> None:
+        pygame.draw.rect(self.screen, PANEL_BG, self._midi_panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._midi_panel_rect, width=1, border_radius=8)
 
-        # Section heading
+        heading = self._label_font.render("MIDI Input Device", True, TEXT_COLOR)
+        self.screen.blit(heading, (self._midi_panel_rect.left + 16, self._midi_panel_rect.top + 8))
+
+        # Truncate device name if too long
+        max_name_w = self._midi_panel_rect.width - 32
+        dev_name = self._current_device_name
+        name_surf = self._small_font.render(dev_name, True, MUTED_TEXT_COLOR)
+        if name_surf.get_width() > max_name_w:
+            while len(dev_name) > 1:
+                dev_name = dev_name[:-1]
+                ts = self._small_font.render(dev_name + "…", True, MUTED_TEXT_COLOR)
+                if ts.get_width() <= max_name_w:
+                    name_surf = ts
+                    break
+
+        # Draw device name to the right of where the button will be
+        name_x = self._midi_device_rect.right + 16
+        self.screen.blit(
+            name_surf,
+            name_surf.get_rect(midleft=(name_x, self._midi_device_rect.centery)),
+        )
+
+        # SELECT button
+        btn_bg = BUTTON_HOVER_BG if self._hover_midi_device else BUTTON_NORMAL_BG
+        btn_fg = BUTTON_HOVER_TEXT_COLOR if self._hover_midi_device else BUTTON_TEXT_COLOR
+        pygame.draw.rect(self.screen, btn_bg, self._midi_device_rect, border_radius=6)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._midi_device_rect, width=1, border_radius=6)
+        label = self._btn_font.render("SELECT DEVICE", True, btn_fg)
+        self.screen.blit(label, label.get_rect(center=self._midi_device_rect.center))
+
+    def _draw_sustain_panel(self) -> None:
+        pygame.draw.rect(self.screen, PANEL_BG, self._sustain_panel_rect, border_radius=8)
+        pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._sustain_panel_rect, width=1, border_radius=8)
+
         section_surf = self._label_font.render("Sustain Pedal  (MIDI CC 64)", True, TEXT_COLOR)
-        self.screen.blit(section_surf, (self._panel_rect.left + 16, self._panel_rect.top + 8 - section_surf.get_height() // 4))
+        self.screen.blit(section_surf, (self._sustain_panel_rect.left + 16, self._sustain_panel_rect.top + 8 - section_surf.get_height() // 4))
 
-        # Checkbox
         cb_bg = BUTTON_HOVER_BG if self._hover_sustain else BUTTON_NORMAL_BG
         pygame.draw.rect(self.screen, cb_bg, self._sustain_check_rect, border_radius=5)
         pygame.draw.rect(self.screen, BUTTON_BORDER_COLOR, self._sustain_check_rect, width=1, border_radius=5)
@@ -131,14 +192,12 @@ class HardwareSettingsScreen:
             inner = self._sustain_check_rect.inflate(-8, -8)
             pygame.draw.rect(self.screen, CHECK_ON_COLOR, inner, border_radius=3)
 
-        # Label beside checkbox
         label_surf = self._label_font.render("Enable Piano Sustain", True, TEXT_COLOR)
         self.screen.blit(
             label_surf,
             label_surf.get_rect(midleft=(self._sustain_check_rect.right + 12, self._sustain_check_rect.centery)),
         )
 
-        # Description
         desc1 = self._small_font.render(
             "While enabled, notes held when CC 64 is pressed stay active until the pedal is released.",
             True, MUTED_TEXT_COLOR,
@@ -148,8 +207,8 @@ class HardwareSettingsScreen:
             True, MUTED_TEXT_COLOR,
         )
         y = self._sustain_check_rect.bottom + 16
-        self.screen.blit(desc1, (self._panel_rect.left + 16, y))
-        self.screen.blit(desc2, (self._panel_rect.left + 16, y + desc1.get_height() + 6))
+        self.screen.blit(desc1, (self._sustain_panel_rect.left + 16, y))
+        self.screen.blit(desc2, (self._sustain_panel_rect.left + 16, y + desc1.get_height() + 6))
 
     def _draw_back(self) -> None:
         bg = BUTTON_HOVER_BG if self._hover_back else BUTTON_NORMAL_BG
