@@ -30,10 +30,12 @@ import src.themes as themes_mod
 
 try:
     from src.midi_player import MidiFilePlayer as _MidiFilePlayer
+    from src.track_select import TrackSelect as _TrackSelect
     _MIDO_AVAILABLE = True
 except ImportError:
     _MIDO_AVAILABLE = False
     _MidiFilePlayer = None  # type: ignore
+    _TrackSelect = None  # type: ignore
 
 try:
     from src.fluid_web_bridge import FluidWebBridge as _FluidWebBridge
@@ -65,6 +67,7 @@ class State(Enum):
     HARDWARE_SETTINGS = auto()
     PROFILE_SCREEN = auto()
     SONG_SELECT = auto()
+    TRACK_SELECT = auto()
     HIGHWAY = auto()
 
 
@@ -97,9 +100,11 @@ class App:
         self._profile_btn_hover: bool = False
         self._profile_btn_rect: pygame.Rect = pygame.Rect(0, 0, 120, 32)
         self._song_select: Optional[SongSelect] = None
+        self._track_select: Optional[object] = None
         self._selected_port: int = int(cfg.load().get("hardware", {}).get("selected_midi_port", 0))
         self._device_select_return_state: State = State.MENU
         self._selected_midi_file: Optional[pathlib.Path] = None
+        self._enabled_tracks: Optional[set[int]] = None
         self._midi_player: Optional[object] = None
         self._note_style: dict[str, int] = self._load_note_style()
         self._note_style_meta: dict[str, str | bool] = self._load_note_style_meta()
@@ -275,7 +280,17 @@ class App:
     def _enter_song_select(self) -> None:
         self._song_select = SongSelect(self.screen)
 
-    def _enter_highway(self, midi_file: Optional[pathlib.Path] = None) -> None:
+    def _enter_track_select(self, midi_path: pathlib.Path) -> None:
+        if _TrackSelect is not None:
+            self._track_select = _TrackSelect(self.screen, midi_path)
+        else:
+            self._track_select = None
+
+    def _enter_highway(
+        self,
+        midi_file: Optional[pathlib.Path] = None,
+        enabled_tracks: Optional[set[int]] = None,
+    ) -> None:
         """Set up MIDI and piano when entering the HIGHWAY state."""
         self._note_style = self._load_note_style()
         self._note_style_meta = self._load_note_style_meta()
@@ -283,8 +298,9 @@ class App:
         self._display_style = self._load_display_style()
         self._refresh_claire_script_state()
         self._selected_midi_file = midi_file
+        self._enabled_tracks = enabled_tracks
         if midi_file is not None and _MIDO_AVAILABLE and _MidiFilePlayer is not None:
-            self._midi_player = _MidiFilePlayer(midi_file)
+            self._midi_player = _MidiFilePlayer(midi_file, enabled_tracks=enabled_tracks)
         else:
             self._midi_player = None
         self._piano = Piano(
@@ -405,9 +421,15 @@ class App:
 
             if self.state == State.MENU:
                 action = self.menu.handle_event(event)
-                if action == "select_file":
-                    self._enter_song_select()
-                    self.state = State.SONG_SELECT
+                if action == "learn_mode":
+                    if self._selected_port == 0:
+                        # No hardware MIDI selected yet — prompt first
+                        self._device_select_return_state = State.SONG_SELECT
+                        self._enter_device_select()
+                        self.state = State.DEVICE_SELECT
+                    else:
+                        self._enter_song_select()
+                        self.state = State.SONG_SELECT
                 elif action == "freeplay":
                     self._enter_highway()
                     self.state = State.HIGHWAY
@@ -429,10 +451,17 @@ class App:
                         ret = self._device_select_return_state
                         if ret == State.HARDWARE_SETTINGS:
                             self._enter_hardware_settings()
+                        elif ret == State.SONG_SELECT:
+                            self._enter_song_select()
                         self.state = ret
                     elif result == "back":
                         self._device_select = None
-                        self.state = self._device_select_return_state
+                        ret = self._device_select_return_state
+                        # SONG_SELECT has nothing to go back to; fall through to MENU
+                        if ret in (State.HARDWARE_SETTINGS,):
+                            self.state = ret
+                        else:
+                            self.state = State.MENU
 
             elif self.state == State.SETTINGS:
                 if self._settings_screen is not None:
@@ -556,11 +585,33 @@ class App:
                     if result == "select":
                         chosen = self._song_select.selected_file
                         self._song_select = None
-                        self._enter_highway(midi_file=chosen)
-                        self.state = State.HIGHWAY
+                        if _MIDO_AVAILABLE and _MidiFilePlayer is not None:
+                            note_tracks = _MidiFilePlayer.get_tracks_info(chosen)
+                        else:
+                            note_tracks = []
+                        if len(note_tracks) > 1:
+                            self._enter_track_select(chosen)
+                            self.state = State.TRACK_SELECT
+                        else:
+                            self._enter_highway(midi_file=chosen, enabled_tracks=None)
+                            self.state = State.HIGHWAY
                     elif result == "back":
                         self._song_select = None
                         self.state = State.MENU
+
+            elif self.state == State.TRACK_SELECT:
+                if self._track_select is not None:
+                    result = self._track_select.handle_event(event)
+                    if result == "play":
+                        chosen = self._track_select.midi_path
+                        enabled = self._track_select.enabled_tracks
+                        self._track_select = None
+                        self._enter_highway(midi_file=chosen, enabled_tracks=enabled)
+                        self.state = State.HIGHWAY
+                    elif result == "back":
+                        self._track_select = None
+                        self._enter_song_select()
+                        self.state = State.SONG_SELECT
 
             elif self.state == State.HIGHWAY:
                 if event.type == pygame.MOUSEMOTION:
@@ -686,7 +737,9 @@ class App:
             if self._midi_player is not None:
                 self._midi_player.update(dt)
                 if self._midi_player.done and _MidiFilePlayer is not None:
-                    self._midi_player = _MidiFilePlayer(self._selected_midi_file)
+                    self._midi_player = _MidiFilePlayer(
+                        self._selected_midi_file, enabled_tracks=self._enabled_tracks
+                    )
             return
         if self._midi is None or not self._midi.connected or self._piano is None:
             self._prev_active_notes.clear()
@@ -926,6 +979,9 @@ class App:
         elif self.state == State.SONG_SELECT:
             if self._song_select is not None:
                 self._song_select.draw()
+        elif self.state == State.TRACK_SELECT:
+            if self._track_select is not None:
+                self._track_select.draw()
         elif self.state == State.HIGHWAY:
             self._draw_highway()
 
