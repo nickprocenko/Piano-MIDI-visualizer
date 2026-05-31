@@ -51,6 +51,13 @@ except ImportError:
     _SHEET_MUSIC_AVAILABLE = False
     _SheetMusicOverlay = None  # type: ignore
 
+try:
+    from src.osmd_bridge import OsmdBridge as _OsmdBridge
+    _OSMD_AVAILABLE = True
+except ImportError:
+    _OSMD_AVAILABLE = False
+    _OsmdBridge = None  # type: ignore
+
 # Fluid UI params are stored as integers; dividing by this scale gives the
 # float value passed to the simulation (e.g. stored 22 → sim 2.2).
 _FLUID_DISSIPATION_SCALE = 10.0
@@ -124,6 +131,7 @@ class App:
         self._note_trails: list[dict[str, float | bool]] = []
         self._fx_renderer: Optional[NoteEffectRenderer] = None
         self._fluid_renderer: Optional[object] = None
+        self._osmd_bridge: Optional[object] = None
         self._sheet_music_overlay: Optional[object] = None
         self._led_output: Optional[LedOutput] = None
         # Background animation: list of slides, each slide is (frames, durations_ms)
@@ -361,6 +369,22 @@ class App:
         else:
             self._sheet_music_overlay = None
 
+        # OSMD webview overlay — replaces the pygame fallback when available
+        if _OSMD_AVAILABLE and _OsmdBridge is not None and midi_file is not None:
+            sw, sh = self.screen.get_size()
+            wx, wy = self._get_window_position()
+            bridge = _OsmdBridge(wx, wy, sw, sh)
+            if bridge.available:
+                bridge.load_midi(midi_file, enabled_tracks)
+                self._osmd_bridge = bridge
+                # Hide the pygame overlay since OSMD takes over
+                if self._sheet_music_overlay is not None:
+                    self._sheet_music_overlay._visible = False
+            else:
+                self._osmd_bridge = None
+        else:
+            self._osmd_bridge = None
+
     def _leave_highway(self) -> None:
         """Clean up MIDI resources when leaving the HIGHWAY state."""
         if self._sheet_music_overlay is not None:
@@ -391,6 +415,9 @@ class App:
         if self._fluid_renderer is not None:
             self._fluid_renderer.destroy()
             self._fluid_renderer = None
+        if self._osmd_bridge is not None:
+            self._osmd_bridge.destroy()
+            self._osmd_bridge = None
 
     def _get_window_position(self) -> tuple[int, int]:
         """Return the top-left screen position of the pygame window.
@@ -773,6 +800,8 @@ class App:
                     self._midi_player = _MidiFilePlayer(
                         self._selected_midi_file, enabled_tracks=self._enabled_tracks
                     )
+                if self._osmd_bridge is not None and self._osmd_bridge.available:
+                    self._osmd_bridge.update_position(self._midi_player.current_ms)
             return
         if self._midi is None or not self._midi.connected or self._piano is None:
             self._prev_active_notes.clear()
