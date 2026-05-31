@@ -166,7 +166,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .midi-form-row label{font-size:11px;color:var(--muted);min-width:70px}
 .midi-form-row select,.midi-form-row input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:11px;font-family:inherit}
 /* ── Notation strip ── */
-#notation-strip{display:none;position:fixed;left:0;right:0;height:170px;background:rgba(8,10,16,.88);border-bottom:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);z-index:50;overflow:hidden;user-select:none}
+#notation-strip{display:none;position:fixed;left:0;right:0;height:220px;background:rgba(8,10,16,.88);border-bottom:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);z-index:50;overflow:hidden;user-select:none}
 #notation-strip.visible{display:flex;align-items:center}
 #notation-drag-handle{writing-mode:vertical-lr;font-size:20px;opacity:.35;cursor:ns-resize;padding:0 8px;flex-shrink:0;color:#fff;line-height:1}
 #notation-svg-wrap{flex:1;height:100%;overflow:hidden;position:relative}
@@ -3209,8 +3209,7 @@ class NotationRenderer{
     const VF=Vex.VF||Vex.Flow||Vex;
     if(!VF?.Renderer){console.error('VexFlow Renderer missing. Vex keys:',Object.keys(Vex||{}));return;}
     try{
-    const stripH=document.getElementById('notation-strip').offsetHeight||170;
-    const staveH=Math.floor((stripH-20)/2); // rough per-stave height
+    const stripH=document.getElementById('notation-strip').offsetHeight||220;
     const PX_PER_BEAT=72;
     const microsPerBeat=meta?.tempoMap?.[meta.tempoMap.length-1]?.microsPerBeat||500000;
     const beatsPerBar=meta?.timeSig?.num||4;
@@ -3231,12 +3230,12 @@ class NotationRenderer{
       totalMs=Math.max(totalMs,(bar.startMs||0)+barDurationMs);
       const xOff=bi*barW+10;
       // Treble stave
-      const trebleY=8;
+      const trebleY=40;
       const trebleStave=new VF.Stave(xOff,trebleY,barW-4);
       if(bi===0){trebleStave.addClef('treble');if(meta?.timeSig)trebleStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
       trebleStave.setContext(ctx).draw();
-      // Bass stave
-      const bassY=trebleY+staveH+12;
+      // Bass stave — anchored so 38px remain below its bottom line for ledger lines
+      const bassY=Math.round(stripH-40-38);
       const bassStave=new VF.Stave(xOff,bassY,barW-4);
       if(bi===0){bassStave.addClef('bass');if(meta?.timeSig)bassStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
       bassStave.setContext(ctx).draw();
