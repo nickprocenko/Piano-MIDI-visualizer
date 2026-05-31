@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      background: rgba(10, 12, 18, 0.91);
+      overflow: hidden;
+    }
+
+    #container {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    /* The score slides left/right via CSS transform — GPU composited */
+    #score-track {
+      position: absolute;
+      top: 0; left: 0;
+      will-change: transform;
+    }
+
+    /* OSMD renders into a white-background div */
+    #osmd-div {
+      background: #fff;
+      display: inline-block;
+      padding: 4px 24px 8px;
+    }
+
+    /* Fixed vertical playhead line */
+    #playhead {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 2px;
+      background: rgba(255, 218, 48, 0.9);
+      pointer-events: none;
+      z-index: 50;
+      box-shadow: 0 0 10px rgba(255, 218, 48, 0.45);
+    }
+
+    /* Status / error overlay */
+    #status {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(170, 170, 204, 0.85);
+      font: 13px/1.4 'Segoe UI', Arial, sans-serif;
+      pointer-events: none;
+      text-align: center;
+      white-space: pre-line;
+    }
+  </style>
+</head>
+<body>
+
+<div id="container">
+  <div id="score-track">
+    <div id="osmd-div"></div>
+  </div>
+  <div id="playhead"></div>
+</div>
+<div id="status">Waiting for score…</div>
+
+<script src="opensheetmusicdisplay.min.js"></script>
+<script>
+"use strict";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PLAYHEAD_FRAC  = 0.25;   // playhead at 25% from left edge
+const LEAD_IN_MS     = 1500;   // matches MidiFilePlayer._LEAD_IN_MS
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+
+const container  = document.getElementById('container');
+const scoreTrack = document.getElementById('score-track');
+const playheadEl = document.getElementById('playhead');
+const statusEl   = document.getElementById('status');
+
+// ─── Shared state ─────────────────────────────────────────────────────────────
+
+let osmd        = null;
+let rendered    = false;
+let currentMs   = -LEAD_IN_MS;
+
+// timestampMap: sorted array of { timeMs, xPx }
+// xPx is relative to score-track origin (before any CSS transform)
+let timestampMap = [];
+
+// ─── Playhead positioning ─────────────────────────────────────────────────────
+
+function positionPlayhead() {
+  playheadEl.style.left = (window.innerWidth * PLAYHEAD_FRAC) + 'px';
+}
+positionPlayhead();
+window.addEventListener('resize', positionPlayhead);
+
+// ─── Public API (called via evaluate_js from Python) ──────────────────────────
+
+/**
+ * Load and render a MusicXML string.
+ * Called once per MIDI file from Python.
+ */
+async function loadScore(musicXml) {
+  rendered = false;
+  timestampMap = [];
+  statusEl.style.display = 'flex';
+  statusEl.textContent   = 'Rendering score…';
+
+  // Reset score-track to origin so timestamp map x coords are correct
+  scoreTrack.style.transform = 'translateX(0px)';
+
+  if (!osmd) {
+    osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd-div', {
+      autoResize:                           false,
+      drawTitle:                            false,
+      drawComposer:                         false,
+      drawSubtitle:                         false,
+      drawLyricist:                         false,
+      drawCredits:                          false,
+      newSystemAtXMLNewSystemAttribute:     false,
+      newPageAtXMLNewPageAttribute:         false,
+      renderSingleHorizontalStaffline:      true,
+      defaultColorNotehead:                 '#1a1a2e',
+      defaultColorStem:                     '#1a1a2e',
+      defaultColorRest:                     '#555577',
+      defaultColorLabel:                    '#222233',
+    });
+  }
+
+  try {
+    await osmd.load(musicXml);
+
+    // Compact margins for a single-line horizontal layout
+    osmd.EngravingRules.PageTopMargin             = 4;
+    osmd.EngravingRules.PageBottomMargin          = 4;
+    osmd.EngravingRules.PageLeftMargin            = 5;
+    osmd.EngravingRules.PageRightMargin           = 5;
+    osmd.EngravingRules.MinimumStaffLineDistance  = 4;
+
+    await osmd.render();
+
+    statusEl.style.display = 'none';
+    rendered = true;
+    buildTimestampMap();
+  } catch (err) {
+    statusEl.textContent = 'Sheet music error:\n' + err.message;
+    console.error('[OSMD]', err);
+  }
+}
+
+/**
+ * Receive the current MIDI playback position from Python (ms).
+ * Called every frame (~60 Hz) by the OSMD bridge.
+ */
+function updatePosition(ms) {
+  currentMs = ms;
+}
+
+// ─── Timestamp map ────────────────────────────────────────────────────────────
+
+/**
+ * Walk the OSMD cursor to build a time (ms) → screen-x (px) lookup table.
+ * xPx values are relative to the score-track origin at translateX(0).
+ */
+function buildTimestampMap() {
+  if (!osmd || !rendered) return;
+
+  // Detect default BPM from the sheet
+  let bpm = 120;
+  try {
+    if (osmd.Sheet && osmd.Sheet.defaultStartTempoInBpm) {
+      bpm = osmd.Sheet.defaultStartTempoInBpm;
+    }
+  } catch (_) {}
+
+  const map = [];
+
+  try {
+    osmd.cursor.show();
+    osmd.cursor.reset();
+
+    while (!osmd.cursor.iterator.EndReached) {
+      // Read cursor element position relative to score-track
+      // (score-track is at translateX(0) right now)
+      const curEl = scoreTrack.querySelector('.osmd-cursor-img') ||
+                    scoreTrack.querySelector('[class*="cursor"]');
+      if (curEl) {
+        const trackRect = scoreTrack.getBoundingClientRect();
+        const elRect    = curEl.getBoundingClientRect();
+        const xPx = elRect.left - trackRect.left + elRect.width * 0.5;
+
+        const ts    = osmd.cursor.iterator.currentTimeStamp;
+        const timeMs = ts.realValue * 4.0 * (60000.0 / bpm);
+
+        // Avoid duplicate x values from multi-voice chords
+        if (map.length === 0 || map[map.length - 1].xPx !== xPx) {
+          map.push({ timeMs, xPx });
+        } else {
+          // Keep the earlier timeMs for this x position
+          map[map.length - 1].timeMs = Math.min(map[map.length - 1].timeMs, timeMs);
+        }
+      }
+
+      osmd.cursor.next();
+    }
+  } catch (err) {
+    console.error('[OSMD] buildTimestampMap:', err);
+  }
+
+  osmd.cursor.hide();
+  timestampMap = map;
+
+  if (map.length === 0) {
+    statusEl.style.display = 'flex';
+    statusEl.textContent   = 'No notes found in score';
+  }
+}
+
+// ─── Scroll interpolation ─────────────────────────────────────────────────────
+
+/**
+ * Binary-search the timestamp map and interpolate an x-pixel position
+ * for the given time in milliseconds.
+ */
+function getXForTime(ms) {
+  const n = timestampMap.length;
+  if (n === 0) return 0;
+
+  // Before the first note
+  if (ms <= timestampMap[0].timeMs) {
+    return timestampMap[0].xPx;
+  }
+  // After the last note
+  if (ms >= timestampMap[n - 1].timeMs) {
+    return timestampMap[n - 1].xPx;
+  }
+
+  // Binary search for the surrounding pair
+  let lo = 0, hi = n - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (timestampMap[mid].timeMs <= ms) lo = mid;
+    else hi = mid;
+  }
+
+  const a = timestampMap[lo];
+  const b = timestampMap[hi];
+  const t = (ms - a.timeMs) / (b.timeMs - a.timeMs);
+  return a.xPx + t * (b.xPx - a.xPx);
+}
+
+// ─── Animation loop ───────────────────────────────────────────────────────────
+
+function tick() {
+  requestAnimationFrame(tick);
+
+  if (!rendered || timestampMap.length === 0) return;
+
+  const phX   = window.innerWidth * PLAYHEAD_FRAC;
+  const noteX = getXForTime(currentMs);
+  scoreTrack.style.transform = `translateX(${(phX - noteX).toFixed(1)}px)`;
+}
+
+tick();
+</script>
+</body>
+</html>
