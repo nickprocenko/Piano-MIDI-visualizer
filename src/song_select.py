@@ -1,4 +1,4 @@
-"""Scrollable MIDI song selection screen."""
+"""Scrollable song selection screen (MIDI and MusicXML)."""
 
 from __future__ import annotations
 
@@ -30,15 +30,28 @@ SCROLLBAR_W = 8
 SCROLL_SPEED = 3   # items per mouse-wheel tick
 
 
+_MUSIC_EXTS = (
+    "*.mid", "*.midi", "*.MID", "*.MIDI",
+    "*.xml", "*.XML", "*.musicxml", "*.MUSICXML",
+    "*.mxl", "*.MXL",
+)
+
+_MUSICXML_SUFFIXES = {".xml", ".musicxml", ".mxl"}
+
+
+def is_musicxml(path: pathlib.Path) -> bool:
+    return path.suffix.lower() in _MUSICXML_SUFFIXES
+
+
 def _scan_folders(folders: list[str]) -> list[pathlib.Path]:
-    """Recursively find all .mid / .midi files in *folders*, deduplicated."""
+    """Recursively find all MIDI and MusicXML files in *folders*, deduplicated."""
     seen: set[pathlib.Path] = set()
     result: list[pathlib.Path] = []
     for folder in folders:
         p = pathlib.Path(folder)
         if not p.is_dir():
             continue
-        for ext in ("*.mid", "*.midi", "*.MID", "*.MIDI"):
+        for ext in _MUSIC_EXTS:
             for f in sorted(p.rglob(ext)):
                 if f not in seen:
                     seen.add(f)
@@ -191,7 +204,7 @@ class SongSelect:
     def _draw_files(self) -> None:
         if not self._files:
             sr = self.screen.get_rect()
-            lines = ["No MIDI files found.", "Add search folders in Settings."]
+            lines = ["No MIDI or MusicXML files found.", "Add search folders in Settings."]
             y = self._list_rect.centery - len(lines) * 18
             for line in lines:
                 surf = self._item_font.render(line, True, NO_FILES_COLOR)

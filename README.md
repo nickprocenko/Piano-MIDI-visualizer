@@ -1,211 +1,150 @@
 # Piano MIDI Visualizer
 
-A full-screen, real-time piano MIDI visualizer for live performances.  
-Designed to run locally on Windows with a large screen or projector.
+A full-screen, real-time piano MIDI visualizer for live performances, built as a single-page web app.  
+Open it locally or deploy to any static host — no server required for the visualizer itself.
 
-Current deployed website: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/" target="_blank" rel="noopener noreferrer">https://nickprocenko.github.io/Piano-MIDI-visualizer/</a>
+Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/" target="_blank" rel="noopener noreferrer">https://nickprocenko.github.io/Piano-MIDI-visualizer/</a>
 
 ## Features
-- Borderless fullscreen on a second monitor — clicking your PC monitor won't minimise the window
-- Real-time MIDI input (USB MIDI devices — tested with Roland JUNO-DS)
-- 88-key piano rendering with animation controls
-- rising-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
-- Animated background image / GIF slideshow
-- ESP32 LED strip(s) synchronisation over serial or BLE
-- Audience live colour control via WebSocket (Twitch channel-point integration)
-- Mappable midi CCs for various controls
-- Built-in theme manager — save, rename, load, and delete colour presets
-- **Live web control panel** at `http://localhost:8181` — change notes, effects, keyboard, and themes from your browser while a song is playing
-- 60 fps game loop with crash diagnostics
 
-## Requirements
-- Python 3.10+
-- Internet connection on first launch (to download packages)
+- Real-time MIDI input via the **Web MIDI API** (USB MIDI devices — tested with Roland JUNO-DS)
+- Rising-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
+- **Learn Mode** — drop a MIDI or MusicXML file, choose tracks and hands, and follow along at your own pace (Wait or Free-play)
+- **Freeplay** — just plug in and play, no file needed
+- Animated fluid ink effects (GPU-accelerated via WebGL)
+- Animated background image / GIF slideshow
+- ESP32 LED strip synchronisation over serial or BLE
+- Audience live colour control via WebSocket (Kik / Twitch channel-point integration)
+- Built-in theme manager — save, rename, load, and delete colour presets
+- Scenes & Profiles — store and switch full visual snapshots
+- Mappable MIDI CCs for any control
+- 60 fps game loop
 
 ## How to run
 
-### Double-click (recommended)
-Just double-click **`Launch Piano MIDI Visualizer.bat`**.
-On first launch it will automatically create a virtual environment and install all Python dependencies from `requirements.txt`. Subsequent launches start immediately.
+### Quickest: open the live site
 
-### Command line
+Go to <https://nickprocenko.github.io/Piano-MIDI-visualizer/> in **Chrome** or **Edge** (Web MIDI requires a Chromium browser).
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
+### Local file (no internet required)
+
+```
+docs/index.html   ← open this file directly in Chrome/Edge
 ```
 
-### Standalone fluid prototype
+No install, no server, no build step.
 
-Use the standalone pywebview fluid prototype to validate the desktop runtime before integrating changes into the keyboard app:
+### Self-hosted
 
-```bash
-python tools/fluid_prototype.py --duration 30
-```
+Copy the `docs/` folder to any static web host (Netlify, Vercel, GitHub Pages, nginx, etc.).
 
-Press **ESC** during a song to return to the main menu.  
-Click **QUIT** or close the window to exit.
+> **Browser requirement:** Web MIDI API is supported in Chromium-based browsers only (Chrome, Edge, Opera). Firefox and Safari do not support it.
 
-## Live Local Web Control Panel
+## Settings
 
-Yes — the app includes a built-in local control webpage served by `src/control_server.py`.
+Open **SETTINGS** from the main menu. Tabs:
 
-How to use it:
-1. Start the app (`python main.py` or the `.bat` launcher).
-2. Keep the app running.
-3. Open `http://localhost:8181` in your browser on the same machine.
-4. Adjust tabs like **Notes**, **Effects**, **Fluid**, **Keyboard**, and **Themes**.
-5. Changes apply live while the visualizer is running and are saved to `config.json`.
+| Tab | What you configure |
+|-----|-------------------|
+| Notes | Colour mode, glow, sparks, smoke, trail speed |
+| Effects | Halo pulse, bloom, spark physics |
+| Fluid | Ink fluid simulation (curl, dissipation, pressure) |
+| Keyboard | Piano height, brightness, visibility |
+| Display | Background slides, frame rate cap |
+| Hardware | MIDI CC mappings |
+| LED Output | ESP32 serial / BLE config |
+| Audience | WebSocket URL for live audience colour votes |
+| Themes | Save / load / delete colour presets |
+| Scenes & Profiles | Full visual snapshots |
 
-Notes:
-- The panel is local-only (`127.0.0.1`) and is not exposed to your network.
-- If the page does not open, another process may already be using port `8181`.
+## Learn Mode
 
-## Crash Diagnostics
+1. Select **LEARN MODE** from the menu.
+2. Drop a `.mid`, `.midi`, `.xml`, or `.musicxml` file (or click **Browse**).
+3. Pick which tracks to show and assign hands (Left / Right).
+4. Choose **Wait** (pauses until you play the right note) or **Free-play** (plays at your set speed).
+5. Click **▶ Start Learning**.
 
-If the app crashes, a JSON crash report is written to `crash_logs/` with:
-- Full Python traceback
-- Runtime app snapshot (state, MIDI connection details, trail counts, note style)
-- Python/platform/pygame version info
+A floating transport HUD lets you pause, loop, and adjust speed without leaving the highway.
 
-Share the newest file in `crash_logs/` to quickly diagnose failures.
+## Crash diagnostics
 
-## ESP32 LED Output (176 LEDs)
+If the visualizer stops rendering, open the browser DevTools console (F12) for error details.
 
-The app can stream note activity to an ESP32-S3 over serial.
+## ESP32 LED Output
 
-1. Install dependencies:
-	 - `pip install -r requirements.txt`
-2. Create/edit `config.json` in the project root with an `led_output` block:
+The app streams note activity to an ESP32-S3 over serial or BLE.
+
+Add an `led_output` block to `config.json` (persisted in `localStorage` when running in-browser):
 
 ```json
 {
-	"led_output": {
-		"enabled": true,
-		"transport": "serial",
-		"port": "COM5",
-		"baudrate": 115200,
-		"ble_address": "AA:BB:CC:DD:EE:FF",
-		"ble_service_uuid": "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
-		"ble_char_uuid": "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
-		"ble_write_with_response": false,
-		"ble_chunk_size": 180,
-		"led_count": 176,
-		"mirror_per_key": 2,
-		"fps_limit": 12,
-		"active_r": 0,
-		"active_g": 220,
-		"active_b": 220
-	}
+  "led_output": {
+    "enabled": true,
+    "transport": "serial",
+    "port": "COM5",
+    "baudrate": 115200,
+    "ble_address": "AA:BB:CC:DD:EE:FF",
+    "ble_service_uuid": "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+    "ble_char_uuid": "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
+    "ble_write_with_response": false,
+    "ble_chunk_size": 180,
+    "led_count": 176,
+    "mirror_per_key": 2,
+    "fps_limit": 12,
+    "active_r": 0,
+    "active_g": 220,
+    "active_b": 220
+  }
 }
 ```
 
-Serial protocol sent from app to ESP32:
-- One line per frame (ASCII):
-- `LEDS,<led_count>,r0,g0,b0,r1,g1,b1,...\n`
-- For 88 keys with 176 LEDs, default mapping is 2 LEDs per key.
-- MIDI note 21 (A0) maps to LEDs 0-1, note 22 maps to 2-3, ... note 108 maps to 174-175.
+Serial protocol (one line per frame, ASCII):
+```
+LEDS,<led_count>,r0,g0,b0,r1,g1,b1,...\n
+```
+For 88 keys × 2 LEDs: MIDI note 21 (A0) → LEDs 0–1, note 22 → LEDs 2–3, … note 108 → LEDs 174–175.
 
-Tip:
-- Keep ESP32 parser non-blocking and apply frame only after a full newline is received.
-- For BLE transport, start with `fps_limit` around 10-15 and increase only if stable.
-
-BLE transport mode:
-- Set `transport` to `"ble"`
-- Set `ble_address` to your ESP32 BLE MAC/address shown by your scanner tool
-- Leave the UUID defaults unless you changed them in firmware
-- The app writes the same `LEDS,...\n` frame, chunked across BLE packets
-
-### In-app LED Settings
-
-From `Settings`, open `LED SETTINGS` to configure:
-- Enable/disable serial LED output
-- COM port cycling + port refresh
-- Baud rate cycling
-- LED FPS, LEDs-per-key mapping, and active RGB color
+BLE transport: set `transport` to `"ble"` and fill in the address. Same frame format, chunked across BLE packets.
 
 ### FastLED Firmware
 
-A ready-to-flash FastLED bridge sketch is included at:
-- `firmware/esp32_fastled_bridge/esp32_fastled_bridge.ino`
+`firmware/esp32_fastled_bridge/esp32_fastled_bridge.ino` — ready to flash.
 
-Defaults in sketch:
-- `LED_COUNT 176`
-- `SERIAL_BAUD 115200`
-- Reads exactly the app protocol: `LEDS,<count>,r,g,b,...` per line
-- Also accepts BLE writes on service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E`
-- Write characteristic UUID: `6E400002-B5A3-F393-E0A9-E50E24DCCA9E`
+Defaults:
+- `LED_COUNT 176`, `SERIAL_BAUD 115200`
+- Accepts BLE writes on service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` (characteristic `6E400002-…`)
+- Install `NimBLE-Arduino` for BLE support
 
-Arduino library requirement for BLE firmware:
-- Install `NimBLE-Arduino`
+## Audience Color Control
 
-## Audience Color Control (App Side)
+The app connects to a WebSocket backend and applies live audience-voted colors.
 
-The app can connect to your backend WebSocket and apply live audience colors.
+Settings → **Audience** tab:
+- WebSocket URL: `ws://localhost:8766` (or your deployed server)
+- Click **Connect**
 
-Add to `config.json`:
-
+Expected incoming message:
 ```json
 {
-	"audience_control": {
-		"enabled": true,
-		"ws_url": "wss://your-domain/ws/app",
-		"channel_id": "12345678",
-		"app_api_key": "your-app-secret",
-		"reconnect_sec": 2.0
-	}
+  "type": "color_set",
+  "rgb": { "r": 41, "g": 220, "b": 255 },
+  "transition_ms": 220
 }
 ```
 
-Expected incoming WebSocket message:
-
-```json
-{
-	"type": "color_set",
-	"rgb": {"r": 41, "g": 220, "b": 255},
-	"transition_ms": 220
-}
-```
-
-Behavior:
-- App smooths from current to target color over `transition_ms`
-- Updates note colors in real time
-- Updates LED active color in real time
-
-### Example Presets
-
-`examples/` contains ready-made JSON settings files. Import any of them via **Settings → Import**:
-
-| File | Description |
-|------|-------------|
-| `claire-de-lune.json` | Soft blue-white palette, gentle fluid ripple, no sparks |
-| `moonlight-sonata.json` | Deep indigo tones, slow trails |
-| `light-my-fire.json` | Warm amber/red, sparks on, fast scroll |
-| `riders-on-the-storm.json` | Cool storm palette, smoke enabled |
-
-### AI Prompt Files
-
-`examples/prompts/` contains copy-paste prompts for any external AI (Claude, ChatGPT, etc.):
-
-- `script.md` — generates a colour script with the full API reference embedded
-- `preset.md` — generates a JSON settings preset with the full schema embedded
-
-Click **Copy AI Prompt** in the script editor to copy a prompt that already includes your current script for the AI to iterate on.
-
----
+The visualizer smooths from the current colour to the target over `transition_ms` and updates both note colours and LED output in real time.
 
 ## Audience Vote Server (`server/`)
 
-A Node.js server that lets your Kik audience vote on live visual changes. Polls run automatically; winners are applied to the web visualizer instantly via WebSocket.
+A Node.js server that lets your Kik audience vote on live visual changes. Polls rotate automatically; the winner is applied to the visualizer over WebSocket.
 
-### Vote categories (random rotation, never repeats back-to-back)
+### Vote categories
 
 | Category | Options |
 |----------|---------|
 | Note Theme | Rainbow, Octave Rainbow, Fire, Ice, Sunset |
-| Performance | Riders on the Storm, Moonlight Sonata, Light My Fire, Claire de Lune *(full visual preset)* |
+| Performance | Riders on the Storm, Moonlight Sonata, Light My Fire, Claire de Lune *(full preset)* |
 | Trail Colour | Ocean Blue, Sunset Red, Forest Green, Neon Purple |
 | Trail Speed | Slow, Normal, Fast, Very Fast |
 | Effects | Sparks On/Off, Smoke On/Off |
@@ -215,18 +154,12 @@ A Node.js server that lets your Kik audience vote on live visual changes. Polls 
 
 | Message | Bot replies |
 |---------|------------|
-| `1` – `N` (poll active) | Confirms vote with time remaining |
-| `!suggest <name>` | Queues a poll for the matched option; if ambiguous, lists candidates numbered for clarification |
+| `1`–`N` (poll active) | Confirms vote with time remaining |
+| `!suggest <name>` | Queues a poll for the matched option |
 | `status` | Shows current poll or next-poll countdown |
 | `!help` | Lists all categories, options, and commands |
 
-**`!suggest` details:** fuzzy-matches against all option names across all categories (exact → starts-with → substring). When multiple options match, the bot asks the viewer to pick from a numbered list before queuing. One suggestion per viewer in the queue at a time; queue capped at 5. When the poll goes live, the overlay shows *"Suggested by @username"* and the suggester gets a personal Kik ping.
-
-**Proactive notifications:** every viewer who has previously messaged the bot receives a Kik notification when a new poll starts, including the numbered option list.
-
-### Setup
-
-See [`server/README.md`](server/README.md) for the complete setup guide (Kik bot registration, ngrok, OBS browser source, WebSocket connection).
+See [`server/README.md`](server/README.md) for full setup (Kik bot registration, ngrok, OBS browser source, WebSocket wiring).
 
 Quick start:
 ```bash
@@ -239,4 +172,24 @@ node server.js
 
 ### OBS Overlay (`docs/overlay.html`)
 
-Add as a **Browser Source** in OBS (1920×1080, transparent background, local file path). The corner card slides in when a poll starts and slides out during the cooldown. Shows live vote bars, countdown, and the "Suggested by" attribution when applicable.
+Add as a **Browser Source** in OBS (1920×1080, transparent background, local file path). The corner card slides in when a poll starts and slides out during the cooldown.
+
+## Example Presets
+
+`examples/` contains ready-made JSON settings files. Import any via **Settings → Themes → Import**:
+
+| File | Description |
+|------|-------------|
+| `claire-de-lune.json` | Soft blue-white palette, gentle fluid ripple, no sparks |
+| `moonlight-sonata.json` | Deep indigo tones, slow trails |
+| `light-my-fire.json` | Warm amber/red, sparks on, fast scroll |
+| `riders-on-the-storm.json` | Cool storm palette, smoke enabled |
+
+## AI Prompt Files
+
+`examples/prompts/` — copy-paste prompts for any external AI (Claude, ChatGPT, etc.):
+
+- `script.md` — generates a colour script with the full API reference embedded
+- `preset.md` — generates a JSON settings preset with the full schema embedded
+
+Click **Copy AI Prompt** in the script editor to copy a prompt that includes your current script for the AI to iterate on.
