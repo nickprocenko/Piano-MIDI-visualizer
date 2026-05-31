@@ -3090,7 +3090,7 @@ function _parseMusicXmlDoc(doc){
     keySig:{sharps:fifths,mode:0}
   };
   const barDurationMs=beats*(microsPerBeat/1000);
-  const parsePart=(part)=>{
+  const parsePart=(part,staffFilter=null)=>{
     const measures=[];
     let divs=globalDivs;
     let usBeat=microsPerBeat;
@@ -3100,12 +3100,13 @@ function _parseMusicXmlDoc(doc){
       const mTempo=measure.querySelector('direction sound[tempo],sound[tempo]');
       if(mTempo)usBeat=Math.round(60000000/parseFloat(mTempo.getAttribute('tempo')));
       const chords=[];
-      let tick=0; let lastDur=0; let first=true;
       Array.from(measure.querySelectorAll('note')).forEach(noteEl=>{
         const isChord=!!noteEl.querySelector('chord');
         const isRest=!!noteEl.querySelector('rest');
-        const dur=parseInt(noteEl.querySelector('duration')?.textContent||'0');
-        if(!isChord){if(!first)tick+=lastDur; first=false; lastDur=dur;}
+        if(staffFilter!==null){
+          const sf=noteEl.querySelector('staff');
+          if(sf&&sf.textContent!==String(staffFilter))return;
+        }
         if(isRest)return;
         const pitchEl=noteEl.querySelector('pitch');
         if(!pitchEl)return;
@@ -3113,6 +3114,7 @@ function _parseMusicXmlDoc(doc){
         const alter=Math.round(parseFloat(pitchEl.querySelector('alter')?.textContent||'0'));
         const octave=parseInt(pitchEl.querySelector('octave')?.textContent||'4');
         const midi=Math.max(21,Math.min(108,(octave+1)*12+(STEP_SEMI[step]||0)+alter));
+        const dur=parseInt(noteEl.querySelector('duration')?.textContent||'0');
         const durationMs=Math.max(50,dur/divs*(usBeat/1000));
         if(isChord&&chords.length>0){chords[chords.length-1].notes.push(midi);}
         else{chords.push({notes:[midi],durationMs});}
@@ -3122,11 +3124,27 @@ function _parseMusicXmlDoc(doc){
     return measures;
   };
   const parts=Array.from(doc.querySelectorAll('part'));
-  const getClef=p=>p.querySelector('measure attributes clef sign')?.textContent==='F'?'bass':'treble';
-  const treblePart=parts.find(p=>getClef(p)==='treble')||parts[0]||null;
-  const bassPart=parts.find(p=>p!==treblePart&&getClef(p)==='bass')||(parts.length>1?parts.find(p=>p!==treblePart):null);
-  const trebleMeasures=treblePart?parsePart(treblePart):[];
-  const bassMeasures=bassPart?parsePart(bassPart):[];
+  let trebleMeasures,bassMeasures;
+  const staveCount=parseInt(parts[0]?.querySelector('attributes staves')?.textContent||'1');
+  if(parts.length===1&&staveCount>1){
+    // Single-part grand staff (piano) — split by <staff> number
+    let trebleStaff=1,bassStaff=2;
+    parts[0].querySelectorAll('measure attributes clef').forEach(clef=>{
+      const num=parseInt(clef.getAttribute('number')||'1');
+      const sign=clef.querySelector('sign')?.textContent;
+      if(sign==='F')bassStaff=num;
+      else if(sign==='G')trebleStaff=num;
+    });
+    trebleMeasures=parsePart(parts[0],trebleStaff);
+    bassMeasures=parsePart(parts[0],bassStaff);
+  }else{
+    // Multiple parts — match by clef
+    const getClef=p=>p.querySelector('measure attributes clef sign')?.textContent==='F'?'bass':'treble';
+    const treblePart=parts.find(p=>getClef(p)==='treble')||parts[0]||null;
+    const bassPart=parts.find(p=>p!==treblePart&&getClef(p)==='bass')||(parts.length>1?parts.find(p=>p!==treblePart):null);
+    trebleMeasures=treblePart?parsePart(treblePart):[];
+    bassMeasures=bassPart?parsePart(bassPart):[];
+  }
   const numBars=Math.min(400,Math.max(trebleMeasures.length,bassMeasures.length));
   const bars=[];
   for(let b=0;b<numBars;b++){
@@ -3177,14 +3195,19 @@ class NotationRenderer{
     this._ready=false;
   }
   render(bars,meta){
-    if(typeof Vex==='undefined'||!this._wrap)return;
+    if(typeof Vex==='undefined'){
+      if(this._wrap){const m=document.createElement('div');m.className='vex-loading-msg';m.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,160,60,.8);font-size:12px;pointer-events:none';m.textContent='Sheet music: VexFlow library not loaded';this._wrap.appendChild(m);}
+      return;
+    }
+    if(!this._wrap)return;
     const old=this._wrap.querySelector('svg');
     if(old)old.remove();
     this._wrap.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
     this._ready=false;
     if(!bars||!bars.length)return;
-    const{VF}=Vex;
-    if(!VF?.Renderer){console.error('VexFlow VF namespace missing');return;}
+    // VexFlow 4.x may expose Flow as Vex.VF, Vex.Flow, or directly on Vex
+    const VF=Vex.VF||Vex.Flow||Vex;
+    if(!VF?.Renderer){console.error('VexFlow Renderer missing. Vex keys:',Object.keys(Vex||{}));return;}
     try{
     const stripH=document.getElementById('notation-strip').offsetHeight||170;
     const staveH=Math.floor((stripH-20)/2); // rough per-stave height
@@ -3264,6 +3287,18 @@ class NotationRenderer{
       buildVoice(bar.bass,'bass',bassStave);
     });
     this._svgEl=this._wrap.querySelector('svg');
+    // VexFlow draws in black by default (paper convention).
+    // Inject a style element to invert ink for the dark strip background.
+    if(this._svgEl){
+      const style=document.createElementNS('http://www.w3.org/2000/svg','style');
+      style.textContent=[
+        'path,rect,polygon{fill:rgba(210,210,210,.88);stroke:rgba(160,160,160,.7)}',
+        'path[fill="none"],rect[fill="none"]{fill:none}',
+        'text{fill:rgba(220,220,220,.9);stroke:none}',
+        'line{stroke:rgba(170,170,170,.75)}'
+      ].join(' ');
+      this._svgEl.insertBefore(style,this._svgEl.firstChild);
+    }
     this._totalMs=totalMs||1;
     this._pxPerMs=totalW/this._totalMs;
     this._ready=true;
