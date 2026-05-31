@@ -168,7 +168,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 /* ── Notation strip ── */
 #notation-strip{display:none;position:fixed;left:0;right:0;height:220px;background:rgba(8,10,16,.88);border-bottom:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);z-index:50;overflow:hidden;user-select:none}
 #notation-strip.visible{display:flex;align-items:center}
-#notation-drag-handle{writing-mode:vertical-lr;font-size:20px;opacity:.35;cursor:ns-resize;padding:0 8px;flex-shrink:0;color:#fff;line-height:1}
+#notation-drag-handle{writing-mode:vertical-lr;font-size:20px;opacity:.35;cursor:ns-resize;padding:6px 10px;flex-shrink:0;color:#fff;line-height:1;touch-action:none}
 #notation-svg-wrap{flex:1;height:100%;overflow:hidden;position:relative}
 #notation-svg-wrap svg{position:absolute;top:0;left:0;color:#ccc}
 #notation-cursor-line{position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(0,180,180,.55);pointer-events:none;z-index:2}
@@ -3430,7 +3430,8 @@ class App{
     if(!handle)return;
     let startY=0,startTop=0;
     const onMove=e=>{
-      const dy=e.clientY-startY;
+      const clientY=e.touches?e.touches[0].clientY:e.clientY;
+      const dy=clientY-startY;
       const maxTop=window.innerHeight-strip.offsetHeight;
       const newTop=Math.max(0,Math.min(maxTop,startTop+dy));
       strip.style.top=newTop+'px';
@@ -3440,14 +3441,19 @@ class App{
       Config.save();
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
+      document.removeEventListener('touchmove',onMove);
+      document.removeEventListener('touchend',onUp);
     };
-    handle.addEventListener('mousedown',e=>{
-      startY=e.clientY;
+    const startDrag=(clientY)=>{
+      startY=clientY;
       startTop=parseInt(strip.style.top)||0;
       document.addEventListener('mousemove',onMove);
       document.addEventListener('mouseup',onUp);
-      e.preventDefault();
-    });
+      document.addEventListener('touchmove',onMove,{passive:false});
+      document.addEventListener('touchend',onUp);
+    };
+    handle.addEventListener('mousedown',e=>{startDrag(e.clientY);e.preventDefault();});
+    handle.addEventListener('touchstart',e=>{startDrag(e.touches[0].clientY);e.preventDefault();},{passive:false});
   }
 
   _frame(now){
