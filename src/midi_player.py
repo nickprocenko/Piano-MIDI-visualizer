@@ -105,13 +105,15 @@ class MidiFilePlayer:
         t = self._pos_ms
         return {note for note, start, end in self._notes if start <= t < end}
 
-    def get_notes_in_window(self, lookahead_ms: float) -> list[tuple[int, float, float]]:
-        """Return (note, start_ms, end_ms) for notes in [pos - 500 ms, pos + lookahead_ms]."""
+    def get_notes_in_window(
+        self, lookahead_ms: float, lookbehind_ms: float = 500.0
+    ) -> list[tuple[int, float, float]]:
+        """Return (note, start_ms, end_ms) for notes in [pos - lookbehind_ms, pos + lookahead_ms]."""
         t = self._pos_ms
         return [
             (note, start, end)
             for note, start, end in self._notes
-            if end > t - 500 and start < t + lookahead_ms
+            if end > t - lookbehind_ms and start < t + lookahead_ms
         ]
 
     @property
