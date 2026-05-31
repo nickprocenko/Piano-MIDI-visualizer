@@ -3090,7 +3090,7 @@ function _parseMusicXmlDoc(doc){
     keySig:{sharps:fifths,mode:0}
   };
   const barDurationMs=beats*(microsPerBeat/1000);
-  const parsePart=(part)=>{
+  const parsePart=(part,staffFilter=null)=>{
     const measures=[];
     let divs=globalDivs;
     let usBeat=microsPerBeat;
@@ -3100,12 +3100,13 @@ function _parseMusicXmlDoc(doc){
       const mTempo=measure.querySelector('direction sound[tempo],sound[tempo]');
       if(mTempo)usBeat=Math.round(60000000/parseFloat(mTempo.getAttribute('tempo')));
       const chords=[];
-      let tick=0; let lastDur=0; let first=true;
       Array.from(measure.querySelectorAll('note')).forEach(noteEl=>{
         const isChord=!!noteEl.querySelector('chord');
         const isRest=!!noteEl.querySelector('rest');
-        const dur=parseInt(noteEl.querySelector('duration')?.textContent||'0');
-        if(!isChord){if(!first)tick+=lastDur; first=false; lastDur=dur;}
+        if(staffFilter!==null){
+          const sf=noteEl.querySelector('staff');
+          if(sf&&sf.textContent!==String(staffFilter))return;
+        }
         if(isRest)return;
         const pitchEl=noteEl.querySelector('pitch');
         if(!pitchEl)return;
@@ -3113,6 +3114,7 @@ function _parseMusicXmlDoc(doc){
         const alter=Math.round(parseFloat(pitchEl.querySelector('alter')?.textContent||'0'));
         const octave=parseInt(pitchEl.querySelector('octave')?.textContent||'4');
         const midi=Math.max(21,Math.min(108,(octave+1)*12+(STEP_SEMI[step]||0)+alter));
+        const dur=parseInt(noteEl.querySelector('duration')?.textContent||'0');
         const durationMs=Math.max(50,dur/divs*(usBeat/1000));
         if(isChord&&chords.length>0){chords[chords.length-1].notes.push(midi);}
         else{chords.push({notes:[midi],durationMs});}
@@ -3122,11 +3124,27 @@ function _parseMusicXmlDoc(doc){
     return measures;
   };
   const parts=Array.from(doc.querySelectorAll('part'));
-  const getClef=p=>p.querySelector('measure attributes clef sign')?.textContent==='F'?'bass':'treble';
-  const treblePart=parts.find(p=>getClef(p)==='treble')||parts[0]||null;
-  const bassPart=parts.find(p=>p!==treblePart&&getClef(p)==='bass')||(parts.length>1?parts.find(p=>p!==treblePart):null);
-  const trebleMeasures=treblePart?parsePart(treblePart):[];
-  const bassMeasures=bassPart?parsePart(bassPart):[];
+  let trebleMeasures,bassMeasures;
+  const staveCount=parseInt(parts[0]?.querySelector('attributes staves')?.textContent||'1');
+  if(parts.length===1&&staveCount>1){
+    // Single-part grand staff (piano) — split by <staff> number
+    let trebleStaff=1,bassStaff=2;
+    parts[0].querySelectorAll('measure attributes clef').forEach(clef=>{
+      const num=parseInt(clef.getAttribute('number')||'1');
+      const sign=clef.querySelector('sign')?.textContent;
+      if(sign==='F')bassStaff=num;
+      else if(sign==='G')trebleStaff=num;
+    });
+    trebleMeasures=parsePart(parts[0],trebleStaff);
+    bassMeasures=parsePart(parts[0],bassStaff);
+  }else{
+    // Multiple parts — match by clef
+    const getClef=p=>p.querySelector('measure attributes clef sign')?.textContent==='F'?'bass':'treble';
+    const treblePart=parts.find(p=>getClef(p)==='treble')||parts[0]||null;
+    const bassPart=parts.find(p=>p!==treblePart&&getClef(p)==='bass')||(parts.length>1?parts.find(p=>p!==treblePart):null);
+    trebleMeasures=treblePart?parsePart(treblePart):[];
+    bassMeasures=bassPart?parsePart(bassPart):[];
+  }
   const numBars=Math.min(400,Math.max(trebleMeasures.length,bassMeasures.length));
   const bars=[];
   for(let b=0;b<numBars;b++){
