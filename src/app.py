@@ -23,7 +23,7 @@ from src.led_settings import LedSettingsScreen
 from src.notes_settings import NotesSettingsScreen
 from src.profile_screen import ProfileScreen
 from src.settings import SettingsScreen
-from src.song_select import SongSelect
+from src.song_select import SongSelect, is_musicxml as _is_musicxml
 from src.theme_settings import ThemeSettingsScreen
 from src.trail_constants import TRAIL_KEY_EDGE_INSET_PX, TRAIL_MIN_WIDTH_PX
 import src.themes as themes_mod
@@ -315,7 +315,9 @@ class App:
         self._refresh_claire_script_state()
         self._selected_midi_file = midi_file
         self._enabled_tracks = enabled_tracks
-        if midi_file is not None and _MIDO_AVAILABLE and _MidiFilePlayer is not None:
+        # MusicXML files don't drive the MIDI player; only MIDI files do.
+        _file_is_xml = midi_file is not None and _is_musicxml(midi_file)
+        if midi_file is not None and not _file_is_xml and _MIDO_AVAILABLE and _MidiFilePlayer is not None:
             self._midi_player = _MidiFilePlayer(midi_file, enabled_tracks=enabled_tracks)
         else:
             self._midi_player = None
@@ -369,15 +371,15 @@ class App:
         else:
             self._sheet_music_overlay = None
 
-        # OSMD webview overlay — replaces the pygame fallback when available
+        # OSMD webview overlay — supports both MIDI and MusicXML files
         if _OSMD_AVAILABLE and _OsmdBridge is not None and midi_file is not None:
             sw, sh = self.screen.get_size()
             wx, wy = self._get_window_position()
             bridge = _OsmdBridge(wx, wy, sw, sh)
             if bridge.available:
-                bridge.load_midi(midi_file, enabled_tracks)
+                bridge.load_file(midi_file, enabled_tracks)
                 self._osmd_bridge = bridge
-                # Hide the pygame overlay since OSMD takes over
+                # Hide pygame overlay since OSMD takes over
                 if self._sheet_music_overlay is not None:
                     self._sheet_music_overlay._visible = False
             else:
@@ -802,7 +804,9 @@ class App:
                     )
                 if self._osmd_bridge is not None and self._osmd_bridge.available:
                     self._osmd_bridge.update_position(self._midi_player.current_ms)
-            return
+                return
+            # MusicXML file: no MIDI player — score is static in the OSMD overlay.
+            # Fall through so live MIDI input still drives the piano and trails.
         if self._midi is None or not self._midi.connected or self._piano is None:
             self._prev_active_notes.clear()
             self._active_note_trails.clear()
