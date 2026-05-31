@@ -245,8 +245,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <div class="screen-title">Learn Mode</div>
   <div id="drop-zone">
     <p>Drag &amp; drop a .mid file here</p>
+    <p style="font-size:11px;margin-top:-4px">optionally include the .xml file too</p>
     <button class="browse-btn" id="btn-browse">Browse…</button>
-    <input type="file" id="file-input" accept=".mid,.midi">
+    <input type="file" id="file-input" accept=".mid,.midi,.xml,.musicxml" multiple>
   </div>
   <div id="recent-files"></div>
   <button class="screen-back" id="btn-file-back">← Back</button>
@@ -3350,6 +3351,7 @@ class App{
     this._notationRenderer=new NotationRenderer();
     this._musicXmlBars=null;
     this._musicXmlMeta=null;
+    this._pendingXmlFile=null;
     this._vizActive=false;
     this._panelOpen=false;
     this._selectedPortId='keyboard';
@@ -4330,7 +4332,7 @@ class App{
     // Device select
     document.getElementById('btn-device-back').onclick=()=>this.showMenu();
     // Track config
-    document.getElementById('btn-tracks-back').onclick=()=>this.showFileSelect();
+    document.getElementById('btn-tracks-back').onclick=()=>{this._pendingXmlFile=null;this.showFileSelect();};
     document.getElementById('btn-tracks-play').onclick=()=>{
       this._applyChannelConfig();
       this.prevNotes.clear();this._activeNotes?.clear();
@@ -4371,18 +4373,17 @@ class App{
       e.target.value='';
     };
     // File select
-    document.getElementById('btn-file-back').onclick=()=>this.showMenu();
+    document.getElementById('btn-file-back').onclick=()=>{this._pendingXmlFile=null;this.showMenu();};
     document.getElementById('btn-browse').onclick=()=>document.getElementById('file-input').click();
     document.getElementById('file-input').onchange=e=>{
-      const f=e.target.files[0]; if(!f)return;
-      this._loadMidiFile(f);
+      if(e.target.files.length)this._handleFileList(e.target.files);
     };
     const dz=document.getElementById('drop-zone');
     dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag-over');});
     dz.addEventListener('dragleave',()=>dz.classList.remove('drag-over'));
     dz.addEventListener('drop',e=>{
       e.preventDefault(); dz.classList.remove('drag-over');
-      const f=e.dataTransfer.files[0]; if(f)this._loadMidiFile(f);
+      if(e.dataTransfer.files.length)this._handleFileList(e.dataTransfer.files);
     });
     // Drop onto canvas while streaming — swap file without leaving visualiser
     const mc=document.getElementById('main-canvas');
@@ -4442,6 +4443,23 @@ class App{
     try{this._buildSettingsScreens();}catch(e){console.error('Panel rebuild error:',e);}
   }
 
+  _handleFileList(files){
+    let midFile=null, xmlFile=null;
+    for(const f of files){
+      const ext=f.name.split('.').pop().toLowerCase();
+      if(ext==='mid'||ext==='midi') midFile=f;
+      else if(ext==='xml'||ext==='musicxml') xmlFile=f;
+    }
+    if(xmlFile) this._pendingXmlFile=xmlFile;
+    if(midFile){
+      this._loadMidiFile(midFile);
+    } else if(xmlFile){
+      // XML dropped without MIDI — update hint and wait
+      const hint=document.querySelector('#drop-zone p');
+      if(hint) hint.textContent='MusicXML saved — now drop the .mid file';
+    }
+  }
+
   async _loadMidiFile(file){
     const buf=await file.arrayBuffer();
     this.midiFile.load(buf,file.name);
@@ -4450,6 +4468,11 @@ class App{
     document.getElementById('hud-song').textContent=file.name;
     this._buildLearnEvents();
     this._notationRenderer.destroy();
+    if(this._pendingXmlFile){
+      await this._loadMusicXmlFile(this._pendingXmlFile);
+      this._pendingXmlFile=null;
+      Config.lrn.notation=true;
+    }
     this.showTrackConfig();
     this._refreshTracksTab();
   }
