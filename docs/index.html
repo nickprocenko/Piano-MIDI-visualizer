@@ -3195,14 +3195,19 @@ class NotationRenderer{
     this._ready=false;
   }
   render(bars,meta){
-    if(typeof Vex==='undefined'||!this._wrap)return;
+    if(typeof Vex==='undefined'){
+      if(this._wrap){const m=document.createElement('div');m.className='vex-loading-msg';m.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,160,60,.8);font-size:12px;pointer-events:none';m.textContent='Sheet music: VexFlow library not loaded';this._wrap.appendChild(m);}
+      return;
+    }
+    if(!this._wrap)return;
     const old=this._wrap.querySelector('svg');
     if(old)old.remove();
     this._wrap.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
     this._ready=false;
     if(!bars||!bars.length)return;
-    const{VF}=Vex;
-    if(!VF?.Renderer){console.error('VexFlow VF namespace missing');return;}
+    // VexFlow 4.x may expose Flow as Vex.VF, Vex.Flow, or directly on Vex
+    const VF=Vex.VF||Vex.Flow||Vex;
+    if(!VF?.Renderer){console.error('VexFlow Renderer missing. Vex keys:',Object.keys(Vex||{}));return;}
     try{
     const stripH=document.getElementById('notation-strip').offsetHeight||170;
     const staveH=Math.floor((stripH-20)/2); // rough per-stave height
@@ -3282,6 +3287,18 @@ class NotationRenderer{
       buildVoice(bar.bass,'bass',bassStave);
     });
     this._svgEl=this._wrap.querySelector('svg');
+    // VexFlow draws in black by default (paper convention).
+    // Inject a style element to invert ink for the dark strip background.
+    if(this._svgEl){
+      const style=document.createElementNS('http://www.w3.org/2000/svg','style');
+      style.textContent=[
+        'path,rect,polygon{fill:rgba(210,210,210,.88);stroke:rgba(160,160,160,.7)}',
+        'path[fill="none"],rect[fill="none"]{fill:none}',
+        'text{fill:rgba(220,220,220,.9);stroke:none}',
+        'line{stroke:rgba(170,170,170,.75)}'
+      ].join(' ');
+      this._svgEl.insertBefore(style,this._svgEl.firstChild);
+    }
     this._totalMs=totalMs||1;
     this._pxPerMs=totalW/this._totalMs;
     this._ready=true;
