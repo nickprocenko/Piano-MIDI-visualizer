@@ -335,7 +335,7 @@ const Config = {
     },
     audience_control:{enabled:0, ws_url:'', transition_ms:220},
     kick_chat:{enabled:0, channel_slug:'', chatroom_id:'', transition_ms:600},
-    hardware:{sustain_enabled:1,midi_cc_mappings:[]},
+    hardware:{sustain_enabled:1,midi_cc_mappings:[],audio_sensitivity:15,audio_input_device:''},
     profiles:[],
     active_profile_id:'',
     learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:true, notation_y:200},
@@ -833,6 +833,84 @@ class MidiHandler{
     catch(e){return false;}
   }
   close(){this._stopQwerty();if(this._port)this._port.onmidimessage=null;this.activeNotes.clear();this.noteChannel.clear();}
+}
+
+// ── YIN monophonic pitch detection ──────────────────────────────────────────
+function _yinPitch(buf,sampleRate){
+  const N=buf.length,half=N>>1;
+  const d=new Float32Array(half);
+  for(let tau=1;tau<half;tau++){for(let i=0;i<half;i++){const x=buf[i]-buf[i+tau];d[tau]+=x*x;}}
+  const c=new Float32Array(half);c[0]=1;
+  let s=0;
+  for(let tau=1;tau<half;tau++){s+=d[tau];c[tau]=s>0?d[tau]*tau/s:1;}
+  let tau=2;
+  while(tau<half){if(c[tau]<0.1){while(tau+1<half&&c[tau+1]<c[tau])tau++;break;}tau++;}
+  if(tau===half||c[tau]>=0.5)return{freq:0,clarity:0};
+  const x0=tau>1?tau-1:tau,x2=tau+1<half?tau+1:tau;
+  let t2=tau;
+  if(x0!==tau&&x2!==tau)t2=tau+(c[x2]-c[x0])/(2*(2*c[tau]-c[x2]-c[x0]));
+  return{freq:sampleRate/t2,clarity:1-c[tau]};
+}
+
+// ── Audio pitch → MIDI converter ────────────────────────────────────────────
+class AudioPitchInput{
+  constructor(midi){
+    this._midi=midi;
+    this._ctx=null;this._analyser=null;this._source=null;this._stream=null;
+    this._buf=null;this._rafId=null;this._currentNote=null;this._active=false;
+  }
+  get active(){return this._active;}
+  async start(deviceId){
+    await this.stop();
+    this._ctx=new AudioContext();
+    const constraints={audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}};
+    if(deviceId)constraints.audio.deviceId={exact:deviceId};
+    this._stream=await navigator.mediaDevices.getUserMedia(constraints);
+    this._source=this._ctx.createMediaStreamSource(this._stream);
+    this._analyser=this._ctx.createAnalyser();
+    this._analyser.fftSize=2048;
+    this._buf=new Float32Array(2048);
+    this._source.connect(this._analyser);
+    this._active=true;
+    this._poll();
+  }
+  async stop(){
+    this._active=false;
+    if(this._rafId){cancelAnimationFrame(this._rafId);this._rafId=null;}
+    this._releaseCurrentNote();
+    if(this._source){try{this._source.disconnect();}catch(e){}this._source=null;}
+    if(this._stream){this._stream.getTracks().forEach(t=>t.stop());this._stream=null;}
+    if(this._ctx){await this._ctx.close();this._ctx=null;}
+    this._analyser=null;this._buf=null;
+  }
+  _poll(){
+    if(!this._active)return;
+    this._rafId=requestAnimationFrame(()=>this._poll());
+    this._analyser.getFloatTimeDomainData(this._buf);
+    const sens=Config.data.hardware?.audio_sensitivity??15;
+    const thresh=1-sens/100;
+    const{freq,clarity}=_yinPitch(this._buf,this._ctx.sampleRate);
+    if(clarity>thresh&&freq>60&&freq<2100){
+      const note=Math.round(12*Math.log2(freq/440)+69);
+      if(note>=21&&note<=108&&note!==this._currentNote){
+        this._releaseCurrentNote();
+        this._currentNote=note;
+        this._midi.activeNotes.add(note);
+        this._midi.noteVelocity.set(note,80);
+        this._midi.noteChannel.set(note,0);
+      }
+    }else{
+      this._releaseCurrentNote();
+    }
+  }
+  _releaseCurrentNote(){
+    if(this._currentNote===null)return;
+    const n=this._currentNote;this._currentNote=null;
+    this._midi.activeNotes.delete(n);
+    this._midi.noteVelocity.delete(n);
+    this._midi.noteChannel.delete(n);
+    if(this._midi.sustainedNotes)this._midi.sustainedNotes.delete(n);
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1974,6 +2052,17 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <p style="font-size:12px;color:var(--muted);margin-top:8px">When enabled, notes held while the sustain pedal is pressed stay active until the pedal is released.</p>
 <p style="font-size:12px;color:var(--muted);margin-top:6px">Triple-tapping the sustain pedal to cycle themes always works regardless of this setting.</p>
 </div>
+<div class="section"><h2>Audio Input <span style="font-size:11px;opacity:.55;font-weight:400">(Pitch → MIDI)</span></h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:8px">Sing or play a monophonic instrument into your mic. The detected pitch drives the note highway exactly like a MIDI keyboard — no MIDI device required.</p>
+<div class="row"><label>Enable</label>
+<div class="toggle-btn${hw.audio_input_enabled?' on':''}" id="btn-hw-audio">${hw.audio_input_enabled?'On':'Off'}</div></div>
+<div class="row" id="hw-audio-device-row"${hw.audio_input_enabled?'':' style="display:none"'}><label>Microphone</label>
+<select id="sel-hw-audio-device" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 6px"><option value="${hw.audio_input_device||''}">${hw.audio_input_device?'Saved device':'Default'}</option></select></div>
+<div class="row" id="hw-audio-sens-row"${hw.audio_input_enabled?'':' style="display:none"'}><label>Sensitivity</label>
+<input type="range" id="sl-hw-audio-sens" min="5" max="45" step="1" value="${hw.audio_sensitivity??15}" style="flex:1">
+<span id="lbl-hw-audio-sens" style="width:28px;text-align:right">${hw.audio_sensitivity??15}</span></div>
+<div class="row"><label>Status</label><span id="hw-audio-status" style="font-size:12px;opacity:.65">${hw.audio_input_enabled?'Starting…':'Disabled'}</span></div>
+</div>
 <div class="section"><h2>MIDI CC Mappings</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Assign any CC knob or slider to a visual parameter or scene trigger. Press <b>Learn</b> then move a control on your device.</p>
 <table class="midi-cc-table"><thead><tr><th>Parameter</th><th style="min-width:36px">CC</th><th style="min-width:32px">Min</th><th style="min-width:32px">Max</th><th></th><th></th></tr></thead>
@@ -2861,6 +2950,70 @@ function wireSettings(root, app){
     hwSustainBtn.textContent=on?'On':'Off';
     schedSave();
   });
+  // Audio Input (pitch → MIDI) wiring
+  const audioBtn=root.querySelector('#btn-hw-audio');
+  const audioStatus=root.querySelector('#hw-audio-status');
+  const audioDeviceRow=root.querySelector('#hw-audio-device-row');
+  const audioSensRow=root.querySelector('#hw-audio-sens-row');
+  const audioDeviceSel=root.querySelector('#sel-hw-audio-device');
+  const audioSensSlider=root.querySelector('#sl-hw-audio-sens');
+  const audioSensLabel=root.querySelector('#lbl-hw-audio-sens');
+  async function _populateAudioDevices(){
+    try{
+      const devs=await navigator.mediaDevices.enumerateDevices();
+      const mics=devs.filter(d=>d.kind==='audioinput');
+      const saved=Config.data.hardware?.audio_input_device||'';
+      audioDeviceSel.innerHTML='<option value="">Default</option>'+mics.map(m=>`<option value="${m.deviceId}"${m.deviceId===saved?' selected':''}>${m.label||'Microphone'}</option>`).join('');
+    }catch(e){}
+  }
+  if(audioBtn){
+    // Restore running state if AudioPitchInput already active
+    if(app.audioPitch?.active){
+      audioBtn.classList.add('on');audioBtn.textContent='On';
+      if(audioStatus)audioStatus.textContent='Listening';
+      if(audioDeviceRow)audioDeviceRow.style.display='';
+      if(audioSensRow)audioSensRow.style.display='';
+      _populateAudioDevices();
+    }
+    audioBtn.addEventListener('click',async()=>{
+      if(app.audioPitch.active){
+        await app.audioPitch.stop();
+        Config.data.hardware.audio_input_enabled=0;
+        audioBtn.classList.remove('on');audioBtn.textContent='Off';
+        if(audioStatus)audioStatus.textContent='Disabled';
+        if(audioDeviceRow)audioDeviceRow.style.display='none';
+        if(audioSensRow)audioSensRow.style.display='none';
+        schedSave();
+      }else{
+        audioBtn.textContent='…';if(audioStatus)audioStatus.textContent='Requesting mic…';
+        try{
+          await app.audioPitch.start(Config.data.hardware?.audio_input_device||'');
+          Config.data.hardware.audio_input_enabled=1;
+          audioBtn.classList.add('on');audioBtn.textContent='On';
+          if(audioStatus)audioStatus.textContent='Listening';
+          if(audioDeviceRow)audioDeviceRow.style.display='';
+          if(audioSensRow)audioSensRow.style.display='';
+          await _populateAudioDevices();
+          schedSave();
+        }catch(e){
+          audioBtn.textContent='Off';
+          if(audioStatus)audioStatus.textContent='Mic denied: '+e.message;
+        }
+      }
+    });
+  }
+  if(audioDeviceSel) audioDeviceSel.addEventListener('change',async e=>{
+    if(!Config.data.hardware)Config.data.hardware={};
+    Config.data.hardware.audio_input_device=e.target.value;
+    schedSave();
+    if(app.audioPitch?.active)await app.audioPitch.start(e.target.value);
+  });
+  if(audioSensSlider) audioSensSlider.addEventListener('input',e=>{
+    if(!Config.data.hardware)Config.data.hardware={};
+    Config.data.hardware.audio_sensitivity=+e.target.value;
+    if(audioSensLabel)audioSensLabel.textContent=e.target.value;
+    schedSave();
+  });
   // MIDI CC mappings
   wireMidiCCMappings(root,app);
   // Scenes & Profiles
@@ -3361,6 +3514,7 @@ class App{
     this.trails=new TrailManager();
     this.fx=null;
     this.midi=new MidiHandler();
+    this.audioPitch=new AudioPitchInput(this.midi);
     this.midiFile=new MidiFilePlayer();
     this.fluid=new FluidController();
     this.led=new LedOutput();
