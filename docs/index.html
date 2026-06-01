@@ -879,6 +879,34 @@ const SceneImageDB={
   },
 };
 
+const RecentMidiDB={
+  _db:null,
+  async _open(){
+    if(this._db)return this._db;
+    return new Promise((res,rej)=>{
+      const req=indexedDB.open('piano-vis-recent-midi',1);
+      req.onupgradeneeded=e=>e.target.result.createObjectStore('files');
+      req.onsuccess=e=>{this._db=e.target.result;res(this._db);};
+      req.onerror=e=>rej(e.target.error);
+    });
+  },
+  async save(name,buf){
+    const db=await this._open();
+    return new Promise((res,rej)=>{
+      const tx=db.transaction('files','readwrite');
+      tx.objectStore('files').put(buf,name);
+      tx.oncomplete=res;tx.onerror=e=>rej(e.target.error);
+    });
+  },
+  async load(name){
+    const db=await this._open();
+    return new Promise((res,rej)=>{
+      const req=db.transaction('files','readonly').objectStore('files').get(name);
+      req.onsuccess=()=>res(req.result??null);req.onerror=e=>rej(e.target.error);
+    });
+  },
+};
+
 // ═══════════════════════════════════════════════════════
 // SCENE MANAGER
 // ═══════════════════════════════════════════════════════
@@ -3951,6 +3979,7 @@ class App{
   showMenu(){
     this._showScreen('screen-menu');
     if(this._mode==='file'&&this.midiFile.playing)this.midiFile.pause();
+    if(this._learn?.active)this._learnStop();
   }
   showVisualizer(){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -3967,7 +3996,17 @@ class App{
 
   showTrackConfig(){
     this._showScreen('screen-tracks');
-    const info=this.midiFile.getChannelInfo();
+    let info=this.midiFile.getChannelInfo();
+    if(!info.length&&this._learn?._events?.length){
+      const chMap={};
+      for(const ev of this._learn._events){
+        if(!chMap[ev.channel])chMap[ev.channel]={ch:ev.channel,count:0,minNote:127,maxNote:0};
+        chMap[ev.channel].count++;
+        if(ev.note<chMap[ev.channel].minNote)chMap[ev.channel].minNote=ev.note;
+        if(ev.note>chMap[ev.channel].maxNote)chMap[ev.channel].maxNote=ev.note;
+      }
+      info=Object.values(chMap).sort((a,b)=>a.ch-b.ch);
+    }
     document.getElementById('tracks-filename').textContent=this.midiFile.filename||'Learn Mode';
     // Sync learn-bar button states
     document.getElementById('tc-mode-wait')?.classList.toggle('on',Config.lrn.mode==='wait');
@@ -4052,6 +4091,25 @@ class App{
     const infoEl=document.getElementById('learn-info');
     const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
     if(infoEl)infoEl.textContent=events.length?events.length+' notes · '+fmt(l._totalMs):'No notes found';
+  }
+
+  _buildLearnEventsFromXmlBars(bars){
+    const events=[];
+    const TREBLE_CH=0,BASS_CH=1;
+    for(const bar of bars){
+      for(const[clef,ch]of[[bar.treble,TREBLE_CH],[bar.bass,BASS_CH]]){
+        if(!clef)continue;
+        let offsetMs=0;
+        for(const chord of clef){
+          const ms=bar.startMs+offsetMs;
+          for(const note of chord.notes)
+            events.push({ms,durationMs:chord.durationMs,note,channel:ch});
+          offsetMs+=chord.durationMs;
+        }
+      }
+    }
+    events.sort((a,b)=>a.ms-b.ms);
+    return events;
   }
 
   _buildNotation(){
@@ -4271,7 +4329,7 @@ class App{
 
   startLearn(){
     const l=this._learn;
-    if(!l._events.length){this._showToast('Load a .mid file first');return;}
+    if(!l._events.length){this._showToast('Load a .mid or .xml file first');return;}
     if(!this._vizActive)this.showVisualizer();
     l.active=true;
     l._lastFrameWall=this._frameNow;
@@ -4355,6 +4413,14 @@ class App{
     const names=JSON.parse(localStorage.getItem('pianoVisRecentFiles')||'[]');
     if(!names.length){rc.innerHTML='';return;}
     rc.innerHTML=`<h3>Recent</h3>${names.map(n=>`<div class="recent-item">${n}</div>`).join('')}`;
+    rc.querySelectorAll('.recent-item').forEach(el=>{
+      el.onclick=async()=>{
+        const name=el.textContent.trim();
+        const buf=await RecentMidiDB.load(name).catch(()=>null);
+        if(!buf){this._showToast('File not in cache — please open it again');return;}
+        await this._loadMidiFile(new File([buf],name));
+      };
+    });
   }
 
   _addRecent(name){
@@ -4497,9 +4563,7 @@ class App{
     if(midFile){
       this._loadMidiFile(midFile);
     } else if(xmlFile){
-      // XML dropped without MIDI — update hint and wait
-      const hint=document.querySelector('#drop-zone p');
-      if(hint) hint.textContent='MusicXML saved — now drop the .mid file';
+      this._loadXmlOnlyForLearn(xmlFile);
     }
   }
 
@@ -4507,6 +4571,7 @@ class App{
     const buf=await file.arrayBuffer();
     this.midiFile.load(buf,file.name);
     this._addRecent(file.name);
+    RecentMidiDB.save(file.name,buf).catch(()=>{});
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
     this._buildLearnEvents();
@@ -4527,6 +4592,7 @@ class App{
     const buf=await file.arrayBuffer();
     this.midiFile.load(buf,file.name);
     this._addRecent(file.name);
+    RecentMidiDB.save(file.name,buf).catch(()=>{});
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
     if(!this._channelConfig||this._channelConfig._file!==file.name){
@@ -4541,6 +4607,45 @@ class App{
     if(xmlRow)xmlRow.textContent='No MusicXML loaded';
     this._refreshTracksTab();
     this._showToast(file.name);
+  }
+
+  async _loadXmlOnlyForLearn(file){
+    try{
+      const text=await file.text();
+      const doc=new DOMParser().parseFromString(text,'application/xml');
+      if(doc.querySelector('parseerror,parsererror')){this._showToast('Invalid XML file');return;}
+      const{bars,meta}=_parseMusicXmlDoc(doc);
+      if(!bars.length){this._showToast('No notes found in MusicXML');return;}
+      this._musicXmlBars=bars; this._musicXmlMeta=meta;
+      const events=this._buildLearnEventsFromXmlBars(bars);
+      if(!events.length){this._showToast('No playable notes in XML');return;}
+      const l=this._learn;
+      l._events=events;
+      l._totalMs=events[events.length-1].ms+events[events.length-1].durationMs;
+      // Two-channel config: ch0=treble (right), ch1=bass (left)
+      const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
+      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig[1].hand='left';
+      this._channelConfig._file=file.name;
+      this._mode='file';
+      this.midiFile.filename=file.name;
+      this._addRecent(file.name);
+      Config.lrn.notation=true;
+      this._notationRenderer.destroy();
+      const xmlRow=document.getElementById('xml-file-row');
+      if(xmlRow)xmlRow.textContent=file.name;
+      document.getElementById('hud-song').textContent=file.name;
+      const fileRow=document.getElementById('learn-file-row');
+      if(fileRow)fileRow.textContent=file.name;
+      const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+      const infoEl=document.getElementById('learn-info');
+      if(infoEl)infoEl.textContent=events.length+' notes · '+fmt(l._totalMs);
+      this.showTrackConfig();
+      this._refreshTracksTab();
+    }catch(e){
+      console.error('XML-only learn error:',e);
+      this._showToast('Failed to load XML for learn mode');
+    }
   }
 
   async _loadMusicXmlFile(file){
@@ -4579,6 +4684,7 @@ class App{
     const buf=await file.arrayBuffer();
     this.midiFile.load(buf,file.name);
     this._addRecent(file.name);
+    RecentMidiDB.save(file.name,buf).catch(()=>{});
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
     this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
@@ -4596,7 +4702,8 @@ class App{
   _refreshTracksTab(){
     const wrap=document.querySelector('#tp-tracks #tracks-tab-content');
     if(!wrap)return;
-    if(this._mode!=='file'||!this.midiFile.events.length){
+    const hasLearnEvents=!!this._learn?._events?.length;
+    if(this._mode!=='file'||(!this.midiFile.events.length&&!hasLearnEvents)){
       wrap.innerHTML='<p style="color:var(--muted);font-size:12px">No file loaded.</p>';return;
     }
     const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
@@ -4605,8 +4712,17 @@ class App{
       this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
       this._channelConfig._file=this.midiFile.filename;
     }
+    let tabInfo=this.midiFile.getChannelInfo();
+    if(!tabInfo.length&&hasLearnEvents){
+      const chMap={};
+      for(const ev of this._learn._events){
+        if(!chMap[ev.channel])chMap[ev.channel]={ch:ev.channel,count:0};
+        chMap[ev.channel].count++;
+      }
+      tabInfo=Object.values(chMap).sort((a,b)=>a.ch-b.ch);
+    }
     wrap.innerHTML='';
-    this.midiFile.getChannelInfo().forEach(({ch})=>{
+    tabInfo.forEach(({ch})=>{
       const cfg=this._channelConfig[ch];
       const row=document.createElement('div');
       row.className='track-row'+(cfg.muted?' muted':'');
