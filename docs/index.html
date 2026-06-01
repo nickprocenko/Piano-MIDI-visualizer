@@ -220,6 +220,10 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   </div>
 </div>
 
+<div id="pitch-strip" style="display:none;position:fixed;right:0;top:0;bottom:0;width:64px;z-index:15;pointer-events:none">
+  <canvas id="pitch-strip-canvas" style="display:block;width:64px;height:100%"></canvas>
+</div>
+
 <!-- MENU SCREEN -->
 <div class="screen active" id="screen-menu">
   <div id="menu-title">Piano MIDI Visualizer</div>
@@ -858,6 +862,8 @@ class AudioPitchInput{
     this._midi=midi;
     this._ctx=null;this._analyser=null;this._source=null;this._stream=null;
     this._buf=null;this._rafId=null;this._currentNote=null;this._active=false;
+    this._pitchHistory=[];this._lastFreq=0;
+    this._stripCanvas=null;this._stripCtx=null;this._stripRAF=null;this._resizeHandler=null;
   }
   get active(){return this._active;}
   async start(deviceId){
@@ -871,11 +877,35 @@ class AudioPitchInput{
     this._analyser.fftSize=2048;
     this._buf=new Float32Array(2048);
     this._source.connect(this._analyser);
+    // Show pitch strip
+    const stripEl=document.getElementById('pitch-strip');
+    const canvas=document.getElementById('pitch-strip-canvas');
+    if(stripEl&&canvas){
+      stripEl.style.display='';
+      canvas.width=64;
+      canvas.height=stripEl.offsetHeight||window.innerHeight;
+      this._stripCanvas=canvas;
+      this._stripCtx=canvas.getContext('2d');
+      this._resizeHandler=()=>{
+        if(this._stripCanvas&&stripEl){
+          this._stripCanvas.width=64;
+          this._stripCanvas.height=stripEl.offsetHeight||window.innerHeight;
+        }
+      };
+      window.addEventListener('resize',this._resizeHandler);
+      this._drawStrip();
+    }
     this._active=true;
     this._poll();
   }
   async stop(){
     this._active=false;
+    if(this._stripRAF){cancelAnimationFrame(this._stripRAF);this._stripRAF=null;}
+    if(this._resizeHandler){window.removeEventListener('resize',this._resizeHandler);this._resizeHandler=null;}
+    const stripEl=document.getElementById('pitch-strip');
+    if(stripEl)stripEl.style.display='none';
+    this._stripCanvas=null;this._stripCtx=null;
+    this._pitchHistory=[];this._lastFreq=0;
     if(this._rafId){cancelAnimationFrame(this._rafId);this._rafId=null;}
     this._releaseCurrentNote();
     if(this._source){try{this._source.disconnect();}catch(e){}this._source=null;}
@@ -891,7 +921,13 @@ class AudioPitchInput{
     const thresh=1-sens/100;
     const{freq,clarity}=_yinPitch(this._buf,this._ctx.sampleRate);
     if(clarity>thresh&&freq>60&&freq<2100){
-      const note=Math.round(12*Math.log2(freq/440)+69);
+      const midiExact=12*Math.log2(freq/440)+69;
+      this._lastFreq=freq;
+      this._pitchHistory.push({midiExact,clarity,t:Date.now()});
+      // prune entries older than 3s
+      const cutoff=Date.now()-3000;
+      while(this._pitchHistory.length&&this._pitchHistory[0].t<cutoff)this._pitchHistory.shift();
+      const note=Math.round(midiExact);
       if(note>=21&&note<=108&&note!==this._currentNote){
         this._releaseCurrentNote();
         this._currentNote=note;
@@ -900,6 +936,7 @@ class AudioPitchInput{
         this._midi.noteChannel.set(note,0);
       }
     }else{
+      this._lastFreq=0;
       this._releaseCurrentNote();
     }
   }
@@ -910,6 +947,75 @@ class AudioPitchInput{
     this._midi.noteVelocity.delete(n);
     this._midi.noteChannel.delete(n);
     if(this._midi.sustainedNotes)this._midi.sustainedNotes.delete(n);
+  }
+  _drawStrip(){
+    const canvas=this._stripCanvas,ctx=this._stripCtx;
+    if(!canvas||!ctx){return;}
+    this._stripRAF=requestAnimationFrame(()=>this._drawStrip());
+    const w=canvas.width,h=canvas.height;
+    const NOTE_MIN=36,NOTE_MAX=96; // C2–C7
+    const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const noteY=n=>h*(NOTE_MAX-n)/(NOTE_MAX-NOTE_MIN);
+    ctx.clearRect(0,0,w,h);
+    // Background
+    ctx.fillStyle='rgba(8,10,16,0.85)';
+    ctx.fillRect(0,0,w,h);
+    // Right border
+    ctx.strokeStyle='rgba(255,255,255,0.1)';
+    ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,h);ctx.stroke();
+    // Scale lines + labels
+    for(let n=NOTE_MIN;n<=NOTE_MAX;n++){
+      const y=noteY(n);
+      const isC=n%12===0;
+      ctx.strokeStyle=isC?'rgba(255,255,255,0.2)':'rgba(255,255,255,0.05)';
+      ctx.lineWidth=isC?1:0.5;
+      ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();
+      if(isC){
+        ctx.fillStyle='rgba(170,170,170,0.55)';
+        ctx.font='9px system-ui,sans-serif';
+        ctx.textAlign='left';
+        ctx.fillText('C'+(Math.floor(n/12)-1),4,y-2);
+      }
+    }
+    // Trail
+    const now=Date.now();
+    for(const p of this._pitchHistory){
+      const age=(now-p.t)/3000;
+      if(age>1)continue;
+      const alpha=(1-age)*p.clarity*0.55;
+      const y=noteY(Math.max(NOTE_MIN,Math.min(NOTE_MAX,p.midiExact)));
+      ctx.beginPath();ctx.arc(w/2,y,2.5,0,Math.PI*2);
+      ctx.fillStyle=`rgba(0,180,180,${alpha.toFixed(2)})`;
+      ctx.fill();
+    }
+    // Current note dot + label
+    if(this._lastFreq>0&&this._currentNote!==null){
+      const midiExact=12*Math.log2(this._lastFreq/440)+69;
+      const y=noteY(Math.max(NOTE_MIN,Math.min(NOTE_MAX,midiExact)));
+      // Glow
+      const grd=ctx.createRadialGradient(w/2,y,2,w/2,y,16);
+      grd.addColorStop(0,'rgba(0,224,224,0.75)');
+      grd.addColorStop(1,'rgba(0,180,180,0)');
+      ctx.beginPath();ctx.arc(w/2,y,16,0,Math.PI*2);
+      ctx.fillStyle=grd;ctx.fill();
+      // Dot
+      ctx.beginPath();ctx.arc(w/2,y,5,0,Math.PI*2);
+      ctx.fillStyle='#00e0e0';ctx.fill();
+      // Note name
+      const name=NOTE_NAMES[this._currentNote%12]+(Math.floor(this._currentNote/12)-1);
+      ctx.fillStyle='rgba(230,230,230,0.92)';
+      ctx.font='bold 10px system-ui,sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText(name,w/2,y-9);
+      // Cents deviation
+      const cents=Math.round((midiExact-this._currentNote)*100);
+      if(Math.abs(cents)>3){
+        ctx.fillStyle='rgba(180,180,180,0.65)';
+        ctx.font='9px system-ui,sans-serif';
+        ctx.fillText((cents>0?'+':'')+cents+'¢',w/2,y+16);
+      }
+    }
   }
 }
 
