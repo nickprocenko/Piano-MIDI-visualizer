@@ -137,14 +137,44 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .track-hand-sel{display:flex;gap:4px;margin-left:4px}
 .track-hand-btn{padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid var(--border);background:var(--btn-bg);color:var(--muted);font-family:inherit;font-weight:700}
 .track-hand-btn.active{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
-/* Learn mode — floating transport HUD */
-#learn-hud{display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(12,14,20,.88);border-radius:10px;padding:8px 18px;align-items:center;gap:14px;z-index:999;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1);box-shadow:0 4px 24px rgba(0,0,0,.5)}
+/* Learn mode — YouTube-style bottom transport bar */
+#learn-hud{display:none;position:fixed;bottom:0;left:0;right:0;background:rgba(10,12,18,.93);flex-direction:column;z-index:999;backdrop-filter:blur(10px);border-top:1px solid rgba(255,255,255,.1);box-shadow:0 -4px 28px rgba(0,0,0,.55)}
 #learn-hud.visible{display:flex}
+/* Timeline row */
+#lhud-timeline-row{padding:10px 16px 4px;position:relative;cursor:pointer}
+#lhud-timeline{height:4px;background:rgba(255,255,255,.18);border-radius:3px;position:relative;transition:height .15s;user-select:none}
+#lhud-timeline-row:hover #lhud-timeline,#lhud-timeline.dragging{height:7px}
+#lhud-fill{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px;pointer-events:none}
+#lhud-loop-region{position:absolute;top:-1px;bottom:-1px;background:rgba(0,210,210,.22);border:1px solid rgba(0,210,210,.55);border-radius:3px;pointer-events:none;display:none}
+#lhud-loop-region.visible{display:block}
+#lhud-thumb{position:absolute;width:13px;height:13px;background:#fff;border-radius:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 1px 5px rgba(0,0,0,.5);opacity:0;transition:opacity .15s}
+#lhud-timeline-row:hover #lhud-thumb,#lhud-timeline.dragging #lhud-thumb{opacity:1}
+/* Loop markers on timeline */
+.lhud-lmarker{position:absolute;top:-8px;bottom:-8px;width:4px;border-radius:2px;cursor:ew-resize;transform:translateX(-50%);display:none;touch-action:none}
+.lhud-lmarker.visible{display:block}
+.lhud-lmarker::before{content:'';position:absolute;top:-4px;left:-4px;right:-4px;bottom:-4px}
+#lhud-lm-start{background:rgba(0,220,130,.95);box-shadow:0 0 6px rgba(0,220,130,.6)}
+#lhud-lm-end{background:rgba(230,80,80,.95);box-shadow:0 0 6px rgba(230,80,80,.6)}
+/* Timeline hover tooltip */
+#lhud-timeline-tip{position:absolute;bottom:calc(100% + 10px);background:rgba(10,12,18,.92);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;pointer-events:none;opacity:0;transition:opacity .1s;white-space:nowrap;transform:translateX(-50%)}
+#lhud-timeline-row:hover #lhud-timeline-tip{opacity:1}
+/* Controls row */
+#lhud-controls{display:flex;align-items:center;gap:10px;padding:5px 16px 8px;flex-wrap:wrap}
 #learn-hud label{font-size:11px;opacity:.7;white-space:nowrap}
-#learn-hud button{padding:5px 12px;border-radius:5px;border:1px solid var(--border);background:var(--btn-bg);color:var(--text);cursor:pointer;font-family:inherit}
-#learn-hud button.on{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
+#learn-hud button{padding:4px 12px;border-radius:5px;border:1px solid var(--border);background:var(--btn-bg);color:var(--text);cursor:pointer;font-family:inherit;font-size:13px}
+#learn-hud button:hover{background:var(--btn-hover)}
+#learn-hud button.on{background:rgba(0,180,180,.18);color:var(--accent);border-color:var(--accent)}
 #lhud-speed{width:80px}
 #lhud-speed-val,#lhud-progress{font-size:11px;opacity:.7;white-space:nowrap}
+.lhud-sep{width:1px;height:18px;background:rgba(255,255,255,.14);flex-shrink:0}
+/* Loop A/B controls */
+#lhud-loop-ctrls{display:none;align-items:center;gap:6px}
+#lhud-loop-ctrls.visible{display:flex}
+#lhud-set-a{background:rgba(0,200,110,.18);border-color:rgba(0,200,110,.6);color:rgba(0,220,130,1);font-weight:700;padding:4px 10px}
+#lhud-set-a:hover{background:rgba(0,200,110,.32)}
+#lhud-set-b{background:rgba(210,70,70,.18);border-color:rgba(210,70,70,.6);color:rgba(240,100,100,1);font-weight:700;padding:4px 10px}
+#lhud-set-b:hover{background:rgba(210,70,70,.32)}
+#lhud-loop-a-time,#lhud-loop-b-time{font-size:10px;opacity:.7;min-width:30px}
 /* Scenes sidebar tab */
 .scene-item{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border)}
 .scene-item:last-child{border-bottom:none}
@@ -205,13 +235,34 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 </div>
 <div id="toast"></div>
 <div id="learn-hud">
-  <button id="lhud-playpause">⏸</button>
-  <button id="lhud-reset">↺</button>
-  <label>Speed</label>
-  <input type="range" id="lhud-speed" min="25" max="150" step="5" value="100">
-  <span id="lhud-speed-val">100%</span>
-  <button id="lhud-loop">Loop</button>
-  <span id="lhud-progress">0:00 / 0:00</span>
+  <div id="lhud-timeline-row">
+    <div id="lhud-timeline">
+      <div id="lhud-loop-region"></div>
+      <div id="lhud-fill"></div>
+      <div id="lhud-thumb"></div>
+      <div id="lhud-lm-start" class="lhud-lmarker"></div>
+      <div id="lhud-lm-end" class="lhud-lmarker"></div>
+    </div>
+    <div id="lhud-timeline-tip">0:00</div>
+  </div>
+  <div id="lhud-controls">
+    <button id="lhud-playpause">⏸</button>
+    <button id="lhud-reset">↺</button>
+    <span id="lhud-progress">0:00 / 0:00</span>
+    <div class="lhud-sep"></div>
+    <label>Speed</label>
+    <input type="range" id="lhud-speed" min="25" max="150" step="5" value="100">
+    <span id="lhud-speed-val">100%</span>
+    <div class="lhud-sep"></div>
+    <button id="lhud-loop">⟳ Loop</button>
+    <div id="lhud-loop-ctrls">
+      <button id="lhud-set-a" title="Set loop start to current position">A</button>
+      <span id="lhud-loop-a-time">0:00</span>
+      <span style="font-size:11px;opacity:.5">→</span>
+      <button id="lhud-set-b" title="Set loop end to current position">B</button>
+      <span id="lhud-loop-b-time">end</span>
+    </div>
+  </div>
 </div>
 <div id="notation-strip">
   <div id="notation-drag-handle">⠿</div>
@@ -338,7 +389,7 @@ const Config = {
     hardware:{sustain_enabled:1,midi_cc_mappings:[]},
     profiles:[],
     active_profile_id:'',
-    learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:true, notation_y:200},
+    learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:true, notation_y:200, loop_start_ms:0, loop_end_ms:0},
     user_themes:[], active_user_theme_index:0,
     note_color_themes:[], active_note_theme:{type:'builtin',index:0},
     fluid_themes:[],
@@ -2961,6 +3012,8 @@ function wireSettings(root, app){
   const hud=document.getElementById('learn-hud');
   if(hud&&!hud._wired){
     hud._wired=true;
+    const fmt=ms=>{const s=Math.max(0,ms)/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+
     document.getElementById('lhud-playpause')?.addEventListener('click',()=>{
       if(app._learn?.active) app.pauseLearn(); else app.startLearn();
     });
@@ -2972,11 +3025,124 @@ function wireSettings(root, app){
       speedVal.textContent=speedSlider.value+'%';
       schedSave();
     });
+
+    // ── Loop toggle ──
     document.getElementById('lhud-loop')?.addEventListener('click',()=>{
       Config.lrn.loop=!Config.lrn.loop;
       document.getElementById('lhud-loop').classList.toggle('on',Config.lrn.loop);
+      const ctrls=document.getElementById('lhud-loop-ctrls');
+      if(ctrls)ctrls.classList.toggle('visible',Config.lrn.loop);
+      // Show/hide loop markers and region
+      const lmS=document.getElementById('lhud-lm-start');
+      const lmE=document.getElementById('lhud-lm-end');
+      const lr=document.getElementById('lhud-loop-region');
+      if(Config.lrn.loop){
+        if(lmS)lmS.classList.add('visible');
+        if(lmE)lmE.classList.add('visible');
+        if(lr)lr.classList.add('visible');
+      } else {
+        if(lmS)lmS.classList.remove('visible');
+        if(lmE)lmE.classList.remove('visible');
+        if(lr)lr.classList.remove('visible');
+      }
       schedSave();
     });
+
+    // ── A/B loop point buttons ──
+    document.getElementById('lhud-set-a')?.addEventListener('click',()=>{
+      const ms=app._learn?Math.max(0,app._learn._currentNoteMs):0;
+      Config.lrn.loop_start_ms=ms;
+      document.getElementById('lhud-loop-a-time').textContent=fmt(ms);
+      schedSave();
+    });
+    document.getElementById('lhud-set-b')?.addEventListener('click',()=>{
+      const total=app._learn?app._learn._totalMs:0;
+      const ms=app._learn?Math.min(total,Math.max(0,app._learn._currentNoteMs)):0;
+      Config.lrn.loop_end_ms=ms;
+      document.getElementById('lhud-loop-b-time').textContent=ms>0&&ms<total?fmt(ms):'end';
+      schedSave();
+    });
+
+    // ── Timeline seek (click + drag) ──
+    const tlRow=document.getElementById('lhud-timeline-row');
+    const tl=document.getElementById('lhud-timeline');
+    const tip=document.getElementById('lhud-timeline-tip');
+    const thumb=document.getElementById('lhud-thumb');
+    let tlDragging=false;
+    const tlSeekAt=x=>{
+      const r=tl.getBoundingClientRect();
+      const pct=Math.max(0,Math.min(1,(x-r.left)/r.width));
+      const total=app._learn?app._learn._totalMs:0;
+      const ms=pct*total;
+      if(total>0)app._learnSeekTo(ms);
+    };
+    const tlUpdateTip=(x,e)=>{
+      const r=tl.getBoundingClientRect();
+      const pct=Math.max(0,Math.min(1,(x-r.left)/r.width));
+      const total=app._learn?app._learn._totalMs:0;
+      if(tip){tip.textContent=fmt(pct*total);tip.style.left=Math.max(20,Math.min(r.width-20,x-r.left))+'px';}
+      if(thumb){thumb.style.left=(pct*100)+'%';}
+    };
+    tlRow?.addEventListener('mousedown',e=>{
+      if(e.target.classList.contains('lhud-lmarker'))return;
+      tlDragging=true;tl.classList.add('dragging');
+      tlSeekAt(e.clientX);tlUpdateTip(e.clientX,e);e.preventDefault();
+    });
+    window.addEventListener('mousemove',e=>{
+      if(!tlDragging)return;
+      tlSeekAt(e.clientX);tlUpdateTip(e.clientX,e);
+    });
+    window.addEventListener('mouseup',e=>{
+      if(!tlDragging)return;
+      tlDragging=false;tl.classList.remove('dragging');
+    });
+    tlRow?.addEventListener('mousemove',e=>{
+      if(tlDragging||e.target.classList.contains('lhud-lmarker'))return;
+      tlUpdateTip(e.clientX,e);
+    });
+    // Touch support for timeline
+    tlRow?.addEventListener('touchstart',e=>{
+      if(e.target.classList.contains('lhud-lmarker'))return;
+      tlDragging=true;tl.classList.add('dragging');
+      tlSeekAt(e.touches[0].clientX);e.preventDefault();
+    },{passive:false});
+    window.addEventListener('touchmove',e=>{
+      if(!tlDragging)return;
+      tlSeekAt(e.touches[0].clientX);tlUpdateTip(e.touches[0].clientX,e);
+    },{passive:true});
+    window.addEventListener('touchend',()=>{tlDragging=false;tl.classList.remove('dragging');});
+
+    // ── Loop marker drag ──
+    const wireMarker=(el,isStart)=>{
+      if(!el)return;
+      let dragging=false;
+      const onMove=e=>{
+        if(!dragging)return;
+        const cx=e.touches?e.touches[0].clientX:e.clientX;
+        const r=tl.getBoundingClientRect();
+        const pct=Math.max(0,Math.min(1,(cx-r.left)/r.width));
+        const total=app._learn?app._learn._totalMs:0;
+        const ms=pct*total;
+        if(isStart){
+          Config.lrn.loop_start_ms=Math.min(ms,Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms-500:ms);
+          document.getElementById('lhud-loop-a-time').textContent=fmt(Config.lrn.loop_start_ms);
+        } else {
+          Config.lrn.loop_end_ms=Math.max(ms,Config.lrn.loop_start_ms+500);
+          const lbt=document.getElementById('lhud-loop-b-time');
+          if(lbt)lbt.textContent=Config.lrn.loop_end_ms>0&&Config.lrn.loop_end_ms<total?fmt(Config.lrn.loop_end_ms):'end';
+        }
+        schedSave();
+      };
+      const onUp=()=>{if(!dragging)return;dragging=false;};
+      el.addEventListener('mousedown',e=>{dragging=true;e.stopPropagation();e.preventDefault();});
+      el.addEventListener('touchstart',e=>{dragging=true;e.stopPropagation();},{passive:true});
+      window.addEventListener('mousemove',onMove);
+      window.addEventListener('touchmove',e=>onMove(e),{passive:true});
+      window.addEventListener('mouseup',onUp);
+      window.addEventListener('touchend',onUp);
+    };
+    wireMarker(document.getElementById('lhud-lm-start'),true);
+    wireMarker(document.getElementById('lhud-lm-end'),false);
   }
 }
 
@@ -3557,13 +3723,33 @@ class App{
     this.fx.endFrame(ctx);
     if(this._learn?.active)this._drawLearnNotes(ctx,this.layout);
     drawPiano(ctx,this.layout,this.prevNotes,Config.ks,this._learnWrongKeys);
-    // Update learn HUD progress and notation scroll every frame
-    if(this._learn?.active){
+    // Update learn HUD progress, timeline, and notation scroll every frame
+    if(this._learn?.active||this._learn?._totalMs>0){
       const l=this._learn;
-      const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+      const fmt=ms=>{const s=Math.max(0,ms)/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+      const curMs=Math.max(0,l._currentNoteMs);
+      const pct=l._totalMs>0?Math.max(0,Math.min(1,curMs/l._totalMs)):0;
       const prog=document.getElementById('lhud-progress');
-      if(prog)prog.textContent=fmt(Math.max(0,l._currentNoteMs))+' / '+fmt(l._totalMs);
-      if(Config.lrn.notation)this._notationRenderer?.scrollTo(l._currentNoteMs);
+      if(prog)prog.textContent=fmt(curMs)+' / '+fmt(l._totalMs);
+      // Timeline fill and thumb
+      const fill=document.getElementById('lhud-fill');
+      const thumb=document.getElementById('lhud-thumb');
+      if(fill)fill.style.width=(pct*100)+'%';
+      if(thumb)thumb.style.left=(pct*100)+'%';
+      // Loop region and markers
+      if(Config.lrn.loop&&l._totalMs>0){
+        const sMs=Config.lrn.loop_start_ms||0;
+        const eMs=Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs;
+        const sPct=(sMs/l._totalMs)*100;
+        const ePct=(eMs/l._totalMs)*100;
+        const lr=document.getElementById('lhud-loop-region');
+        if(lr){lr.style.left=sPct+'%';lr.style.width=(ePct-sPct)+'%';}
+        const lmS=document.getElementById('lhud-lm-start');
+        const lmE=document.getElementById('lhud-lm-end');
+        if(lmS)lmS.style.left=sPct+'%';
+        if(lmE)lmE.style.left=ePct+'%';
+      }
+      if(l.active&&Config.lrn.notation)this._notationRenderer?.scrollTo(l._currentNoteMs);
     }
   }
 
@@ -3618,7 +3804,10 @@ class App{
     this._drawBgGifFrame('a');
     this._drawBgGifFrame('b');
     if(window.fluidSim)window.fluidSim.resize();
-    this.layout=buildLayout(W,H,Config.ks.height_percent,Config.ks.width_percent??100);
+    // Shrink usable height by HUD height so piano sits above the transport bar
+    const hudEl=document.getElementById('learn-hud');
+    const hudH=hudEl&&hudEl.classList.contains('visible')?hudEl.offsetHeight:0;
+    this.layout=buildLayout(W,H-hudH,Config.ks.height_percent,Config.ks.width_percent??100);
     if(this.fx)this.fx.resize(W,H); else this.fx=new FXRenderer(W,H);
   }
 
@@ -3946,6 +4135,10 @@ class App{
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById(id)?.classList.add('active');
     document.getElementById('hud').classList.remove('active');
+    const lhud=document.getElementById('learn-hud');
+    const lhudWasVisible=lhud&&lhud.classList.contains('visible');
+    lhud?.classList.remove('visible');
+    if(lhudWasVisible)this._resize();
     this._vizActive=false;
   }
   showMenu(){
@@ -4046,6 +4239,13 @@ class App{
     events.sort((a,b)=>a.ms-b.ms);
     l._events=events;
     l._totalMs=events.length?events[events.length-1].ms+events[events.length-1].durationMs:0;
+    // Reset loop region for new file
+    Config.lrn.loop_start_ms=0;
+    Config.lrn.loop_end_ms=0;
+    const aTimeEl=document.getElementById('lhud-loop-a-time');
+    const bTimeEl=document.getElementById('lhud-loop-b-time');
+    if(aTimeEl)aTimeEl.textContent='0:00';
+    if(bTimeEl)bTimeEl.textContent='end';
     // Update sidebar learn tab info
     const fileRow=document.getElementById('learn-file-row');
     if(fileRow)fileRow.textContent=this.midiFile.filename||'File loaded';
@@ -4169,14 +4369,40 @@ class App{
     }
   }
 
+  _learnSeekTo(targetMs){
+    const l=this._learn;
+    l._pendingChord.clear();
+    const safeMs=Math.max(0,Math.min(targetMs,l._totalMs));
+    if(Config.lrn.mode==='freeplay'){
+      l.cursorMs=safeMs;
+      l._currentNoteMs=safeMs;
+    } else {
+      // Wait mode: snap to the next note at or after the target position
+      const next=l._events.find(ev=>ev.ms>=safeMs&&this._learnHandFilter(ev.channel));
+      if(next){
+        l._currentNoteMs=next.ms;
+        l.cursorMs=safeMs;
+        for(const ev of l._events){
+          if(ev.ms>=next.ms-30&&ev.ms<=next.ms+50&&this._learnHandFilter(ev.channel))
+            l._pendingChord.add(ev.note);
+        }
+      } else {
+        l.cursorMs=safeMs;
+        l._currentNoteMs=safeMs;
+      }
+    }
+    l._lastFrameWall=this._frameNow;
+  }
+
   _learnAdvanceCursor(){
     const l=this._learn;
+    const loopEnd=Config.lrn.loop&&Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs;
     let nextMs=null;
     for(const ev of l._events){
-      if(ev.ms>l._currentNoteMs+50&&this._learnHandFilter(ev.channel)){nextMs=ev.ms;break;}
+      if(ev.ms>l._currentNoteMs+50&&this._learnHandFilter(ev.channel)&&ev.ms<loopEnd){nextMs=ev.ms;break;}
     }
     if(nextMs===null){
-      if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=this._frameNow;}
+      if(Config.lrn.loop){this._learnSeekTo(Config.lrn.loop_start_ms||0);l._lastFrameWall=this._frameNow;}
       else this._learnStop();
       return;
     }
@@ -4192,7 +4418,7 @@ class App{
   _learnStop(){
     const l=this._learn; l.active=false;
     document.getElementById('lhud-playpause').textContent='▶';
-    document.getElementById('learn-hud').classList.remove('visible');
+    // Keep HUD visible so the timeline remains accessible for replay/seeking
     this._updateNotationVisibility();
   }
 
@@ -4214,18 +4440,19 @@ class App{
     const dt=(now-l._lastFrameWall)*Config.lrn.speed;
     l._lastFrameWall=now;
     if(dt<=0||dt>=500)return;
+    const loopEnd=Config.lrn.loop&&Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs;
     if(Config.lrn.mode==='freeplay'){
       l.cursorMs+=dt; l._currentNoteMs=l.cursorMs;
-      if(l.cursorMs>=l._totalMs){
-        if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=now;}
+      if(l.cursorMs>=loopEnd){
+        if(Config.lrn.loop){this._learnSeekTo(Config.lrn.loop_start_ms||0);l._lastFrameWall=now;}
         else this._learnStop();
       }
     } else {
       // Wait mode: advance cursor toward the current pending note, then hold until user plays it
       if(l.cursorMs<l._currentNoteMs)
         l.cursorMs=Math.min(l.cursorMs+dt,l._currentNoteMs);
-      if(l.cursorMs>=l._totalMs){
-        if(Config.lrn.loop){this._learnResetCursor();l._lastFrameWall=now;}
+      if(l.cursorMs>=loopEnd){
+        if(Config.lrn.loop){this._learnSeekTo(Config.lrn.loop_start_ms||0);l._lastFrameWall=now;}
         else this._learnStop();
       }
     }
@@ -4277,11 +4504,29 @@ class App{
     l._lastFrameWall=this._frameNow;
     if(l._currentNoteMs<=0||l._currentNoteMs>=l._totalMs)this._learnResetCursor();
     const hud=document.getElementById('learn-hud');
+    const hudWasHidden=hud&&!hud.classList.contains('visible');
     if(hud)hud.classList.add('visible');
+    if(hudWasHidden)this._resize();
     const pp=document.getElementById('lhud-playpause');
     if(pp)pp.textContent='⏸';
     const loopBtn=document.getElementById('lhud-loop');
     if(loopBtn)loopBtn.classList.toggle('on',!!Config.lrn.loop);
+    // Sync loop A/B controls visibility and labels
+    const fmt=ms=>{const s=Math.max(0,ms)/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+    const ctrls=document.getElementById('lhud-loop-ctrls');
+    if(ctrls)ctrls.classList.toggle('visible',!!Config.lrn.loop);
+    const lmS=document.getElementById('lhud-lm-start');
+    const lmE=document.getElementById('lhud-lm-end');
+    const lr=document.getElementById('lhud-loop-region');
+    if(Config.lrn.loop){
+      if(lmS)lmS.classList.add('visible');
+      if(lmE)lmE.classList.add('visible');
+      if(lr)lr.classList.add('visible');
+    }
+    const aTime=document.getElementById('lhud-loop-a-time');
+    const bTime=document.getElementById('lhud-loop-b-time');
+    if(aTime)aTime.textContent=fmt(Config.lrn.loop_start_ms||0);
+    if(bTime)bTime.textContent=Config.lrn.loop_end_ms>0&&Config.lrn.loop_end_ms<l._totalMs?fmt(Config.lrn.loop_end_ms):'end';
     const spd=document.getElementById('lhud-speed');
     const spdVal=document.getElementById('lhud-speed-val');
     if(spd){spd.value=Math.round(Config.lrn.speed*100);if(spdVal)spdVal.textContent=spd.value+'%';}
@@ -4297,10 +4542,6 @@ class App{
   resetLearn(){
     this.pauseLearn();
     this._learnResetCursor();
-    const l=this._learn;
-    const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
-    const prog=document.getElementById('lhud-progress');
-    if(prog)prog.textContent='0:00 / '+fmt(l._totalMs);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
