@@ -485,8 +485,8 @@ const TRAIL_MIN=3, TRAIL_INSET=2;
 const SPARK_LIFE=460, SMOKE_LIFE=1080, SPARK_G=240, MAX_SP=7, MAX_SM=8;
 
 function anchorY(lay,n,ks,H){
-  if(!ks.visible)return H;
-  const r=getRect(lay,n); return r?r.y:H;
+  if(!ks.visible)return lay.pianoY;
+  const r=getRect(lay,n); return r?r.y:lay.pianoY;
 }
 function trailW(lay,n,ns){
   const r=getRect(lay,n); if(!r)return ns.width_px;
