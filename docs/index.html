@@ -512,6 +512,7 @@ class TrailManager{
     const t=this.active.get(n); if(!t)return;
     const r=getRect(lay,n); if(!r)return;
     t.x=r.x+r.w/2; t.bottomY=anchorY(lay,n,ks,H); t.width=trailW(lay,n,ns);
+    if(t.renderBottomY>H)t.renderBottomY=t.bottomY;
   }
   update(sdt,ns){
     const simDt=Math.max(1,Math.min(33,sdt));
@@ -614,7 +615,7 @@ class FXRenderer{
     this.frameBloom=0; this.time+=dt;
   }
   drawTrail(ctx,t,ns){
-    const cx=t.renderX,ty=t.renderTopY,by=t.renderBottomY,w=t.renderWidth;
+    const cx=t.renderX,ty=t.renderTopY,by=Math.min(t.renderBottomY,this.H),w=t.renderWidth;
     const h=Math.max(2,by-ty); if(by<0||ty>this.H)return;
     const hw=w/2;
     const{r,g,b}=resolveNoteColor(t.note,t.channel,ns);
@@ -4234,6 +4235,8 @@ class App{
     const l=this._learn;
     if(!l._events.length||!layout)return;
     const{pianoY}=layout;
+    const canvasH=ctx.canvas.height;
+    const floorY=Math.min(pianoY,canvasH);
     const sps=Config.ns.speed_px_per_sec;
     const ns=Config.ns;
     const windowEnd=l.cursorMs+Config.lrn.lookahead_ms;
@@ -4243,9 +4246,9 @@ class App{
       if(timeTillEnd<0)continue;
       if(!this._channelConfig?.[ev.channel]||this._channelConfig[ev.channel].muted)continue;
       const timeTillStart=ev.ms-l.cursorMs;
-      const yBottom=pianoY-Math.max(0,timeTillStart)/1000*sps;
-      const yTop=pianoY-timeTillEnd/1000*sps;
-      if(yTop>=pianoY)continue;
+      const yBottom=floorY-Math.max(0,timeTillStart)/1000*sps;
+      const yTop=floorY-timeTillEnd/1000*sps;
+      if(yTop>=floorY)continue;
       if(yBottom<0)continue;
       const key=getRect(layout,ev.note);
       if(!key)continue;
@@ -4253,7 +4256,7 @@ class App{
       const isPending=l._pendingChord.has(ev.note);
       const isIgnored=this._channelConfig?.[ev.channel]?.hand==='none';
       ctx.globalAlpha=isIgnored?0.2:(isPending?0.92:0.5);
-      const clampTop=Math.max(0,yTop), clampBot=Math.min(yBottom,pianoY);
+      const clampTop=Math.max(0,yTop), clampBot=Math.min(yBottom,floorY);
       ctx.fillStyle=`rgb(${r},${g},${b})`;
       ctx.beginPath();ctx.roundRect(key.x+1,clampTop,key.w-2,clampBot-clampTop,3);ctx.fill();
       if(isPending){
