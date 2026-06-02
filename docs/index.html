@@ -166,7 +166,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .midi-form-row label{font-size:11px;color:var(--muted);min-width:70px}
 .midi-form-row select,.midi-form-row input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:11px;font-family:inherit}
 /* ── Notation strip ── */
-#notation-strip{display:none;position:fixed;left:0;right:0;height:260px;background:rgba(8,10,16,.88);border-bottom:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);z-index:50;overflow:hidden;user-select:none}
+#notation-strip{display:none;position:fixed;left:0;right:0;height:280px;background:rgba(8,10,16,.88);border-bottom:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);z-index:50;overflow:hidden;user-select:none}
 #notation-strip.visible{display:flex;align-items:center}
 #notation-drag-handle{writing-mode:vertical-lr;font-size:20px;opacity:.35;cursor:ns-resize;padding:6px 10px;flex-shrink:0;color:#fff;line-height:1;touch-action:none}
 #notation-svg-wrap{flex:1;height:100%;overflow:hidden;position:relative}
@@ -3237,7 +3237,11 @@ class NotationRenderer{
     if(!this._msgHandler){
       this._msgHandler=e=>{
         if(!this._iframe||e.source!==this._iframe.contentWindow)return;
-        if(e.data?.type==='ready')this._ready=true;
+        if(e.data?.type==='ready'){this._ready=true;return;}
+        if(e.data?.type==='height'){
+          const strip=document.getElementById('notation-strip');
+          if(strip)strip.style.height=Math.max(220,Math.min(500,e.data.h+30))+'px';
+        }
       };
       window.addEventListener('message',this._msgHandler);
     }

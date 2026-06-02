@@ -67,7 +67,7 @@
 </div>
 <div id="status">Waiting for score…</div>
 
-<script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.8.4/build/opensheetmusicdisplay.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.9.3/build/opensheetmusicdisplay.min.js"></script>
 <script>
 "use strict";
 
@@ -143,16 +143,35 @@ async function loadScore(musicXml) {
     await osmd.load(musicXml);
 
     const er = osmd.EngravingRules;
-    er.PageTopMargin    = 3;
-    er.PageBottomMargin = 3;
+    er.PageTopMargin    = 15;
+    er.PageBottomMargin = 20;
     er.PageLeftMargin   = 5;
     er.PageRightMargin  = 5;
     er.RenderSingleHorizontalStaffline = true;
+    er.RenderArpeggios      = true;
+    er.RenderPedals         = true;
+    er.RenderFermatas       = true;
+    er.RenderTempos         = true;
+    er.RenderTuplets        = true;
+    er.RenderMeasureNumbers = true;
+    er.MeasureNumberInterval = 1;
+    er.RenderSlurs          = true;
+    er.RenderTies           = true;
 
     await osmd.render();
 
     statusEl.style.display = 'none';
     rendered = true;
+
+    // Let parent resize the notation strip to fit actual rendered height
+    try {
+      const svgEl = document.querySelector('#osmd-div svg');
+      if (svgEl) {
+        const h = Math.ceil(svgEl.getBoundingClientRect().height);
+        window.parent.postMessage({type: 'height', h}, '*');
+      }
+    } catch(_) {}
+
     buildTimestampMap();
     window.parent.postMessage({type:'ready'}, '*');
   } catch (err) {
