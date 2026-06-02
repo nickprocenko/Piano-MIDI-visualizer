@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      background: transparent;
+      overflow: hidden;
+    }
+    #viewport {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+    #score-track {
+      position: absolute;
+      top: 0; left: 0;
+      will-change: transform;
+    }
+    #osmd-div {
+      background: #fff;
+      display: inline-block;
+      padding: 4px 40px 8px;
+      min-width: 200px;
+    }
+    #playhead {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 2px;
+      background: rgba(0, 180, 180, 0.80);
+      pointer-events: none;
+      z-index: 100;
+      box-shadow: 0 0 8px rgba(0, 200, 200, 0.45);
+    }
+    #fade-left {
+      position: absolute;
+      top: 0; bottom: 0; left: 0;
+      width: 60px;
+      background: linear-gradient(to right, rgba(8,10,16,.92) 20%, transparent);
+      pointer-events: none;
+      z-index: 90;
+    }
+    #status {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(160, 165, 200, 0.80);
+      font: 12px/1.5 'Segoe UI', Arial, sans-serif;
+      text-align: center;
+      white-space: pre-line;
+      pointer-events: none;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+<div id="viewport">
+  <div id="score-track">
+    <div id="osmd-div"></div>
+  </div>
+  <div id="playhead"></div>
+  <div id="fade-left"></div>
+</div>
+<div id="status">Waiting for score…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.9.3/build/opensheetmusicdisplay.min.js"></script>
+<script>
+"use strict";
+
+const PLAYHEAD_FRAC = 0.50;
+
+const scoreTrack = document.getElementById('score-track');
+const playheadEl = document.getElementById('playhead');
+const statusEl   = document.getElementById('status');
+
+let osmd         = null;
+let rendered     = false;
+let currentMs    = 0;
+let timestampMap = [];
+let pxPerMs      = 0.18;
+
+function positionPlayhead() {
+  playheadEl.style.left = (window.innerWidth * PLAYHEAD_FRAC) + 'px';
+}
+positionPlayhead();
+window.addEventListener('resize', positionPlayhead);
+
+// ── postMessage API ───────────────────────────────────────────────────────────
+window.addEventListener('message', async e => {
+  if (!e.data || typeof e.data !== 'object') return;
+  if (e.data.type === 'loadScore') {
+    await loadScore(e.data.xml);
+  } else if (e.data.type === 'updatePosition') {
+    updatePosition(e.data.ms);
+  } else if (e.data.type === 'clear') {
+    clearScore();
+  }
+});
+
+function clearScore() {
+  rendered = false;
+  timestampMap = [];
+  scoreTrack.style.transform = 'translateX(0px)';
+  document.getElementById('osmd-div').innerHTML = '';
+  statusEl.style.display = 'flex';
+  statusEl.textContent = 'Waiting for score…';
+}
+
+async function loadScore(musicXml) {
+  rendered     = false;
+  timestampMap = [];
+  statusEl.style.display = 'flex';
+  statusEl.textContent   = 'Rendering score…';
+  scoreTrack.style.transform = 'translateX(0px)';
+
+  if (typeof opensheetmusicdisplay === 'undefined') {
+    statusEl.textContent = 'Sheet music library not loaded\n(check network connection)';
+    window.parent.postMessage({type:'error', msg:'OSMD not loaded'}, '*');
+    return;
+  }
+
+  try {
+    if (!osmd) {
+      osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('osmd-div', {
+        autoResize:                       false,
+        drawTitle:                        false,
+        drawComposer:                     false,
+        drawSubtitle:                     false,
+        drawLyricist:                     false,
+        drawCredits:                      false,
+        newSystemAtXMLNewSystemAttribute: false,
+        newPageAtXMLNewPageAttribute:     false,
+        renderSingleHorizontalStaffline:  true,
+      });
+    } else {
+      document.getElementById('osmd-div').innerHTML = '';
+    }
+
+    await osmd.load(musicXml);
+
+    const er = osmd.EngravingRules;
+    er.PageTopMargin    = 15;
+    er.PageBottomMargin = 20;
+    er.PageLeftMargin   = 5;
+    er.PageRightMargin  = 5;
+    er.RenderSingleHorizontalStaffline = true;
+    er.RenderArpeggios      = true;
+    er.RenderPedals         = true;
+    er.RenderFermatas       = true;
+    er.RenderTempos         = true;
+    er.RenderTuplets        = true;
+    er.RenderMeasureNumbers = true;
+    er.MeasureNumberInterval = 1;
+    er.RenderSlurs          = true;
+    er.RenderTies           = true;
+
+    await osmd.render();
+
+    statusEl.style.display = 'none';
+    rendered = true;
+
+    // Let parent resize the notation strip to fit actual rendered height
+    try {
+      const svgEl = document.querySelector('#osmd-div svg');
+      if (svgEl) {
+        const h = Math.ceil(svgEl.getBoundingClientRect().height);
+        window.parent.postMessage({type: 'height', h}, '*');
+      }
+    } catch(_) {}
+
+    buildTimestampMap();
+    window.parent.postMessage({type:'ready'}, '*');
+  } catch (err) {
+    statusEl.textContent = 'Error rendering score:\n' + (err.message || err);
+    console.error('[OSMD]', err);
+    window.parent.postMessage({type:'error', msg: String(err.message || err)}, '*');
+  }
+}
+
+function updatePosition(ms) {
+  currentMs = ms;
+}
+
+// ── Timestamp map ─────────────────────────────────────────────────────────────
+function buildTimestampMap() {
+  if (!osmd || !rendered) return;
+
+  let bpm = 120;
+  try {
+    const b = osmd.Sheet && osmd.Sheet.DefaultStartTempoInBpm;
+    if (b && b > 0) bpm = b;
+  } catch (_) {}
+
+  const map = [];
+
+  // Strategy A: walk cursor
+  try {
+    const trackRect = scoreTrack.getBoundingClientRect();
+    osmd.cursor.show();
+    osmd.cursor.reset();
+
+    while (!osmd.cursor.iterator.EndReached) {
+      const ts     = osmd.cursor.iterator.currentTimeStamp;
+      const timeMs = ts.realValue * 4.0 * (60000.0 / bpm);
+      const curEl  = document.getElementById('cursorImg-0');
+      if (curEl) {
+        const r   = curEl.getBoundingClientRect();
+        const xPx = r.left - trackRect.left + r.width * 0.5;
+        if (map.length === 0 || xPx - map[map.length - 1].xPx > 1) {
+          map.push({timeMs, xPx});
+        } else if (timeMs < map[map.length - 1].timeMs) {
+          map[map.length - 1].timeMs = timeMs;
+        }
+      }
+      osmd.cursor.next();
+    }
+    osmd.cursor.hide();
+  } catch (err) {
+    console.error('[OSMD] cursor walk failed:', err);
+  }
+
+  // Strategy B: graphic model fallback
+  if (map.length === 0) {
+    try { map.push(...buildMapFromGraphicModel(bpm)); }
+    catch (err) { console.error('[OSMD] graphic fallback failed:', err); }
+  }
+
+  map.sort((a, b) => a.timeMs - b.timeMs);
+  timestampMap = map;
+
+  if (map.length >= 2) {
+    const dx = map[map.length-1].xPx  - map[0].xPx;
+    const dt = map[map.length-1].timeMs - map[0].timeMs;
+    if (dt > 0) pxPerMs = dx / dt;
+  }
+
+  if (map.length === 0) {
+    statusEl.style.display = 'flex';
+    statusEl.textContent   = 'Could not map note positions.\nIs this a valid score?';
+  }
+}
+
+function buildMapFromGraphicModel(bpm) {
+  const result   = [];
+  const svgEl    = document.querySelector('#osmd-div svg');
+  if (!svgEl) return result;
+  const svgRect  = svgEl.getBoundingClientRect();
+  const trackRect= scoreTrack.getBoundingClientRect();
+  const offsetX  = svgRect.left - trackRect.left;
+  const vb       = svgEl.viewBox.baseVal;
+  const scaleX   = vb.width > 0 ? svgRect.width / vb.width : 1;
+
+  for (const staffMeasures of osmd.GraphicSheet.MeasureList) {
+    for (const measure of staffMeasures) {
+      if (!measure) continue;
+      for (const gse of (measure.StaffEntries || [])) {
+        if (!gse) continue;
+        const absX  = gse.PositionAndShape.AbsolutePosition.x;
+        const xPx   = offsetX + absX * scaleX;
+        const mTs   = gse.parentMeasure.parentSourceMeasure.absoluteTimestamp;
+        const eTs   = gse.relInMeasureTimestamp;
+        const timeMs= (mTs.realValue + eTs.realValue) * 4.0 * (60000.0 / bpm);
+        if (result.length === 0 || xPx - result[result.length-1].xPx > 1) {
+          result.push({timeMs, xPx});
+        }
+      }
+    }
+  }
+  return result;
+}
+
+// ── Scroll helpers ────────────────────────────────────────────────────────────
+function getXForTime(ms) {
+  const n = timestampMap.length;
+  if (n === 0) return 0;
+  if (ms < timestampMap[0].timeMs)
+    return timestampMap[0].xPx - (timestampMap[0].timeMs - ms) * pxPerMs;
+  if (ms > timestampMap[n-1].timeMs)
+    return timestampMap[n-1].xPx + (ms - timestampMap[n-1].timeMs) * pxPerMs;
+  let lo = 0, hi = n - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (timestampMap[mid].timeMs <= ms) lo = mid; else hi = mid;
+  }
+  const a = timestampMap[lo], b = timestampMap[hi];
+  const t = (ms - a.timeMs) / (b.timeMs - a.timeMs);
+  return a.xPx + t * (b.xPx - a.xPx);
+}
+
+// ── Animation loop ────────────────────────────────────────────────────────────
+function tick() {
+  requestAnimationFrame(tick);
+  if (!rendered || timestampMap.length === 0) return;
+  const phX   = window.innerWidth * PLAYHEAD_FRAC;
+  const noteX = getXForTime(currentMs);
+  scoreTrack.style.transform = `translateX(${(phX - noteX).toFixed(1)}px)`;
+}
+tick();
+</script>
+</body>
+</html>

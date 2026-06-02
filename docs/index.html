@@ -196,7 +196,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .midi-form-row label{font-size:11px;color:var(--muted);min-width:70px}
 .midi-form-row select,.midi-form-row input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:3px;font-size:11px;font-family:inherit}
 /* ── Notation strip ── */
-#notation-strip{display:none;position:fixed;left:0;right:0;height:260px;background:rgba(8,10,16,.88);border-bottom:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);z-index:50;overflow:hidden;user-select:none}
+#notation-strip{display:none;position:fixed;left:0;right:0;height:280px;background:rgba(8,10,16,.88);border-bottom:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);backdrop-filter:blur(6px);z-index:50;overflow:hidden;user-select:none}
 #notation-strip.visible{display:flex;align-items:center}
 #notation-drag-handle{writing-mode:vertical-lr;font-size:20px;opacity:.35;cursor:ns-resize;padding:6px 10px;flex-shrink:0;color:#fff;line-height:1;touch-action:none}
 #notation-svg-wrap{flex:1;height:100%;overflow:hidden;position:relative}
@@ -3392,11 +3392,43 @@ class NotationRenderer{
     this._pxPerMs=0;
     this._ready=false;
     this._svgEl=null;
+    this._iframe=null;
+    this._xmlMode=false;
+    this._msgHandler=null;
   }
   init(){
     this._wrap=document.getElementById('notation-svg-wrap');
     this._ready=false;
+    // Single window-level listener for iframe postMessage
+    if(!this._msgHandler){
+      this._msgHandler=e=>{
+        if(!this._iframe||e.source!==this._iframe.contentWindow)return;
+        if(e.data?.type==='ready'){this._ready=true;return;}
+        if(e.data?.type==='height'){
+          const strip=document.getElementById('notation-strip');
+          if(strip)strip.style.height=Math.max(220,Math.min(500,e.data.h+30))+'px';
+        }
+      };
+      window.addEventListener('message',this._msgHandler);
+    }
   }
+  // OSMD iframe path — used when raw XML is available
+  renderXml(xmlStr){
+    if(!this._wrap)return;
+    this.destroy();
+    this._xmlMode=true;
+    this._ready=false;
+    const iframe=document.createElement('iframe');
+    iframe.src='notation.html';
+    iframe.style.cssText='width:100%;height:100%;border:none;background:transparent';
+    iframe.setAttribute('allowtransparency','true');
+    this._wrap.appendChild(iframe);
+    this._iframe=iframe;
+    iframe.addEventListener('load',()=>{
+      iframe.contentWindow.postMessage({type:'loadScore',xml:xmlStr},'*');
+    },{once:true});
+  }
+  // VexFlow path — used for MIDI-only fallback
   render(bars,meta){
     if(typeof Vex==='undefined'){
       if(this._wrap){const m=document.createElement('div');m.className='vex-loading-msg';m.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,160,60,.8);font-size:12px;pointer-events:none';m.textContent='Sheet music: VexFlow library not loaded';this._wrap.appendChild(m);}
@@ -3408,11 +3440,10 @@ class NotationRenderer{
     this._wrap.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
     this._ready=false;
     if(!bars||!bars.length)return;
-    // VexFlow 4.x may expose Flow as Vex.VF, Vex.Flow, or directly on Vex
     const VF=Vex.VF||Vex.Flow||Vex;
     if(!VF?.Renderer){console.error('VexFlow Renderer missing. Vex keys:',Object.keys(Vex||{}));return;}
     try{
-    const stripH=document.getElementById('notation-strip').offsetHeight||220;
+    const stripH=document.getElementById('notation-strip').offsetHeight||260;
     const PX_PER_BEAT=72;
     const microsPerBeat=meta?.tempoMap?.[meta.tempoMap.length-1]?.microsPerBeat||500000;
     const beatsPerBar=meta?.timeSig?.num||4;
@@ -3424,7 +3455,6 @@ class NotationRenderer{
     renderer.resize(totalW,totalH);
     const ctx=renderer.getContext();
     ctx.setFont('Arial',10);
-    // colour theme
     ctx.setFillStyle('rgba(210,210,210,0.9)');
     ctx.setStrokeStyle('rgba(180,180,180,0.9)');
     const useFlats=(meta?.keySig?.sharps||0)<0;
@@ -3432,17 +3462,14 @@ class NotationRenderer{
     bars.forEach((bar,bi)=>{
       totalMs=Math.max(totalMs,(bar.startMs||0)+barDurationMs);
       const xOff=bi*barW+10;
-      // Treble stave
       const trebleY=28;
       const trebleStave=new VF.Stave(xOff,trebleY,barW-4);
       if(bi===0){trebleStave.addClef('treble');if(meta?.timeSig)trebleStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
       trebleStave.setContext(ctx).draw();
-      // Bass stave — positioned at 46% of strip height so low-note ledger lines have room
       const bassY=Math.round(stripH*0.46);
       const bassStave=new VF.Stave(xOff,bassY,barW-4);
       if(bi===0){bassStave.addClef('bass');if(meta?.timeSig)bassStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
       bassStave.setContext(ctx).draw();
-      // Build voices
       const buildVoice=(notes,clef,stave)=>{
         if(!notes||!notes.length){
           const rest=new VF.StaveNote({clef,keys:[clef==='treble'?'b/4':'d/3'],duration:'wr'});
@@ -3461,14 +3488,12 @@ class NotationRenderer{
           try{
             sn=new VF.StaveNote({clef,keys,duration:dur});
             if(dotted)VF.Dot.buildAndAttach([sn]);
-            // Accidentals
             keys.forEach((k,i)=>{
               if(_needsAccidental(chord.notes[i],meta?.keySig)){
                 sn.addModifier(new VF.Accidental(useFlats?'b':'#'),i);
               }
             });
           }catch(e){
-            // Fallback: quarter rest
             sn=new VF.StaveNote({clef,keys:[clef==='treble'?'b/4':'d/3'],duration:'qr'});
           }
           staveNotes.push(sn);
@@ -3480,7 +3505,6 @@ class NotationRenderer{
           const fmt=new VF.Formatter();
           fmt.joinVoices([voice]).format([voice],barW-24);
           voice.draw(ctx,stave);
-          // Beams
           const beams=VF.Beam.generateBeams(staveNotes);
           beams.forEach(b=>b.setContext(ctx).draw());
         }catch(e){}
@@ -3489,8 +3513,6 @@ class NotationRenderer{
       buildVoice(bar.bass,'bass',bassStave);
     });
     this._svgEl=this._wrap.querySelector('svg');
-    // VexFlow draws in black by default (paper convention).
-    // Inject a style element to invert ink for the dark strip background.
     if(this._svgEl){
       const style=document.createElementNS('http://www.w3.org/2000/svg','style');
       style.textContent=[
@@ -3514,14 +3536,25 @@ class NotationRenderer{
     }
   }
   scrollTo(cursorMs){
+    if(this._xmlMode&&this._iframe?.contentWindow){
+      this._iframe.contentWindow.postMessage({type:'updatePosition',ms:cursorMs},'*');
+      return;
+    }
     if(!this._ready||!this._svgEl)return;
     const wrapW=this._wrap?.offsetWidth||800;
     const offset=Math.max(0,cursorMs*this._pxPerMs-wrapW/2);
     this._svgEl.style.transform=`translateX(-${offset}px)`;
   }
   destroy(){
+    if(this._iframe){
+      this._iframe.contentWindow?.postMessage({type:'clear'},'*');
+      this._iframe.remove();
+      this._iframe=null;
+    }
+    this._xmlMode=false;
     const el=this._wrap?.querySelector('svg');
     if(el)el.remove();
+    this._wrap?.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
     this._ready=false;
   }
 }
@@ -4321,8 +4354,14 @@ class App{
   }
 
   _buildNotation(){
-    if(typeof Vex==='undefined')return;
     if(!Config.lrn.notation)return;
+    // OSMD path — raw XML available → iframe renderer handles voices, pedal, arpeggio
+    if(this._musicXmlText){
+      this._notationRenderer.renderXml(this._musicXmlText);
+      return;
+    }
+    // VexFlow path — MIDI-only fallback
+    if(typeof Vex==='undefined')return;
     if(this._musicXmlBars){
       this._notationRenderer.render(this._musicXmlBars,this._musicXmlMeta);
       return;
@@ -4821,6 +4860,7 @@ class App{
     this.midiFile.load(buf,file.name);
     this._addRecent(file.name);
     RecentMidiDB.save(file.name,buf).catch(()=>{});
+    this._musicXmlText=null;
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
     this._buildLearnEvents();
@@ -4851,7 +4891,7 @@ class App{
     this._buildLearnEvents();
     this._applyChannelConfig();
     this._notationRenderer.destroy();
-    this._musicXmlBars=null; this._musicXmlMeta=null;
+    this._musicXmlText=null; this._musicXmlBars=null; this._musicXmlMeta=null;
     const xmlRow=document.getElementById('xml-file-row');
     if(xmlRow)xmlRow.textContent='No MusicXML loaded';
     this._refreshTracksTab();
@@ -4865,6 +4905,7 @@ class App{
       if(doc.querySelector('parseerror,parsererror')){this._showToast('Invalid XML file');return;}
       const{bars,meta}=_parseMusicXmlDoc(doc);
       if(!bars.length){this._showToast('No notes found in MusicXML');return;}
+      this._musicXmlText=text;
       this._musicXmlBars=bars; this._musicXmlMeta=meta;
       const events=this._buildLearnEventsFromXmlBars(bars);
       if(!events.length){this._showToast('No playable notes in XML');return;}
@@ -4904,6 +4945,7 @@ class App{
       if(doc.querySelector('parsererror')){this._showToast('Invalid XML file');return;}
       const{bars,meta}=_parseMusicXmlDoc(doc);
       if(!bars.length){this._showToast('No notes found in MusicXML');return;}
+      this._musicXmlText=text;
       this._musicXmlBars=bars;
       this._musicXmlMeta=meta;
       const row=document.getElementById('xml-file-row');
@@ -4941,7 +4983,7 @@ class App{
     this._applyChannelConfig();
     this._buildLearnEvents();
     this._notationRenderer.destroy();
-    this._musicXmlBars=null; this._musicXmlMeta=null;
+    this._musicXmlText=null; this._musicXmlBars=null; this._musicXmlMeta=null;
     this.prevNotes.clear();
     this.trails.active.clear();
     this.midiFile.play();
