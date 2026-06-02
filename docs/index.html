@@ -202,6 +202,8 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 #notation-svg-wrap{flex:1;height:100%;overflow:hidden;position:relative}
 #notation-svg-wrap svg{position:absolute;top:0;left:0;color:#ccc}
 #notation-cursor-line{position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(0,180,180,.55);pointer-events:none;z-index:2}
+.claude-btn{color:var(--accent);border-color:rgba(0,180,180,.4)}
+.claude-btn:hover{background:rgba(0,180,180,.1)}
 </style>
 </head>
 <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js" defer></script>
@@ -1684,6 +1686,83 @@ YOUR REQUEST:
 [describe the colour effect you want here]`;
 }
 
+function buildSystemPrompt(currentScript){
+  return `You are writing a JavaScript colour script for a Piano MIDI Visualiser.
+
+EXECUTION: The script runs as new Function('api', code)(api) in a browser.
+No imports, no fetch, no require — plain ES2020 browser JS only.
+Return value is ignored; interact only through the api object.
+
+API REFERENCE:
+  api.setNote(n, r, g, b)        n=0-127 MIDI note; r/g/b=0-255; pass null for r to clear
+  api.setOctave(oct, r, g, b)    oct=0-11 pitch class (applies to all octaves)
+  api.setAll(r, g, b)            set all 128 notes
+  api.setChannel(ch, r, g, b)    ch=0-15
+  api.setZone(ch, lo, hi, r, g, b)
+  [r,g,b] = api.hsvToRgb(h,s,v) h/s/v all 0-1; returns array [r,g,b] 0-255
+
+  api.onNoteOn(fn)    fn(note, velocity, channel)  fired when a note is struck
+  api.onNoteOff(fn)   fn(note, channel)             fired on note release
+  api.onFrame(fn)     fn(activeNotes, now, dt)      fired every animation frame
+                      activeNotes = Set of active MIDI note numbers
+                      now = performance.now() in ms
+                      dt = seconds since last frame
+
+MIDI NOTE NUMBERS: A0=21  C4=60 (middle C)  A4=69  C8=108  piano range 21-108
+Pitch classes: C=0 C#=1 D=2 D#=3 E=4 F=5 F#=6 G=7 G#=8 A=9 Bb=10 B=11
+
+EXAMPLE — Rainbow keyboard (static):
+for(let n=0;n<128;n++){
+  const hue=((n-21)/87%1+1)%1;
+  const [r,g,b]=api.hsvToRgb(hue,0.9,1.0);
+  api.setNote(n,r,g,b);
+}
+
+EXAMPLE — Velocity-reactive notes with rainbow animation:
+api.setAll(0,30,60);
+api.onNoteOn(function(note,velocity,channel){
+  const bright=Math.round(velocity*2);
+  api.setNote(note,bright,bright,255);
+});
+api.onNoteOff(function(note,channel){
+  api.setNote(note,null);
+});
+api.onFrame(function(activeNotes,now,dt){
+  for(const n of activeNotes){
+    const [r,g,b]=api.hsvToRgb((now/2000+n/12)%1,1,1);
+    api.setNote(n,r,g,b);
+  }
+});
+
+CURRENT SCRIPT (modify or replace entirely):
+\`\`\`
+${currentScript||'// empty — write a new script from scratch'}
+\`\`\`
+
+Respond with ONLY the JavaScript code, no markdown fences, no explanation.`;
+}
+
+async function callClaudeApi(userMsg,currentScript,apiKey){
+  const res=await fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{
+      'x-api-key':apiKey,
+      'anthropic-version':'2023-06-01',
+      'content-type':'application/json',
+      'anthropic-dangerous-direct-browser-access':'true',
+    },
+    body:JSON.stringify({
+      model:'claude-haiku-4-5-20251001',
+      max_tokens:1024,
+      system:buildSystemPrompt(currentScript),
+      messages:[{role:'user',content:userMsg}],
+    }),
+  });
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${res.status}`);}
+  const j=await res.json();
+  return j.content?.[0]?.text||'';
+}
+
 function runUserScript(code){
   const notes=new Array(128).fill(null);
   const channelColors=new Array(16).fill(null);
@@ -1834,6 +1913,15 @@ function colourCard(side,ns){
 <button id="${p}-nc-run" class="action-btn">▶ Run</button>
 <button id="${p}-nc-saveas" class="action-btn">Save As…</button>
 <button id="${p}-nc-copy-prompt" class="action-btn">Copy AI Prompt</button>
+<button id="${p}-nc-ask-claude" class="action-btn claude-btn">✦ Ask Claude</button>
+</div>
+<div id="${p}-claude-chat" style="display:none;margin-top:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px">
+<div id="${p}-apikey-row" style="display:none;margin-bottom:6px">
+<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Anthropic API key (stored locally in browser)</div>
+<div style="display:flex;gap:6px"><input id="${p}-apikey-input" type="password" placeholder="sk-ant-…" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:monospace"><button id="${p}-apikey-save" class="action-btn">Save</button></div>
+</div>
+<div id="${p}-chat-log" style="max-height:120px;overflow-y:auto;font-size:11px;margin-bottom:6px;display:flex;flex-direction:column;gap:3px"></div>
+<div style="display:flex;gap:6px"><input id="${p}-chat-input" type="text" placeholder="Describe the colour effect…" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px"><button id="${p}-chat-send" class="action-btn">Send</button></div>
 </div></div></div>`;
 }
 
@@ -1894,6 +1982,15 @@ function buildSettingsHTML(tab){
 <button id="${prefix}-nc-run" class="action-btn">▶ Run</button>
 <button id="${prefix}-nc-saveas" class="action-btn">Save As…</button>
 <button id="${prefix}-nc-copy-prompt" class="action-btn">Copy AI Prompt</button>
+<button id="${prefix}-nc-ask-claude" class="action-btn claude-btn">✦ Ask Claude</button>
+</div>
+<div id="${prefix}-claude-chat" style="display:none;margin-top:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px">
+<div id="${prefix}-apikey-row" style="display:none;margin-bottom:6px">
+<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Anthropic API key (stored locally in browser)</div>
+<div style="display:flex;gap:6px"><input id="${prefix}-apikey-input" type="password" placeholder="sk-ant-…" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:monospace"><button id="${prefix}-apikey-save" class="action-btn">Save</button></div>
+</div>
+<div id="${prefix}-chat-log" style="max-height:120px;overflow-y:auto;font-size:11px;margin-bottom:6px;display:flex;flex-direction:column;gap:3px"></div>
+<div style="display:flex;gap:6px"><input id="${prefix}-chat-input" type="text" placeholder="Describe the colour effect…" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px"><button id="${prefix}-chat-send" class="action-btn">Send</button></div>
 </div></div></div>`;
 
   const fluidSel=()=>`<div class="section"><h2>Fluid Presets</h2>
@@ -2135,6 +2232,48 @@ ${(()=>{
 let _saveTimer=null;
 function schedSave(){clearTimeout(_saveTimer);_saveTimer=setTimeout(()=>Config.save(),300);}
 
+function wireClaude(root,prefix,getTa,getRunBtn){
+  const chatPanel=root.querySelector(`#${prefix}-claude-chat`);
+  const apikeyRow=root.querySelector(`#${prefix}-apikey-row`);
+  const apikeyInput=root.querySelector(`#${prefix}-apikey-input`);
+  const apikeySave=root.querySelector(`#${prefix}-apikey-save`);
+  const chatLog=root.querySelector(`#${prefix}-chat-log`);
+  const chatInput=root.querySelector(`#${prefix}-chat-input`);
+  const sendBtn=root.querySelector(`#${prefix}-chat-send`);
+  const askBtn=root.querySelector(`#${prefix}-nc-ask-claude`);
+  if(!askBtn||!chatPanel)return;
+  function appendMsg(text,isUser){
+    const d=document.createElement('div');
+    d.style.cssText=`padding:3px 6px;border-radius:3px;word-break:break-word;${isUser?'background:rgba(0,180,180,.12);color:var(--accent);align-self:flex-end':'background:var(--btn-bg);color:var(--text);align-self:flex-start'}`;
+    d.textContent=text;chatLog.appendChild(d);chatLog.scrollTop=chatLog.scrollHeight;
+  }
+  askBtn.addEventListener('click',()=>{
+    const vis=chatPanel.style.display!=='none';
+    chatPanel.style.display=vis?'none':'';
+    if(!vis&&apikeyRow)apikeyRow.style.display=localStorage.getItem('piano_claude_key')?'none':'';
+  });
+  if(apikeySave)apikeySave.addEventListener('click',()=>{
+    const k=(apikeyInput?.value||'').trim();if(!k)return;
+    localStorage.setItem('piano_claude_key',k);if(apikeyRow)apikeyRow.style.display='none';
+  });
+  async function doSend(){
+    const msg=(chatInput?.value||'').trim();if(!msg)return;
+    const apiKey=localStorage.getItem('piano_claude_key');
+    if(!apiKey){if(apikeyRow)apikeyRow.style.display='';return;}
+    const ta=getTa();if(!ta)return;
+    chatInput.value='';appendMsg(msg,true);
+    sendBtn.textContent='…';sendBtn.disabled=true;
+    try{
+      const script=await callClaudeApi(msg,ta.value.trim(),apiKey);
+      ta.value=script;const runBtn=getRunBtn();if(runBtn)runBtn.click();
+      appendMsg('✓ Script applied',false);
+    }catch(e){appendMsg('Error: '+e.message,false);}
+    finally{sendBtn.textContent='Send';sendBtn.disabled=false;}
+  }
+  if(sendBtn)sendBtn.addEventListener('click',doSend);
+  if(chatInput)chatInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();doSend();}});
+}
+
 function wireNoteThemeDropdown(root,prefix,refreshAll){
   const sel=root.querySelector(`#${prefix}-nc-sel`);
   const delBtn=root.querySelector(`#${prefix}-nc-del`);
@@ -2227,6 +2366,8 @@ function wireNoteThemeDropdown(root,prefix,refreshAll){
       if(window.app?._showToast)app._showToast('AI prompt copied to clipboard');
     });
   });
+
+  wireClaude(root,prefix,()=>ta,()=>runBtn);
 
   if(delBtn) delBtn.addEventListener('click',()=>{
     const v=sel.value; if(!v.startsWith('u'))return;
@@ -2397,6 +2538,7 @@ function wireColourCard(root,side,refreshAll){
       if(window.app?._showToast)app._showToast('AI prompt copied');
     });
   });
+  wireClaude(root,p,()=>ta,()=>runBtn);
   if(delBtn)delBtn.addEventListener('click',()=>{
     const at=getAT();if(at.type!=='user')return;
     const t=NoteColorThemeManager.getAll()[at.index];
