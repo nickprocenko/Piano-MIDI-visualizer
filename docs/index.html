@@ -1078,11 +1078,11 @@ function parseMidi(buf){
   u32(); const fmt=u16(),ntrks=u16(),div=u16();
   if(div&0x8000)return[];
   // Collect all tracks
-  const tracks=[];
+  const tracks=[];const trackNames=[];
   for(let ti=0;ti<ntrks;ti++){
     const tag=u32(); if(tag!==0x4D54726B){u32();continue;} // "MTrk"
     const tLen=u32(),tEnd=p+tLen;
-    const evts=[]; let tick=0,rs=0;
+    const evts=[]; let tick=0,rs=0; let tName='';
     while(p<tEnd){
       tick+=vlq();
       let st=v.getUint8(p);
@@ -1090,17 +1090,18 @@ function parseMidi(buf){
       const tp=st&0xF0;
       if(tp===0x90||tp===0x80){
         const n=u8(),vel=u8();
-        evts.push({tick,type:tp===0x90?'on':'off',ch:st&0x0F,n,vel});
+        evts.push({tick,type:tp===0x90?'on':'off',ch:st&0x0F,n,vel,ti});
       }else if(tp===0xB0||tp===0xA0||tp===0xE0){u8();u8();}
       else if(tp===0xC0||tp===0xD0){u8();}
       else if(st===0xFF){
         const mt=u8(),ml=vlq();
         if(mt===0x51&&ml===3)evts.push({tick,type:'tempo',us:(u8()<<16)|(u8()<<8)|u8()});
+        else if((mt===0x03||mt===0x04)&&!tName){let s='';for(let ci=0;ci<ml;ci++)s+=String.fromCharCode(u8());tName=s.trim();}
         else p+=ml;
       }else if(st===0xF0||st===0xF7){p+=vlq();}
       else break;
     }
-    p=tEnd; tracks.push(evts);
+    p=tEnd; tracks.push(evts); trackNames.push(tName);
   }
   // Build tempo map from track 0 (format 1) or all tracks (format 0)
   const tempoMap=[{tick:0,us:500000,ms:0}];
@@ -1116,11 +1117,12 @@ function parseMidi(buf){
     return seg.ms+(tick-seg.tick)*seg.us/div/1000;
   }
   const all=[];
-  for(const tr of tracks) for(const e of tr){
+  for(let ti=0;ti<tracks.length;ti++) for(const e of tracks[ti]){
     if(e.type==='on'||e.type==='off')
-      all.push({timeMs:tickToMs(e.tick),type:e.type==='on'?'noteon':'noteoff',note:e.n,velocity:e.vel,channel:e.ch??0});
+      all.push({timeMs:tickToMs(e.tick),type:e.type==='on'?'noteon':'noteoff',note:e.n,velocity:e.vel,channel:e.ch??0,track:ti});
   }
   all.sort((a,b)=>a.timeMs-b.timeMs||(a.type==='noteoff'?-1:1));
+  all._trackNames=trackNames;
   return all;
 }
 
@@ -1167,9 +1169,9 @@ function parseMidiMeta(buf){
 }
 
 class MidiFilePlayer{
-  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';this.meta=null;}
+  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';this.meta=null;this._trackNames=[];}
   load(buf,name){
-    this.filename=name; this.events=parseMidi(buf);
+    this.filename=name; const evts=parseMidi(buf); this.events=evts; this._trackNames=evts._trackNames||[];
     try{this.meta=parseMidiMeta(buf);}catch(e){this.meta=null;}
     this.stop();
   }
@@ -1181,7 +1183,7 @@ class MidiFilePlayer{
     const el=performance.now()-this.t0; let ch=false;
     while(this.idx<this.events.length&&this.events[this.idx].timeMs<=el){
       const e=this.events[this.idx++];
-      if(e.type==='noteon'&&e.velocity>0){this.activeNotes.add(e.note);this.noteChannel.set(e.note,e.channel??0);this.noteVelocity.set(e.note,e.velocity);ch=true;}
+      if(e.type==='noteon'&&e.velocity>0){this.activeNotes.add(e.note);this.noteChannel.set(e.note,(e.track??0)*16+(e.channel??0));this.noteVelocity.set(e.note,e.velocity);ch=true;}
       else if(e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0)){this.activeNotes.delete(e.note);this.noteChannel.delete(e.note);this.noteVelocity.delete(e.note);ch=true;}
     }
     if(this.idx>=this.events.length){this.playing=false;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();this.pos=0;return true;}
@@ -1189,16 +1191,17 @@ class MidiFilePlayer{
   }
   getChannelInfo(){
     const info={};
+    const names=this._trackNames||[];
     for(const e of this.events){
       if(e.type==='noteon'&&e.velocity>0){
-        const c=e.channel??0;
-        if(!info[c])info[c]={ch:c,count:0,minNote:127,maxNote:0};
-        info[c].count++;
-        if(e.note<info[c].minNote)info[c].minNote=e.note;
-        if(e.note>info[c].maxNote)info[c].maxNote=e.note;
+        const c=e.channel??0,t=e.track??0,vid=t*16+c;
+        if(!info[vid])info[vid]={ch:c,track:t,vid,name:names[t]||'',count:0,minNote:127,maxNote:0};
+        info[vid].count++;
+        if(e.note<info[vid].minNote)info[vid].minNote=e.note;
+        if(e.note>info[vid].maxNote)info[vid].maxNote=e.note;
       }
     }
-    return Object.values(info).sort((a,b)=>a.ch-b.ch);
+    return Object.values(info).sort((a,b)=>a.track-b.track||a.ch-b.ch);
   }
   _seek(ms){
     let lo=0,hi=this.events.length;
@@ -4234,12 +4237,13 @@ class App{
     if(!info.length&&this._learn?._events?.length){
       const chMap={};
       for(const ev of this._learn._events){
-        if(!chMap[ev.channel])chMap[ev.channel]={ch:ev.channel,count:0,minNote:127,maxNote:0};
-        chMap[ev.channel].count++;
-        if(ev.note<chMap[ev.channel].minNote)chMap[ev.channel].minNote=ev.note;
-        if(ev.note>chMap[ev.channel].maxNote)chMap[ev.channel].maxNote=ev.note;
+        const vid=(ev.track??0)*16+(ev.channel??0);
+        if(!chMap[vid])chMap[vid]={ch:ev.channel,track:ev.track??0,vid,name:'',count:0,minNote:127,maxNote:0};
+        chMap[vid].count++;
+        if(ev.note<chMap[vid].minNote)chMap[vid].minNote=ev.note;
+        if(ev.note>chMap[vid].maxNote)chMap[vid].maxNote=ev.note;
       }
-      info=Object.values(chMap).sort((a,b)=>a.ch-b.ch);
+      info=Object.values(chMap).sort((a,b)=>a.track-b.track||a.ch-b.ch);
     }
     document.getElementById('tracks-filename').textContent=this.midiFile.filename||'Learn Mode';
     // Sync learn-bar button states
@@ -4255,17 +4259,21 @@ class App{
     const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
     // Build config — preserve existing or create fresh
     if(!this._channelConfig||this._channelConfig._file!==this.midiFile.filename){
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig=[];
       this._channelConfig._file=this.midiFile.filename;
     }
+    info.forEach(({vid},i)=>{
+      if(!this._channelConfig[vid])this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+    });
     const list=document.getElementById('track-channel-list');
     list.innerHTML='';
-    info.forEach(({ch,count,minNote,maxNote})=>{
-      const cfg=this._channelConfig[ch];
+    info.forEach(({ch,track,vid,name,count,minNote,maxNote},i)=>{
+      const cfg=this._channelConfig[vid];
       const row=document.createElement('div');
       row.className='track-row'+(cfg.muted?' muted':'');
+      const label=name||`Track ${track+1}`;
       row.innerHTML=`
-        <span class="track-ch-label">Ch ${ch+1}</span>
+        <span class="track-ch-label" title="Track ${track+1}, Ch ${ch+1}">${label}</span>
         <span class="track-ch-meta">${count} notes &nbsp;·&nbsp; ${noteName(minNote)}–${noteName(maxNote)}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
         <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
@@ -4305,13 +4313,13 @@ class App{
     const active=new Map();
     const events=[];
     for(const ev of rawEvents){
-      const k=`${ev.note}-${ev.channel}`;
+      const k=`${ev.note}-${ev.channel}-${ev.track??0}`;
       if(ev.type==='noteon'&&ev.velocity>0){
         active.set(k,ev);
       } else if(ev.type==='noteoff'||(ev.type==='noteon'&&ev.velocity===0)){
         const start=active.get(k);
         if(start){
-          events.push({ms:start.timeMs,durationMs:Math.max(50,ev.timeMs-start.timeMs),note:ev.note,channel:ev.channel});
+          events.push({ms:start.timeMs,durationMs:Math.max(50,ev.timeMs-start.timeMs),note:ev.note,channel:ev.channel,track:start.track??0});
           active.delete(k);
         }
       }
@@ -4376,12 +4384,13 @@ class App{
     const numBars=Math.min(400,Math.max(1,Math.ceil(totalMs/barDurationMs)));
     // Use hand assignments if configured; otherwise auto-split at middle C.
     const cfg=this._channelConfig;
-    const hasLeftHand=cfg&&Array.from({length:16},(_,i)=>i).some(i=>cfg[i]?.hand==='left'&&!cfg[i]?.muted);
-    const notMuted=e=>e.channel!==9&&(!cfg||!cfg[e.channel]?.muted);
+    const hasLeftHand=cfg&&cfg.some&&cfg.some(c=>c?.hand==='left'&&!c?.muted);
+    const _evVid=e=>(e.track??0)*16+(e.channel??0);
+    const notMuted=e=>e.channel!==9&&(!cfg||!cfg[_evVid(e)]?.muted);
     let trebleEvents,bassEvents;
     if(hasLeftHand){
-      trebleEvents=events.filter(e=>notMuted(e)&&cfg[e.channel]?.hand!=='left');
-      bassEvents=events.filter(e=>notMuted(e)&&cfg[e.channel]?.hand==='left');
+      trebleEvents=events.filter(e=>notMuted(e)&&cfg[_evVid(e)]?.hand!=='left');
+      bassEvents=events.filter(e=>notMuted(e)&&cfg[_evVid(e)]?.hand==='left');
     }else{
       // Auto-split: notes ≥ MIDI 60 (middle C) → treble, below → bass
       trebleEvents=events.filter(e=>notMuted(e)&&e.note>=60);
@@ -4451,9 +4460,13 @@ class App{
     if(!this._notationRenderer._ready)this._buildNotation();
   }
 
-  _learnHandFilter(ch){
-    const cfg=this._channelConfig?.[ch];
-    return !!cfg&&cfg.hand!=='none'&&!cfg.muted;
+  _learnHandFilter(vid){
+    if(!this._channelConfig)return true;
+    const cfg=this._channelConfig[vid];
+    if(cfg)return cfg.hand!=='none'&&!cfg.muted;
+    // vid<16 means raw MIDI channel from live input — match any track using that channel
+    if(vid<16)return this._channelConfig.some(c=>c&&!c.muted&&c.hand!=='none');
+    return false;
   }
 
   _learnResetCursor(){
@@ -4462,13 +4475,13 @@ class App{
     const sps=Config.ns.speed_px_per_sec;
     // Time for a note to travel from the top of canvas down to the piano top
     const leadInMs=this.layout?this.layout.pianoY/sps*1000:3000;
-    const first=l._events.find(ev=>this._learnHandFilter(ev.channel));
+    const first=l._events.find(ev=>this._learnHandFilter((ev.track??0)*16+(ev.channel??0)));
     l._currentNoteMs=first?first.ms:0;
     // Both modes: start above the canvas so notes enter from the top edge
     l.cursorMs=l._currentNoteMs-leadInMs;
     if(Config.lrn.mode==='wait'&&first){
       for(const ev of l._events){
-        if(ev.ms>=first.ms-30&&ev.ms<=first.ms+50&&this._learnHandFilter(ev.channel))
+        if(ev.ms>=first.ms-30&&ev.ms<=first.ms+50&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0)))
           l._pendingChord.add(ev.note);
       }
     }
@@ -4483,12 +4496,12 @@ class App{
       l._currentNoteMs=safeMs;
     } else {
       // Wait mode: snap to the next note at or after the target position
-      const next=l._events.find(ev=>ev.ms>=safeMs&&this._learnHandFilter(ev.channel));
+      const next=l._events.find(ev=>ev.ms>=safeMs&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0)));
       if(next){
         l._currentNoteMs=next.ms;
         l.cursorMs=safeMs;
         for(const ev of l._events){
-          if(ev.ms>=next.ms-30&&ev.ms<=next.ms+50&&this._learnHandFilter(ev.channel))
+          if(ev.ms>=next.ms-30&&ev.ms<=next.ms+50&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0)))
             l._pendingChord.add(ev.note);
         }
       } else {
@@ -4504,7 +4517,7 @@ class App{
     const loopEnd=Config.lrn.loop&&Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs;
     let nextMs=null;
     for(const ev of l._events){
-      if(ev.ms>l._currentNoteMs+50&&this._learnHandFilter(ev.channel)&&ev.ms<loopEnd){nextMs=ev.ms;break;}
+      if(ev.ms>l._currentNoteMs+50&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0))&&ev.ms<loopEnd){nextMs=ev.ms;break;}
     }
     if(nextMs===null){
       if(Config.lrn.loop){this._learnSeekTo(Config.lrn.loop_start_ms||0);l._lastFrameWall=this._frameNow;}
@@ -4515,7 +4528,7 @@ class App{
     // Don't teleport cursorMs — _learnTick advances it naturally so notes fall smoothly
     l._pendingChord.clear();
     for(const ev of l._events){
-      if(ev.ms>=nextMs-30&&ev.ms<=nextMs+50&&this._learnHandFilter(ev.channel))
+      if(ev.ms>=nextMs-30&&ev.ms<=nextMs+50&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0)))
         l._pendingChord.add(ev.note);
     }
   }
@@ -4576,7 +4589,8 @@ class App{
       if(ev.ms>windowEnd)break;
       const timeTillEnd=ev.ms+ev.durationMs-l.cursorMs;
       if(timeTillEnd<0)continue;
-      if(!this._channelConfig?.[ev.channel]||this._channelConfig[ev.channel].muted)continue;
+      const _vid=(ev.track??0)*16+(ev.channel??0);
+      if(!this._channelConfig?.[_vid]||this._channelConfig[_vid].muted)continue;
       const timeTillStart=ev.ms-l.cursorMs;
       const yBottom=floorY-Math.max(0,timeTillStart)/1000*sps;
       const yTop=floorY-timeTillEnd/1000*sps;
@@ -4584,9 +4598,9 @@ class App{
       if(yBottom<0)continue;
       const key=getRect(layout,ev.note);
       if(!key)continue;
-      const {r,g,b}=resolveNoteColor(ev.note,ev.channel,ns);
+      const {r,g,b}=resolveNoteColor(ev.note,_vid,ns);
       const isPending=l._pendingChord.has(ev.note);
-      const isIgnored=this._channelConfig?.[ev.channel]?.hand==='none';
+      const isIgnored=this._channelConfig?.[_vid]?.hand==='none';
       ctx.globalAlpha=isIgnored?0.2:(isPending?0.92:0.5);
       const clampTop=Math.max(0,yTop), clampBot=Math.min(yBottom,floorY);
       ctx.fillStyle=`rgb(${r},${g},${b})`;
@@ -4653,13 +4667,12 @@ class App{
 
   _applyChannelConfig(){
     if(!this._channelConfig)return;
-    const channelColors=new Array(16).fill(null);
-    for(let ch=0;ch<16;ch++){
-      const c=this._channelConfig[ch];
-      if(!c||c.muted)continue;
+    const channelColors=[];
+    this._channelConfig.forEach((c,vid)=>{
+      if(!c||c.muted)return;
       const dim=(c.hand&&c.hand!=='none')?1:0.35;
-      channelColors[ch]={r:Math.round(c.r*dim),g:Math.round(c.g*dim),b:Math.round(c.b*dim)};
-    }
+      channelColors[vid]={r:Math.round(c.r*dim),g:Math.round(c.g*dim),b:Math.round(c.b*dim)};
+    });
     Config.ns.note_colors={notes:new Array(128).fill(null),channelColors,zones:[]};
     Config.ns.color_mode='script';
   }
@@ -4885,8 +4898,11 @@ class App{
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
     if(!this._channelConfig||this._channelConfig._file!==file.name){
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig=[];
       this._channelConfig._file=file.name;
+      this.midiFile.getChannelInfo().forEach(({vid},i)=>{
+        this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+      });
     }
     this._buildLearnEvents();
     this._applyChannelConfig();
@@ -4912,10 +4928,10 @@ class App{
       const l=this._learn;
       l._events=events;
       l._totalMs=events[events.length-1].ms+events[events.length-1].durationMs;
-      // Two-channel config: ch0=treble (right), ch1=bass (left)
-      const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
-      this._channelConfig[1].hand='left';
+      // Two-channel config: vid0=treble (right), vid1=bass (left)
+      this._channelConfig=[];
+      this._channelConfig[0]={muted:false,hand:'right',r:0,g:230,b:230};
+      this._channelConfig[1]={muted:false,hand:'left',r:180,g:80,b:255};
       this._channelConfig._file=file.name;
       this._mode='file';
       this.midiFile.filename=file.name;
@@ -4978,8 +4994,11 @@ class App{
     RecentMidiDB.save(file.name,buf).catch(()=>{});
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
-    this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+    this._channelConfig=[];
     this._channelConfig._file=file.name;
+    this.midiFile.getChannelInfo().forEach(({vid},i)=>{
+      this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+    });
     this._applyChannelConfig();
     this._buildLearnEvents();
     this._notationRenderer.destroy();
@@ -5000,25 +5019,29 @@ class App{
     const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
     const toHex=(r,g,b)=>'#'+[r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,'0')).join('');
     if(!this._channelConfig||this._channelConfig._file!==this.midiFile.filename){
-      this._channelConfig=Array.from({length:16},(_,i)=>({muted:false,hand:'right',r:PAL[i][0],g:PAL[i][1],b:PAL[i][2]}));
+      this._channelConfig=[];
       this._channelConfig._file=this.midiFile.filename;
     }
     let tabInfo=this.midiFile.getChannelInfo();
     if(!tabInfo.length&&hasLearnEvents){
       const chMap={};
       for(const ev of this._learn._events){
-        if(!chMap[ev.channel])chMap[ev.channel]={ch:ev.channel,count:0};
-        chMap[ev.channel].count++;
+        const vid=(ev.track??0)*16+(ev.channel??0);
+        if(!chMap[vid])chMap[vid]={ch:ev.channel,track:ev.track??0,vid,count:0};
+        chMap[vid].count++;
       }
-      tabInfo=Object.values(chMap).sort((a,b)=>a.ch-b.ch);
+      tabInfo=Object.values(chMap).sort((a,b)=>a.track-b.track||a.ch-b.ch);
     }
+    tabInfo.forEach(({vid},i)=>{
+      if(!this._channelConfig[vid])this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+    });
     wrap.innerHTML='';
-    tabInfo.forEach(({ch})=>{
-      const cfg=this._channelConfig[ch];
+    tabInfo.forEach(({ch,track,vid,name})=>{
+      const cfg=this._channelConfig[vid];
       const row=document.createElement('div');
       row.className='track-row'+(cfg.muted?' muted':'');
       row.style.cssText='margin-bottom:6px';
-      row.innerHTML=`<span class="track-ch-label">Ch ${ch+1}</span>
+      row.innerHTML=`<span class="track-ch-label" title="Track ${track+1}, Ch ${ch+1}">${name||'Track '+(track+1)}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
         <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
         <span class="track-hand-sel" title="Hand assignment for Learn mode">
