@@ -1149,14 +1149,16 @@ const SceneManager={
 // Default track config for the track-setup screens. Understands the naming
 // convention of the DSOTM performance MIDIs (rig/dsotm/performance): tracks
 // named "LIVE Upper/Lower" are the parts you play (right/left hand on the
-// highway); "LIVE Bass Pedals", "EXTRA …", "BACKING …", "FX …" and the drum
-// channel default to '—' (shown dim, streamed to the MIDI output as backing).
+// highway); "LIVE Bass Pedals" gets the bass assignment (drawn bright, bass
+// clef, audible backing that never stalls Wait mode); "EXTRA …", "BACKING …",
+// "FX …" and the drum channel default to '—' (dim backing).
 function defaultTrackCfg(name,ch,pal){
   const n=(name||'').toUpperCase();
   let hand='right';
   if(n.startsWith('LIVE UPPER'))hand='right';
   else if(n.startsWith('LIVE LOWER'))hand='left';
-  else if(n.startsWith('LIVE BASS')||n.startsWith('EXTRA')||n.startsWith('BACKING')||n.startsWith('FX')||ch===9)hand='none';
+  else if(n.startsWith('LIVE BASS'))hand='bass';
+  else if(n.startsWith('EXTRA')||n.startsWith('BACKING')||n.startsWith('FX')||ch===9)hand='none';
   return {muted:false,hand,r:pal[0],g:pal[1],b:pal[2]};
 }
 
@@ -4475,9 +4477,10 @@ class App{
         <span class="track-ch-meta">${count} notes &nbsp;·&nbsp; ${noteName(minNote)}–${noteName(maxNote)}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
         <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
-        <span class="track-hand-sel" title="Hand assignment for Learn mode">
+        <span class="track-hand-sel" title="Assignment for Learn mode: Right / Left hand, Bass pedals, or backing (—)">
           <button class="track-hand-btn${cfg.hand==='right'?' active':''}" data-hand="right">R</button>
           <button class="track-hand-btn${cfg.hand==='left'?' active':''}" data-hand="left">L</button>
+          <button class="track-hand-btn${cfg.hand==='bass'?' active':''}" data-hand="bass" title="Bass pedals — drawn bright, plays as backing, doesn't pause Wait mode">B</button>
           <button class="track-hand-btn${cfg.hand==='none'?' active':''}" data-hand="none">—</button>
         </span>`;
       const colorEl=row.querySelector('.track-color-swatch');
@@ -4586,13 +4589,14 @@ class App{
     const numBars=Math.min(400,Math.max(1,Math.ceil(totalMs/barDurationMs)));
     // Use hand assignments if configured; otherwise auto-split at middle C.
     const cfg=this._channelConfig;
-    const hasLeftHand=cfg&&cfg.some&&cfg.some(c=>c?.hand==='left'&&!c?.muted);
+    const isBassClef=h=>h==='left'||h==='bass';
+    const hasLeftHand=cfg&&cfg.some&&cfg.some(c=>isBassClef(c?.hand)&&!c?.muted);
     const _evVid=e=>(e.track??0)*16+(e.channel??0);
     const notMuted=e=>e.channel!==9&&(!cfg||!cfg[_evVid(e)]?.muted);
     let trebleEvents,bassEvents;
     if(hasLeftHand){
-      trebleEvents=events.filter(e=>notMuted(e)&&cfg[_evVid(e)]?.hand!=='left');
-      bassEvents=events.filter(e=>notMuted(e)&&cfg[_evVid(e)]?.hand==='left');
+      trebleEvents=events.filter(e=>notMuted(e)&&!isBassClef(cfg[_evVid(e)]?.hand));
+      bassEvents=events.filter(e=>notMuted(e)&&isBassClef(cfg[_evVid(e)]?.hand));
     }else{
       // Auto-split: notes ≥ MIDI 60 (middle C) → treble, below → bass
       trebleEvents=events.filter(e=>notMuted(e)&&e.note>=60);
@@ -4662,12 +4666,16 @@ class App{
     if(!this._notationRenderer._ready)this._buildNotation();
   }
 
+  // Only right/left-hand tracks gate the Wait-mode cursor — 'bass' is played
+  // by feet (Taurus pedals via the FCB, not the tracked keyboard) and streams
+  // as backing instead, so it must never stall the highway.
   _learnHandFilter(vid){
     if(!this._channelConfig)return true;
+    const isHand=h=>h==='right'||h==='left';
     const cfg=this._channelConfig[vid];
-    if(cfg)return cfg.hand!=='none'&&!cfg.muted;
+    if(cfg)return isHand(cfg.hand)&&!cfg.muted;
     // vid<16 means raw MIDI channel from live input — match any track using that channel
-    if(vid<16)return this._channelConfig.some(c=>c&&!c.muted&&c.hand!=='none');
+    if(vid<16)return this._channelConfig.some(c=>c&&!c.muted&&isHand(c.hand));
     return false;
   }
 
@@ -4766,7 +4774,7 @@ class App{
   _learnOutFilter(vid){
     const cfg=this._channelConfig?.[vid];
     if(!cfg)return true;
-    return !cfg.muted&&cfg.hand==='none';
+    return !cfg.muted&&(cfg.hand==='none'||cfg.hand==='bass');
   }
 
   _learnEmit(cur){
@@ -5305,9 +5313,10 @@ class App{
       row.innerHTML=`<span class="track-ch-label" title="Track ${track+1}, Ch ${ch+1}">${name||'Track '+(track+1)}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
         <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
-        <span class="track-hand-sel" title="Hand assignment for Learn mode">
+        <span class="track-hand-sel" title="Assignment for Learn mode: Right / Left hand, Bass pedals, or backing (—)">
           <button class="track-hand-btn${cfg.hand==='right'?' active':''}" data-hand="right">R</button>
           <button class="track-hand-btn${cfg.hand==='left'?' active':''}" data-hand="left">L</button>
+          <button class="track-hand-btn${cfg.hand==='bass'?' active':''}" data-hand="bass" title="Bass pedals — drawn bright, plays as backing, doesn't pause Wait mode">B</button>
           <button class="track-hand-btn${cfg.hand==='none'?' active':''}" data-hand="none">—</button>
         </span>`;
       row.querySelector('.track-color-swatch').oninput=e=>{

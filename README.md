@@ -62,7 +62,7 @@ Open **SETTINGS** from the main menu. Tabs:
 
 1. Select **LEARN MODE** from the menu.
 2. Drop a `.mid`, `.midi`, `.xml`, or `.musicxml` file (or click **Browse**).
-3. Pick which tracks to show and assign hands (Left / Right).
+3. Pick which tracks to show and assign parts: **R**/**L** hands (gate Wait mode), **B** bass — drawn bright and fed to the bass clef, plays as backing and never pauses the highway (for Taurus-pedal / left-foot bass lines), or **—** dim backing.
 4. Choose **Wait** (pauses until you play the right note) or **Free-play** (plays at your set speed).
 5. Click **▶ Start Learning**.
 
@@ -74,8 +74,9 @@ Settings → **Hardware** → *MIDI Output → DSOTM Router*:
 
 1. Enable **MIDI Output** and pick a port (e.g. `loopMIDI Port` feeding the REAPER rig in `rig/dsotm`).
 2. Load one of the DSOTM performance MIDIs (`rig/dsotm/performance/generated/`). Tracks named
-   `LIVE Upper` / `LIVE Lower` auto-assign to right/left hands; `LIVE Bass Pedals`, `EXTRA`,
-   `BACKING` and `FX` tracks default to `—` (dimmed backing).
+   `LIVE Upper` / `LIVE Lower` auto-assign to right/left hands; `LIVE Bass Pedals` gets the
+   **B** (bass) assignment — bright falling notes you can follow on the pedals without pausing
+   Wait mode; `EXTRA`, `BACKING` and `FX` tracks default to `—` (dimmed backing).
 3. Pick a **Playback Channels** mode:
    - *Everything* — listen to the whole performance through the rig (patch changes included)
    - *Band + bass* — CH1–2 notes are muted; you play the keys
@@ -97,7 +98,7 @@ If the visualizer stops rendering, open the browser DevTools console (F12) for e
 
 The app streams note activity to an ESP32-S3 over serial or BLE.
 
-Add an `led_output` block to `config.json` (persisted in `localStorage` when running in-browser):
+Configure in Settings → **LED Output** (persisted in `localStorage`); the equivalent settings block:
 
 ```json
 {
