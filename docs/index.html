@@ -386,7 +386,7 @@ const Config = {
     },
     audience_control:{enabled:0, ws_url:'', transition_ms:220},
     kick_chat:{enabled:0, channel_slug:'', chatroom_id:'', transition_ms:600},
-    hardware:{sustain_enabled:1,midi_cc_mappings:[]},
+    hardware:{sustain_enabled:1,midi_cc_mappings:[],midi_out:{enabled:0,port_name:'',mode:'all',echo_input:0}},
     profiles:[],
     active_profile_id:'',
     learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:true, notation_y:200, loop_start_ms:0, loop_end_ms:0},
@@ -822,6 +822,7 @@ class MidiHandler{
     }
   }
   _onMsg(d){
+    if(this._app?.midiOut?.echoEnabled)this._app.midiOut.send(d);
     const st=d[0]&0xF0,ch=d[0]&0x0F,n=d[1],v=d[2];
     if(st===0x90&&v>0){
       if(this.activeNotes.has(n))this.reattackedNotes.add(n);
@@ -885,6 +886,83 @@ class MidiHandler{
     catch(e){return false;}
   }
   close(){this._stopQwerty();if(this._port)this._port.onmidimessage=null;this.activeNotes.clear();this.noteChannel.clear();}
+}
+
+// ═══════════════════════════════════════════════════════
+// MIDI OUTPUT — routes file playback / learn-mode backing to a hardware or
+// virtual port (e.g. loopMIDI Port → REAPER DSOTM router rig).
+// Ports are matched by NAME because Web MIDI port ids change between sessions.
+// ═══════════════════════════════════════════════════════
+class MidiOut{
+  constructor(){this._access=null;this._port=null;this.portName='';this.connected=false;this._sounding=new Set();}
+  async requestAccess(){
+    if(!navigator.requestMIDIAccess)return false;
+    try{this._access=await navigator.requestMIDIAccess({sysex:false});return true;}
+    catch(e){return false;}
+  }
+  listPorts(){
+    const ports=[];
+    if(this._access)for(const p of this._access.outputs.values())ports.push({id:p.id,name:p.name});
+    return ports;
+  }
+  async init(portName){
+    this.close();
+    if(!portName)return;
+    if(!this._access&&!(await this.requestAccess()))return;
+    const connect=()=>{
+      this._port=null;this.connected=false;
+      for(const p of this._access.outputs.values()){
+        if(p.name===portName){this._port=p;this.portName=p.name;this.connected=true;break;}
+      }
+    };
+    connect();
+    this._access.onstatechange=this._access.onstatechange||(()=>{});
+    const prev=this._access.onstatechange;
+    this._access.onstatechange=e=>{prev(e);if(!this.connected)connect();};
+  }
+  get enabled(){return!!(Config.data?.hardware?.midi_out?.enabled)&&this.connected;}
+  get mode(){return Config.data?.hardware?.midi_out?.mode||'all';}
+  get echoEnabled(){return this.enabled&&!!(Config.data?.hardware?.midi_out?.echo_input);}
+  // mode filter: which playback channels (0-based) are suppressed so the user
+  // can play them live. 'all'=send everything, 'band-bass'=mute CH1-2 (live keys),
+  // 'band'=mute CH1-3 (keys + bass pedals).
+  channelAllowed(ch){
+    const m=this.mode;
+    if(m==='band-bass')return ch>1;
+    if(m==='band')return ch>2;
+    return true;
+  }
+  send(bytes){
+    if(!this._port)return;
+    try{this._port.send(bytes);}catch(e){}
+  }
+  noteOn(ch,note,vel){if(!this.enabled)return;this.send([0x90|(ch&15),note&127,vel&127]);this._sounding.add((ch&15)*128+(note&127));}
+  noteOff(ch,note){if(!this.enabled)return;this.send([0x80|(ch&15),note&127,0]);this._sounding.delete((ch&15)*128+(note&127));}
+  cc(ch,num,val){if(!this.enabled)return;this.send([0xB0|(ch&15),num&127,val&127]);}
+  pc(ch,prog){if(!this.enabled)return;this.send([0xC0|(ch&15),prog&127]);}
+  pitchBend(ch,value){ // value: -8192..8191
+    if(!this.enabled)return;
+    const v=Math.max(0,Math.min(16383,value+8192));
+    this.send([0xE0|(ch&15),v&127,(v>>7)&127]);
+  }
+  // Send a parsed file event ({type,channel,note,velocity,...}).
+  // The mode filter suppresses NOTES on the channels you play yourself;
+  // program changes / CC / bend always pass so the rig lands on the right patch.
+  sendFileEvent(e){
+    if(!this.enabled)return;
+    if(e.type==='noteon'&&e.velocity>0){if(this.channelAllowed(e.channel))this.noteOn(e.channel,e.note,e.velocity);}
+    else if(e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0))this.noteOff(e.channel,e.note);
+    else if(e.type==='cc')this.cc(e.channel,e.num,e.value);
+    else if(e.type==='pc')this.pc(e.channel,e.program);
+    else if(e.type==='pb')this.pitchBend(e.channel,e.value);
+  }
+  allNotesOff(){
+    if(!this._port)return;
+    for(const k of this._sounding)this.send([0x80|(k>>7&15),k&127,0]);
+    this._sounding.clear();
+    for(let ch=0;ch<16;ch++){this.send([0xB0|ch,123,0]);this.send([0xB0|ch,64,0]);}
+  }
+  close(){if(this._sounding.size||this._port)this.allNotesOff();this._port=null;this.connected=false;this.portName='';}
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1068,6 +1146,20 @@ const SceneManager={
 // ═══════════════════════════════════════════════════════
 // MIDI FILE PLAYER
 // ═══════════════════════════════════════════════════════
+// Default track config for the track-setup screens. Understands the naming
+// convention of the DSOTM performance MIDIs (rig/dsotm/performance): tracks
+// named "LIVE Upper/Lower" are the parts you play (right/left hand on the
+// highway); "LIVE Bass Pedals", "EXTRA …", "BACKING …", "FX …" and the drum
+// channel default to '—' (shown dim, streamed to the MIDI output as backing).
+function defaultTrackCfg(name,ch,pal){
+  const n=(name||'').toUpperCase();
+  let hand='right';
+  if(n.startsWith('LIVE UPPER'))hand='right';
+  else if(n.startsWith('LIVE LOWER'))hand='left';
+  else if(n.startsWith('LIVE BASS')||n.startsWith('EXTRA')||n.startsWith('BACKING')||n.startsWith('FX')||ch===9)hand='none';
+  return {muted:false,hand,r:pal[0],g:pal[1],b:pal[2]};
+}
+
 function parseMidi(buf){
   const v=new DataView(buf); let p=0;
   const u32=()=>{const x=v.getUint32(p);p+=4;return x;};
@@ -1091,8 +1183,17 @@ function parseMidi(buf){
       if(tp===0x90||tp===0x80){
         const n=u8(),vel=u8();
         evts.push({tick,type:tp===0x90?'on':'off',ch:st&0x0F,n,vel,ti});
-      }else if(tp===0xB0||tp===0xA0||tp===0xE0){u8();u8();}
-      else if(tp===0xC0||tp===0xD0){u8();}
+      }else if(tp===0xB0){
+        const num=u8(),val=u8();
+        evts.push({tick,type:'cc',ch:st&0x0F,num,val,ti});
+      }else if(tp===0xE0){
+        const lo=u8(),hi=u8();
+        evts.push({tick,type:'pb',ch:st&0x0F,val:((hi<<7)|lo)-8192,ti});
+      }else if(tp===0xC0){
+        const prog=u8();
+        evts.push({tick,type:'pc',ch:st&0x0F,prog,ti});
+      }else if(tp===0xA0){u8();u8();}
+      else if(tp===0xD0){u8();}
       else if(st===0xFF){
         const mt=u8(),ml=vlq();
         if(mt===0x51&&ml===3)evts.push({tick,type:'tempo',us:(u8()<<16)|(u8()<<8)|u8()});
@@ -1120,8 +1221,16 @@ function parseMidi(buf){
   for(let ti=0;ti<tracks.length;ti++) for(const e of tracks[ti]){
     if(e.type==='on'||e.type==='off')
       all.push({timeMs:tickToMs(e.tick),type:e.type==='on'?'noteon':'noteoff',note:e.n,velocity:e.vel,channel:e.ch??0,track:ti});
+    else if(e.type==='cc')
+      all.push({timeMs:tickToMs(e.tick),type:'cc',num:e.num,value:e.val,channel:e.ch??0,track:ti});
+    else if(e.type==='pc')
+      all.push({timeMs:tickToMs(e.tick),type:'pc',program:e.prog,channel:e.ch??0,track:ti});
+    else if(e.type==='pb')
+      all.push({timeMs:tickToMs(e.tick),type:'pb',value:e.val,channel:e.ch??0,track:ti});
   }
-  all.sort((a,b)=>a.timeMs-b.timeMs||(a.type==='noteoff'?-1:1));
+  // ctrl events (order 0) before noteoff (1) before noteon (2) at equal time
+  const _ord=e=>e.type==='noteon'?2:e.type==='noteoff'?1:0;
+  all.sort((a,b)=>a.timeMs-b.timeMs||_ord(a)-_ord(b));
   all._trackNames=trackNames;
   return all;
 }
@@ -1169,24 +1278,34 @@ function parseMidiMeta(buf){
 }
 
 class MidiFilePlayer{
-  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';this.meta=null;this._trackNames=[];}
+  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';this.meta=null;this._trackNames=[];this.onEvent=null;this.onStop=null;}
   load(buf,name){
     this.filename=name; const evts=parseMidi(buf); this.events=evts; this._trackNames=evts._trackNames||[];
     try{this.meta=parseMidiMeta(buf);}catch(e){this.meta=null;}
     this.stop();
   }
-  play(){if(!this.events.length)return;this.playing=true;this.t0=performance.now()-this.pos;this.idx=this._seek(this.pos);}
-  pause(){this.playing=false;this.pos=performance.now()-this.t0;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();}
-  stop(){this.playing=false;this.pos=0;this.idx=0;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();}
+  play(){
+    if(!this.events.length)return;
+    this.playing=true;this.t0=performance.now()-this.pos;this.idx=this._seek(this.pos);
+    // catch up program changes so instruments land on the right patch mid-file
+    if(this.onEvent){
+      const latestPc=new Map();
+      for(let i=0;i<this.idx;i++){const e=this.events[i];if(e.type==='pc')latestPc.set(e.channel,e);}
+      for(const e of latestPc.values())this.onEvent(e);
+    }
+  }
+  pause(){this.playing=false;this.pos=performance.now()-this.t0;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();if(this.onStop)this.onStop();}
+  stop(){this.playing=false;this.pos=0;this.idx=0;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();if(this.onStop)this.onStop();}
   update(){
     if(!this.playing)return false;
     const el=performance.now()-this.t0; let ch=false;
     while(this.idx<this.events.length&&this.events[this.idx].timeMs<=el){
       const e=this.events[this.idx++];
+      if(this.onEvent)this.onEvent(e);
       if(e.type==='noteon'&&e.velocity>0){this.activeNotes.add(e.note);this.noteChannel.set(e.note,(e.track??0)*16+(e.channel??0));this.noteVelocity.set(e.note,e.velocity);ch=true;}
       else if(e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0)){this.activeNotes.delete(e.note);this.noteChannel.delete(e.note);this.noteVelocity.delete(e.note);ch=true;}
     }
-    if(this.idx>=this.events.length){this.playing=false;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();this.pos=0;return true;}
+    if(this.idx>=this.events.length){this.playing=false;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();this.pos=0;if(this.onStop)this.onStop();return true;}
     return ch;
   }
   getChannelInfo(){
@@ -2057,6 +2176,24 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <p style="font-size:12px;color:var(--muted);margin-top:8px">When enabled, notes held while the sustain pedal is pressed stay active until the pedal is released.</p>
 <p style="font-size:12px;color:var(--muted);margin-top:6px">Triple-tapping the sustain pedal to cycle themes always works regardless of this setting.</p>
 </div>
+<div class="section"><h2>MIDI Output → DSOTM Router</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:8px">Streams file playback and Learn-mode backing tracks to a MIDI port — pick <b>loopMIDI Port</b> to hear everything through the REAPER DSOTM rig (Analog Lab on CH1–4, sampler on CH5). Patch changes in the file pass through so the rig switches sounds per song.</p>
+<div class="row"><label>Enable MIDI Output</label>
+<div class="toggle-btn${hw.midi_out?.enabled?' on':''}" id="btn-midiout-enable">${hw.midi_out?.enabled?'On':'Off'}</div></div>
+<div class="row"><label>Output Port</label>
+<select id="midiout-port" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px"><option value="">— select port —</option></select></div>
+<div class="row"><label>Playback Channels</label>
+<select id="midiout-mode" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px">
+<option value="all"${(hw.midi_out?.mode||'all')==='all'?' selected':''}>Everything — listen to the full performance</option>
+<option value="band-bass"${hw.midi_out?.mode==='band-bass'?' selected':''}>Band + bass — you play the keys (CH1–2 silent)</option>
+<option value="band"${hw.midi_out?.mode==='band'?' selected':''}>Band only — you play keys + bass (CH1–3 silent)</option>
+</select></div>
+<div class="row"><label>Echo Input to Output</label>
+<div class="toggle-btn${hw.midi_out?.echo_input?' on':''}" id="btn-midiout-echo">${hw.midi_out?.echo_input?'On':'Off'}</div></div>
+<p style="font-size:12px;color:var(--muted);margin-top:6px">Echo forwards your keyboard's raw MIDI to the output port. Leave off when REAPER already listens to the keyboard directly — otherwise notes double.</p>
+<div class="row"><label></label><button class="action-btn" id="btn-midiout-panic">All Notes Off (Panic)</button></div>
+<div id="midiout-status" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
+</div>
 <div class="section"><h2>MIDI CC Mappings</h2>
 <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Assign any CC knob or slider to a visual parameter or scene trigger. Press <b>Learn</b> then move a control on your device.</p>
 <table class="midi-cc-table"><thead><tr><th>Parameter</th><th style="min-width:36px">CC</th><th style="min-width:32px">Min</th><th style="min-width:32px">Max</th><th></th><th></th></tr></thead>
@@ -2611,6 +2748,59 @@ function wireScenes(root,app){
 // ═══════════════════════════════════════════════════════
 // MIDI CC MAPPING WIRING
 // ═══════════════════════════════════════════════════════
+function wireMidiOut(root,app){
+  const enableBtn=root.querySelector('#btn-midiout-enable');
+  if(!enableBtn)return;
+  const portSel=root.querySelector('#midiout-port');
+  const modeSel=root.querySelector('#midiout-mode');
+  const echoBtn=root.querySelector('#btn-midiout-echo');
+  const panicBtn=root.querySelector('#btn-midiout-panic');
+  const statusEl=root.querySelector('#midiout-status');
+  const mo=()=>{
+    if(!Config.data.hardware)Config.data.hardware={};
+    if(!Config.data.hardware.midi_out)Config.data.hardware.midi_out={enabled:0,port_name:'',mode:'all',echo_input:0};
+    return Config.data.hardware.midi_out;
+  };
+  const status=()=>{
+    if(!statusEl)return;
+    statusEl.textContent=!mo().enabled?'':(app.midiOut.connected
+      ?`Connected: ${app.midiOut.portName}`
+      :(mo().port_name?`Port "${mo().port_name}" not found — is loopMIDI running?`:'No port selected.'));
+  };
+  const refreshPorts=async()=>{
+    if(!navigator.requestMIDIAccess){if(statusEl)statusEl.textContent='Web MIDI requires Chrome or Edge.';return;}
+    await app.midiOut.requestAccess();
+    const ports=app.midiOut.listPorts();
+    portSel.innerHTML='<option value="">— select port —</option>'+
+      ports.map(p=>`<option value="${p.name}"${p.name===mo().port_name?' selected':''}>${p.name}</option>`).join('');
+    status();
+  };
+  refreshPorts();
+  enableBtn.addEventListener('click',async()=>{
+    const m=mo();
+    m.enabled=m.enabled?0:1;
+    enableBtn.classList.toggle('on',!!m.enabled);
+    enableBtn.textContent=m.enabled?'On':'Off';
+    if(m.enabled){await app.midiOut.init(m.port_name);await refreshPorts();}
+    else app.midiOut.close();
+    status();schedSave();
+  });
+  portSel.addEventListener('change',async()=>{
+    mo().port_name=portSel.value;
+    await app.midiOut.init(portSel.value);
+    status();schedSave();
+  });
+  modeSel.addEventListener('change',()=>{mo().mode=modeSel.value;schedSave();});
+  echoBtn.addEventListener('click',()=>{
+    const m=mo();
+    m.echo_input=m.echo_input?0:1;
+    echoBtn.classList.toggle('on',!!m.echo_input);
+    echoBtn.textContent=m.echo_input?'On':'Off';
+    schedSave();
+  });
+  if(panicBtn)panicBtn.addEventListener('click',()=>app.midiOut.allNotesOff());
+}
+
 function wireMidiCCMappings(root,app){
   function getMappings(){return Config.data?.hardware?.midi_cc_mappings||[];}
 
@@ -2944,6 +3134,8 @@ function wireSettings(root, app){
     hwSustainBtn.textContent=on?'On':'Off';
     schedSave();
   });
+  // MIDI Output → DSOTM router
+  wireMidiOut(root,app);
   // MIDI CC mappings
   wireMidiCCMappings(root,app);
   // Scenes & Profiles
@@ -3601,6 +3793,9 @@ class App{
     this.fx=null;
     this.midi=new MidiHandler();
     this.midiFile=new MidiFilePlayer();
+    this.midiOut=new MidiOut();
+    this.midiFile.onEvent=e=>this.midiOut.sendFileEvent(e);
+    this.midiFile.onStop=()=>this.midiOut.allNotesOff();
     this.fluid=new FluidController();
     this.led=new LedOutput();
     this.audience=new AudienceColorClient();
@@ -3619,7 +3814,7 @@ class App{
     this.rebuildLayout=false;
     this._bgImages=[];   // [{url:string, name:string, isGif:bool}]
     this._mode='freeplay'; // 'freeplay' or 'file'
-    this._learn={active:false,cursorMs:0,_currentNoteMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set()};
+    this._learn={active:false,cursorMs:0,_currentNoteMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set(),_ctrl:[],_sendIdx:0,_ctrlIdx:0,_pendingOffs:[]};
     this._learnWrongKeys=new Map();
     this._notationRenderer=new NotationRenderer();
     this._musicXmlBars=null;
@@ -3655,6 +3850,9 @@ class App{
       if(ant.type==='builtin'){const t=BUILTIN_NOTE_THEMES[ant.index];if(t)Config.ns.note_colors=t.build();}
     }
     if(Config.kc.chatroom_id)this.kickChat.connect(Config.kc.chatroom_id,Config.kc.transition_ms);
+    // Reconnect the MIDI output (→ DSOTM router) if it was enabled last session
+    const mo=Config.data.hardware?.midi_out;
+    if(mo?.enabled&&mo.port_name)this.midiOut.init(mo.port_name).catch(()=>{});
     this._notationRenderer.init();
     this._setupNotationDrag();
     this._boundFrame=this._frame.bind(this);
@@ -4262,8 +4460,8 @@ class App{
       this._channelConfig=[];
       this._channelConfig._file=this.midiFile.filename;
     }
-    info.forEach(({vid},i)=>{
-      if(!this._channelConfig[vid])this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+    info.forEach(({vid,name,ch},i)=>{
+      if(!this._channelConfig[vid])this._channelConfig[vid]=defaultTrackCfg(name,ch,PAL[i%16]);
     });
     const list=document.getElementById('track-channel-list');
     list.innerHTML='';
@@ -4312,20 +4510,24 @@ class App{
     const rawEvents=this.midiFile.events; // already parsed, [{timeMs,type,note,velocity,channel}]
     const active=new Map();
     const events=[];
+    const ctrl=[];
     for(const ev of rawEvents){
+      if(ev.type==='cc'||ev.type==='pc'||ev.type==='pb'){ctrl.push(ev);continue;}
       const k=`${ev.note}-${ev.channel}-${ev.track??0}`;
       if(ev.type==='noteon'&&ev.velocity>0){
         active.set(k,ev);
       } else if(ev.type==='noteoff'||(ev.type==='noteon'&&ev.velocity===0)){
         const start=active.get(k);
         if(start){
-          events.push({ms:start.timeMs,durationMs:Math.max(50,ev.timeMs-start.timeMs),note:ev.note,channel:ev.channel,track:start.track??0});
+          events.push({ms:start.timeMs,durationMs:Math.max(50,ev.timeMs-start.timeMs),note:ev.note,channel:ev.channel,track:start.track??0,vel:start.velocity??96});
           active.delete(k);
         }
       }
     }
     events.sort((a,b)=>a.ms-b.ms);
     l._events=events;
+    l._ctrl=ctrl; // already in file order (parse sorts by time)
+    l._sendIdx=0;l._ctrlIdx=0;l._pendingOffs=[];
     l._totalMs=events.length?events[events.length-1].ms+events[events.length-1].durationMs:0;
     // Reset loop region for new file
     Config.lrn.loop_start_ms=0;
@@ -4485,6 +4687,7 @@ class App{
           l._pendingChord.add(ev.note);
       }
     }
+    this._learnSyncOut();
   }
 
   _learnSeekTo(targetMs){
@@ -4510,6 +4713,7 @@ class App{
       }
     }
     l._lastFrameWall=this._frameNow;
+    this._learnSyncOut();
   }
 
   _learnAdvanceCursor(){
@@ -4535,6 +4739,7 @@ class App{
 
   _learnStop(){
     const l=this._learn; l.active=false;
+    this.midiOut.allNotesOff(); l._pendingOffs=[];
     document.getElementById('lhud-playpause').textContent='▶';
     // Keep HUD visible so the timeline remains accessible for replay/seeking
     this._updateNotationVisibility();
@@ -4550,6 +4755,60 @@ class App{
     } else {
       this._learnWrongKeys.set(note,performance.now()+450);
     }
+  }
+
+  // ── Learn-mode MIDI output: backing tracks follow the cursor ──────────────
+  // Tracks with hand '—' (none) that aren't muted are the "band": their notes
+  // stream to the MIDI output as the cursor passes them, so in Wait mode the
+  // band literally waits for you. Hand-assigned tracks stay silent — you play
+  // those. Program changes / CCs from any unmuted track always pass so the
+  // DSOTM rig switches patches correctly.
+  _learnOutFilter(vid){
+    const cfg=this._channelConfig?.[vid];
+    if(!cfg)return true;
+    return !cfg.muted&&cfg.hand==='none';
+  }
+
+  _learnEmit(cur){
+    const l=this._learn,out=this.midiOut;
+    if(!out.enabled)return;
+    while(l._sendIdx<l._events.length&&l._events[l._sendIdx].ms<=cur){
+      const ev=l._events[l._sendIdx++];
+      const vid=(ev.track??0)*16+(ev.channel??0);
+      if(this._learnOutFilter(vid)&&out.channelAllowed(ev.channel)){
+        out.noteOn(ev.channel,ev.note,ev.vel??96);
+        l._pendingOffs.push({ms:ev.ms+ev.durationMs,note:ev.note,ch:ev.channel});
+      }
+    }
+    while(l._ctrlIdx<(l._ctrl?.length||0)&&l._ctrl[l._ctrlIdx].timeMs<=cur){
+      const ev=l._ctrl[l._ctrlIdx++];
+      const vid=(ev.track??0)*16+(ev.channel??0);
+      if(!this._channelConfig?.[vid]?.muted)out.sendFileEvent(ev);
+    }
+    if(l._pendingOffs.length){
+      const keep=[];
+      for(const o of l._pendingOffs){if(o.ms<=cur)out.noteOff(o.ch,o.note);else keep.push(o);}
+      l._pendingOffs=keep;
+    }
+  }
+
+  // Re-align the output stream after a seek/reset: silence everything, move the
+  // send pointers to the cursor, and re-assert the latest program change per
+  // channel so the rig is on the right patch wherever you drop in.
+  _learnSyncOut(){
+    const l=this._learn,out=this.midiOut;
+    out.allNotesOff();
+    l._pendingOffs=[];
+    const cur=l.cursorMs;
+    l._sendIdx=0;
+    while(l._sendIdx<l._events.length&&l._events[l._sendIdx].ms<=cur)l._sendIdx++;
+    l._ctrlIdx=0;
+    const latestPc=new Map();
+    while(l._ctrlIdx<(l._ctrl?.length||0)&&l._ctrl[l._ctrlIdx].timeMs<=cur){
+      const ev=l._ctrl[l._ctrlIdx++];
+      if(ev.type==='pc')latestPc.set(ev.channel,ev);
+    }
+    if(out.enabled)for(const ev of latestPc.values())out.pc(ev.channel,ev.program);
   }
 
   _learnTick(now){
@@ -4574,6 +4833,7 @@ class App{
         else this._learnStop();
       }
     }
+    if(l.active)this._learnEmit(l.cursorMs);
   }
 
   _drawLearnNotes(ctx,layout){
@@ -4654,6 +4914,7 @@ class App{
 
   pauseLearn(){
     const l=this._learn; l.active=false;
+    this.midiOut.allNotesOff(); l._pendingOffs=[];
     const pp=document.getElementById('lhud-playpause');
     if(pp)pp.textContent='▶';
   }
@@ -4900,8 +5161,8 @@ class App{
     if(!this._channelConfig||this._channelConfig._file!==file.name){
       this._channelConfig=[];
       this._channelConfig._file=file.name;
-      this.midiFile.getChannelInfo().forEach(({vid},i)=>{
-        this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+      this.midiFile.getChannelInfo().forEach(({vid,name,ch},i)=>{
+        this._channelConfig[vid]=defaultTrackCfg(name,ch,PAL[i%16]);
       });
     }
     this._buildLearnEvents();
@@ -4996,8 +5257,8 @@ class App{
     document.getElementById('hud-song').textContent=file.name;
     this._channelConfig=[];
     this._channelConfig._file=file.name;
-    this.midiFile.getChannelInfo().forEach(({vid},i)=>{
-      this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+    this.midiFile.getChannelInfo().forEach(({vid,name,ch},i)=>{
+      this._channelConfig[vid]=defaultTrackCfg(name,ch,PAL[i%16]);
     });
     this._applyChannelConfig();
     this._buildLearnEvents();
@@ -5032,8 +5293,8 @@ class App{
       }
       tabInfo=Object.values(chMap).sort((a,b)=>a.track-b.track||a.ch-b.ch);
     }
-    tabInfo.forEach(({vid},i)=>{
-      if(!this._channelConfig[vid])this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+    tabInfo.forEach(({vid,name,ch},i)=>{
+      if(!this._channelConfig[vid])this._channelConfig[vid]=defaultTrackCfg(name,ch,PAL[i%16]);
     });
     wrap.innerHTML='';
     tabInfo.forEach(({ch,track,vid,name})=>{

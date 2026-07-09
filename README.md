@@ -8,8 +8,9 @@ Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/"
 ## Features
 
 - Real-time MIDI input via the **Web MIDI API** (USB MIDI devices — tested with Roland JUNO-DS)
+- **MIDI output routing** — stream file playback and Learn-mode backing tracks to any MIDI port (e.g. `loopMIDI Port` → REAPER DSOTM router rig), with patch changes passed through
 - Rising-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
-- **Learn Mode** — drop a MIDI or MusicXML file, choose tracks and hands, and follow along at your own pace (Wait or Free-play)
+- **Learn Mode** — drop a MIDI or MusicXML file, choose tracks and hands, and follow along at your own pace (Wait or Free-play); in Wait mode the backing band literally waits for you
 - **Freeplay** — just plug in and play, no file needed
 - Animated fluid ink effects (GPU-accelerated via WebGL)
 - Animated background image / GIF slideshow
@@ -66,6 +67,27 @@ Open **SETTINGS** from the main menu. Tabs:
 5. Click **▶ Start Learning**.
 
 A floating transport HUD lets you pause, loop, and adjust speed without leaving the highway.
+
+## MIDI Output → DSOTM Router (practice & performance)
+
+Settings → **Hardware** → *MIDI Output → DSOTM Router*:
+
+1. Enable **MIDI Output** and pick a port (e.g. `loopMIDI Port` feeding the REAPER rig in `rig/dsotm`).
+2. Load one of the DSOTM performance MIDIs (`rig/dsotm/performance/generated/`). Tracks named
+   `LIVE Upper` / `LIVE Lower` auto-assign to right/left hands; `LIVE Bass Pedals`, `EXTRA`,
+   `BACKING` and `FX` tracks default to `—` (dimmed backing).
+3. Pick a **Playback Channels** mode:
+   - *Everything* — listen to the whole performance through the rig (patch changes included)
+   - *Band + bass* — CH1–2 notes are muted; you play the keys
+   - *Band only* — CH1–3 muted; you play keys and bass pedals
+4. **Learn Mode**: backing tracks (hand `—`, not muted) stream to the output in sync with the
+   falling notes. In **Wait** mode the band pauses until you hit the right note; seeking
+   re-asserts the correct patches. Hand-assigned tracks are never auto-played — those are yours.
+5. **Echo Input to Output** forwards your keyboard's raw MIDI to the output port — leave it off
+   when REAPER already listens to your keyboard directly, or notes will double.
+
+An **All Notes Off (Panic)** button is next to the settings; playback stop/pause also silences
+the output.
 
 ## Crash diagnostics
 
