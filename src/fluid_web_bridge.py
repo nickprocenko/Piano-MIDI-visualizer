@@ -191,8 +191,13 @@ class FluidWebBridge:
         vel_dissipation: Optional[float] = None,
         dye_dissipation: Optional[float] = None,
         pressure: Optional[float] = None,
+        shading: Optional[bool] = None,
+        bloom: Optional[bool] = None,
+        bloom_intensity: Optional[float] = None,
+        sunrays: Optional[bool] = None,
+        sunrays_weight: Optional[float] = None,
     ) -> None:
-        """Update one or more simulation parameters at runtime."""
+        """Update one or more simulation/display parameters at runtime."""
         if not self._enabled:
             return
         parts: list[str] = []
@@ -204,6 +209,16 @@ class FluidWebBridge:
             parts.append(f"cfg.dyeDissipation={float(dye_dissipation):.4f}")
         if pressure        is not None:
             parts.append(f"cfg.pressure={float(pressure):.4f}")
+        if shading         is not None:
+            parts.append(f"cfg.shading={'true' if shading else 'false'}")
+        if bloom           is not None:
+            parts.append(f"cfg.bloom={'true' if bloom else 'false'}")
+        if bloom_intensity is not None:
+            parts.append(f"cfg.bloomIntensity={float(bloom_intensity):.4f}")
+        if sunrays         is not None:
+            parts.append(f"cfg.sunrays={'true' if sunrays else 'false'}")
+        if sunrays_weight  is not None:
+            parts.append(f"cfg.sunraysWeight={float(sunrays_weight):.4f}")
         if parts:
             self._put_js(";".join(parts) + ";")
 

@@ -1,3 +1,4 @@
+import colorsys
 import queue
 import sys
 import pathlib
@@ -853,20 +854,41 @@ class App:
                 sw = float(render_target.get_width())
                 sh = float(render_target.get_height())
                 intensity = self._note_style.get("fluid_intensity", 100) / 100.0
-                r = self._note_style["color_r"] / 255.0
-                g = self._note_style["color_g"] / 255.0
-                b = self._note_style["color_b"] / 255.0
-                vel_y = -self._note_style["speed_px_per_sec"] * 0.30 * intensity
+                velocities = self._midi.get_note_velocities()
+                base_vel_y = -self._note_style["speed_px_per_sec"] * 0.30 * intensity
                 for note in active_notes:
                     trail = self._active_note_trails.get(note)
                     if trail is None:
                         continue
+                    # Strike velocity drives splat energy: soft notes leave faint
+                    # wisps, hard strikes erupt bigger, brighter and faster.
+                    strike = velocities.get(note, 100) / 127.0
+                    energy = 0.45 + 0.85 * strike
+                    r, g, b = self._fluid_note_color(note)
                     norm_x = float(trail["x"]) / sw
                     norm_y = float(trail["bottom_y"]) / sh
-                    radius = max(0.025, float(trail["width"]) / sw * 4.5)
+                    radius = max(0.025, float(trail["width"]) / sw * 4.5) * (0.8 + 0.45 * strike)
                     self._fluid_renderer.add_splat(
-                        norm_x, norm_y, 0.0, vel_y, r, g, b, radius
+                        norm_x, norm_y, 0.0, base_vel_y * energy,
+                        r * energy, g * energy, b * energy, radius,
                     )
+
+    def _fluid_note_color(self, note: int) -> tuple[float, float, float]:
+        """Theme colour hue-shifted by pitch so chords mix visibly in the fluid.
+
+        The shift spans roughly ±40° of hue across the 88-key range — bass
+        rotates one way, treble the other — so every splat still reads as the
+        theme colour, but simultaneous notes blend into new colours where
+        their dye meets.  Grey/white themes (no saturation) pass through
+        unchanged.
+        """
+        r = self._note_style["color_r"] / 255.0
+        g = self._note_style["color_g"] / 255.0
+        b = self._note_style["color_b"] / 255.0
+        h, s, v = colorsys.rgb_to_hsv(r, g, b)
+        span = (min(max(note, 21), 108) - 64.5) / 87.0  # A0 → -0.5 … C8 → +0.5
+        h = (h + span * 0.22) % 1.0
+        return colorsys.hsv_to_rgb(h, s, v)
 
     def _update_audience_color(self, dt: int) -> None:
         all_events = []

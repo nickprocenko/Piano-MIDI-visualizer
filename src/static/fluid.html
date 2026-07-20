@@ -89,10 +89,14 @@
 
   const gl = canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
   const extColorBufferFloat = !!(gl && gl.getExtension('EXT_color_buffer_float'));
+  // 32F textures are only LINEAR-filterable when this extension is enabled;
+  // without it they are incomplete and sample as black on strict drivers.
+  const extFloatLinear = !!(gl && gl.getExtension('OES_texture_float_linear'));
 
   hostState.capabilities = {
     webgl2: !!gl,
     extColorBufferFloat,
+    extFloatLinear,
     width: canvas.width,
     height: canvas.height,
     userAgent: navigator.userAgent,
@@ -129,6 +133,15 @@
     pressure:         0.8,
     pressureIters:   20,
     intensity:        1.0,
+    // Post-processing defaults are tuned for this app's HDR dye scale
+    // (addSplat writes color * 8): only genuinely hot cores should bloom.
+    shading:          true,
+    bloom:            true,
+    bloomIntensity:   0.55,
+    bloomThreshold:   1.3,
+    bloomSoftKnee:    0.7,
+    sunrays:          true,
+    sunraysWeight:    0.8,
   };
 
   // ── Shader sources (GLSL ES 3.00) ────────────────────────────────────────
@@ -315,19 +328,138 @@ void main() {
   fragColor = vec4(base + splat * u_color, 1.0);
 }`;
 
-  // Reinhard tonemap + gamma so bright splats don't hard-clip; alpha from luminance.
+  // Soft-knee bright-pass: keeps only dye brighter than the threshold so the
+  // blur chain glows around highlights instead of hazing the whole frame.
+  const FRAG_BLOOM_PREFILTER = `#version 300 es
+precision highp float;
+uniform sampler2D u_texture;
+uniform vec3  u_curve;      // (threshold - knee, knee * 2, 0.25 / knee)
+uniform float u_threshold;
+in  vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec3 c = texture(u_texture, vUv).rgb;
+  float br = max(c.r, max(c.g, c.b));
+  float rq = clamp(br - u_curve.x, 0.0, u_curve.y);
+  rq = u_curve.z * rq * rq;
+  c *= max(rq, br - u_threshold) / max(br, 0.0001);
+  fragColor = vec4(c, 0.0);
+}`;
+
+  const FRAG_BLOOM_BLUR = `#version 300 es
+precision highp float;
+uniform sampler2D u_texture;
+in  vec2 vUv;
+in  vec2 vL;
+in  vec2 vR;
+in  vec2 vT;
+in  vec2 vB;
+out vec4 fragColor;
+void main() {
+  vec4 sum = texture(u_texture, vL) + texture(u_texture, vR)
+           + texture(u_texture, vT) + texture(u_texture, vB);
+  fragColor = sum * 0.25;
+}`;
+
+  const FRAG_BLOOM_FINAL = `#version 300 es
+precision highp float;
+uniform sampler2D u_texture;
+uniform float u_bloom_intensity;
+in  vec2 vUv;
+in  vec2 vL;
+in  vec2 vR;
+in  vec2 vT;
+in  vec2 vB;
+out vec4 fragColor;
+void main() {
+  vec4 sum = texture(u_texture, vL) + texture(u_texture, vR)
+           + texture(u_texture, vT) + texture(u_texture, vB);
+  fragColor = sum * 0.25 * u_bloom_intensity;
+}`;
+
+  // Occlusion mask for the radial light-shaft pass: alpha is high where the
+  // screen is empty and low where dye blocks light.
+  const FRAG_SUNRAYS_MASK = `#version 300 es
+precision highp float;
+uniform sampler2D u_texture;
+in  vec2 vUv;
+out vec4 fragColor;
+void main() {
+  vec4 c = texture(u_texture, vUv);
+  float br = max(c.r, max(c.g, c.b));
+  c.a = 1.0 - min(max(br * 20.0, 0.0), 0.8);
+  fragColor = c;
+}`;
+
+  const FRAG_SUNRAYS = `#version 300 es
+precision highp float;
+uniform sampler2D u_texture;
+uniform float u_weight;
+in  vec2 vUv;
+out vec4 fragColor;
+#define ITERATIONS 16
+void main() {
+  float density  = 0.3;
+  float decay    = 0.95;
+  float exposure = 0.7;
+  vec2 coord = vUv;
+  vec2 dir = (vUv - 0.5) * (1.0 / float(ITERATIONS)) * density;
+  float illuminationDecay = 1.0;
+  float color = texture(u_texture, vUv).a;
+  for (int i = 0; i < ITERATIONS; i++) {
+    coord -= dir;
+    color += texture(u_texture, coord).a * illuminationDecay * u_weight;
+    illuminationDecay *= decay;
+  }
+  fragColor = vec4(color * exposure, 0.0, 0.0, 1.0);
+}`;
+
+  // Reinhard tonemap + gamma so bright splats don't hard-clip.  Optional
+  // gradient-normal shading fakes volumetric lighting, sunrays modulate the
+  // dye, and gamma-corrected bloom is added on top.  Alpha comes from the
+  // brightest channel so saturated single-hue dye stays opaque.
   const FRAG_DISPLAY = `#version 300 es
 precision highp float;
 uniform sampler2D u_dye;
+uniform sampler2D u_bloom;
+uniform sampler2D u_sunrays;
+uniform vec2  u_texelSize;
 uniform float u_intensity;
+uniform float u_shading;
+uniform float u_bloom_on;
+uniform float u_sunrays_on;
 in  vec2 vUv;
 out vec4 fragColor;
 void main() {
   vec3 col = texture(u_dye, vUv).rgb * u_intensity;
+
+  if (u_shading > 0.5) {
+    vec3 lc = texture(u_dye, vUv - vec2(u_texelSize.x, 0.0)).rgb;
+    vec3 rc = texture(u_dye, vUv + vec2(u_texelSize.x, 0.0)).rgb;
+    vec3 tc = texture(u_dye, vUv + vec2(0.0, u_texelSize.y)).rgb;
+    vec3 bc = texture(u_dye, vUv - vec2(0.0, u_texelSize.y)).rgb;
+    float dx = length(rc) - length(lc);
+    float dy = length(tc) - length(bc);
+    vec3 n = normalize(vec3(dx, dy, length(u_texelSize)));
+    float diffuse = clamp(dot(n, vec3(0.0, 0.0, 1.0)) + 0.7, 0.7, 1.0);
+    col *= diffuse;
+  }
+
+  float sun = 1.0;
+  if (u_sunrays_on > 0.5) {
+    sun = texture(u_sunrays, vUv).r;
+    col *= sun;
+  }
+
   col = col / (col + vec3(0.5));
   col = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
-  float lum = dot(col, vec3(0.299, 0.587, 0.114));
-  float alpha = clamp(lum * 2.0, 0.0, 1.0);
+
+  if (u_bloom_on > 0.5) {
+    vec3 bloom = texture(u_bloom, vUv).rgb * sun;
+    col += pow(max(bloom, vec3(0.0)), vec3(1.0 / 2.2));
+  }
+
+  float alpha = clamp(max(col.r, max(col.g, col.b)) * 1.6, 0.0, 1.0);
   fragColor = vec4(col, alpha);
 }`;
 
@@ -413,6 +545,11 @@ void main() {
     vorticity:        createProgram(VERT_FULL,   FRAG_VORTICITY),
     pressure:         createProgram(VERT_FULL,   FRAG_PRESSURE),
     gradSubtract:     createProgram(VERT_FULL,   FRAG_GRADIENT_SUBTRACT),
+    bloomPrefilter:   createProgram(VERT_SIMPLE, FRAG_BLOOM_PREFILTER),
+    bloomBlur:        createProgram(VERT_FULL,   FRAG_BLOOM_BLUR),
+    bloomFinal:       createProgram(VERT_FULL,   FRAG_BLOOM_FINAL),
+    sunraysMask:      createProgram(VERT_SIMPLE, FRAG_SUNRAYS_MASK),
+    sunrays:          createProgram(VERT_SIMPLE, FRAG_SUNRAYS),
   };
 
   const vaos = {};
@@ -420,11 +557,47 @@ void main() {
 
   // ── Simulation buffers ───────────────────────────────────────────────────
 
-  const vel  = new DoubleFBO(simW, simH, gl.RG32F,   gl.RG,   gl.FLOAT, gl.LINEAR);
+  const floatFilter = extFloatLinear ? gl.LINEAR : gl.NEAREST;
+  const vel  = new DoubleFBO(simW, simH, gl.RG32F,   gl.RG,   gl.FLOAT, floatFilter);
   const pres = new DoubleFBO(simW, simH, gl.R32F,    gl.RED,  gl.FLOAT, gl.NEAREST);
-  const dye  = new DoubleFBO(simW, simH, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.LINEAR);
+  const dye  = new DoubleFBO(simW, simH, gl.RGBA32F, gl.RGBA, gl.FLOAT, floatFilter);
   const divFBO  = makeFBO(simW, simH, gl.R32F, gl.RED, gl.FLOAT, gl.NEAREST);
   const curlFBO = makeFBO(simW, simH, gl.R32F, gl.RED, gl.FLOAT, gl.NEAREST);
+
+  // ── Post-processing buffers (bloom + sunrays) ────────────────────────────
+  // Half-float targets: bloom's additive upsample needs blendable attachments,
+  // and 16F blending works under EXT_color_buffer_float alone (32F would also
+  // require EXT_float_blend).
+
+  function getResolution(base) {
+    let aspectRatio = canvas.width / Math.max(1, canvas.height);
+    if (aspectRatio < 1.0) aspectRatio = 1.0 / aspectRatio;
+    const lo = Math.round(base);
+    const hi = Math.round(base * aspectRatio);
+    return canvas.width > canvas.height
+      ? { width: hi, height: lo }
+      : { width: lo, height: hi };
+  }
+
+  const bloomRes = getResolution(256);
+  const bloomFBO = makeFBO(bloomRes.width, bloomRes.height,
+    gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR);
+  const bloomChain = [];
+  {
+    let w = bloomRes.width >> 1;
+    let h = bloomRes.height >> 1;
+    for (let i = 0; i < 8 && w >= 2 && h >= 2; i++, w >>= 1, h >>= 1) {
+      bloomChain.push(makeFBO(w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR));
+    }
+  }
+
+  const sunraysRes     = getResolution(196);
+  const sunraysMaskFBO = makeFBO(sunraysRes.width, sunraysRes.height,
+    gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR);
+  const sunraysFBO     = makeFBO(sunraysRes.width, sunraysRes.height,
+    gl.R16F, gl.RED, gl.HALF_FLOAT, gl.LINEAR);
+  const sunraysTempFBO = makeFBO(sunraysRes.width, sunraysRes.height,
+    gl.R16F, gl.RED, gl.HALF_FLOAT, gl.LINEAR);
 
   // ── Rendering utilities ──────────────────────────────────────────────────
 
@@ -525,6 +698,80 @@ void main() {
     vel.swap();
   }
 
+  // ── Post-processing passes ───────────────────────────────────────────────
+
+  function setFboTexelSize(prog, fbo) {
+    gl.uniform2f(gl.getUniformLocation(prog, 'u_texelSize'), 1.0 / fbo.w, 1.0 / fbo.h);
+  }
+
+  // Bright-pass the dye, blur down a mip chain, additively collect back up,
+  // then write the finished glow into bloomFBO for the display pass.
+  function applyBloom() {
+    if (bloomChain.length < 2) return;
+
+    let prog = progs.bloomPrefilter;
+    usePass(prog, bloomFBO);
+    const knee = cfg.bloomThreshold * cfg.bloomSoftKnee + 0.0001;
+    gl.uniform3f(gl.getUniformLocation(prog, 'u_curve'),
+      cfg.bloomThreshold - knee, knee * 2.0, 0.25 / knee);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_threshold'), cfg.bloomThreshold);
+    bindTex(0, dye.read.tex); gl.uniform1i(gl.getUniformLocation(prog, 'u_texture'), 0);
+    drawQuad('bloomPrefilter');
+
+    prog = progs.bloomBlur;
+    let last = bloomFBO;
+    for (let i = 0; i < bloomChain.length; i++) {
+      const dest = bloomChain[i];
+      usePass(prog, dest);
+      setFboTexelSize(prog, last);
+      bindTex(0, last.tex); gl.uniform1i(gl.getUniformLocation(prog, 'u_texture'), 0);
+      drawQuad('bloomBlur');
+      last = dest;
+    }
+
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.enable(gl.BLEND);
+    for (let i = bloomChain.length - 2; i >= 0; i--) {
+      const dest = bloomChain[i];
+      usePass(prog, dest);
+      setFboTexelSize(prog, last);
+      bindTex(0, last.tex); gl.uniform1i(gl.getUniformLocation(prog, 'u_texture'), 0);
+      drawQuad('bloomBlur');
+      last = dest;
+    }
+    gl.disable(gl.BLEND);
+
+    prog = progs.bloomFinal;
+    usePass(prog, bloomFBO);
+    setFboTexelSize(prog, last);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_bloom_intensity'), cfg.bloomIntensity);
+    bindTex(0, last.tex); gl.uniform1i(gl.getUniformLocation(prog, 'u_texture'), 0);
+    drawQuad('bloomFinal');
+  }
+
+  // Build the occlusion mask, march light shafts toward screen centre, then
+  // soften with two cheap cross-blur passes into sunraysFBO.
+  function applySunrays() {
+    let prog = progs.sunraysMask;
+    usePass(prog, sunraysMaskFBO);
+    bindTex(0, dye.read.tex); gl.uniform1i(gl.getUniformLocation(prog, 'u_texture'), 0);
+    drawQuad('sunraysMask');
+
+    prog = progs.sunrays;
+    usePass(prog, sunraysFBO);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_weight'), cfg.sunraysWeight);
+    bindTex(0, sunraysMaskFBO.tex); gl.uniform1i(gl.getUniformLocation(prog, 'u_texture'), 0);
+    drawQuad('sunrays');
+
+    prog = progs.bloomBlur;
+    for (const [src, dest] of [[sunraysFBO, sunraysTempFBO], [sunraysTempFBO, sunraysFBO]]) {
+      usePass(prog, dest);
+      setFboTexelSize(prog, src);
+      bindTex(0, src.tex); gl.uniform1i(gl.getUniformLocation(prog, 'u_texture'), 0);
+      drawQuad('bloomBlur');
+    }
+  }
+
   // ── Public API (called by pywebview via evaluate_js) ─────────────────────
 
   /**
@@ -574,6 +821,10 @@ void main() {
     lastTime = now;
     frameCount += 1;
 
+    // Simulation and post-processing FBO passes must overwrite, not blend
+    // (the display pass below leaves SRC_ALPHA blending enabled).
+    gl.disable(gl.BLEND);
+
     // Physics passes (mirrors fluid_renderer.py step() order)
     advect(vel, dt, cfg.velDissipation);
     computeCurl();
@@ -584,6 +835,10 @@ void main() {
     subtractGradient();
     advect(dye, dt, cfg.dyeDissipation);
 
+    // Post-processing passes (feed the display shader's bloom/sunrays inputs)
+    if (cfg.bloom)   applyBloom();
+    if (cfg.sunrays) applySunrays();
+
     // Display pass — transparent where no dye exists
     const prog = progs.display;
     usePass(prog, null);
@@ -592,8 +847,16 @@ void main() {
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     bindTex(0, dye.read.tex);
-    gl.uniform1i(gl.getUniformLocation(prog, 'u_dye'),       0);
-    gl.uniform1f(gl.getUniformLocation(prog, 'u_intensity'), cfg.intensity);
+    bindTex(1, bloomFBO.tex);
+    bindTex(2, sunraysFBO.tex);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_dye'),     0);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_bloom'),   1);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_sunrays'), 2);
+    gl.uniform2f(gl.getUniformLocation(prog, 'u_texelSize'), texelX, texelY);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_intensity'),  cfg.intensity);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_shading'),    cfg.shading ? 1.0 : 0.0);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_bloom_on'),   cfg.bloom ? 1.0 : 0.0);
+    gl.uniform1f(gl.getUniformLocation(prog, 'u_sunrays_on'), cfg.sunrays ? 1.0 : 0.0);
     drawQuad('display');
 
     if (hostState.ready && (now - hostState.lastFrameReportMs) >= 1000.0) {
