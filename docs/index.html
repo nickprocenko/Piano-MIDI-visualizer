@@ -13,10 +13,11 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-serif;font-size:14px;overflow:hidden;width:100vw;height:100vh;user-select:none}
-#bg-canvas,#fluid-canvas,#main-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none}
+#bg-canvas,#fluid-canvas,#shader-canvas,#main-canvas{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none}
 #main-canvas{pointer-events:auto}
 #bg-canvas{z-index:0}
 #fluid-canvas{z-index:1;display:none}
+#shader-canvas{z-index:1;display:none}
 #main-canvas{z-index:2}
 /* HUD */
 #hud{display:none;position:fixed;top:0;left:0;right:0;height:44px;background:rgba(15,15,20,.88);border-bottom:1px solid var(--border);z-index:20;align-items:center;padding:0 14px;gap:10px;backdrop-filter:blur(4px)}
@@ -210,6 +211,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 <div id="bg-slide-a" style="position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;pointer-events:none"></div>
 <div id="bg-slide-b" style="position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;pointer-events:none;opacity:0"></div>
 <canvas id="fluid-canvas"></canvas>
+<canvas id="shader-canvas"></canvas>
 <canvas id="main-canvas" tabindex="0"></canvas>
 
 <!-- HUD -->
@@ -375,6 +377,8 @@ const Config = {
       fluid_density_dissipation:15, fluid_velocity_dissipation:7, fluid_pressure:80,
       fluid_splat_size:20, fluid_opacity:80, fluid_color_strength:100,
       fluid_own_color:0, fluid_own_r:0, fluid_own_g:230, fluid_own_b:230,
+      shader_notes_enabled:0, shader_notes_preset:0, shader_notes_custom_src:'',
+      shader_notes_brightness:100, shader_notes_speed:100, shader_notes_opacity:100,
     },
     keyboard_style:{height_percent:18, brightness:100, visible:1, width_percent:100},
     display_style:{background_color:'#0f0f14', background_image:'', bg_slide_ms:5000, bg_fade_ms:1000, gif_speed_percent:100, giphy_api_key:''},
@@ -665,7 +669,7 @@ class FXRenderer{
     this.bctx.clearRect(0,0,this.bW,this.bH);
     this.frameBloom=0; this.time+=dt;
   }
-  drawTrail(ctx,t,ns){
+  drawTrail(ctx,t,ns,skipBody=false){
     const cx=t.renderX,ty=t.renderTopY,by=Math.min(t.renderBottomY,this.H),w=t.renderWidth;
     const h=Math.max(2,by-ty); if(by<0||ty>this.H)return;
     const hw=w/2;
@@ -684,7 +688,7 @@ class FXRenderer{
       glStr=Math.max(.08,glStr*(.80+.26*Math.sin(this.time*.004+cx*.012)));
 
     // Glow + bloom
-    if(ns.effect_glow_enabled&&glStr>0){
+    if(!skipBody&&ns.effect_glow_enabled&&glStr>0){
       this.frameBloom=Math.max(this.frameBloom,glStr*.9);
       const gs=Math.max(decF,1-.5*decS/100);
       const gr=Math.min(255,r*gs|0),gg=Math.min(255,g*gs|0),gb=Math.min(255,b*gs|0);
@@ -700,7 +704,7 @@ class FXRenderer{
       }
     }
     // Moon dust
-    if(ns.effect_moon_dust_enabled){
+    if(!skipBody&&ns.effect_moon_dust_enabled){
       const stemLen=Math.max(1,h),swarm=Math.max(0,Math.min(14,(4+(stemLen/70|0))*(ns.moon_dust_amount_percent??100)/100|0));
       const span=Math.max(10,stemLen-10),base=(t.ageMs*.0058)+(cx*.014);
       for(let i=0;i<swarm;i++){
@@ -713,8 +717,8 @@ class FXRenderer{
         this.octx.beginPath();this.octx.arc(px,py,i%4?1:2,0,Math.PI*2);this.octx.fill();
       }
     }
-    // Core bars (on main ctx)
-    if(w>0&&h>0){
+    // Core bars (on main ctx) — skipped when the GLSL shader renders the bodies
+    if(!skipBody&&w>0&&h>0){
       const bx=cx-hw;
       const og=ctx.createLinearGradient(bx,ty,bx,ty+h);
       og.addColorStop(0,rgb(r,g,b));
@@ -1054,6 +1058,7 @@ const SceneManager={
     }
     app.fluid.setEnabled(Config.ns.effect_fluid_enabled);
     app.fluid.updateConfig(Config.ns);
+    app.shaderNotes.applyFromConfig(Config.ns);
     app.rebuildLayout=true;
   },
   async deleteScene(profileId,sceneId){
@@ -1249,6 +1254,296 @@ class FluidController{
     const velRadius=Math.max(0.0002,(ns.fluid_splat_size??20)/100*0.010);
     window.fluidSim.addSplat(normX,normY,0,velY,r,g,b,velRadius,velRadius*1.4);
   }
+}
+
+// ═══════════════════════════════════════════════════════
+// SHADER NOTES (GLSL note-trail renderer)
+// ═══════════════════════════════════════════════════════
+const SHADER_MAX_NOTES=64;
+const SHADER_PRELUDE=`#version 300 es
+precision highp float;
+#define MAX_NOTES 64
+uniform vec3  iResolution;
+uniform float iTime;
+uniform float iTimeDelta;
+uniform int   iFrame;
+uniform vec4  iMouse;
+uniform int   iNoteCount;
+uniform vec4  iNotes[MAX_NOTES];
+uniform vec4  iNoteColors[MAX_NOTES];
+uniform vec4  iNoteMeta[MAX_NOTES];
+uniform float iPianoTop;
+uniform float iBrightness;
+out vec4 _snOut;
+float sdBar(vec2 p, int i){
+  vec4 n = iNotes[i];
+  vec2 c = vec2(n.x, (n.y + n.z) * 0.5);
+  vec2 h = vec2(n.w * 0.5, (n.z - n.y) * 0.5);
+  vec2 d = abs(p - c) - h;
+  return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}`;
+const SHADER_PRELUDE_LINES=SHADER_PRELUDE.split('\n').length;
+const SHADER_FOOTER=`void main(){
+  vec4 c = vec4(0.0);
+  mainImage(c, gl_FragCoord.xy);
+  c.rgb *= iBrightness;
+  float a = clamp(max(c.a, max(c.r, max(c.g, c.b))), 0.0, 1.0);
+  _snOut = vec4(c.rgb, a);
+}`;
+const SHADER_NOTE_PRESETS=[
+{name:'Twisty Ribbons',src:`void mainImage(out vec4 O, in vec2 fc){
+  vec3 col = vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec4 n=iNotes[i]; vec4 c=iNoteColors[i]; vec4 m=iNoteMeta[i];
+    if(fc.y<n.y-30.0||fc.y>n.z+30.0)continue;
+    float ph=m.z*0.37+iTime*3.0;
+    float amp=n.w*(0.9+0.6*c.a);
+    for(int s=0;s<2;s++){
+      float dir=(s==0)?1.0:-1.0;
+      float cx=n.x+sin(fc.y*0.035+ph*dir)*amp*dir;
+      float d=abs(fc.x-cx);
+      float strand=exp(-d*d/(n.w*0.6));
+      float endFade=smoothstep(n.y-20.0,n.y+30.0,fc.y)*smoothstep(n.z+20.0,n.z-30.0,fc.y);
+      col+=c.rgb*strand*endFade*(0.8+0.7*c.a);
+    }
+  }
+  O=vec4(col,0.0);
+}`},
+{name:'Neon Glow Bars',src:`void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec3 c=iNoteColors[i].rgb;
+    float d=sdBar(fc,i)-3.0;
+    col+=c*( smoothstep(1.0,-1.0,d)
+           + 0.55*exp(-max(d,0.0)*0.07)
+           + 0.22*exp(-max(d,0.0)*0.015) );
+  }
+  O=vec4(col,0.0);
+}`},
+{name:'Plasma Columns',src:`void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    float d=sdBar(fc,i);
+    float mask=smoothstep(4.0,-4.0,d); if(mask<=0.0)continue;
+    vec2 p=fc*0.05;
+    float v=sin(p.x+iTime)+sin(p.y+iTime*1.3)+sin(p.x+p.y+iTime*0.7)
+           +sin(length(fc-vec2(iNotes[i].x,iNotes[i].y))*0.06-iTime*2.0);
+    col+=iNoteColors[i].rgb*mask*(0.65+0.35*sin(v*3.14159));
+  }
+  O=vec4(col,0.0);
+}`},
+{name:'Aurora Curtains',src:`float hash(float n){return fract(sin(n)*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+  float a=hash(i.x+i.y*57.0),b=hash(i.x+1.0+i.y*57.0),
+        c=hash(i.x+(i.y+1.0)*57.0),d=hash(i.x+1.0+(i.y+1.0)*57.0);
+  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);}
+void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec4 n=iNotes[i]; vec4 c=iNoteColors[i];
+    float sway=noise(vec2(fc.y*0.01,iTime*0.6+iNoteMeta[i].z))*2.0-1.0;
+    float d=abs(fc.x-(n.x+sway*n.w*1.5));
+    float curtain=exp(-d*d/(n.w*n.w*1.2));
+    float band=smoothstep(n.y-10.0,n.y+40.0,fc.y)*smoothstep(n.z+60.0,n.z-80.0,fc.y);
+    float shimmer=0.7+0.3*noise(vec2(fc.y*0.05-iTime*2.0,float(i)));
+    col+=c.rgb*curtain*band*shimmer*(0.6+0.6*c.a);
+  }
+  O=vec4(col,0.0);
+}`},
+];
+const SHADER_VERTEX_SRC=`#version 300 es
+layout(location=0) in vec2 aPos;
+void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+class ShaderNotesRenderer{
+  constructor(canvas){
+    this.canvas=canvas; this.ok=false; this.program=null; this.uniforms=null;
+    const gl=canvas.getContext('webgl2',{alpha:true,depth:false,stencil:false,antialias:false});
+    if(!gl)return;
+    this.gl=gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER,gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,-1,1,1,1,1,-1]),gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,gl.createBuffer());
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,new Uint16Array([0,1,2,0,2,3]),gl.STATIC_DRAW);
+    gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);gl.enableVertexAttribArray(0);
+    const vs=gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs,SHADER_VERTEX_SRC);gl.compileShader(vs);
+    if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS))return;
+    this._vs=vs; this.ok=true;
+    this._frame=0; this._time=0;
+    this._uNotes=new Float32Array(SHADER_MAX_NOTES*4);
+    this._uColors=new Float32Array(SHADER_MAX_NOTES*4);
+    this._uMeta=new Float32Array(SHADER_MAX_NOTES*4);
+  }
+  setSource(userSrc){
+    const gl=this.gl;
+    const fs=gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs,SHADER_PRELUDE+'\n'+userSrc+'\n'+SHADER_FOOTER);
+    gl.compileShader(fs);
+    if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS)){
+      const err=this._rebaseErr(gl.getShaderInfoLog(fs)||'unknown shader error');
+      gl.deleteShader(fs); return err;
+    }
+    const prog=gl.createProgram();
+    gl.attachShader(prog,this._vs);gl.attachShader(prog,fs);gl.linkProgram(prog);
+    if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){
+      const err=this._rebaseErr(gl.getProgramInfoLog(prog)||'shader link error');
+      gl.deleteShader(fs);gl.deleteProgram(prog); return err;
+    }
+    gl.deleteShader(fs);
+    if(this.program)gl.deleteProgram(this.program);
+    this.program=prog;
+    this.uniforms=_fluidGetUniforms(gl,prog);
+    return null;
+  }
+  _rebaseErr(log){
+    return log.replace(/\u0000/g,'').trim()
+      .replace(/0:(\d+)/g,(m,l)=>'line '+Math.max(1,+l-SHADER_PRELUDE_LINES));
+  }
+  resize(w,h){this.canvas.width=w;this.canvas.height=h;}
+  render(trails,ns,layout,dtMs){
+    if(!this.ok||!this.program)return;
+    const gl=this.gl,W=this.canvas.width,H=this.canvas.height;
+    const speed=(ns.shader_notes_speed??100)/100;
+    this._time+=(dtMs/1000)*speed; this._frame++;
+    let cnt=0;
+    for(let i=trails.length-1;i>=0&&cnt<SHADER_MAX_NOTES;i--){
+      const t=trails[i];
+      const by=Math.min(t.renderBottomY,H);
+      if(by<0||t.renderTopY>H)continue;
+      const j=cnt*4;
+      this._uNotes[j]=t.renderX; this._uNotes[j+1]=H-by;
+      this._uNotes[j+2]=H-t.renderTopY; this._uNotes[j+3]=t.renderWidth;
+      const c=resolveNoteColor(t.note,t.channel,ns);
+      this._uColors[j]=c.r/255; this._uColors[j+1]=c.g/255; this._uColors[j+2]=c.b/255;
+      this._uColors[j+3]=t.velocity??0.8;
+      this._uMeta[j]=t.ageMs/1000; this._uMeta[j+1]=t.released?1:0;
+      this._uMeta[j+2]=t.note; this._uMeta[j+3]=t.channel;
+      cnt++;
+    }
+    gl.viewport(0,0,W,H); gl.disable(gl.BLEND);
+    gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(this.program);
+    const u=this.uniforms;
+    if(u.iResolution)gl.uniform3f(u.iResolution,W,H,1);
+    if(u.iTime)gl.uniform1f(u.iTime,this._time);
+    if(u.iTimeDelta)gl.uniform1f(u.iTimeDelta,dtMs/1000);
+    if(u.iFrame)gl.uniform1i(u.iFrame,this._frame);
+    if(u.iMouse)gl.uniform4f(u.iMouse,0,0,0,0);
+    if(u.iNoteCount)gl.uniform1i(u.iNoteCount,cnt);
+    if(u['iNotes[0]'])gl.uniform4fv(u['iNotes[0]'],this._uNotes);
+    if(u['iNoteColors[0]'])gl.uniform4fv(u['iNoteColors[0]'],this._uColors);
+    if(u['iNoteMeta[0]'])gl.uniform4fv(u['iNoteMeta[0]'],this._uMeta);
+    if(u.iPianoTop)gl.uniform1f(u.iPianoTop,H-(layout?layout.pianoY:H));
+    if(u.iBrightness)gl.uniform1f(u.iBrightness,(ns.shader_notes_brightness??100)/100);
+    gl.drawElements(gl.TRIANGLES,6,gl.UNSIGNED_SHORT,0);
+  }
+}
+
+class ShaderNotesController{
+  constructor(){
+    this._canvas=document.getElementById('shader-canvas');
+    this._r=null; this._enabled=false; this.lastError='';
+  }
+  _ensure(){
+    if(!this._r){
+      this._canvas.width=window.innerWidth; this._canvas.height=window.innerHeight;
+      this._r=new ShaderNotesRenderer(this._canvas);
+    }
+    return this._r.ok;
+  }
+  get supported(){return this._ensure();}
+  get active(){return this._enabled&&!!this._r?.ok&&!!this._r.program;}
+  setEnabled(v){
+    if(v&&!this._ensure()){
+      this._enabled=false; Config.ns.shader_notes_enabled=0;
+      window.app?._showToast?.('WebGL2 not available — shader notes disabled');
+      return false;
+    }
+    this._enabled=!!v;
+    this._canvas.style.display=v?'block':'none';
+    if(v&&!this._r.program)this.compileActive(Config.ns);
+    return this._enabled;
+  }
+  compileActive(ns){
+    if(!this._ensure())return 'WebGL2 unavailable';
+    const src=ns.shader_notes_preset===-1
+      ?(ns.shader_notes_custom_src||'')
+      :(SHADER_NOTE_PRESETS[ns.shader_notes_preset]?.src||SHADER_NOTE_PRESETS[0].src);
+    this.lastError=this._r.setSource(src)||'';
+    return this.lastError||null;
+  }
+  updateConfig(ns){
+    this._canvas.style.opacity=(ns.shader_notes_opacity??100)/100;
+  }
+  applyFromConfig(ns){
+    this.setEnabled(ns.shader_notes_enabled);
+    if(this._enabled)this.compileActive(ns);
+    this.updateConfig(ns);
+  }
+  resize(w,h){this._r?.resize(w,h);}
+  render(trails,ns,layout,dtMs){
+    if(this.active)this._r.render(trails,ns,layout,dtMs);
+  }
+}
+
+function buildShaderPrompt(currentSrc){
+  return `You are writing a GLSL ES 3.00 fragment shader for a Piano MIDI Visualiser, Shadertoy-style.
+
+ENTRY POINT (required, exactly this signature):
+  void mainImage(out vec4 fragColor, in vec2 fragCoord)
+fragCoord is in PIXELS with origin at the BOTTOM-LEFT (Shadertoy convention).
+Do NOT write #version, precision, or uniform declarations — they are provided.
+No textures/iChannel*, no multipass. Single fullscreen fragment pass only.
+
+UNIFORMS PROVIDED:
+  vec3  iResolution   viewport (W, H, 1) in pixels
+  float iTime         seconds, scaled by user speed setting
+  float iTimeDelta    seconds since last frame
+  int   iFrame        frame counter
+  vec4  iMouse        always vec4(0) (stub)
+  int   iNoteCount    number of valid note entries (0..64)
+  vec4  iNotes[64]    per falling note bar: x = center X px;
+                      y = bottom Y px (leading edge, near the piano);
+                      z = top Y px (tail end, z >= y); w = bar width px
+  vec4  iNoteColors[64]  rgb = note colour 0-1; a = key velocity 0-1
+  vec4  iNoteMeta[64]    x = age in seconds since note-on; y = 1.0 if released else 0.0;
+                         z = MIDI pitch 21-108; w = MIDI channel 0-15
+  float iPianoTop     Y px of the piano's top edge (bars start here)
+  float iBrightness   applied automatically after mainImage
+
+HELPER PROVIDED:
+  float sdBar(vec2 p, int i)   signed distance (px) to note bar i's rectangle
+
+LOOP PATTERN (uniform arrays require a constant loop bound):
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break; ... }
+
+OUTPUT: draw coloured light on a BLACK background. Black renders as transparent
+(alpha is auto-derived from the brightest channel unless you set fragColor.a).
+The piano keys, particles, and background are composited around your output.
+
+EXAMPLE — neon glow bars:
+void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec3 c=iNoteColors[i].rgb;
+    float d=sdBar(fc,i)-3.0;
+    col+=c*( smoothstep(1.0,-1.0,d)
+           + 0.55*exp(-max(d,0.0)*0.07)
+           + 0.22*exp(-max(d,0.0)*0.015) );
+  }
+  O=vec4(col,0.0);
+}
+
+CURRENT SHADER (modify or replace entirely):
+\`\`\`
+${currentSrc||'// empty — write a new shader from scratch'}
+\`\`\`
+
+Respond with ONLY the GLSL code, no markdown fences, no explanation.
+
+YOUR REQUEST:
+[describe the note visual effect you want here]`;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1573,7 +1868,8 @@ const THEME_FIELDS=['color_r','color_g','color_b','interior_r','interior_g','int
   'spark_amount_percent','smoke_amount_percent','press_smoke_amount_percent',
   'moon_dust_amount_percent','moon_dust_opacity_percent',
   'effect_glow_enabled','effect_highlight_enabled','effect_sparks_enabled','effect_smoke_enabled',
-  'effect_press_smoke_enabled','effect_moon_dust_enabled','effect_steam_smoke_enabled','effect_halo_pulse_enabled'];
+  'effect_press_smoke_enabled','effect_moon_dust_enabled','effect_steam_smoke_enabled','effect_halo_pulse_enabled',
+  'shader_notes_enabled','shader_notes_preset','shader_notes_brightness','shader_notes_speed','shader_notes_opacity'];
 
 const ThemeManager={
   getAll(){return Config.data.user_themes||[];},
@@ -1586,6 +1882,7 @@ const ThemeManager={
     const t=Config.data.user_themes[i]; if(!t)return;
     for(const f of THEME_FIELDS)if(f in t)Config.ns[f]=t[f];
     Config.data.active_user_theme_index=i; Config.save();
+    window.app?.shaderNotes?.applyFromConfig(Config.ns);
   },
   delete(i){
     Config.data.user_themes.splice(i,1); Config.save();
@@ -1955,6 +2252,25 @@ ${row('Curl','r-fc',0,100,5,'fluid_curl')}
 ${row('Density Diss.','r-fdd',1,100,1,'fluid_density_dissipation')}
 ${row('Velocity Diss.','r-fvd',1,40,1,'fluid_velocity_dissipation')}
 ${row('Pressure %','r-fp',0,100,5,'fluid_pressure')}
+</div>`,
+    shader:`<div class="section"><h2>Shader Notes</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Renders the falling notes with a GPU fragment shader in your note colours. Requires WebGL2. Sparks, smoke and the piano stay on top.</p>
+<div class="toggle-btn${ns.shader_notes_enabled?' on':''}" data-ns-tog="shader_notes_enabled" style="max-width:180px;margin-bottom:12px">GPU Shader Notes</div>
+<div class="row"><label>Preset</label>
+<select id="shader-preset-sel" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px"></select>
+</div>
+${row('Brightness %','r-shbr',0,200,5,'shader_notes_brightness')}
+${row('Speed %','r-shsp',0,300,5,'shader_notes_speed')}
+${row('Opacity %','r-shop',0,100,5,'shader_notes_opacity')}
+<div id="shader-custom-wrap" style="display:none;margin-top:8px">
+<textarea id="shader-custom-ta" rows="12" spellcheck="false" placeholder="void mainImage(out vec4 fragColor, in vec2 fragCoord){\n  // Shadertoy-style GLSL. Note bars in iNotes[i], colours in iNoteColors[i].\n  // fragCoord is in pixels, origin bottom-left. Black = transparent.\n  vec3 col = vec3(0.0);\n  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;\n    float d = sdBar(fragCoord, i);\n    col += iNoteColors[i].rgb * exp(-max(d,0.0)*0.05);\n  }\n  fragColor = vec4(col, 0.0);\n}" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px;border-radius:4px;font-family:monospace;font-size:11px;resize:vertical"></textarea>
+<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+<button id="shader-apply" class="action-btn">▶ Apply</button>
+<button id="shader-copy-prompt" class="action-btn">Copy AI Prompt</button>
+</div>
+</div>
+<pre id="shader-err" style="display:none;color:#e08080;font-size:11px;white-space:pre-wrap;margin-top:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px"></pre>
+<p style="font-size:11px;color:var(--muted);margin-top:8px">Custom shaders: paste a Shadertoy-style <b>mainImage</b>. Uniforms provided: iResolution, iTime, iNoteCount, iNotes[64] (x=center&nbsp;px, y=bottom, z=top, w=width; origin bottom-left), iNoteColors[64] (rgb + velocity), iNoteMeta[64] (age, released, pitch, channel), iPianoTop, plus an sdBar(p,i) distance helper. No iChannel textures. Draw on black — black renders transparent.</p>
 </div>`,
     keyboard:`<div class="section"><h2>Keyboard</h2>
 ${krow('Height %','r-kh',8,45,1,'height_percent')}
@@ -2457,6 +2773,57 @@ function wireFluidPresets(root,app){
   });
 }
 
+function wireShaderSection(root,app){
+  const sel=root.querySelector('#shader-preset-sel');
+  if(!sel)return;
+  const wrap=root.querySelector('#shader-custom-wrap');
+  const ta=root.querySelector('#shader-custom-ta');
+  const errBox=root.querySelector('#shader-err');
+  const applyBtn=root.querySelector('#shader-apply');
+  const promptBtn=root.querySelector('#shader-copy-prompt');
+  const showErr=err=>{
+    if(!errBox)return;
+    errBox.style.display=err?'block':'none';
+    errBox.textContent=err||'';
+  };
+  SHADER_NOTE_PRESETS.forEach((p,i)=>{
+    const o=document.createElement('option');
+    o.value=i; o.textContent=p.name; sel.appendChild(o);
+  });
+  const custom=document.createElement('option');
+  custom.value='custom'; custom.textContent='Custom…'; sel.appendChild(custom);
+  const syncUI=()=>{
+    const p=Config.ns.shader_notes_preset??0;
+    sel.value=p===-1?'custom':String(Math.max(0,Math.min(SHADER_NOTE_PRESETS.length-1,p)));
+    if(wrap)wrap.style.display=p===-1?'block':'none';
+    if(ta&&!ta.value)ta.value=Config.ns.shader_notes_custom_src||'';
+  };
+  syncUI();
+  if(!app.shaderNotes.supported){
+    showErr('WebGL2 not available — shader notes cannot run in this browser.');
+    root.querySelectorAll('[data-ns-tog="shader_notes_enabled"]').forEach(el=>el.style.opacity=.4);
+  }else showErr(app.shaderNotes.lastError);
+  sel.addEventListener('change',()=>{
+    Config.ns.shader_notes_preset=sel.value==='custom'?-1:+sel.value;
+    if(wrap)wrap.style.display=sel.value==='custom'?'block':'none';
+    if(sel.value==='custom'&&!Config.ns.shader_notes_custom_src){showErr('');schedSave();return;}
+    showErr(app.shaderNotes.compileActive(Config.ns));
+    schedSave();
+  });
+  if(applyBtn)applyBtn.addEventListener('click',()=>{
+    Config.ns.shader_notes_custom_src=ta?ta.value:'';
+    Config.ns.shader_notes_preset=-1;
+    const err=app.shaderNotes.compileActive(Config.ns);
+    showErr(err);
+    if(!err)app._showToast?.('Shader compiled ✓');
+    schedSave();
+  });
+  if(promptBtn)promptBtn.addEventListener('click',()=>{
+    navigator.clipboard?.writeText(buildShaderPrompt(ta?ta.value:''));
+    app._showToast?.('AI prompt copied to clipboard');
+  });
+}
+
 // ═══════════════════════════════════════════════════════
 // MIDI CC PARAM APPLY
 // ═══════════════════════════════════════════════════════
@@ -2776,6 +3143,7 @@ function wireSettings(root, app){
       }
       if(k==='effect_fluid_enabled')app.fluid.setEnabled(v);
       if(k.startsWith('fluid_'))app.fluid.updateConfig(ns);
+      if(k.startsWith('shader_notes_'))app.shaderNotes.updateConfig(ns);
       schedSave();
     });
   });
@@ -2795,6 +3163,7 @@ function wireSettings(root, app){
       const k=el.dataset.nsTog, nv=el.classList.contains('on')?0:1;
       Config.ns[k]=nv; el.classList.toggle('on',!!nv);
       if(k==='effect_fluid_enabled')app.fluid.setEnabled(nv);
+      if(k==='shader_notes_enabled'&&!app.shaderNotes.setEnabled(nv))el.classList.remove('on');
       schedSave();
     });
   });
@@ -2959,6 +3328,8 @@ function wireSettings(root, app){
   });
   // Fluid presets
   wireFluidPresets(root,app);
+  // Shader notes
+  wireShaderSection(root,app);
   // Kick.com Chat
   const kickSlug=root.querySelector('#kick-slug');
   const kickIdLink=root.querySelector('#kick-id-link');
@@ -3567,6 +3938,7 @@ class NotationRenderer{
 // ═══════════════════════════════════════════════════════
 class App{
   constructor(){
+    window.app=this;
     this.mainCanvas=document.getElementById('main-canvas');
     this.ctx=this.mainCanvas.getContext('2d');
     this.bgCanvas=document.getElementById('bg-canvas'); // kept for compat; not drawn on
@@ -3602,6 +3974,7 @@ class App{
     this.midi=new MidiHandler();
     this.midiFile=new MidiFilePlayer();
     this.fluid=new FluidController();
+    this.shaderNotes=new ShaderNotesController();
     this.led=new LedOutput();
     this.audience=new AudienceColorClient();
     this.kickChat=new KickChatClient();
@@ -3649,6 +4022,8 @@ class App{
     // only called on user interaction, so saved settings would otherwise be ignored)
     this.fluid.setEnabled(Config.ns.effect_fluid_enabled);
     this.fluid.updateConfig(Config.ns);
+    if(Config.ns.shader_notes_enabled)this.shaderNotes.setEnabled(1);
+    this.shaderNotes.updateConfig(Config.ns);
     // Apply active built-in note theme if note_colors wasn't persisted (e.g. after preset import)
     if(!Config.ns.note_colors){
       const ant=Config.data.active_note_theme||{type:'builtin',index:0};
@@ -3735,6 +4110,7 @@ class App{
       if(activeNotes.has(n)){
         const src=this._mode==='file'?this.midiFile:this.midi;
         const t=this.trails.start(n,src.noteChannel.get(n)??0,this.layout,ns,ks,H);
+        if(t)t.velocity=((src.noteVelocity?.get(n))??100)/127;
         if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
       }
     }
@@ -3757,6 +4133,7 @@ class App{
       const ch=src.noteChannel.get(ni)??0;
       if(this._mode==='file'&&this._channelConfig?.[ch]?.muted)continue;
       const t=this.trails.start(ni,ch,this.layout,ns,ks,H);
+      if(t)t.velocity=((src.noteVelocity?.get(ni))??100)/127;
       if(t&&ns.effect_fluid_enabled)this.fluid.splat(t,ns,W,H);
     }
     for(let i=0;i<released.length;i++) this.trails.release(released[i],ns);
@@ -3787,12 +4164,14 @@ class App{
     ctx.clearRect(0,0,W,H);
     if(!this._vizActive||!this.layout){return;}
     const ns=Config.ns;
+    const shaderOn=!!ns.shader_notes_enabled&&this.shaderNotes.active;
     this.fx.beginFrame(this.smoothedDt);
     for(const t of this.trails.all){
       this.trails.interp(t,this.smoothedDt);
-      this.fx.drawTrail(ctx,t,ns);
+      this.fx.drawTrail(ctx,t,ns,shaderOn);
     }
     this.fx.endFrame(ctx);
+    if(shaderOn)this.shaderNotes.render(this.trails.all,ns,this.layout,this.smoothedDt);
     if(this._learn?.active)this._drawLearnNotes(ctx,this.layout);
     drawPiano(ctx,this.layout,this.prevNotes,Config.ks,this._learnWrongKeys);
     // Update learn HUD progress, timeline, and notation scroll every frame
@@ -3876,6 +4255,7 @@ class App{
     this._drawBgGifFrame('a');
     this._drawBgGifFrame('b');
     if(window.fluidSim)window.fluidSim.resize();
+    this.shaderNotes?.resize(W,H);
     // Shrink usable height by HUD height so piano sits above the transport bar
     const hudEl=document.getElementById('learn-hud');
     const hudH=hudEl&&hudEl.classList.contains('visible')?hudEl.offsetHeight:0;
@@ -4830,6 +5210,7 @@ class App{
     const content=document.getElementById('settings-content');
     const TABS=[
       {id:'notes',label:'Notes'},{id:'effects',label:'Effects'},{id:'fluid',label:'Fluid'},
+      {id:'shader',label:'Shader'},
       {id:'keyboard',label:'Keyboard'},{id:'display',label:'Display'},
       {id:'hardware',label:'Hardware'},
       {id:'led',label:'LED Output'},{id:'audience',label:'Audience'},
@@ -4840,6 +5221,7 @@ class App{
     // Sidebar panel
     const PANEL_TABS=[
       {id:'notes',label:'Notes',active:true},{id:'effects',label:'FX'},{id:'fluid',label:'Fluid'},
+      {id:'shader',label:'Shader'},
       {id:'keyboard',label:'Keys'},{id:'display',label:'Display'},{id:'led',label:'LED'},
       {id:'audience',label:'Aud.'},{id:'themes',label:'Themes'},{id:'tracks',label:'Tracks'},
       {id:'scenes',label:'Scenes'},
