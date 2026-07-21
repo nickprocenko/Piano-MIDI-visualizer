@@ -12,6 +12,7 @@ Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/"
 - **Learn Mode** — drop a MIDI or MusicXML file, choose tracks and hands, and follow along at your own pace (Wait or Free-play)
 - **Freeplay** — just plug in and play, no file needed
 - Animated fluid ink effects (GPU-accelerated via WebGL)
+- **Shader Notes** — render the falling notes with GLSL fragment shaders (built-in presets like Twisty Ribbons and Neon Glow Bars, or paste your own Shadertoy-style `mainImage`)
 - Animated background image / GIF slideshow
 - ESP32 LED strip synchronisation over serial or BLE
 - Audience live colour control via WebSocket (Kik / Twitch channel-point integration)
@@ -49,6 +50,7 @@ Open **SETTINGS** from the main menu. Tabs:
 | Notes | Colour mode, glow, sparks, smoke, trail speed |
 | Effects | Halo pulse, bloom, spark physics |
 | Fluid | Ink fluid simulation (curl, dissipation, pressure) |
+| Shader | GPU note rendering — presets or custom Shadertoy-style GLSL (WebGL2) |
 | Keyboard | Piano height, brightness, visibility |
 | Display | Background slides, frame rate cap |
 | Hardware | MIDI CC mappings |
