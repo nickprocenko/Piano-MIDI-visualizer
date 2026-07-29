@@ -1350,6 +1350,128 @@ void mainImage(out vec4 O, in vec2 fc){
   }
   O=vec4(col,0.0);
 }`},
+{name:'Fire Plumes',src:`float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+float fbm(vec2 p){return 0.55*noise(p)+0.30*noise(p*2.1)+0.15*noise(p*4.3);}
+void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec4 n=iNotes[i]; vec4 c=iNoteColors[i];
+    float wide=n.w*3.0;
+    if(abs(fc.x-n.x)>wide*1.7)continue;
+    float top=n.z+n.w*5.0;
+    if(fc.y<n.y-12.0||fc.y>top)continue;
+    float seed=iNoteMeta[i].z*7.0;
+    float t=clamp((fc.y-n.y)/max(top-n.y,1.0),0.0,1.0);
+    float sway=(noise(vec2(fc.y*0.015-iTime*1.2,seed))-0.5)*n.w*(0.6+2.4*t);
+    vec2 uv=vec2((fc.x-n.x)/n.w*0.5, fc.y*0.014-iTime*2.2+seed);
+    float turb=fbm(uv);
+    float xoff=(fc.x-n.x-sway)/wide;
+    float env=1.0-abs(xoff)*(0.8+1.2*t);
+    float heat=clamp(env-turb*(0.45+1.0*t),0.0,1.0)*(1.0-t*0.6);
+    heat=clamp(heat*(0.85+0.5*c.a),0.0,1.0);
+    if(heat<=0.0)continue;
+    float h2=heat*heat;
+    vec3 fire=vec3(1.9,0.5,0.04)*heat+vec3(1.4,1.0,0.2)*h2*heat+vec3(1.0,0.95,0.85)*h2*h2*h2;
+    col+=mix(fire,c.rgb*(heat*1.8),0.35);
+  }
+  O=vec4(col,0.0);
+}`},
+{name:'Double Helix',src:`void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec4 n=iNotes[i]; vec4 c=iNoteColors[i];
+    float amp=n.w*(1.1+0.5*c.a);
+    if(abs(fc.x-n.x)>amp+n.w*2.0)continue;
+    if(fc.y<n.y-20.0||fc.y>n.z+20.0)continue;
+    float endFade=smoothstep(n.y-20.0,n.y+30.0,fc.y)*smoothstep(n.z+20.0,n.z-30.0,fc.y);
+    float ph=fc.y*0.030+iNoteMeta[i].z*0.5+iTime*2.6;
+    for(int s=0;s<2;s++){
+      float p=ph+(s==0?0.0:3.14159);
+      float cx=n.x+sin(p)*amp;
+      float depth=0.55+0.45*cos(p);
+      float wS=n.w*(0.35+0.40*depth);
+      float d=abs(fc.x-cx);
+      float strand=exp(-d*d/(wS*wS));
+      col+=c.rgb*strand*endFade*depth*(0.9+0.6*c.a);
+    }
+    float sep=abs(sin(ph));
+    float rung=smoothstep(0.94,1.0,sep)*exp(-pow((fc.x-n.x)/(amp*sep+1.0),2.0));
+    col+=c.rgb*rung*endFade*0.40;
+  }
+  O=vec4(col,0.0);
+}`},
+{name:'Silk Ribbons',src:`void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec4 n=iNotes[i]; vec4 c=iNoteColors[i];
+    float amp=n.w*(1.3+0.6*c.a);
+    if(abs(fc.x-n.x)>amp+n.w*2.5)continue;
+    if(fc.y<n.y-25.0||fc.y>n.z+25.0)continue;
+    float endFade=smoothstep(n.y-25.0,n.y+35.0,fc.y)*smoothstep(n.z+25.0,n.z-35.0,fc.y);
+    for(int s=0;s<4;s++){
+      float fs=float(s);
+      float p=fc.y*(0.022+fs*0.004)+iTime*(1.6+fs*0.5)+iNoteMeta[i].z*0.37+fs*1.7;
+      float cx=n.x+sin(p)*amp*(0.55+fs*0.15);
+      float d=abs(fc.x-cx);
+      float w2=n.w*(0.55-fs*0.08);
+      float strand=exp(-d*d/(w2*w2));
+      vec3 sc=mix(c.rgb,vec3(1.0),fs*0.16);
+      col+=sc*strand*endFade*(0.45+0.3*c.a);
+    }
+  }
+  O=vec4(col,0.0);
+}`},
+{name:'Vortex Swirl',src:`void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec4 n=iNotes[i]; vec4 c=iNoteColors[i];
+    float R=n.w*(4.0+3.0*c.a);
+    vec2 p=fc-vec2(n.x,n.y);
+    if(abs(p.x)<n.w*2.5&&fc.y>n.y&&fc.y<n.z+10.0){
+      float wob=sin(fc.y*0.045+iTime*3.2+iNoteMeta[i].z)*n.w*0.7;
+      float dx=p.x-wob;
+      float g=exp(-dx*dx/(n.w*n.w*0.35));
+      float vFade=smoothstep(n.z+10.0,n.y,fc.y);
+      col+=c.rgb*g*vFade*0.22;
+    }
+    float r=length(p);
+    if(r>R)continue;
+    float th=atan(p.y,p.x);
+    float arm=sin(th*3.0+r*0.22-iTime*5.0+iNoteMeta[i].z);
+    float swirl=smoothstep(0.05,1.0,arm)*(1.0-r/R);
+    float core=exp(-r*r/(n.w*n.w));
+    col+=c.rgb*(swirl*(0.9+0.6*c.a)+core)+vec3(1.0)*core*0.5;
+  }
+  O=vec4(col,0.0);
+}`},
+{name:'Electric Arcs',src:`float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+void mainImage(out vec4 O, in vec2 fc){
+  vec3 col=vec3(0.0);
+  for(int i=0;i<MAX_NOTES;i++){ if(i>=iNoteCount)break;
+    vec4 n=iNotes[i]; vec4 c=iNoteColors[i];
+    float reach=n.w*3.0;
+    if(abs(fc.x-n.x)>reach)continue;
+    if(fc.y<n.y-15.0||fc.y>n.z+15.0)continue;
+    float endFade=smoothstep(n.y-15.0,n.y+20.0,fc.y)*smoothstep(n.z+15.0,n.z-20.0,fc.y);
+    float tq=floor(iTime*14.0);
+    float seed=iNoteMeta[i].z*3.1+tq*17.0;
+    float wob=(noise(vec2(fc.y*0.035,seed))-0.5)*2.0
+             +(noise(vec2(fc.y*0.11,seed*1.7))-0.5)*0.8;
+    float cx=n.x+wob*n.w*1.6;
+    float d=abs(fc.x-cx);
+    float coreW=n.w*0.16;
+    float bolt=exp(-d*d/(coreW*coreW));
+    float glow=exp(-d/(n.w*1.1));
+    float edgeFade=smoothstep(reach,reach*0.45,abs(fc.x-n.x));
+    float flick=0.7+0.3*hash(vec2(tq,iNoteMeta[i].z));
+    col+=(vec3(1.0)*bolt*0.9+c.rgb*(bolt*0.8+glow*0.55))*endFade*edgeFade*flick*(0.8+0.4*c.a);
+  }
+  O=vec4(col,0.0);
+}`},
 ];
 const SHADER_VERTEX_SRC=`#version 300 es
 layout(location=0) in vec2 aPos;
