@@ -1,9 +1,47 @@
 # Piano MIDI Visualizer
 
-A full-screen, real-time piano MIDI visualizer for live performances, built as a single-page web app.  
-Open it locally or deploy to any static host — no server required for the visualizer itself.
+**A full-screen, real-time piano MIDI visualizer for live performances — one HTML file, no build step, no install.**
 
-Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/" target="_blank" rel="noopener noreferrer">https://nickprocenko.github.io/Piano-MIDI-visualizer/</a>
+Plug in a MIDI keyboard, open the page, and play. Notes rise off the keys as glowing
+trails through GPU fluid ink and custom GLSL shaders. Drop in a MIDI or MusicXML file
+and it becomes a learn-along tool. Wire up an ESP32 and your LED strip lights up with
+you.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Live demo](https://img.shields.io/badge/demo-live-blue.svg)](https://nickprocenko.github.io/Piano-MIDI-visualizer/)
+
+### ▶ [Try it live](https://nickprocenko.github.io/Piano-MIDI-visualizer/) — Chrome or Edge, no sign-up
+
+<!--
+  TODO: drop a screenshot or short GIF here — it does more than any paragraph above.
+  Commit it to docs/media/ and reference it:
+  ![Piano MIDI Visualizer](docs/media/demo.gif)
+-->
+
+---
+
+## 🤝 Looking for collaborators
+
+This started as a personal tool for live piano performances and is now open for
+contributions. **There is no build tooling and no framework** — clone the repo, open
+`docs/index.html` in Chrome, edit, refresh. If you have a text editor you can already
+contribute.
+
+Especially interested in help with:
+
+- **Shaders and visual effects** — the note renderer takes Shadertoy-style GLSL, so new
+  presets are self-contained and easy to prototype
+- **Testing on hardware other than a Roland JUNO-DS** — genuinely useful, costs ten minutes
+- **Mobile / touch support** and accessibility in the settings UI
+- **A test harness of any kind** — there is currently none
+- **Splitting the single-file app into ES modules** without adding a build step
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the repo layout, a walkthrough of how the
+single-file app is organised, and a list of good places to start. Questions and
+half-formed ideas are welcome in [issues](https://github.com/nickprocenko/Piano-MIDI-visualizer/issues).
+
+---
 
 ## Features
 
@@ -195,3 +233,34 @@ Add as a **Browser Source** in OBS (1920×1080, transparent background, local fi
 - `preset.md` — generates a JSON settings preset with the full schema embedded
 
 Click **Copy AI Prompt** in the script editor to copy a prompt that includes your current script for the AI to iterate on.
+
+## Project structure
+
+The repo contains four independent programs that share a protocol and a look. Most
+work only touches one of them.
+
+| Path | What it is |
+|------|-----------|
+| `docs/index.html` | **The web app** — one self-contained file, no build step |
+| `docs/notation.html` | Sheet-music strip (OpenSheetMusicDisplay, loaded in an iframe) |
+| `docs/overlay.html` | OBS browser-source overlay for audience polls |
+| `main.py`, `src/` | Standalone desktop version (Python + pygame), Windows-oriented |
+| `server/` | Audience vote server — Kik chat bot, WebSocket out to the visualizer |
+| `firmware/` | ESP32-S3 FastLED sketch for the LED strip |
+| `examples/` | Importable preset JSON and AI prompt templates |
+| `tools/` | Dev utilities — BLE scanner, fluid prototype, renderer stress test |
+
+The web app and the Python app are separate implementations, not a shared core.
+`docs/` is what GitHub Pages deploys on every push to `main`.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup, how the
+single-file app is laid out, and ideas for where to start. Bug reports, presets, and
+shader submissions all count.
+
+Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Licence
+
+[MIT](LICENSE) © 2026 Nick Procenko — use it, fork it, perform with it, sell it.

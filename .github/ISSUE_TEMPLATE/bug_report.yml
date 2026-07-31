@@ -1,0 +1,89 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The single most useful thing you can include is the
+        **browser console output** (F12 → Console) — for the web app it's usually
+        the whole answer.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part of the project?
+      options:
+        - Web app (docs/index.html)
+        - Sheet music / notation strip
+        - Learn Mode / MIDI file playback
+        - LED output or ESP32 firmware
+        - Audience vote server (server/)
+        - OBS overlay (docs/overlay.html)
+        - Python desktop app (main.py, src/)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the visualizer
+        2. Go to Settings → Notes
+        3. Enable ...
+        4. Play a chord — the trails ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output / crash log
+      description: >
+        Web app: F12 → Console, copy any red errors.
+        Python app: attach the newest file from `crash_logs/`.
+      render: text
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: "Chrome 141, Windows 11"
+    validations:
+      required: true
+
+  - type: input
+    id: midi-device
+    attributes:
+      label: MIDI device
+      description: Leave blank if the bug doesn't involve MIDI input.
+      placeholder: "Roland JUNO-DS via USB"
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Settings JSON
+      description: >
+        If the bug is preset- or settings-related, export your settings
+        (Settings → Themes → Export) and paste them here.
+      render: json
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I'm using a Chromium-based browser (Chrome, Edge, Opera) — Web MIDI does not exist in Firefox or Safari
+          required: true
+        - label: I searched existing issues for this problem
+          required: true

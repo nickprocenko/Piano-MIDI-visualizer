@@ -1,0 +1,56 @@
+name: Feature request
+description: Suggest a new effect, setting, or capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        Describe the situation, not just the solution — "during fast passages I
+        can't tell which hand is which" tells us more than "add an outline mode".
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: >
+        Screenshots, videos, a Shadertoy link, or another app doing something
+        similar. Extremely helpful for anything visual.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the project?
+      options:
+        - Note rendering / visual effects
+        - Shaders
+        - Learn Mode / sheet music
+        - Settings UI
+        - MIDI input or CC mapping
+        - LED / hardware output
+        - Audience interaction
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contributing
+    attributes:
+      label: Would you want to build it?
+      description: Entirely optional — "no" is a perfectly good answer.
+      options:
+        - "Just suggesting it"
+        - "Maybe, with some pointers on where to start"
+        - "Yes, I'd like to take this on"
+    validations:
+      required: true
