@@ -1,0 +1,313 @@
+{
+  "drum_leds": {
+    "pads": [
+      {
+        "id": "kick",
+        "name": "Kick",
+        "enabled": 1,
+        "strip": 0,
+        "led_count": 30,
+        "reversed": 0,
+        "rotate": 0,
+        "notes": [
+          36
+        ],
+        "alt_notes": [],
+        "channel": 9,
+        "effect": "flash",
+        "color": {
+          "r": 255,
+          "g": 40,
+          "b": 0
+        },
+        "color2": {
+          "r": 255,
+          "g": 210,
+          "b": 120
+        },
+        "decay_ms": 300,
+        "vel_floor": 20,
+        "vel_curve": 100,
+        "speed": 100,
+        "width": 20,
+        "idle": "off",
+        "idle_brightness": 8,
+        "script": "",
+        "view_x": 0.5,
+        "view_y": 0.72,
+        "view_r": 0.155
+      },
+      {
+        "id": "snare",
+        "name": "Snare",
+        "enabled": 1,
+        "strip": 1,
+        "led_count": 24,
+        "reversed": 0,
+        "rotate": 0,
+        "notes": [
+          38
+        ],
+        "alt_notes": [
+          37,
+          40
+        ],
+        "channel": 9,
+        "effect": "burst",
+        "color": {
+          "r": 0,
+          "g": 200,
+          "b": 255
+        },
+        "color2": {
+          "r": 255,
+          "g": 255,
+          "b": 255
+        },
+        "decay_ms": 240,
+        "vel_floor": 20,
+        "vel_curve": 100,
+        "speed": 100,
+        "width": 20,
+        "idle": "off",
+        "idle_brightness": 8,
+        "script": "",
+        "view_x": 0.3,
+        "view_y": 0.6,
+        "view_r": 0.105
+      },
+      {
+        "id": "tom1",
+        "name": "Tom 1",
+        "enabled": 1,
+        "strip": 2,
+        "led_count": 20,
+        "reversed": 0,
+        "rotate": 0,
+        "notes": [
+          48
+        ],
+        "alt_notes": [
+          50
+        ],
+        "channel": 9,
+        "effect": "ripple",
+        "color": {
+          "r": 180,
+          "g": 0,
+          "b": 255
+        },
+        "color2": {
+          "r": 255,
+          "g": 120,
+          "b": 255
+        },
+        "decay_ms": 280,
+        "vel_floor": 20,
+        "vel_curve": 100,
+        "speed": 100,
+        "width": 20,
+        "idle": "off",
+        "idle_brightness": 8,
+        "script": "",
+        "view_x": 0.4,
+        "view_y": 0.34,
+        "view_r": 0.095
+      },
+      {
+        "id": "tom2",
+        "name": "Tom 2",
+        "enabled": 1,
+        "strip": 3,
+        "led_count": 20,
+        "reversed": 0,
+        "rotate": 0,
+        "notes": [
+          45
+        ],
+        "alt_notes": [
+          47
+        ],
+        "channel": 9,
+        "effect": "ripple",
+        "color": {
+          "r": 255,
+          "g": 0,
+          "b": 140
+        },
+        "color2": {
+          "r": 255,
+          "g": 160,
+          "b": 210
+        },
+        "decay_ms": 300,
+        "vel_floor": 20,
+        "vel_curve": 100,
+        "speed": 100,
+        "width": 20,
+        "idle": "off",
+        "idle_brightness": 8,
+        "script": "",
+        "view_x": 0.6,
+        "view_y": 0.34,
+        "view_r": 0.095
+      },
+      {
+        "id": "floor",
+        "name": "Floor Tom",
+        "enabled": 1,
+        "strip": 4,
+        "led_count": 26,
+        "reversed": 0,
+        "rotate": 0,
+        "notes": [
+          43
+        ],
+        "alt_notes": [
+          58
+        ],
+        "channel": 9,
+        "effect": "ripple",
+        "color": {
+          "r": 255,
+          "g": 120,
+          "b": 0
+        },
+        "color2": {
+          "r": 255,
+          "g": 230,
+          "b": 150
+        },
+        "decay_ms": 360,
+        "vel_floor": 20,
+        "vel_curve": 100,
+        "speed": 100,
+        "width": 20,
+        "idle": "off",
+        "idle_brightness": 8,
+        "script": "",
+        "view_x": 0.74,
+        "view_y": 0.6,
+        "view_r": 0.125
+      },
+      {
+        "id": "hihat",
+        "name": "Hi-Hat",
+        "enabled": 0,
+        "strip": 5,
+        "led_count": 20,
+        "reversed": 0,
+        "rotate": 0,
+        "notes": [
+          46,
+          42
+        ],
+        "alt_notes": [
+          22,
+          26,
+          44
+        ],
+        "channel": 9,
+        "effect": "sparkle",
+        "color": {
+          "r": 255,
+          "g": 230,
+          "b": 60
+        },
+        "color2": {
+          "r": 255,
+          "g": 255,
+          "b": 220
+        },
+        "decay_ms": 180,
+        "vel_floor": 20,
+        "vel_curve": 100,
+        "speed": 100,
+        "width": 20,
+        "idle": "off",
+        "idle_brightness": 8,
+        "script": "",
+        "view_x": 0.16,
+        "view_y": 0.36,
+        "view_r": 0.075
+      },
+      {
+        "id": "crash1",
+        "name": "Crash 1",
+        "enabled": 0,
+        "strip": 6,
+        "led_count": 20,
+        "reversed": 0,
+        "rotate": 0,
+        "notes": [
+          49
+        ],
+        "alt_notes": [
+          55
+        ],
+        "channel": 9,
+        "effect": "sparkle",
+        "color": {
+          "r": 255,
+          "g": 255,
+          "b": 255
+        },
+        "color2": {
+          "r": 180,
+          "g": 220,
+          "b": 255
+        },
+        "decay_ms": 700,
+        "vel_floor": 20,
+        "vel_curve": 100,
+        "speed": 100,
+        "width": 20,
+        "idle": "off",
+        "idle_brightness": 8,
+        "script": "",
+        "view_x": 0.2,
+        "view_y": 0.14,
+        "view_r": 0.085
+      },
+      {
+        "id": "ride",
+        "name": "Ride",
+        "enabled": 0,
+        "strip": 7,
+        "led_count": 20,
+        "reversed": 0,
+        "rotate": 0,
+        "notes": [
+          51
+        ],
+        "alt_notes": [
+          59,
+          53
+        ],
+        "channel": 9,
+        "effect": "spin",
+        "color": {
+          "r": 255,
+          "g": 200,
+          "b": 80
+        },
+        "color2": {
+          "r": 255,
+          "g": 255,
+          "b": 200
+        },
+        "decay_ms": 600,
+        "vel_floor": 20,
+        "vel_curve": 100,
+        "speed": 100,
+        "width": 20,
+        "idle": "off",
+        "idle_brightness": 8,
+        "script": "",
+        "view_x": 0.86,
+        "view_y": 0.3,
+        "view_r": 0.09
+      }
+    ]
+  }
+}

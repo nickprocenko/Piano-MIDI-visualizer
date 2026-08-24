@@ -15,6 +15,7 @@ Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/"
 - **Shader Notes** — render the falling notes with GLSL fragment shaders (built-in presets like Twisty Ribbons and Neon Glow Bars, or paste your own Shadertoy-style `mainImage`)
 - Animated background image / GIF slideshow
 - ESP32 LED strip synchronisation over serial or BLE
+- **Drum Kit LEDs** — an LED ring per drum on an electronic kit (Roland TD-9), each with its own effect, colour and velocity response
 - Audience live colour control via WebSocket (Kik / Twitch channel-point integration)
 - Built-in theme manager — save, rename, load, and delete colour presets
 - Scenes & Profiles — store and switch full visual snapshots
@@ -55,6 +56,7 @@ Open **SETTINGS** from the main menu. Tabs:
 | Display | Background slides, frame rate cap |
 | Hardware | MIDI CC mappings |
 | LED Output | ESP32 serial / BLE config |
+| Drum LEDs | Per-drum LED rings, pad mapping, ring effects, pad scripts |
 | Audience | WebSocket URL for live audience colour votes |
 | Themes | Save / load / delete colour presets |
 | Scenes & Profiles | Full visual snapshots |
@@ -117,6 +119,154 @@ Defaults:
 - `LED_COUNT 176`, `SERIAL_BAUD 115200`
 - Accepts BLE writes on service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` (characteristic `6E400002-…`)
 - Install `NimBLE-Arduino` for BLE support
+
+## Drum Kit LED Output
+
+Drives an LED ring around the top of each drum from an electronic kit (developed against a
+**Roland TD-9** over USB MIDI). Each drum gets its own data pin, its own effect, and its own
+colour, and every stroke is captured as a discrete hit with a velocity-scaled decay envelope —
+so rolls and flams read as separate events rather than one smear.
+
+This is a separate path from the piano LED output above: separate config, separate protocol,
+separate firmware. Both can run at once on two boards.
+
+### Quick start
+
+1. Flash `firmware/esp32_drum_leds/esp32_drum_leds.ino` (needs the **FastLED** library, 3.6+).
+2. Serve the app over `http://localhost` or HTTPS — Web Serial refuses `file://`:
+   ```bash
+   cd docs && python3 -m http.server 8000
+   ```
+3. **Settings → Drum LEDs** → set the LED count for each drum → **Connect**.
+4. **Identify** on each pad sweeps a single pixel round that strip, so you can see which
+   physical drum is on which output and fix the `Strip` numbers.
+5. Hit each drum and watch the **MIDI Monitor**. Anything showing `UNMAPPED` gets a one-click
+   **+ Add** chip; or use **Learn** per pad, or **Map My Kit…** to walk the whole kit at once.
+
+**DRUM KIT** on the main menu gives a full-screen top-down view of the rings, so you can
+rehearse the lighting without looking at the drums. Number keys **1**–**9** fire pads
+(Shift = soft hit, Alt = rim).
+
+### Wiring
+
+One WS2812B ring per drum, each on its own GPIO. Slot numbers in the app map to the
+`STRIP_PINS[]` table at the top of the sketch — edit that table to match your build:
+
+| Slot | Default GPIO | Suggested drum |
+|------|--------------|----------------|
+| 0 | 18 | Kick |
+| 1 | 19 | Snare |
+| 2 | 21 | Tom 1 |
+| 3 | 22 | Tom 2 |
+| 4 | 23 | Floor Tom |
+| 5 | 25 | Hi-Hat |
+| 6 | 26 | Crash |
+| 7 | 27 | Ride |
+
+Put a 300–470 Ω resistor in series with each data line at the board, a 1000 µF capacitor
+across 5V/GND at each drum, and power the strips from a dedicated 5V supply rather than the
+ESP32's USB rail — with all grounds tied together.
+
+> **Board limits — check before wiring eight drums.** FastLED drives WS2812B through the RMT
+> peripheral, one channel per strip: **ESP32 (classic) has 8**, **ESP32-S3 has 4**, **ESP32-C3
+> has 2**. On an S3 or C3, keep the strip count at or below that limit, or daisy-chain several
+> drums onto one output.
+
+### Roland TD-9 default note map
+
+Loaded out of the box, and restorable any time with **Load TD-9 Map** (which leaves your
+colours, effects and LED counts alone). Note maps are editable per kit, so confirm yours with
+the MIDI Monitor.
+
+| Pad | Head / bow | Rim / edge | Enabled by default |
+|---|---|---|---|
+| Kick | 36 | — | ✅ |
+| Snare | 38 | 37 cross-stick, 40 rimshot | ✅ |
+| Tom 1 | 48 | 50 | ✅ |
+| Tom 2 | 45 | 47 | ✅ |
+| Floor Tom | 43 | 58 | ✅ |
+| Hi-Hat | 46, 42 | 22, 26, 44 pedal | — |
+| Crash 1 | 49 | 55 | — |
+| Ride | 51 | 59, 53 bell | — |
+
+The cymbals ship disabled since the strips are on the drums; enable them in the Pads list, or
+use **+ Add Pad** for anything else (a second crash, an aux pad).
+
+### Ring effects
+
+Each pad picks one, with its own colour, accent colour, decay, velocity response, speed and
+arc width. Rim/edge hits use the accent colour and a shorter decay so they read differently
+from the head.
+
+| Effect | On a ring |
+|---|---|
+| Flash | Whole ring lights, exponential decay — the reliable default |
+| Radial Burst | Two arcs leave the top, meet at the bottom, fade |
+| Comet Spin | An arc whips round the ring with a fading tail |
+| Sparkle | Random pixels pop, count scaled by velocity |
+| Ripple | A wavefront expands both ways with a damped wake |
+| VU Ring | Fills in proportion to velocity, then drains |
+| Strobe | Rapid on/off pulses inside the decay window |
+| Rainbow Spin | Hue rotates round the ring; hits boost it |
+| Hue Step | Each stroke advances the hue — rolls paint a gradient |
+| Ember | Ring-wrapped fire flicker fed by hits |
+| Alternating Halves | Successive hits light opposite halves |
+| Theater Chase | Every Nth pixel lit, marching round |
+
+Plus a per-pad idle layer (off / solid / breathe / drift) so the kit glows between strokes.
+
+### Custom lighting per drum
+
+**Settings → Drum LEDs → Pad Script** takes a JavaScript script that replaces the built-in
+effect for one pad:
+
+```js
+api.onFrame(function(now, dt, hits){
+  api.fill(0,0,0);
+  for (const h of hits) {
+    const a = Math.exp(-h.age / 0.3) * h.vel;
+    const c = api.hsvToRgb((h.index * 0.13) % 1, 0.95, 1);   // new hue each stroke
+    for (let i = 0; i < api.len; i++) api.add(i, c.r*a, c.g*a, c.b*a);
+  }
+});
+```
+
+**Copy AI Prompt** puts a full API reference — plus that pad's name, LED count and current
+script — on the clipboard, ready to hand to any assistant. The same text lives in
+[`examples/prompts/drum-script.md`](examples/prompts/drum-script.md).
+
+Whole-kit setups save as named presets and export to JSON;
+[`examples/drum-kit-td9.json`](examples/drum-kit-td9.json) is the factory map.
+
+### Protocol
+
+USB serial at 921600 baud. Binary rather than the piano path's ASCII CSV, because a drum
+flash has to land within a few milliseconds of the stick:
+
+```
+A5 5A <type> <len_lo> <len_hi> <payload…> <crc8>
+```
+
+`len` counts payload bytes only; CRC-8/ATM (poly 0x07) covers type + length + payload. The
+parser is length-driven, so `A5 5A` occurring inside pixel data is just data; a failed CRC
+costs one frame.
+
+| Type | Name | Payload |
+|---|---|---|
+| `0x01` | CFG | `nStrips`, then `{slot:u8, len:u16}` per strip, then `power_ma:u16` |
+| `0x02` | FRAME | `seq:u8`, then every configured strip's pixels concatenated, `r,g,b` each |
+| `0x03` | PING | — (device replies with an ASCII banner) |
+| `0x04` | IDENT | `slot:u8` — sweeps one strip so you can identify it |
+| `0x05` | BLANK | — all strips off |
+
+A five-drum kit of 120 pixels is 367 bytes a frame, about 24 % of the link at 60 fps. The
+tab shows live bandwidth and turns red past 85 %; **Protocol Self-Test** checks the framing
+and flags configuration mistakes (two drums on one output, a strip longer than the firmware
+allows) without any hardware attached.
+
+Until it has a valid CFG the device prints `DKNEEDCFG` once a second, and the app answers
+automatically — so resetting or reflashing the ESP32 mid-session recovers on its own. If
+frames stop for two seconds the firmware fades the kit out rather than freezing it lit.
 
 ## Audience Color Control
 
@@ -193,5 +343,6 @@ Add as a **Browser Source** in OBS (1920×1080, transparent background, local fi
 
 - `script.md` — generates a colour script with the full API reference embedded
 - `preset.md` — generates a JSON settings preset with the full schema embedded
+- `drum-script.md` — generates a per-drum ring lighting script
 
 Click **Copy AI Prompt** in the script editor to copy a prompt that includes your current script for the AI to iterate on.
