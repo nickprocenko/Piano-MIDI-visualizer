@@ -69,6 +69,10 @@ Open **SETTINGS** from the main menu. Tabs:
 
 A floating transport HUD lets you pause, loop, and adjust speed without leaving the highway.
 
+## Practice Coach for Claude (`midi_coach/`)
+
+A local MCP server that lets Claude Desktop record your playing, compare it with a reference MIDI/MusicXML file (wrong notes, timing, tempo, dynamics, pedal — by bar), track progress, and play passages back on the keyboard. See [`midi_coach/README.md`](midi_coach/README.md) for setup.
+
 ## Crash diagnostics
 
 If the visualizer stops rendering, open the browser DevTools console (F12) for error details.
