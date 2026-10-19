@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: https://cdn.jsdelivr.net; connect-src 'self' wss://ws-us2.pusher.com https://kick.com https: blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: mediastream:; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: data: https://cdn.jsdelivr.net; connect-src 'self' wss://ws-us2.pusher.com https://kick.com https: http://127.0.0.1:* http://localhost:* blob: data:;">
 <title>Piano MIDI Visualizer</title>
 <style>
 :root {
@@ -390,6 +390,7 @@ const Config = {
     },
     audience_control:{enabled:0, ws_url:'', transition_ms:220},
     kick_chat:{enabled:0, channel_slug:'', chatroom_id:'', transition_ms:600},
+    coach:{enabled:0, url:'http://127.0.0.1:8765/'},
     hardware:{sustain_enabled:1,midi_cc_mappings:[]},
     profiles:[],
     active_profile_id:'',
@@ -432,6 +433,7 @@ const Config = {
   get lo(){return this.data.led_output;},
   get ac(){return this.data.audience_control;},
   get kc(){return this.data.kick_chat;},
+  get coach(){return this.data.coach;},
   get lrn(){return this.data.learn;},
 };
 Config.load();
@@ -2391,6 +2393,12 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <button class="action-btn" id="midi-cc-confirm" style="font-size:11px;padding:4px 10px">Add</button>
 <button class="action-btn" id="midi-cc-cancel" style="font-size:11px;padding:4px 10px">Cancel</button>
 </div></div></div>
+</div>
+<div class="section"><h2>Practice Coach (Claude)</h2>
+<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Mirror the midi-coach live score in the sheet-music strip: the cursor, hit / missed notes, wrong keys and the bar heat map. Requires Claude Desktop running the midi-coach server.</p>
+<div class="row"><label>Coach URL</label><input type="text" id="coach-url" value="${(Config.coach&&Config.coach.url)||'http://127.0.0.1:8765/'}" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
+<div class="row"><label>Status</label><span id="coach-status">Off</span></div>
+<div class="row"><label></label><button class="action-btn" id="btn-coach-connect">Connect</button><button class="action-btn" id="btn-coach-disconnect" style="margin-left:6px">Disconnect</button></div>
 </div>`,
     profiles:`<div class="section"><h2>Scenes &amp; Profiles</h2>
 ${(()=>{
@@ -3351,6 +3359,16 @@ function wireSettings(root, app){
   const btnKickD=root.querySelector('#btn-kick-disconnect');
   if(btnKickD) btnKickD.addEventListener('click',()=>{app.kickChat.disconnect();});
   if(kickTrans) kickTrans.addEventListener('change',()=>{Config.kc.transition_ms=parseInt(kickTrans.value)||600;Config.save();});
+  // Practice Coach (midi-coach)
+  const coachUrl=root.querySelector('#coach-url');
+  const btnCoachC=root.querySelector('#btn-coach-connect');
+  if(btnCoachC) btnCoachC.addEventListener('click',()=>{
+    Config.coach.url=(coachUrl?.value||'').trim()||'http://127.0.0.1:8765/';
+    Config.coach.enabled=1; Config.save();
+    app.coach.connect(Config.coach.url);
+  });
+  const btnCoachD=root.querySelector('#btn-coach-disconnect');
+  if(btnCoachD) btnCoachD.addEventListener('click',()=>{Config.coach.enabled=0;Config.save();app.coach.disconnect();});
   // Audience Vote Server
   const audUrl=root.querySelector('#aud-url');
   const btnAudC=root.querySelector('#btn-aud-connect');
@@ -3777,7 +3795,7 @@ class NotationRenderer{
     if(!this._msgHandler){
       this._msgHandler=e=>{
         if(!this._iframe||e.source!==this._iframe.contentWindow)return;
-        if(e.data?.type==='ready'){this._ready=true;return;}
+        if(e.data?.type==='ready'){this._ready=true;this.onReady?.();return;}
         if(e.data?.type==='height'){
           const strip=document.getElementById('notation-strip');
           if(strip)strip.style.height=Math.max(220,Math.min(500,e.data.h+30))+'px';
@@ -3909,6 +3927,11 @@ class NotationRenderer{
       this._wrap.appendChild(msg);
     }
   }
+  // Forward a midi-coach message (marks, cursorBeat, heat, flash, status) to the OSMD iframe
+  post(msg){
+    if(this._xmlMode&&this._ready&&this._iframe?.contentWindow){this._iframe.contentWindow.postMessage(msg,'*');return true;}
+    return false;
+  }
   scrollTo(cursorMs){
     if(this._xmlMode&&this._iframe?.contentWindow){
       this._iframe.contentWindow.postMessage({type:'updatePosition',ms:cursorMs},'*');
@@ -3936,6 +3959,63 @@ class NotationRenderer{
 // ═══════════════════════════════════════════════════════
 // APP
 // ═══════════════════════════════════════════════════════
+// midi-coach live score: mirrors the coach's Server-Sent Events into the notation strip.
+class CoachLink{
+  constructor(app){this.app=app;this.es=null;this.base='';this.version=0;this.lessonVersion=0;this.sessionActive=false;this._queue=[];}
+  _status(t){const el=document.getElementById('coach-status');if(el)el.textContent=t;}
+  connect(url){
+    this.disconnect();
+    this.base=url.endsWith('/')?url:url+'/';
+    let es;
+    try{es=new EventSource(this.base+'events');}catch(e){this._status('Bad URL: '+e.message);return;}
+    this.es=es;
+    this._status('Connecting…');
+    es.onopen=()=>this._status(this.version?'Connected':'Connected — waiting for a score from Claude');
+    es.onerror=()=>this._status('Not reachable — is Claude Desktop (midi-coach) running?');
+    es.onmessage=ev=>{try{this._onMessage(JSON.parse(ev.data));}catch(e){console.warn('coach',e);}};
+  }
+  disconnect(){
+    if(this.es){this.es.close();this.es=null;}
+    this.version=0;this.lessonVersion=0;this.sessionActive=false;this._queue=[];
+    if(this.app._coachActive){
+      this.app._coachActive=false;
+      this.app._notationRenderer.destroy();
+      this.app._updateNotationVisibility();
+    }
+    this._status('Off');
+  }
+  async _onMessage(m){
+    if(m.type==='score'){
+      if(m.version===this.version)return;
+      this.version=m.version;
+      this._queue=[];
+      const res=await fetch(this.base+'score',{cache:'no-store'});
+      const payload=await res.json();
+      if(payload.version!==this.version)return;
+      const r=this.app._notationRenderer;
+      this.app._coachActive=true;
+      document.getElementById('notation-strip').classList.add('visible');
+      r.onReady=()=>{this._queue.forEach(q=>r.post(q));this._queue=[];};
+      r.renderXml(payload.xml);
+      this._status('Showing '+m.title);
+      return;
+    }
+    if(m.type==='lesson'){
+      if(m.version===this.lessonVersion)return;
+      this.lessonVersion=m.version;
+      const res=await fetch(this.base+'lesson',{cache:'no-store'});
+      const lesson=await res.json();
+      if(lesson.version===this.lessonVersion)this.app._loadCoachLesson(lesson,!!m.autostart);
+      return;
+    }
+    if(m.type==='session'){this.sessionActive=!!m.active;return;}
+    // While Learn Mode plays a lesson it scrolls the strip itself; only a live coach
+    // session (wait / rehearsal grading) takes the cursor over.
+    if(m.type==='cursorBeat'&&!m.live&&this.app._learn?.active)return;
+    if(!this.app._notationRenderer.post(m))this._queue.push(m);
+  }
+}
+
 class App{
   constructor(){
     window.app=this;
@@ -3995,6 +4075,8 @@ class App{
     this._learn={active:false,cursorMs:0,_currentNoteMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set()};
     this._learnWrongKeys=new Map();
     this._notationRenderer=new NotationRenderer();
+    this._coachActive=false;
+    this.coach=new CoachLink(this);
     this._musicXmlBars=null;
     this._musicXmlMeta=null;
     this._pendingXmlFile=null;
@@ -4032,6 +4114,7 @@ class App{
     if(Config.kc.chatroom_id)this.kickChat.connect(Config.kc.chatroom_id,Config.kc.transition_ms);
     this._notationRenderer.init();
     this._setupNotationDrag();
+    if(Config.coach?.enabled)this.coach.connect(Config.coach.url);
     this._boundFrame=this._frame.bind(this);
     requestAnimationFrame(this._boundFrame);
   }
@@ -4200,7 +4283,7 @@ class App{
         if(lmS)lmS.style.left=sPct+'%';
         if(lmE)lmE.style.left=ePct+'%';
       }
-      if(l.active&&Config.lrn.notation)this._notationRenderer?.scrollTo(l._currentNoteMs);
+      if(l.active&&Config.lrn.notation&&!this.coach?.sessionActive)this._notationRenderer?.scrollTo(l._currentNoteMs);
     }
   }
 
@@ -4742,7 +4825,7 @@ class App{
   }
 
   _buildNotation(){
-    if(!Config.lrn.notation)return;
+    if(!Config.lrn.notation||this._coachActive)return;
     // OSMD path — raw XML available → iframe renderer handles voices, pedal, arpeggio
     if(this._musicXmlText){
       this._notationRenderer.renderXml(this._musicXmlText);
@@ -4814,9 +4897,9 @@ class App{
   _updateNotationVisibility(){
     const strip=document.getElementById('notation-strip');
     if(!strip)return;
-    const show=this._learn.active&&!!Config.lrn.notation;
+    const show=(this._learn.active&&!!Config.lrn.notation)||this._coachActive;
     strip.classList.toggle('visible',show);
-    if(!show)return;
+    if(!show||this._coachActive)return;  // the coach owns the strip while connected
     if(typeof Vex==='undefined'){
       // VexFlow CDN not yet loaded — show placeholder
       const wrap=document.getElementById('notation-svg-wrap');
@@ -5294,6 +5377,43 @@ class App{
     if(xmlRow)xmlRow.textContent='No MusicXML loaded';
     this._refreshTracksTab();
     this._showToast(file.name);
+  }
+
+  // Lesson pushed live from midi-coach: events come pre-timed from the coach (rests and
+  // tempo included); the sheet strip is already showing the same score via CoachLink.
+  _loadCoachLesson(p,autostart){
+    if(!p?.events?.length){this._showToast('Lesson has no notes');return;}
+    if(this._learn?.active)this._learnStop();
+    this.midiFile.stop();
+    this.midiFile.events=[];
+    this.midiFile.filename=p.title;
+    const l=this._learn;
+    l._events=p.events.map(e=>({ms:e.ms,durationMs:e.durationMs,note:e.note,channel:e.channel,track:0}));
+    l._totalMs=Math.max(...l._events.map(e=>e.ms+e.durationMs));
+    l._currentNoteMs=0;
+    l._pendingChord?.clear();
+    this._musicXmlText=p.xml; this._musicXmlBars=null; this._musicXmlMeta=null;
+    this._channelConfig=[];
+    this._channelConfig[0]={muted:false,hand:'right',r:0,g:230,b:230};
+    this._channelConfig[1]={muted:false,hand:'left',r:180,g:80,b:255};
+    this._channelConfig._file=p.title;
+    this._mode='file';
+    Config.lrn.notation=true;
+    Config.lrn.loop_start_ms=0; Config.lrn.loop_end_ms=0;
+    if(p.learn_mode==='wait'||p.learn_mode==='freeplay')Config.lrn.mode=p.learn_mode;
+    if(p.speed)Config.lrn.speed=p.speed;
+    this.prevNotes.clear();this._activeNotes?.clear();
+    document.getElementById('hud-song').textContent=p.title;
+    const fileRow=document.getElementById('learn-file-row');
+    if(fileRow)fileRow.textContent=p.title;
+    const xmlRow=document.getElementById('xml-file-row');
+    if(xmlRow)xmlRow.textContent=p.title;
+    const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+    const infoEl=document.getElementById('learn-info');
+    if(infoEl)infoEl.textContent=l._events.length+' notes · '+fmt(l._totalMs);
+    this._refreshTracksTab();
+    this._showToast('Lesson: '+p.title);
+    if(autostart){this.showVisualizer();this.startLearn();}
   }
 
   async _loadXmlOnlyForLearn(file){
