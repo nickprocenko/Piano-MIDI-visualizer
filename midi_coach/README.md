@@ -58,6 +58,12 @@ devices on your local network — allow it, since the coach runs on `127.0.0.1`.
 
 ## Setup (Windows)
 
+**Quick way:** from the repo root run `python midi_coach\setup_claude_desktop.py`. It
+creates `.venv`, installs everything, lists your MIDI ports and adds midi-coach to Claude
+Desktop's config (with a backup; other settings are kept). Add `--input Coach` if you use
+a loopMIDI port. Then quit Claude Desktop from the tray and reopen it. The manual steps
+below do the same thing.
+
 1. **Install dependencies** (from the repo root, ideally in the same venv as the visualizer):
 
    ```bat
