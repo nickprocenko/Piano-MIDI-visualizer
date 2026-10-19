@@ -37,6 +37,7 @@ def reference_folders() -> list[pathlib.Path]:
     extra = os.environ.get("MIDI_COACH_REFERENCE_DIRS", "")
     folders += [pathlib.Path(p) for p in extra.split(os.pathsep) if p.strip()]
     folders.append(home() / "references")
+    folders.append(home() / "lessons")
     seen, out = set(), []
     for f in folders:
         key = str(f).lower()

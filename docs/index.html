@@ -3961,7 +3961,7 @@ class NotationRenderer{
 // ═══════════════════════════════════════════════════════
 // midi-coach live score: mirrors the coach's Server-Sent Events into the notation strip.
 class CoachLink{
-  constructor(app){this.app=app;this.es=null;this.base='';this.version=0;this._queue=[];}
+  constructor(app){this.app=app;this.es=null;this.base='';this.version=0;this.lessonVersion=0;this.sessionActive=false;this._queue=[];}
   _status(t){const el=document.getElementById('coach-status');if(el)el.textContent=t;}
   connect(url){
     this.disconnect();
@@ -3976,7 +3976,7 @@ class CoachLink{
   }
   disconnect(){
     if(this.es){this.es.close();this.es=null;}
-    this.version=0;this._queue=[];
+    this.version=0;this.lessonVersion=0;this.sessionActive=false;this._queue=[];
     if(this.app._coachActive){
       this.app._coachActive=false;
       this.app._notationRenderer.destroy();
@@ -4000,6 +4000,18 @@ class CoachLink{
       this._status('Showing '+m.title);
       return;
     }
+    if(m.type==='lesson'){
+      if(m.version===this.lessonVersion)return;
+      this.lessonVersion=m.version;
+      const res=await fetch(this.base+'lesson',{cache:'no-store'});
+      const lesson=await res.json();
+      if(lesson.version===this.lessonVersion)this.app._loadCoachLesson(lesson,!!m.autostart);
+      return;
+    }
+    if(m.type==='session'){this.sessionActive=!!m.active;return;}
+    // While Learn Mode plays a lesson it scrolls the strip itself; only a live coach
+    // session (wait / rehearsal grading) takes the cursor over.
+    if(m.type==='cursorBeat'&&!m.live&&this.app._learn?.active)return;
     if(!this.app._notationRenderer.post(m))this._queue.push(m);
   }
 }
@@ -4271,7 +4283,7 @@ class App{
         if(lmS)lmS.style.left=sPct+'%';
         if(lmE)lmE.style.left=ePct+'%';
       }
-      if(l.active&&Config.lrn.notation&&!this._coachActive)this._notationRenderer?.scrollTo(l._currentNoteMs);
+      if(l.active&&Config.lrn.notation&&!this.coach?.sessionActive)this._notationRenderer?.scrollTo(l._currentNoteMs);
     }
   }
 
@@ -5365,6 +5377,43 @@ class App{
     if(xmlRow)xmlRow.textContent='No MusicXML loaded';
     this._refreshTracksTab();
     this._showToast(file.name);
+  }
+
+  // Lesson pushed live from midi-coach: events come pre-timed from the coach (rests and
+  // tempo included); the sheet strip is already showing the same score via CoachLink.
+  _loadCoachLesson(p,autostart){
+    if(!p?.events?.length){this._showToast('Lesson has no notes');return;}
+    if(this._learn?.active)this._learnStop();
+    this.midiFile.stop();
+    this.midiFile.events=[];
+    this.midiFile.filename=p.title;
+    const l=this._learn;
+    l._events=p.events.map(e=>({ms:e.ms,durationMs:e.durationMs,note:e.note,channel:e.channel,track:0}));
+    l._totalMs=Math.max(...l._events.map(e=>e.ms+e.durationMs));
+    l._currentNoteMs=0;
+    l._pendingChord?.clear();
+    this._musicXmlText=p.xml; this._musicXmlBars=null; this._musicXmlMeta=null;
+    this._channelConfig=[];
+    this._channelConfig[0]={muted:false,hand:'right',r:0,g:230,b:230};
+    this._channelConfig[1]={muted:false,hand:'left',r:180,g:80,b:255};
+    this._channelConfig._file=p.title;
+    this._mode='file';
+    Config.lrn.notation=true;
+    Config.lrn.loop_start_ms=0; Config.lrn.loop_end_ms=0;
+    if(p.learn_mode==='wait'||p.learn_mode==='freeplay')Config.lrn.mode=p.learn_mode;
+    if(p.speed)Config.lrn.speed=p.speed;
+    this.prevNotes.clear();this._activeNotes?.clear();
+    document.getElementById('hud-song').textContent=p.title;
+    const fileRow=document.getElementById('learn-file-row');
+    if(fileRow)fileRow.textContent=p.title;
+    const xmlRow=document.getElementById('xml-file-row');
+    if(xmlRow)xmlRow.textContent=p.title;
+    const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+    const infoEl=document.getElementById('learn-info');
+    if(infoEl)infoEl.textContent=l._events.length+' notes · '+fmt(l._totalMs);
+    this._refreshTracksTab();
+    this._showToast('Lesson: '+p.title);
+    if(autostart){this.showVisualizer();this.startLearn();}
   }
 
   async _loadXmlOnlyForLearn(file){

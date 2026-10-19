@@ -55,6 +55,9 @@ class DisplayHub:
         self._heat: list[dict] | None = None
         self._status = ""
         self._cursor: dict | None = None
+        self._lesson: dict | None = None
+        self._lesson_version = 0
+        self._session: dict = {"type": "session", "active": False}
 
     # -- server ------------------------------------------------------------
 
@@ -96,9 +99,7 @@ class DisplayHub:
     def load_score(self, score: Score) -> None:
         if score.path == self.score_path and self._score_payload:
             return
-        xml = self._xml_cache.get(score.path)
-        if xml is None:
-            xml = self._xml_cache[score.path] = score_to_musicxml(score.path)
+        xml = self.xml_for(score.path)
         with self._lock:
             self._version += 1
             self.score_path = score.path
@@ -108,6 +109,12 @@ class DisplayHub:
             self._cursor = None
             self._status = ""
         self._broadcast({"type": "score", "version": self._version, "title": pathlib.Path(score.path).stem})
+
+    def xml_for(self, path: str) -> str:
+        xml = self._xml_cache.get(path)
+        if xml is None:
+            xml = self._xml_cache[path] = score_to_musicxml(path)
+        return xml
 
     def marks(self, updates: list[tuple[float, int, str]], reset: bool = False) -> None:
         with self._lock:
@@ -122,10 +129,30 @@ class DisplayHub:
             self._heat = bars
         self._broadcast({"type": "heat", "bars": bars or []})
 
-    def cursor(self, beat: float, beats_per_sec: float = 0.0) -> None:
-        msg = {"type": "cursorBeat", "beat": round(beat, 4), "bps": round(beats_per_sec, 4)}
+    def cursor(self, beat: float, beats_per_sec: float = 0.0, live: bool = False) -> None:
+        """live=True: a practice session drives the cursor (the visualizer then lets it
+        override Learn Mode's own scrolling); otherwise it's just positioning."""
+        msg = {"type": "cursorBeat", "beat": round(beat, 4), "bps": round(beats_per_sec, 4), "live": live}
         with self._lock:
             self._cursor = msg
+        self._broadcast(msg)
+
+    def lesson(self, payload: dict) -> int:
+        """Publish a lesson for the visualizer's Learn Mode (title, xml, events, mode...)."""
+        with self._lock:
+            self._lesson_version += 1
+            self._lesson = {**payload, "version": self._lesson_version}
+        self._broadcast({"type": "lesson", "version": self._lesson_version, "title": payload.get("title"), "autostart": payload.get("autostart", False)})
+        return self._lesson_version
+
+    def lesson_payload(self) -> dict | None:
+        with self._lock:
+            return self._lesson
+
+    def session(self, active: bool, mode: str | None = None) -> None:
+        msg = {"type": "session", "active": active, "mode": mode}
+        with self._lock:
+            self._session = msg
         self._broadcast(msg)
 
     def flash(self, text: str) -> None:
@@ -138,9 +165,11 @@ class DisplayHub:
 
     def snapshot(self) -> list[dict]:
         with self._lock:
+            # A page that connects late gets the latest lesson, but never auto-started.
+            lesson = [{"type": "lesson", "version": self._lesson_version, "title": self._lesson.get("title"), "autostart": False}] if self._lesson else []
             if not self._score_payload:
-                return [{"type": "status", "text": "Waiting for a score from Claude…"}]
-            out = [{"type": "score", "version": self._version, "title": self._score_payload["title"]}]
+                return lesson + [{"type": "status", "text": "Waiting for a score from Claude…"}]
+            out = [{"type": "score", "version": self._version, "title": self._score_payload["title"]}] + lesson + [self._session]
             if self._marks:
                 out.append({"type": "marks", "reset": True, "marks": [{"beat": b, "pitch": p, "status": s} for (b, p), s in self._marks.items()]})
             if self._heat:
@@ -210,6 +239,11 @@ def _make_handler(hub: DisplayHub):
             path = self.path.split("?", 1)[0]
             if path == "/events":
                 return self._events()
+            if path == "/lesson":
+                payload = hub.lesson_payload()
+                if not payload:
+                    return self._send(404, b'{"error":"no lesson"}', "application/json")
+                return self._send(200, json.dumps(payload).encode(), "application/json")
             if path == "/score":
                 payload = hub.score_payload()
                 if not payload:

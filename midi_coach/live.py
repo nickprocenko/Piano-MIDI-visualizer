@@ -101,7 +101,7 @@ class LiveSession:
         self._group_started = now
         if self.hub:
             self.hub.marks([(n.beat, n.pitch, "pending") for n in g.notes])
-            self.hub.cursor(self._beat[idx])
+            self.hub.cursor(self._beat[idx], live=True)
 
     # -- lifecycle -------------------------------------------------------------
 
@@ -112,6 +112,7 @@ class LiveSession:
         if self.hub:
             self.hub.marks([], reset=True)
             self.hub.heat(None)
+            self.hub.session(True, self.mode)
         now = time.perf_counter()
         if self.mode == "wait":
             self._set_group(0, now)
@@ -120,12 +121,14 @@ class LiveSession:
             if self.hub:
                 first = self.groups[0]
                 self.hub.marks([(n.beat, n.pitch, "pending") for n in first.notes])
-                self.hub.cursor(self._beat[0])
+                self.hub.cursor(self._beat[0], live=True)
             self._ticker = threading.Thread(target=self._tick, daemon=True)
             self._ticker.start()
         self._status()
 
     def stop(self) -> None:
+        if not self._stop.is_set() and self.hub:
+            self.hub.session(False, self.mode)
         self._stop.set()
 
     def should_stop(self) -> str | None:
@@ -224,7 +227,7 @@ class LiveSession:
                     self._status()
                 if self.hub and now - last_cursor >= 0.25:
                     beat, slope = self.beat_at(ref_t)
-                    self.hub.cursor(beat, slope * self.speed)
+                    self.hub.cursor(beat, slope * self.speed, live=True)
                     last_cursor = now
                 if ref_t > end_ref + 1.0 * self.speed:
                     self.done_reason = "reached the end"

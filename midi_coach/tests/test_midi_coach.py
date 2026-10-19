@@ -386,8 +386,11 @@ class RecordingHub:
     def marks(self, updates, reset=False):
         self.events.append(("marks", list(updates), reset))
 
-    def cursor(self, beat, bps=0.0):
+    def cursor(self, beat, bps=0.0, live=False):
         self.events.append(("cursor", beat, bps))
+
+    def session(self, active, mode=None):
+        self.events.append(("session", active, mode))
 
     def flash(self, text):
         self.events.append(("flash", text))
@@ -480,11 +483,11 @@ def test_display_server_streams_state(ref):
         stream = urllib.request.urlopen(url + "events")
         assert stream.headers["Access-Control-Allow-Origin"] == "*"
         msgs = []
-        while len(msgs) < 3:
+        while len(msgs) < 4:
             line = stream.readline().decode().strip()
             if line.startswith("data: "):
                 msgs.append(json.loads(line[6:]))
-        assert [m["type"] for m in msgs] == ["score", "marks", "status"]
+        assert [m["type"] for m in msgs] == ["score", "session", "marks", "status"]
         hub.flash("F#4")
         while True:
             line = stream.readline().decode().strip()
@@ -519,6 +522,75 @@ def test_mcp_wait_mode_end_to_end(ref, fake_rtmidi, monkeypatch):
         assert heat and {b["bar"] for b in heat} == {1, 2}
         shown = await server.show_heatmap()
         assert shown["bars_shown"] == 2
+
+    try:
+        asyncio.run(run())
+    finally:
+        server.hub.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Lessons
+# ---------------------------------------------------------------------------
+
+
+def test_build_lesson_two_hands(ref):
+    from midi_coach import lessons
+
+    path, score = lessons.build_lesson(
+        "G warm-up", right="g4 a b c' d'2 r4 d'8 c' b1", left="chord{GG2 BB D} r2 GG1", key="G", tempo_bpm=120
+    )
+    assert path.endswith("g-warm-up.musicxml") and "<fifths>1</fifths>" in open(path).read()
+    side = analysis.side_resolver(score)
+    lines = lessons.describe(score, side)
+    assert lines[0] == "1: RH G4@1 A4@2 B4@3 C5@4 | LH G2+B2+D3@1"
+    assert lines[1] == "2: RH D5@1 D5@4 C5@4.5 | LH G2@1"  # rest on beat 3 respected
+    events = lessons.learn_events(score, side)
+    d5 = [e for e in events if e["note"] == 74]
+    assert [e["ms"] for e in d5] == [2000.0, 3500.0]  # 120 bpm: bar 2 starts at 2 s
+    assert {e["channel"] for e in events} == {0, 1}
+    # Lessons live in the reference library.
+    assert library.resolve_reference("g warm-up").name == "g-warm-up.musicxml"
+
+
+def test_lesson_rejects_silently_dropped_tokens(ref):
+    from midi_coach import lessons
+
+    with pytest.raises(ValueError, match="G,"):
+        lessons.build_lesson("bad", left="chord{G,2 B, D} r2")
+    with pytest.raises(ValueError):
+        lessons.build_lesson("bad key", right="c4 d e f", key="H")
+
+
+def test_excerpt_lesson_one_hand(ref):
+    from midi_coach import lessons
+
+    path, score = lessons.excerpt_lesson(ref.path, (3, 4), "left", "etude LH 3-4")
+    assert len(score.bars) == 2
+    assert sorted({n.pitch for n in score.notes}) == [48, 52, 55]
+
+
+def test_create_lesson_tool_publishes(ref, monkeypatch):
+    import json
+    import urllib.request
+
+    from midi_coach import display, server
+
+    monkeypatch.setenv("MIDI_COACH_NO_BROWSER", "1")
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+
+    async def run():
+        out = await server.create_lesson("Scale", right="c4 d e f g a b c'", practice_mode="rehearsal", tempo_percent=70)
+        assert out["notes"] == {"right": 8, "left": 0} and out["bars"] == 2, out
+        lesson = json.loads(urllib.request.urlopen(server.hub.url + "lesson").read())
+        assert lesson["learn_mode"] == "freeplay" and lesson["speed"] == 0.7 and lesson["autostart"]
+        assert len(lesson["events"]) == 8 and lesson["xml"].lstrip().startswith("<?xml")
+        bad = await server.create_lesson("Bad", right="c4 x9")
+        assert "error" in bad
+        again = await server.send_lesson("etude")  # a MIDI reference becomes a lesson too
+        assert again["sent"]["lesson_version"] == 2
+        lesson = json.loads(urllib.request.urlopen(server.hub.url + "lesson").read())
+        assert lesson["xml"].lstrip().startswith("<?xml")
 
     try:
         asyncio.run(run())

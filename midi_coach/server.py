@@ -18,7 +18,7 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import analysis, library, live
+from . import analysis, lessons, library, live
 from .display import DisplayHub
 from .midi_io import Player, PortError, Recorder, RestProfile, build_events, list_ports
 from .notes import note_name, notes_from_events, parse_bars, select_notes
@@ -45,6 +45,11 @@ via its Coach link) with the reference. start_recording(mode='wait') holds the c
 until the right notes are played (best for learning notes); mode='rehearsal' moves at
 tempo_percent and grades notes as they pass (best for performance practice). After each
 take the score shows a bar heat map; show_heatmap(take) redisplays any take's map.
+Custom lessons: create_lesson writes an exercise (tinyNotation per hand, or MusicXML, or
+an excerpt of a reference) and pushes it live into the visualizer's Learn Mode and the
+coach page - no file loading. Check the returned bar-by-bar readout against what you
+meant, then start_recording(reference=<lesson path>, mode=...) to grade it. Target
+lessons at the user's weak spots (worst bars, hands, rhythms) and keep them short.
 Timing numbers are relative to the user's own local tempo; playing slower than
 the score is not an error. Velocity 1-127: ~40 soft, ~64 medium, ~95 loud.
 """
@@ -383,6 +388,101 @@ async def show_score(reference: str | None = None, hand: str = "both", bars: str
     except Exception as exc:
         return _err(exc)
     return {"url": url, "reference": score.path, "viewers_connected": hub.clients}
+
+
+def _publish_lesson(path: str, score, practice_mode: str, tempo_percent: float, autostart: bool) -> dict:
+    side = analysis.side_resolver(score)
+    hub.start()
+    hub.load_score(score)
+    hub.marks([], reset=True)
+    hub.heat(None)
+    hub.status(f"Lesson: {pathlib.Path(path).stem}")
+    version = hub.lesson({
+        "title": pathlib.Path(path).stem,
+        "path": path,
+        "xml": hub.xml_for(path),
+        "events": lessons.learn_events(score, side),
+        "learn_mode": "wait" if practice_mode == "wait" else "freeplay",
+        "speed": max(0.1, tempo_percent / 100),
+        "autostart": autostart,
+    })
+    if hub.clients == 0 and not os.environ.get("MIDI_COACH_NO_BROWSER"):
+        hub.open_browser()
+    return {"lesson_version": version, "viewers_connected": hub.clients}
+
+
+@mcp.tool()
+async def create_lesson(
+    title: str,
+    right: str | None = None,
+    left: str | None = None,
+    time_signature: str = "4/4",
+    key: str = "C",
+    tempo_bpm: float = 80,
+    musicxml: str | None = None,
+    from_reference: str | None = None,
+    bars: str | None = None,
+    hand: str = "both",
+    send: bool = True,
+    practice_mode: str = "wait",
+    tempo_percent: float = 100,
+    autostart: bool = True,
+) -> dict:
+    """Create a practice lesson and push it live to the visualizer's Learn Mode and the coach page.
+
+    Three ways to write it:
+    1. right / left: one music21 tinyNotation string per hand (written in the treble / bass clef):
+       c d e f g a b = C4..B4; c' = C5, c'' = C6; C = C3, CC = C2. Sharps f#, flats b- (B flat).
+       Durations after the pitch: 1 whole, 2 half, 4 quarter, 8 eighth, 16; dots c4.; a note
+       without a number reuses the last duration. Rests r4. Ties c2~ c8. Chords chord{C2 E G}
+       (duration on the first note). Triplets trip{c8 d e}. Example right hand:
+       "g4 a b c' d'2 r4 d'8 c' b1"
+    2. musicxml: a complete MusicXML document (for fingerings, dynamics, voices...).
+    3. from_reference + bars (+ hand): excerpt of an existing piece, e.g. the user's worst bars.
+    key: 'C', 'G', 'Bb', 'F#m', 'Am' (minor with m) or sharps count like -3.
+    practice_mode: Learn Mode style in the visualizer - 'wait' or 'rehearsal' (free-play at
+      tempo_percent). autostart: start Learn Mode immediately when it arrives.
+    Returns the saved path (use it as `reference` for start_recording / compare_take) and a
+    bar-by-bar readout - check it matches what you intended before telling the user.
+    """
+    try:
+        if from_reference:
+            bar_range = parse_bars(bars)
+            if not bar_range:
+                return {"error": "from_reference needs bars, e.g. '9-12'."}
+            ref_path = str(library.resolve_reference(from_reference))
+            path, score = await asyncio.to_thread(lessons.excerpt_lesson, ref_path, bar_range, hand, title)
+        else:
+            path, score = await asyncio.to_thread(lessons.build_lesson, title, right, left, time_signature, key, tempo_bpm, musicxml)
+        if not score.notes:
+            return {"error": "The lesson has no notes.", "path": path}
+        side = analysis.side_resolver(score)
+        out = {
+            "path": path,
+            "bars": len(score.bars),
+            "notes": {"right": sum(1 for n in score.notes if side(n) == "right"), "left": sum(1 for n in score.notes if side(n) == "left")},
+            "duration_sec_at_tempo": round(score.duration, 1),
+            "readout": lessons.describe(score, side),
+            "readout_format": "bar: RH note@beat ... | LH ...; chords joined with +",
+        }
+        if send:
+            out["sent"] = await asyncio.to_thread(_publish_lesson, path, score, practice_mode, tempo_percent, autostart)
+            out["display"] = hub.url
+        out["next"] = f"start_recording(reference={path!r}, mode={practice_mode!r}) to grade the user on it."
+        return out
+    except Exception as exc:
+        return _err(exc)
+
+
+@mcp.tool()
+async def send_lesson(lesson: str, practice_mode: str = "wait", tempo_percent: float = 100, autostart: bool = True) -> dict:
+    """Push an existing lesson or reference file (title or path) live into the visualizer's Learn Mode."""
+    try:
+        score = await asyncio.to_thread(library.get_score, lesson)
+        sent = await asyncio.to_thread(_publish_lesson, score.path, score, practice_mode, tempo_percent, autostart)
+    except Exception as exc:
+        return _err(exc)
+    return {"path": score.path, "sent": sent, "display": hub.url}
 
 
 @mcp.tool()

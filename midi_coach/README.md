@@ -14,6 +14,27 @@ Ask Claude things like:
 - *"Wait mode on bars 1–8, right hand — I'm learning the notes."*
 - *"Rehearsal at 80%, whole piece."*
 
+## Custom lessons, pushed live
+
+Ask Claude for an exercise and it appears in the visualizer's Learn Mode (falling notes plus
+sheet music) and on the coach page **immediately** — no file to save or load. For example:
+
+- *"Write me a 4-bar left-hand exercise for the jump in bar 12."*
+- *"Make a lesson out of my three worst bars from that take, right hand only."*
+- *"Give me a G major contrary-motion scale, Wait mode."*
+
+Claude writes each hand in music21 *tinyNotation* (`g4 a b c' d'2 r4 d'8 c' b1`,
+chords as `chord{GG2 BB D}`), full MusicXML, or cuts an excerpt from a reference. The
+server validates it (a typo is rejected instead of silently dropped), returns a
+bar-by-bar readout so Claude can check it, saves it to `%USERPROFILE%\MidiCoach\lessons`
+and publishes it. Lessons are normal references afterwards, so recording, Wait/Rehearsal
+grading, heat maps and `progress` all work on them.
+
+The visualizer must be connected (Settings → Hardware → *Practice Coach* → Connect; it
+reconnects automatically after a reload). A lesson that arrives while you're in the middle
+of something replaces the current Learn Mode song; a page that connects later receives the
+latest lesson without auto-starting it.
+
 ## Live sheet music
 
 midi-coach reuses the visualizer's OSMD sheet-music strip (`docs/notation.html`) as a
@@ -104,6 +125,8 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `stop_playback` | Stop, release notes and pedal |
 | `show_score` | Show a reference on the live sheet-music page |
 | `show_heatmap` | Draw a take's bar heat map on the live score |
+| `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and push it into Learn Mode |
+| `send_lesson` | Push an existing lesson or reference into Learn Mode |
 
 ## How it works
 
