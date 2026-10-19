@@ -192,7 +192,17 @@ def learn_events(score: Score, side) -> list[dict]:
     ]
 
 
-def describe(score: Score, side) -> list[str]:
+def key_spelling(key: str | int | None) -> str | None:
+    """'sharps' / 'flats' to match a lesson key, None if unknown or C major / A minor."""
+    try:
+        k = _key(key)
+    except ValueError:
+        return None
+    sharps = getattr(k, "sharps", 0) if k is not None else 0
+    return "sharps" if sharps > 0 else "flats" if sharps < 0 else None
+
+
+def describe(score: Score, side, spelling: str | None = None) -> list[str]:
     """One line per bar listing the notes of each hand, so the author can check the lesson."""
     from .notes import note_name
 
@@ -204,7 +214,7 @@ def describe(score: Score, side) -> list[str]:
             groups: dict[float, list[str]] = {}
             for n in in_bar:
                 if side(n) == want:
-                    groups.setdefault(round(n.beat - bar.start_beat, 3), []).append(note_name(n.pitch))
+                    groups.setdefault(round(n.beat - bar.start_beat, 3), []).append(note_name(n.pitch, spelling))
             hands[label] = ["+".join(v) + f"@{k + 1:g}" for k, v in sorted(groups.items())]
         lines.append(f"{bar.number}: RH {' '.join(hands['RH']) or '-'} | LH {' '.join(hands['LH']) or '-'}")
     return lines

@@ -596,3 +596,13 @@ def test_create_lesson_tool_publishes(ref, monkeypatch):
         asyncio.run(run())
     finally:
         server.hub.shutdown()
+
+
+def test_readout_spells_black_keys_in_key(ref):
+    from midi_coach import lessons
+
+    _, score = lessons.build_lesson("E run", right="e16 f# g# a b c'# d'# e' f'# g'# a' b' c''# d''# e''8 "
+                                    "d''#16 c''# b' a' g'# f'# e' d'# c'# b a g# f# e8.", key="E")
+    lines = lessons.describe(score, analysis.side_resolver(score), lessons.key_spelling("E"))
+    assert len(lines) == 2 and "D#6@4.25" in lines[0] and "G#4" in lines[1] and "Ab" not in "".join(lines)
+    assert lessons.key_spelling("Bb") == "flats" and lessons.key_spelling("C") is None

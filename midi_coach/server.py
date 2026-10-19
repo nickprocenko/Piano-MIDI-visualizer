@@ -462,7 +462,7 @@ async def create_lesson(
             "bars": len(score.bars),
             "notes": {"right": sum(1 for n in score.notes if side(n) == "right"), "left": sum(1 for n in score.notes if side(n) == "left")},
             "duration_sec_at_tempo": round(score.duration, 1),
-            "readout": lessons.describe(score, side),
+            "readout": lessons.describe(score, side, None if from_reference or musicxml else lessons.key_spelling(key)),
             "readout_format": "bar: RH note@beat ... | LH ...; chords joined with +",
         }
         if send:

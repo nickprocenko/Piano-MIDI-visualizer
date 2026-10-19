@@ -18,10 +18,14 @@ MUSICXML_SUFFIXES = {".xml", ".musicxml", ".mxl"}
 MIDI_SUFFIXES = {".mid", ".midi"}
 
 _NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+_SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+_FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
 
-def note_name(pitch: int) -> str:
-    return f"{_NOTE_NAMES[pitch % 12]}{pitch // 12 - 1}"
+def note_name(pitch: int, spelling: str | None = None) -> str:
+    """spelling: None (mixed default), 'sharps' or 'flats' (e.g. to match a key signature)."""
+    names = {"sharps": _SHARP_NAMES, "flats": _FLAT_NAMES}.get(spelling or "", _NOTE_NAMES)
+    return f"{names[pitch % 12]}{pitch // 12 - 1}"
 
 
 @dataclass
