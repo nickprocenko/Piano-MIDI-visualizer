@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
+import os
 import statistics
 import sys
 import time
@@ -17,7 +18,8 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import analysis, library
+from . import analysis, library, live
+from .display import DisplayHub
 from .midi_io import Player, PortError, Recorder, RestProfile, build_events, list_ports
 from .notes import note_name, notes_from_events, parse_bars, select_notes
 
@@ -38,6 +40,11 @@ Typical loop:
 5. play_comparison(bars=...) to let them hear their take vs the reference,
    play(reference, bars=..., hand="left", tempo_percent=70) for practice.
 6. progress(reference) to show improvement across sessions.
+Live sheet music: show_score opens a page (and the web visualizer's notation strip,
+via its Coach link) with the reference. start_recording(mode='wait') holds the cursor
+until the right notes are played (best for learning notes); mode='rehearsal' moves at
+tempo_percent and grades notes as they pass (best for performance practice). After each
+take the score shows a bar heat map; show_heatmap(take) redisplays any take's map.
 Timing numbers are relative to the user's own local tempo; playing slower than
 the score is not an error. Velocity 1-127: ~40 soft, ~64 medium, ~95 loud.
 """
@@ -45,7 +52,9 @@ the score is not an error. Velocity 1-127: ~40 soft, ~64 medium, ~95 loud.
 mcp = _Server("midi-coach", instructions=INSTRUCTIONS)
 recorder = Recorder()
 player = Player()
+hub = DisplayHub()
 _last_take: dict = {}
+_live: dict = {"session": None}
 
 
 def _err(exc: Exception) -> dict:
@@ -129,8 +138,12 @@ async def inspect_reference(reference: str, split_note: int = 60) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _on_recording_finished(meta_base: dict):
+def _on_recording_finished(meta_base: dict, session: live.LiveSession | None = None):
     def finish(state) -> None:
+        if session is not None:
+            session.stop()
+            meta_base["mode"] = session.mode
+            meta_base["live"] = session.summary()
         if not state.events or state.note_ons == 0:
             _last_take.clear()
             _last_take.update({"id": None, "stop_reason": state.stop_reason})
@@ -158,9 +171,18 @@ async def start_recording(
     max_minutes: float = 10.0,
     input_port: str | None = None,
     split_note: int = 60,
+    mode: str = "free",
+    tempo_percent: float = 100.0,
+    show_score: bool = True,
 ) -> dict:
     """Start recording the user's playing from the MIDI input.
 
+    mode: 'free' (just record), 'wait' (cursor waits for the right notes, like Synthesia
+      Melody Practice) or 'rehearsal' (cursor moves at tempo_percent once the first note
+      is played; notes are graded hit/missed live, like Synthesia Song Recital).
+      wait/rehearsal need a reference and end automatically at the end of the piece/bars.
+    show_score: show the reference on the live sheet-music page (opens the browser if no
+      display is connected).
     reference: optional reference title/path; enables rest-aware auto-stop and auto-compare.
     hand: 'both' | 'right' | 'left' - what the user is practicing.
     bars: e.g. '9-16' to practice a section.
@@ -168,9 +190,18 @@ async def start_recording(
       timeout is stretched to cover the longest written rest still ahead.
     Recording waits up to 2 minutes for the first note. Then call wait_for_recording.
     """
-    meta = {"reference": None, "hand": hand, "bars": bars, "split_note": split_note}
+    mode = (mode or "free").lower()
+    if mode not in ("free",) + live.MODES:
+        return {"error": "mode must be 'free', 'wait' or 'rehearsal'."}
+    if mode != "free" and not reference:
+        return {"error": f"{mode} mode needs a reference to follow."}
+    if recorder.active:
+        return {"error": "A recording is already running. Call stop_recording first."}
+    meta = {"reference": None, "hand": hand, "bars": bars, "split_note": split_note, "mode": mode}
     rests = None
     selection = None
+    session = None
+    display_url = None
     try:
         if reference:
             score = await asyncio.to_thread(library.get_score, reference)
@@ -179,20 +210,70 @@ async def start_recording(
                 return {"error": f"No reference notes for hand={hand} bars={bars}."}
             rests = RestProfile.from_notes(notes)
             meta["reference"] = score.path
-        recorder.on_finish = _on_recording_finished(meta)
+            if show_score:
+                display_url = await asyncio.to_thread(_show, score, notes)
+            if mode != "free":
+                session = live.LiveSession(mode, score, notes, hub if show_score else None, tempo_percent)
+                meta["tempo_percent"] = tempo_percent if mode == "rehearsal" else None
+                silence_sec, rests = 300.0, None  # the session decides when the piece is over
+            elif show_score:
+                hub.status("Recording (free play) · Claude will analyze when you stop")
+        recorder.on_finish = _on_recording_finished(meta, session)
+        recorder.listener = session.on_message if session else None
+        recorder.external_stop = session.should_stop if session else None
         port = await asyncio.to_thread(recorder.start, input_port, silence_sec, max_minutes * 60, 120.0, rests)
+        if session:
+            session.start()
+        _live["session"] = session
     except Exception as exc:
         return _err(exc)
     _last_take.clear()
     longest = max(rests.rests, default=0.0) if rests else 0.0
+    if mode == "wait":
+        auto_stop = "when the last chord is played (or 5 minutes idle)"
+    elif mode == "rehearsal":
+        auto_stop = f"after the last note passes at {tempo_percent:g}% tempo (clock starts on the first note)"
+    else:
+        auto_stop = f"{silence_sec}s of silence" + (f", extended through written rests (longest {longest:.1f}s at score tempo)" if longest > silence_sec else "")
     return {
         "recording": True,
+        "mode": mode,
         "port": port,
         "reference": meta["reference"],
         "selection": selection,
-        "auto_stop": f"{silence_sec}s of silence" + (f", extended through written rests (longest {longest:.1f}s at score tempo)" if longest > silence_sec else ""),
+        "display": display_url,
+        "auto_stop": auto_stop,
         "next": "Tell the user to start playing, then call wait_for_recording.",
     }
+
+
+def _show(score, notes) -> str:
+    """Load a score on the live display, opening the browser if nothing is watching."""
+    url = hub.start()
+    hub.load_score(score)
+    hub.marks([], reset=True)
+    hub.heat(None)
+    if notes:
+        hub.cursor(min(n.beat for n in notes))
+    if hub.clients == 0 and not os.environ.get("MIDI_COACH_NO_BROWSER"):
+        hub.open_browser()
+    return url
+
+
+def _push_heat(meta: dict, score, per_bar: list[dict] | None) -> list[dict] | None:
+    if not hub.url:
+        return None
+    if meta.get("mode") in live.MODES and meta.get("live"):
+        bars = live.heat_from_live(score, meta["live"])
+    elif per_bar is not None:
+        bars = live.heat_from_comparison(score, per_bar)
+    else:
+        return None
+    hub.load_score(score)
+    hub.cursor(bars[0]["start"] if bars else 0.0)
+    hub.heat(bars)
+    hub.status(f"Take {meta.get('id')} · bar heat map (green = clean, red = most problems)")
+    return bars
 
 
 def _summary(report: dict) -> dict:
@@ -214,6 +295,17 @@ def _compare(take_meta: dict, reference: str | None, hand: str | None, bars: str
     if "error" in report:
         return report
     report = {"take": take_meta["id"], "reference": score.path, "selection": selection, **report}
+    if take_meta.get("mode") == "wait":
+        # The cursor waited for the player, so timing and tempo say nothing here.
+        skipped = {"note": "Wait mode take: the cursor waited for you, so timing/tempo aren't measured."}
+        report["timing"], report["tempo"] = skipped, skipped
+        report["scores"] = {"overall": report["scores"]["notes"], "notes": report["scores"]["notes"], "method": "wait mode: note accuracy only"}
+    if take_meta.get("live"):
+        report["live"] = take_meta["live"]
+    try:
+        _push_heat(take_meta, score, report["_per_bar"])
+    except Exception as exc:  # display problems never fail an analysis
+        log.warning("heat map push failed: %s", exc)
     if save:
         take_meta.setdefault("comparisons", []).append({
             "when": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -222,7 +314,7 @@ def _compare(take_meta: dict, reference: str | None, hand: str | None, bars: str
             "bars": report["scope"]["bars"],
             "scores": report["scores"],
             "notes": report["notes"],
-            "tempo_bpm": report["tempo"]["your_bpm"],
+            "tempo_bpm": report["tempo"].get("your_bpm"),
             "per_bar": [{k: b[k] for k in ("bar", "wrong", "missed", "extra", "timing_ms")} for b in report["_per_bar"]],
         })
         library.update_take(take_meta)
@@ -243,7 +335,9 @@ async def wait_for_recording(max_wait_sec: float = 45.0, auto_compare: bool = Tr
     done = await asyncio.to_thread(recorder.wait, max_wait_sec)
     status = recorder.status()
     if not done:
-        return {**status, "next": "Still going - call wait_for_recording again."}
+        session = _live["session"]
+        progress = {k: v for k, v in session.summary().items() if k != "per_bar"} if session else None
+        return {**status, "live": progress, "next": "Still going - call wait_for_recording again."}
     return await _finished_result(status, auto_compare)
 
 
@@ -267,6 +361,54 @@ async def _finished_result(status: dict, auto_compare: bool) -> dict:
 
 
 @mcp.tool()
+async def show_score(reference: str | None = None, hand: str = "both", bars: str | None = None, open_browser: bool = True, split_note: int = 60) -> dict:
+    """Show a reference on the live sheet-music page (http://127.0.0.1:8765/) and in the
+    web visualizer's notation strip when its Coach link is on. Defaults to the latest take's reference."""
+    try:
+        if not reference:
+            reference = library.get_take("latest").get("reference")
+            if not reference:
+                return {"error": "No reference given and the latest take has none."}
+        score = await asyncio.to_thread(library.get_score, reference)
+        notes, selection, _ = _selection(score, hand, bars, split_note)
+        url = hub.start()
+        hub.load_score(score)
+        hub.marks([], reset=True)
+        hub.heat(None)
+        if notes:
+            hub.cursor(min(n.beat for n in notes))
+        hub.status(f"{pathlib.Path(score.path).stem} · {selection.get('method')}" + (f" · bars {bars}" if bars else ""))
+        if open_browser and hub.clients == 0 and not os.environ.get("MIDI_COACH_NO_BROWSER"):
+            hub.open_browser()
+    except Exception as exc:
+        return _err(exc)
+    return {"url": url, "reference": score.path, "viewers_connected": hub.clients}
+
+
+@mcp.tool()
+async def show_heatmap(take: str = "latest") -> dict:
+    """Show a take's bar heat map on the live score (green = clean bar, red = most problems)."""
+    try:
+        meta = library.get_take(take)
+        ref = meta.get("reference")
+        if not ref:
+            return {"error": "That take has no reference to draw on."}
+        score = await asyncio.to_thread(library.get_score, ref)
+        comps = [c for c in meta.get("comparisons", []) if c["reference"] == score.path]
+        if not comps and not meta.get("live"):
+            await asyncio.to_thread(_compare, meta, None, None, None, None, "normal", True)
+            comps = [c for c in meta.get("comparisons", []) if c["reference"] == score.path]
+        hub.start()
+        bars = await asyncio.to_thread(_push_heat, meta, score, comps[-1]["per_bar"] if comps else None)
+        if hub.clients == 0 and not os.environ.get("MIDI_COACH_NO_BROWSER"):
+            hub.open_browser()
+    except Exception as exc:
+        return _err(exc)
+    worst = sorted((b for b in bars or [] if b["value"] > 0), key=lambda b: -b["value"])[:8]
+    return {"url": hub.url, "take": meta["id"], "bars_shown": len(bars or []), "hottest_bars": worst}
+
+
+@mcp.tool()
 async def stop_recording(auto_compare: bool = True) -> dict:
     """Stop the current recording now and save the take (then compare/analyze it)."""
     if recorder.status().get("state") == "idle":
@@ -278,7 +420,13 @@ async def stop_recording(auto_compare: bool = True) -> dict:
 @mcp.tool()
 async def status() -> dict:
     """Current recording and playback status."""
-    return {"recording": recorder.status(), "playback": player.status()}
+    session = _live["session"]
+    return {
+        "recording": recorder.status(),
+        "live": session.summary() if session and recorder.active else None,
+        "display": {"url": hub.url, "viewers_connected": hub.clients, "score": hub.score_path},
+        "playback": player.status(),
+    }
 
 
 # ---------------------------------------------------------------------------

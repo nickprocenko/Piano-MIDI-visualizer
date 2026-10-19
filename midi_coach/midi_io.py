@@ -125,6 +125,8 @@ class Recorder:
         self._midi_in = None
         self._monitor: threading.Thread | None = None
         self.on_finish = None  # callback(state) run on the monitor thread
+        self.listener = None  # callback(now, message) for live judging, run on the MIDI thread
+        self.external_stop = None  # callable() -> stop reason or None
 
     @property
     def active(self) -> bool:
@@ -179,6 +181,11 @@ class Recorder:
             elif status == 0xB0 and len(message) >= 3 and message[1] == 64:
                 st.pedal_down = message[2] >= 64
             st.last_activity = now
+        if self.listener:
+            try:
+                self.listener(now, message)
+            except Exception:  # a display bug must never break recording
+                pass
 
     def _timeout(self, st: RecordingState, now: float) -> float:
         silence_sec, _, _, rests = self._params
@@ -208,6 +215,8 @@ class Recorder:
                         reason = "no notes played"
                 elif now - st.first_note_at > max_sec:
                     reason = "max duration reached"
+                elif self.external_stop and (ext := self.external_stop()):
+                    reason = ext
                 elif not st.held:
                     st.current_timeout = self._timeout(st, now)
                     if now - st.last_activity > st.current_timeout:

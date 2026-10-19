@@ -31,6 +31,7 @@ class Note:
     end: float
     velocity: int
     part: int = 0
+    beat: float = 0.0  # quarter notes from the start of the file (for score display)
 
     @property
     def duration(self) -> float:
@@ -56,6 +57,8 @@ class Bar:
     end: float
     numerator: int
     denominator: int
+    start_beat: float = 0.0  # quarter notes
+    end_beat: float = 0.0
 
 
 @dataclass
@@ -187,7 +190,7 @@ def load_midi(path: str | pathlib.Path) -> Score:
                 key = (t_idx, msg.channel)
                 if key not in parts:
                     parts[key] = Part(index=-1, track=t_idx, channel=msg.channel, name=track_name)
-                notes.append(Note(msg.note, tmap.to_seconds(start_tick), tmap.to_seconds(tick), vel))
+                notes.append(Note(msg.note, tmap.to_seconds(start_tick), tmap.to_seconds(tick), vel, beat=start_tick / ppq))
                 note_keys.append(key)
             elif msg.type == "control_change" and msg.control == 64:
                 pedal.append((tmap.to_seconds(tick), msg.value))
@@ -239,7 +242,7 @@ def _build_bars(tmap: _TempoMap, ppq: int, sigs: list[tuple[int, int, int]], end
         # A signature change in the middle of a bar starts a new bar there.
         if sig_i + 1 < len(sigs) and sigs[sig_i + 1][0] < bar_end:
             bar_end = sigs[sig_i + 1][0]
-        bars.append(Bar(len(bars) + 1, tmap.to_seconds(tick), tmap.to_seconds(bar_end), num, den))
+        bars.append(Bar(len(bars) + 1, tmap.to_seconds(tick), tmap.to_seconds(bar_end), num, den, tick / ppq, bar_end / ppq))
         tick = bar_end
     return bars
 

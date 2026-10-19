@@ -370,3 +370,157 @@ def test_wait_without_recording_returns_immediately(monkeypatch):
     started = time.perf_counter()
     out = asyncio.run(server.wait_for_recording(max_wait_sec=10))
     assert "error" in out and time.perf_counter() - started < 1
+
+
+# ---------------------------------------------------------------------------
+# Live modes + display server
+# ---------------------------------------------------------------------------
+
+
+class RecordingHub:
+    """DisplayHub stand-in that records what would be sent to the page."""
+
+    def __init__(self):
+        self.events = []
+
+    def marks(self, updates, reset=False):
+        self.events.append(("marks", list(updates), reset))
+
+    def cursor(self, beat, bps=0.0):
+        self.events.append(("cursor", beat, bps))
+
+    def flash(self, text):
+        self.events.append(("flash", text))
+
+    def status(self, text):
+        self.events.append(("status", text))
+
+    def heat(self, bars):
+        self.events.append(("heat", bars))
+
+    def statuses(self, kind):
+        return [m for e in self.events if e[0] == "marks" for m in e[1] if m[2] == kind]
+
+
+def _on(pitch):
+    return [0x90, pitch, 80]
+
+
+def test_live_wait_mode(ref):
+    from midi_coach import live
+
+    notes, _ = select_notes(ref, "right", bars=(1, 1))
+    hub = RecordingHub()
+    sess = live.LiveSession("wait", ref, notes, hub)
+    sess.start()
+    first_chord = [m for m in hub.statuses("pending")]
+    assert [m[1] for m in first_chord] == [72]
+    t = 0.0
+    sess.on_message(t, _on(61))  # wrong key: flashes, cursor stays
+    assert ("flash", "C#4") in hub.events and sess.wrong == 1
+    for n in notes:
+        t += 0.5
+        sess.on_message(t, _on(n.pitch))
+    assert sess.should_stop() == "finished the piece"
+    assert sess.hits == len(notes) == len(hub.statuses("hit"))
+    cursors = [e[1] for e in hub.events if e[0] == "cursor"]
+    assert cursors == sorted(cursors) and cursors[-1] == pytest.approx(3.5)  # last eighth of bar 1
+    summary = sess.summary()
+    assert summary["per_bar"]["1"]["wrong"] == 1
+    heat = live.heat_from_live(ref, summary)
+    assert heat[0]["bar"] == 1 and heat[0]["value"] > 0 and "1 wrong" in heat[0]["label"]
+    assert heat[0]["start"] == 0 and heat[0]["end"] == 4
+
+
+def test_live_rehearsal_mode(ref):
+    from midi_coach import live
+
+    notes, _ = select_notes(ref, "right", bars=(1, 1))
+    hub = RecordingHub()
+    sess = live.LiveSession("rehearsal", ref, notes, hub, tempo_percent=400)  # 8 eighths in 0.6 s
+    sess.start()
+    try:
+        sess.on_message(time.perf_counter(), _on(30))  # before the start: ignored
+        assert sess.wrong == 0
+        t0 = time.perf_counter()
+        sess.on_message(t0, _on(notes[0].pitch))  # starts the clock
+        for n in notes[1:6]:  # play five more on time, skip the last two
+            due = t0 + (n.start - notes[0].start) / 4
+            while time.perf_counter() < due:
+                time.sleep(0.002)
+            sess.on_message(time.perf_counter(), _on(n.pitch))
+        deadline = time.time() + 5
+        while not sess.should_stop() and time.time() < deadline:
+            time.sleep(0.02)
+    finally:
+        sess.stop()
+    assert sess.should_stop() == "reached the end"
+    assert sess.hits == 6 and sess.misses == 2
+    assert len(hub.statuses("missed")) == 2
+    assert any(e[0] == "cursor" and e[2] > 0 for e in hub.events)  # moving cursor with tempo
+
+
+def test_display_server_streams_state(ref):
+    import json
+    import urllib.request
+
+    from midi_coach import display
+
+    hub = display.DisplayHub()
+    url = hub.start()
+    try:
+        page = urllib.request.urlopen(url).read().decode()
+        assert "notation.html" in page
+        assert b"applyMarks" in urllib.request.urlopen(url + "notation.html").read()
+        hub.load_score(ref)  # MIDI -> MusicXML via music21
+        payload = json.loads(urllib.request.urlopen(url + "score").read())
+        assert payload["xml"].lstrip().startswith("<?xml") and payload["version"] == 1
+        hub.marks([(0.0, 72, "hit")])
+        hub.status("hello")
+        stream = urllib.request.urlopen(url + "events")
+        assert stream.headers["Access-Control-Allow-Origin"] == "*"
+        msgs = []
+        while len(msgs) < 3:
+            line = stream.readline().decode().strip()
+            if line.startswith("data: "):
+                msgs.append(json.loads(line[6:]))
+        assert [m["type"] for m in msgs] == ["score", "marks", "status"]
+        hub.flash("F#4")
+        while True:
+            line = stream.readline().decode().strip()
+            if line.startswith("data: "):
+                assert json.loads(line[6:]) == {"type": "flash", "text": "F#4"}
+                break
+        stream.close()
+    finally:
+        hub.shutdown()
+
+
+def test_mcp_wait_mode_end_to_end(ref, fake_rtmidi, monkeypatch):
+    from midi_coach import display, server
+
+    monkeypatch.setenv("MIDI_COACH_NO_BROWSER", "1")
+    monkeypatch.setattr(server, "recorder", midi_io.Recorder())
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+
+    async def run():
+        res = await server.start_recording(reference="etude", hand="right", bars="1-2", mode="wait")
+        assert res.get("recording") and res["display"], res
+        fin = FakeIn.instance
+        for n in [n for n in ref.notes if n.part == 0 and n.start < ref.bars[2].start]:
+            fin.send([0x90, n.pitch, 70])
+            time.sleep(0.03)
+            fin.send([0x80, n.pitch, 0])
+        out = await server.wait_for_recording(max_wait_sec=5)
+        assert out["stop_reason"] == "finished the piece", out
+        comp = out["comparison"]
+        assert comp["scores"]["method"].startswith("wait mode") and comp["live"]["hits"] == 16
+        heat = server.hub._heat
+        assert heat and {b["bar"] for b in heat} == {1, 2}
+        shown = await server.show_heatmap()
+        assert shown["bars_shown"] == 2
+
+    try:
+        asyncio.run(run())
+    finally:
+        server.hub.shutdown()

@@ -11,6 +11,29 @@ Ask Claude things like:
 - *"Play bars 9–16 of the left hand at 70% so I can practice the right hand over it."*
 - *"Let me hear my take of the worst bar, then how it should sound."*
 - *"Am I getting better at the Moonlight Sonata?"*
+- *"Wait mode on bars 1–8, right hand — I'm learning the notes."*
+- *"Rehearsal at 80%, whole piece."*
+
+## Live sheet music
+
+midi-coach reuses the visualizer's OSMD sheet-music strip (`docs/notation.html`) as a
+live score. Claude opens it at **http://127.0.0.1:8765/** (the coach page) when you
+start a session; you can also show it inside the visualizer (below).
+
+| Mode | Cursor | Grading |
+|------|--------|---------|
+| `wait` | Holds on each chord until you play every note of it (Synthesia *Melody Practice*) | Notes turn **green** as you hit them, the next chord is **cyan**, wrong keys flash in red. Time stuck per bar is recorded. |
+| `rehearsal` | Starts on your first note and moves at `tempo_percent` (Synthesia *Song Recital*) | Notes turn **green** when hit within ±200 ms, **red** when they pass unplayed. |
+| `free` | Score shown, no live grading | Analyzed after you stop (the original behavior). |
+
+After every take the score shows a **bar heat map**: green = clean bar, through yellow to
+red = most problems, with a label such as "2 wrong, 1 missed". `show_heatmap(take)` redraws
+it for any earlier take. Wait-mode takes are scored on notes only, since the cursor waited.
+
+**In the web visualizer:** Settings → Hardware → *Practice Coach (Claude)* → Connect. The
+sheet-music strip then mirrors the coach (it takes over the strip from Learn Mode while
+connected). When the visualizer runs from GitHub Pages, Chrome may ask to allow access to
+devices on your local network — allow it, since the coach runs on `127.0.0.1`.
 
 ## Setup (Windows)
 
@@ -69,7 +92,7 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `list_midi_ports` | Show MIDI inputs/outputs |
 | `find_reference` | Fuzzy search the reference library by title |
 | `inspect_reference` | Parts (track + channel), which hand each is, bars, tempo, pedal, long rests |
-| `start_recording` | Record from the input; optional reference / hand / bars |
+| `start_recording` | Record from the input; optional reference / hand / bars; `mode` = free / wait / rehearsal |
 | `wait_for_recording` | Block until the take ends; returns the comparison (or standalone analysis) |
 | `stop_recording` | End the take now |
 | `status` | Recording + playback status |
@@ -79,6 +102,8 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `play` | Play a reference or take: bar range, single hand, tempo %, loops |
 | `play_comparison` | A/B: your take of a passage, then the reference (at your tempo by default) |
 | `stop_playback` | Stop, release notes and pedal |
+| `show_score` | Show a reference on the live sheet-music page |
+| `show_heatmap` | Draw a take's bar heat map on the live score |
 
 ## How it works
 
@@ -117,6 +142,8 @@ Takes are saved as `.mid` plus `.json` in `%USERPROFILE%\MidiCoach\takes` (overr
 | `MIDI_COACH_HOME` | `~/MidiCoach` | Takes and extra references |
 | `MIDI_COACH_REFERENCE_DIRS` | — | Extra reference folders (`;`-separated) |
 | `MIDI_COACH_CONFIG` | `<repo>/config.json` | Where to read `search_folders` |
+| `MIDI_COACH_DISPLAY_PORT` | `8765` | Live score server port (next free port if taken) |
+| `MIDI_COACH_NO_BROWSER` | — | Set to stop Claude opening the browser automatically |
 
 ## Development
 

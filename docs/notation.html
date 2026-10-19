@@ -42,6 +42,52 @@
       pointer-events: none;
       z-index: 90;
     }
+    /* midi-coach overlays: bar heat map (scrolls with the score), wrong-key flash, HUD */
+    #heat-layer {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      pointer-events: none;
+      z-index: 5;
+    }
+    .heat-bar {
+      position: absolute;
+      top: 0; bottom: 0;
+      mix-blend-mode: multiply;
+      border-right: 1px solid rgba(0,0,0,.08);
+    }
+    .heat-bar span {
+      position: absolute;
+      left: 4px; top: 4px;
+      font: 600 11px/1.2 'Segoe UI', Arial, sans-serif;
+      color: #222;
+      white-space: nowrap;
+    }
+    #flash {
+      position: absolute;
+      top: 8px;
+      transform: translateX(-50%);
+      padding: 3px 10px;
+      border-radius: 10px;
+      background: rgba(220, 40, 40, .92);
+      color: #fff;
+      font: 600 13px/1.4 'Segoe UI', Arial, sans-serif;
+      opacity: 0;
+      transition: opacity .25s;
+      pointer-events: none;
+      z-index: 110;
+    }
+    #hud {
+      position: absolute;
+      top: 6px; left: 70px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: rgba(8,10,16,.75);
+      color: #e8f6f6;
+      font: 12px/1.5 'Segoe UI', Arial, sans-serif;
+      pointer-events: none;
+      z-index: 110;
+      display: none;
+    }
     #status {
       position: absolute;
       inset: 0;
@@ -61,13 +107,20 @@
 <div id="viewport">
   <div id="score-track">
     <div id="osmd-div"></div>
+    <div id="heat-layer"></div>
   </div>
+  <div id="flash"></div>
+  <div id="hud"></div>
   <div id="playhead"></div>
   <div id="fade-left"></div>
 </div>
 <div id="status">Waiting for score…</div>
 
 <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.9.3/build/opensheetmusicdisplay.min.js"></script>
+<script>
+// Offline fallback: midi-coach serves a bundled copy next to this page.
+if (typeof opensheetmusicdisplay === 'undefined') document.write('<script src="opensheetmusicdisplay.min.js"><\/script>');
+</script>
 <script>
 "use strict";
 
@@ -82,6 +135,14 @@ let rendered     = false;
 let currentMs    = 0;
 let timestampMap = [];
 let pxPerMs      = 0.18;
+
+// Beat-driven mode (midi-coach): positions in quarter notes instead of ms.
+let beatMap      = [];   // [{q, xPx}] sorted by q
+let noteEntries  = [];   // [{q, pitch, el}] one per rendered notehead group
+let measureMap   = [];   // [{q, x0, x1}] barline-to-barline extent of each measure
+let beatMode     = false;
+let beatTarget   = 0, beatShown = 0, beatBps = 0, beatAt = 0;
+const MARK_COLORS = { hit: '#159a3c', missed: '#d42020', pending: '#00a6b8' };
 
 function positionPlayhead() {
   playheadEl.style.left = (window.innerWidth * PLAYHEAD_FRAC) + 'px';
@@ -98,12 +159,28 @@ window.addEventListener('message', async e => {
     updatePosition(e.data.ms);
   } else if (e.data.type === 'clear') {
     clearScore();
+  } else if (e.data.type === 'cursorBeat') {
+    beatMode = true;
+    beatTarget = e.data.beat; beatBps = e.data.bps || 0; beatAt = performance.now();
+    if (beatBps > 0) beatShown = beatTarget;
+  } else if (e.data.type === 'marks') {
+    applyMarks(e.data.marks || [], !!e.data.reset);
+  } else if (e.data.type === 'heat') {
+    drawHeat(e.data.bars || []);
+  } else if (e.data.type === 'flash') {
+    showFlash(e.data.text);
+  } else if (e.data.type === 'status') {
+    const hud = document.getElementById('hud');
+    hud.textContent = e.data.text || '';
+    hud.style.display = e.data.text ? 'block' : 'none';
   }
 });
 
 function clearScore() {
   rendered = false;
   timestampMap = [];
+  beatMap = []; noteEntries = []; measureMap = []; beatMode = false;
+  document.getElementById('heat-layer').innerHTML = '';
   scoreTrack.style.transform = 'translateX(0px)';
   document.getElementById('osmd-div').innerHTML = '';
   statusEl.style.display = 'flex';
@@ -113,6 +190,8 @@ function clearScore() {
 async function loadScore(musicXml) {
   rendered     = false;
   timestampMap = [];
+  beatMap = []; noteEntries = []; measureMap = []; beatMode = false;
+  document.getElementById('heat-layer').innerHTML = '';
   statusEl.style.display = 'flex';
   statusEl.textContent   = 'Rendering score…';
   scoreTrack.style.transform = 'translateX(0px)';
@@ -183,6 +262,92 @@ async function loadScore(musicXml) {
 
 function updatePosition(ms) {
   currentMs = ms;
+  beatMode = false;
+}
+
+// ── midi-coach: note marks, heat map, flash ───────────────────────────────────
+function findNote(beat, pitch) {
+  let best = null, bestD = 0.26;
+  for (const n of noteEntries) {
+    if (n.pitch !== pitch) continue;
+    const d = Math.abs(n.q - beat);
+    if (d < bestD) { best = n; bestD = d; }
+  }
+  return best;
+}
+
+function colorNote(el, color) {
+  if (!el) return;
+  el.querySelectorAll('path, ellipse, rect').forEach(p => {
+    p.style.fill = color || '';
+    p.style.stroke = color || '';
+  });
+}
+
+function applyMarks(marks, reset) {
+  if (reset) noteEntries.forEach(n => colorNote(n.el, ''));
+  for (const m of marks) {
+    const n = findNote(m.beat, m.pitch);
+    if (n) colorNote(n.el, MARK_COLORS[m.status] || '');
+  }
+}
+
+function getXForBeat(q) {
+  const n = beatMap.length;
+  if (n === 0) return 0;
+  if (n === 1) return beatMap[0].xPx;
+  let lo = 0, hi = n - 1;
+  if (q <= beatMap[0].q) { lo = 0; hi = 1; }
+  else if (q >= beatMap[n - 1].q) { lo = n - 2; hi = n - 1; }
+  else {
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (beatMap[mid].q <= q) lo = mid; else hi = mid;
+    }
+  }
+  const a = beatMap[lo], b = beatMap[hi];
+  return a.xPx + (q - a.q) * (b.xPx - a.xPx) / ((b.q - a.q) || 1);
+}
+
+// Barline x for a bar boundary at beat q; falls back to note positions.
+function getBarlineX(q, isEnd) {
+  const ms = measureMap.filter(Boolean);
+  for (let i = 0; i < ms.length; i++) {
+    if (Math.abs(ms[i].q - q) < 0.02) return ms[i].x0;
+  }
+  if (isEnd && ms.length && q > ms[ms.length - 1].q) return ms[ms.length - 1].x1;
+  return getXForBeat(q);
+}
+
+function drawHeat(bars) {
+  const layer = document.getElementById('heat-layer');
+  layer.innerHTML = '';
+  if (!rendered) return;
+  for (const b of bars) {
+    const x0 = getBarlineX(b.start, false), x1 = getBarlineX(b.end, true);
+    const div = document.createElement('div');
+    div.className = 'heat-bar';
+    const v = Math.max(0, Math.min(1, b.value));
+    // green (clean) → yellow → red (most problems)
+    div.style.background = `hsla(${Math.round(120 * (1 - v))}, 85%, 55%, ${0.18 + 0.32 * v})`;
+    div.style.left = x0 + 'px';
+    div.style.width = Math.max(4, x1 - x0) + 'px';
+    div.title = `Bar ${b.bar}: ${b.label}`;
+    const label = document.createElement('span');
+    label.textContent = v > 0 ? `${b.bar}: ${b.label}` : '';
+    div.appendChild(label);
+    layer.appendChild(div);
+  }
+}
+
+let flashTimer = null;
+function showFlash(text) {
+  const el = document.getElementById('flash');
+  el.textContent = '✗ ' + text;
+  el.style.left = (window.innerWidth * PLAYHEAD_FRAC) + 'px';
+  el.style.opacity = '1';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { el.style.opacity = '0'; }, 700);
 }
 
 // ── Timestamp map ─────────────────────────────────────────────────────────────
@@ -210,6 +375,27 @@ function buildTimestampMap() {
       if (curEl) {
         const r   = curEl.getBoundingClientRect();
         const xPx = r.left - trackRect.left + r.width * 0.5;
+        const q   = ts.RealValue * 4.0;
+        if (beatMap.length === 0 || q > beatMap[beatMap.length - 1].q) beatMap.push({q, xPx});
+        try {
+          const mi = osmd.cursor.iterator.CurrentMeasureIndex;
+          if (!measureMap[mi]) {
+            const gm = osmd.GraphicSheet.MeasureList[mi][0];
+            const svgEl = document.querySelector('#osmd-div svg');
+            const ox = svgEl.getBoundingClientRect().left - trackRect.left;
+            const unit = 10 * osmd.zoom;  // OSMD units -> px
+            const x0 = ox + gm.PositionAndShape.AbsolutePosition.x * unit;
+            measureMap[mi] = {q, x0, x1: x0 + gm.PositionAndShape.Size.width * unit};
+          }
+        } catch (_) {}
+        try {
+          for (const gn of osmd.cursor.GNotesUnderCursor()) {
+            const sn = gn.sourceNote;
+            if (!sn || sn.isRest()) continue;
+            if (sn.NoteTie && sn.NoteTie.StartNote !== sn) continue;  // tie continuation: not a new key press
+            noteEntries.push({q, pitch: sn.halfTone + 12, el: gn.getSVGGElement()});
+          }
+        } catch (_) {}
         if (map.length === 0 || xPx - map[map.length - 1].xPx > 1) {
           map.push({timeMs, xPx});
         } else if (timeMs < map[map.length - 1].timeMs) {
@@ -296,6 +482,13 @@ function tick() {
   requestAnimationFrame(tick);
   if (!rendered || timestampMap.length === 0) return;
   const phX   = window.innerWidth * PLAYHEAD_FRAC;
+  if (beatMode && beatMap.length) {
+    const now = performance.now();
+    if (beatBps > 0) beatShown = beatTarget + beatBps * (now - beatAt) / 1000;
+    else beatShown += (beatTarget - beatShown) * 0.18;  // ease toward the waiting chord
+    scoreTrack.style.transform = `translateX(${(phX - getXForBeat(beatShown)).toFixed(1)}px)`;
+    return;
+  }
   const noteX = getXForTime(currentMs);
   scoreTrack.style.transform = `translateX(${(phX - noteX).toFixed(1)}px)`;
 }
