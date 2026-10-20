@@ -133,6 +133,24 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `show_heatmap` | Draw a take's bar heat map on the live score |
 | `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and push it into Learn Mode |
 | `send_lesson` | Push an existing lesson or reference into Learn Mode |
+| `search_chord_charts` | Search Ultimate Guitar (chords, tabs, bass, ukulele, drums, Guitar Pro), plus sheet-music search links |
+| `get_chord_chart` | A chart's key, capo, chords, per-section progression and text; transpose; with `reference`, suggests the transpose that matches the score |
+| `chords_in_score` | Names the chord in each bar (or half bar, or beat) of a reference from its notes, plus the estimated key |
+| `search_youtube` | Recordings, performances and tutorials for a piece |
+
+## Cross-referencing charts and recordings
+
+The Ultimate Guitar and YouTube lookups are ported from the Music Practice app, so you can ask
+things like:
+
+- *"Pull up the chords for Let It Be and check them against my reference."*
+- *"Which bars of my score don't match the chart's chorus?"*
+- *"Find a slow piano tutorial for bars 9–16 on YouTube."*
+
+`chords_in_score` works the harmony out from the notes, so it does best on accompaniment-style
+writing. Busy melodies and passing notes lower each bar's `fit`. Charts are written by fans, so
+when a chart and the score disagree, Claude is told to trust the score. These tools need an
+internet connection; everything else stays local.
 
 ## How it works
 

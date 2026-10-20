@@ -18,7 +18,7 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import analysis, lessons, library, live
+from . import analysis, harmony, lessons, library, live, web
 from .display import DisplayHub
 from .midi_io import Player, PortError, Recorder, RestProfile, build_events, list_ports
 from .notes import note_name, notes_from_events, parse_bars, select_notes
@@ -50,6 +50,11 @@ an excerpt of a reference) and pushes it live into the visualizer's Learn Mode a
 coach page - no file loading. Check the returned bar-by-bar readout against what you
 meant, then start_recording(reference=<lesson path>, mode=...) to grade it. Target
 lessons at the user's weak spots (worst bars, hands, rhythms) and keep them short.
+Cross-reference: search_chord_charts / get_chord_chart pull Ultimate Guitar charts (key, capo,
+progression); chords_in_score names each bar's chord from the reference's notes, and
+get_chord_chart(reference=...) suggests the transpose that lines a chart up with the score.
+search_youtube finds recordings and tutorials. Charts are fan-made: when chart and score
+disagree, trust the score and say so.
 Timing numbers are relative to the user's own local tempo; playing slower than
 the score is not an error. Velocity 1-127: ~40 soft, ~64 medium, ~95 loud.
 """
@@ -762,6 +767,94 @@ async def stop_playback() -> dict:
     """Stop playback immediately (sends note-offs and releases the sustain pedal)."""
     player.stop()
     return player.status()
+
+
+# ---------------------------------------------------------------------------
+# Cross-reference: chord charts, YouTube, the score's own harmony
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def search_chord_charts(query: str, types: list[str] | None = None, limit: int = 10) -> dict:
+    """Search Ultimate Guitar by song/artist. types: chords (default), tabs, bass, ukulele,
+    drums, guitar pro; [] searches all. Results are sorted by votes × rating; open one with get_chord_chart."""
+    try:
+        tabs = await asyncio.to_thread(web.ug_search, query, types)
+    except Exception as exc:
+        return _err(exc)
+    tabs.sort(key=lambda t: -((t["votes"] or 0) * (t["rating"] or 0)))
+    return {"query": query, "results": tabs[:limit], "sheet_music": web.sheet_music_links(query)}
+
+
+@mcp.tool()
+async def get_chord_chart(tab_id: int, transpose: int = 0, include_text: bool = True, reference: str | None = None, bars: str | None = None) -> dict:
+    """Open an Ultimate Guitar chart: key, capo, chords, progression per section and the
+    chord-over-lyrics text. transpose shifts every chord (semitones). With a reference, the
+    score's own chords per bar (chords_in_score) are compared to suggest the transpose that
+    lines the chart up with the score; chords are as written, so a capo raises the sounding key."""
+    try:
+        tab = await asyncio.to_thread(web.ug_tab, tab_id)
+    except Exception as exc:
+        return _err(exc)
+    content = tab.pop("content")
+    out = {
+        **tab,
+        "transpose": transpose,
+        "chords": web.chart_chords(content, transpose),
+        "progression": web.chart_progression(content, transpose),
+    }
+    if tab["capo"]:
+        out["sounding_chords"] = web.chart_chords(content, transpose + tab["capo"])
+    if include_text:
+        out["text"] = web.chart_text(content, transpose)
+    if reference:
+        harm = await chords_in_score(reference, bars=bars)
+        if "error" in harm:
+            out["score_comparison"] = harm
+        else:
+            out["score_comparison"] = {
+                "reference": harm["reference"],
+                "score_key": harm["key"],
+                "score_chords": harm["distinct"],
+                # Values for `transpose` that make the written chart match the score.
+                "best_transpose": harmony.best_transpose(
+                    [c for sec in web.chart_progression(content) for c in sec["chords"]],
+                    [c["chord"] for c in harm["chords"]],
+                ),
+            }
+    return out
+
+
+@mcp.tool()
+async def chords_in_score(reference: str, bars: str | None = None, hand: str = "both", per_bar: int = 1, split_note: int = 60) -> dict:
+    """Name the chord in each bar of a reference (or lesson) from its notes, plus an estimated
+    key. per_bar=2 or 4 splits each bar into halves or beats (for faster harmonic rhythm, e.g. hymns). 'fit' is how much of
+    the sounding notes the chord explains; low fit means melody/passing notes dominate."""
+    try:
+        score = await asyncio.to_thread(library.get_score, reference)
+        notes, selection, bar_range = _selection(score, hand, bars, split_note)
+    except Exception as exc:
+        return _err(exc)
+    key = harmony.estimate_key(notes)
+    chords = harmony.chords_by_bar(score, notes, bar_range, max(1, min(per_bar, 4)), key)
+    return {
+        "reference": score.path,
+        "selection": selection,
+        "key": key,
+        "distinct": list(dict.fromkeys(c["chord"] for c in chords if c["chord"] != "N.C.")),
+        "chords": chords,
+    }
+
+
+@mcp.tool()
+async def search_youtube(query: str, limit: int = 5) -> dict:
+    """Find YouTube videos (recordings, performances, tutorials) for a piece, to hear how it goes
+    or compare interpretations. Add words like 'piano tutorial' or 'slow' to the query."""
+    try:
+        videos = await asyncio.to_thread(web.youtube_search, query, max(1, min(limit, 20)))
+    except Exception as exc:
+        return _err(exc)
+    return {"query": query, "videos": videos}
 
 
 def main() -> None:
