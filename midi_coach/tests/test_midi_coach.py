@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import sys
 import time
@@ -606,3 +607,139 @@ def test_readout_spells_black_keys_in_key(ref):
     lines = lessons.describe(score, analysis.side_resolver(score), lessons.key_spelling("E"))
     assert len(lines) == 2 and "D#6@4.25" in lines[0] and "G#4" in lines[1] and "Ab" not in "".join(lines)
     assert lessons.key_spelling("Bb") == "flats" and lessons.key_spelling("C") is None
+
+
+# ---------------------------------------------------------------------------
+# Cross-reference: chord charts, YouTube, harmony
+# ---------------------------------------------------------------------------
+
+UG_TAB = {
+    "id": 42, "song_name": "Etude", "artist_name": "Test", "type": 300, "type_name": "Chords",
+    "version": 2, "rating": 4.71234, "votes": 120, "tonality_name": "G", "capo": 2,
+    "tuning": {"name": "Standard", "value": "E A D G B E"},
+    "content": "[Intro]\r\n[ch]G[/ch]  [ch]D/F#[/ch]\r\n\r\n\r\n[Verse]\r\n[tab][ch]G[/ch]      [ch]Em[/ch]\r\nHello   world[/tab]\r\n[ch]Bb7[/ch]",
+    "applicature": [
+        {"chord": "G", "variations": [{"frets": [3, 2, 0, 0, 0, 3], "fingers": [2, 1, 0, 0, 0, 3], "fret": 1}]},
+        {"chord": "G", "variations": []},
+        {"chord": "Em", "frets": ["0", "2", "2", "0", "0", "x"], "fingers": [0, 2, 3, 0, 0, 0]},
+    ],
+}
+
+
+def _fake_get(responses):
+    calls = []
+
+    def get(url, headers):
+        calls.append((url, headers))
+        for key, res in responses.items():
+            if key in url:
+                return res
+        return 404, "application/json", "{}"
+
+    return get, calls
+
+
+def test_chord_sheet_markup():
+    from midi_coach import web
+
+    content = UG_TAB["content"]
+    assert web.chart_chords(content) == ["G", "D/F#", "Em", "Bb7"]
+    assert web.chart_chords(content, 2) == ["A", "E/G#", "F#m", "C7"]
+    assert web.transpose_chord("Bb7", 1) == "B7" and web.transpose_chord("Eb", 1) == "E"
+    assert web.chart_progression(content) == [
+        {"section": "Intro", "chords": ["G", "D/F#"]},
+        {"section": "Verse", "chords": ["G", "Em", "Bb7"]},
+    ]
+    text = web.chart_text(content)
+    assert "G      Em\nHello   world" in text and "\n\n\n" not in text and "[ch]" not in text
+
+
+def test_ug_client_parses_search_and_tab(monkeypatch):
+    from midi_coach import web
+
+    get, calls = _fake_get({
+        "/tab/search": (200, "application/json; charset=utf-8", json.dumps({"tabs": [UG_TAB, {"song_name": "no id"}]})),
+        "/tab/info": (200, "application/json", json.dumps(UG_TAB)),
+    })
+    monkeypatch.setattr(web, "_get", get)
+    results = web.ug_search("etude", ["chords", "tabs"])
+    assert [r["tab_id"] for r in results] == [42] and results[0]["rating"] == 4.71
+    assert "type%5B%5D=300" in calls[0][0] and "type%5B%5D=200" in calls[0][0]
+    assert len(calls[0][1]["X-UG-API-KEY"]) == 32
+    tab = web.ug_tab(42)
+    assert tab["capo"] == 2 and tab["tuning"] == "Standard" and tab["key"] == "G"
+    assert [s["chord"] for s in tab["chord_shapes"]] == ["G", "Em"]
+    assert tab["chord_shapes"][1]["frets"] == [0, 2, 2, 0, 0]
+
+    monkeypatch.setattr(web, "_get", _fake_get({})[0])
+    assert web.ug_search("nothing") == []  # UG answers 404 for no results
+    monkeypatch.setattr(web, "_get", lambda url, headers: (429, "text/html", "slow down"))
+    with pytest.raises(web.WebError, match="rate limited"):
+        web.ug_search("etude")
+
+
+def test_ug_api_key_matches_band_hq():
+    import datetime
+    import hashlib
+
+    from midi_coach import web
+
+    now = datetime.datetime(2024, 3, 5, 7, 30, tzinfo=datetime.timezone.utc)
+    assert web.ug_api_key("abc", now) == hashlib.md5(b"abc2024-03-05:7createLog()").hexdigest()
+
+
+def test_youtube_parse():
+    from midi_coach import web
+
+    html = (
+        '"videoRenderer":{"videoId":"abcdefghijk","thumbnail":{},"title":{"runs":[{"text":"Clair de Lune \\u0026 more \\"live\\""}]}'
+        '"videoRenderer":{"videoId":"abcdefghijk","title":{"runs":[{"text":"dup"}]}'
+        '"videoRenderer":{"videoId":"ZYXWVUTSRQP","title":{"runs":[{"text":"Second"}]}'
+    )
+    videos = web.parse_youtube(html, 5)
+    assert [v["title"] for v in videos] == ['Clair de Lune & more "live"', "Second"]
+    assert videos[0]["url"] == "https://www.youtube.com/watch?v=abcdefghijk"
+    assert [v["video_id"] for v in web.parse_youtube('"videoId":"AAAAAAAAAAA" "videoId":"BBBBBBBBBBB"', 1)] == ["AAAAAAAAAAA"]
+
+
+def test_name_chord_templates():
+    from midi_coach import harmony
+
+    def w(*pcs):
+        out = [0.0] * 12
+        for pc in pcs:
+            out[pc] += 1
+        return out
+
+    assert harmony.name_chord(w(0, 4, 7), 0)[0] == "C"
+    assert harmony.name_chord(w(9, 0, 4), 9)[0] == "Am"
+    assert harmony.name_chord(w(7, 11, 2, 5), 7)[0] == "G7"
+    assert harmony.name_chord(w(0, 4, 7), 4)[0] == "C/E"
+    assert harmony.name_chord(w(2, 5, 9, 0), 2)[0] == "Dm7"
+    assert harmony.name_chord([0.0] * 12, None) == (None, 0.0)
+
+
+def test_chords_in_score_and_chart_comparison(ref, monkeypatch):
+    from midi_coach import server, web
+
+    async def run():
+        harm = await server.chords_in_score("etude", hand="left")
+        assert harm["key"] in ("C", "Am")
+        by_bar = {c["bar"]: c["chord"] for c in harm["chords"]}
+        assert by_bar[1] == "C" and by_bar[9] == "N.C." and harm["distinct"] == ["C"]
+        assert len((await server.chords_in_score("etude", bars="1-2", per_bar=2))["chords"]) == 4
+
+        monkeypatch.setattr(web, "_get", _fake_get({"/tab/info": (200, "application/json", json.dumps(UG_TAB))})[0])
+        chart = await server.get_chord_chart(42, transpose=2, reference="etude", bars="1-8")
+        assert chart["chords"][0] == "A" and chart["sounding_chords"][0] == "B"
+        assert chart["progression"][0]["chords"] == ["A", "E/G#"]
+        # Written G -> score's C is +5.
+        assert chart["score_comparison"]["best_transpose"][0]["transpose"] == 5
+
+        monkeypatch.setattr(web, "_get", lambda url, headers: (200, "text/html", '"videoRenderer":{"videoId":"abcdefghijk","title":{"runs":[{"text":"Etude"}]}'))
+        yt = await server.search_youtube("etude piano")
+        assert yt["videos"][0]["title"] == "Etude"
+        res = await server.search_chord_charts("etude", types=["kazoo"])
+        assert "Unknown tab type" in res["error"]
+
+    asyncio.run(run())
