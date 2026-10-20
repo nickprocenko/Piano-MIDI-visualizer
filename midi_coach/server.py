@@ -21,7 +21,7 @@ except ImportError:  # mcp 1.x
 from . import analysis, harmony, lessons, library, live, web
 from .display import DisplayHub
 from .midi_io import Player, PortError, Recorder, RestProfile, build_events, list_ports
-from .notes import note_name, notes_from_events, parse_bars, select_notes
+from .notes import note_name, notes_from_events, parse_bars, playable_parts, select_notes, suggest_hands
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s midi-coach %(message)s")
 log = logging.getLogger("midi-coach")
@@ -31,6 +31,10 @@ midi-coach lets you hear and coach the user's piano playing (Roland JUNO-DS).
 
 Typical loop:
 1. find_reference("moonlight") -> inspect_reference(path) to see parts, hands, bars.
+   Band arrangements (files downloaded from MIDI sites): inspect_reference names each
+   part's instrument. When it returns ask_user, show the user the parts and your
+   suggestion (e.g. melody in the right hand, bass line in the left), ask which to
+   play, then set_parts(...) saves the choice; every tool uses it from then on.
 2. start_recording(reference=..., hand=..., bars=...) then tell the user to play.
 3. wait_for_recording() repeatedly until state is 'stopped'. With a reference it
    returns the comparison automatically. Recording auto-stops after silence, but
@@ -104,7 +108,9 @@ async def find_reference(query: str = "", limit: int = 10) -> dict:
 
 @mcp.tool()
 async def inspect_reference(reference: str, split_note: int = 60) -> dict:
-    """Describe a reference MIDI/MusicXML file: parts (track+channel), which hand each part is, bars, tempo, pedal, long rests."""
+    """Describe a reference MIDI/MusicXML file: parts (track+channel) with their instrument and
+    hand, bars, tempo, pedal, long rests. part_choice is the user's saved choice of parts per
+    hand, or a suggestion; when ask_user is true, confirm it with the user, then set_parts."""
     try:
         score = await asyncio.to_thread(library.get_score, reference)
     except Exception as exc:
@@ -115,12 +121,17 @@ async def inspect_reference(reference: str, split_note: int = 60) -> dict:
         pnotes = [n for n in score.notes if n.part == p.index]
         if not pnotes:
             continue
-        sides = [side(n) for n in pnotes]
-        guess = max(set(sides), key=sides.count)
+        if score.hands:
+            hand = {"right": "right", "left": "left", "both": "both (split by pitch)"}.get(score.hands.get(p.index), "not played")
+        elif p.drums:
+            hand = "not played (drums)"
+        else:
+            sides = [side(n) for n in pnotes]
+            guess = max(set(sides), key=sides.count)
+            hand = guess if sides.count(guess) / len(sides) > 0.8 else "mixed (split by pitch)"
         parts.append({
-            "index": p.index, "name": p.name, "track": p.track, "channel": p.channel + 1,
-            "notes": p.note_count, "range": f"{note_name(p.low)}-{note_name(p.high)}",
-            "hand": guess if sides.count(guess) / len(sides) > 0.8 else "mixed (split by pitch)",
+            "index": p.index, "name": p.name, "instrument": p.instrument, "track": p.track, "channel": p.channel + 1,
+            "notes": p.note_count, "range": f"{note_name(p.low)}-{note_name(p.high)}", "hand": hand,
         })
     profile = RestProfile.from_notes(score.notes)
     rests = sorted(
@@ -140,6 +151,59 @@ async def inspect_reference(reference: str, split_note: int = 60) -> dict:
         "has_pedal": bool(score.pedal),
         "has_dynamics": len(score.notes) > 2 and statistics.pstdev(n.velocity for n in score.notes) >= 4,
         "longest_rests": rests,
+        **_part_choice(score),
+    }
+
+
+def _part_choice(score) -> dict:
+    if score.hands:
+        chosen = {h: [i for i, v in sorted(score.hands.items()) if v == h] for h in ("right", "left", "both")}
+        return {"part_choice": {"confirmed": True, **chosen}, "ask_user": False}
+    suggestion = suggest_hands(score)
+    playable = playable_parts(score)
+    # A plain piano file (one or two piano parts, nothing else) needs no questions.
+    plain = all(p.is_piano for p in playable) and len(playable) <= 2 and len(playable) == sum(1 for p in score.parts if p.note_count)
+    return {"part_choice": {"confirmed": False, "suggested": suggestion}, "ask_user": not plain}
+
+
+@mcp.tool()
+async def set_parts(
+    reference: str,
+    right: list[int] | None = None,
+    left: list[int] | None = None,
+    both: list[int] | None = None,
+    clear: bool = False,
+) -> dict:
+    """Save which parts of a reference the user plays (part indexes from inspect_reference).
+
+    right / left: parts played by that hand; both: parts shared between the hands, split by
+    pitch (e.g. a single piano track). Parts not listed are left out of recording, comparison,
+    playback and the score. The choice is remembered for this file. clear=True forgets it.
+    """
+    try:
+        score = await asyncio.to_thread(library.get_score, reference)
+        if clear:
+            library.save_hands(score, {})
+            return {"reference": score.path, "cleared": True, **_part_choice(score)}
+        hands: dict[int, str] = {}
+        valid = {p.index for p in score.parts if p.note_count}
+        for hand, indexes in (("right", right), ("left", left), ("both", both)):
+            for i in indexes or []:
+                if i not in valid:
+                    return {"error": f"Part {i} doesn't exist or has no notes. Parts: {sorted(valid)}"}
+                if i in hands:
+                    return {"error": f"Part {i} is listed for both {hands[i]} and {hand}; use both=[{i}] to share it."}
+                hands[i] = hand
+        if not hands:
+            return {"error": "Give at least one part in right, left or both (or clear=True)."}
+        library.save_hands(score, hands)
+    except Exception as exc:
+        return _err(exc)
+    names = {p.index: f"{p.index} {p.name} ({p.instrument})" for p in score.parts}
+    return {
+        "reference": score.path,
+        "saved": {h: [names[i] for i, v in sorted(hands.items()) if v == h] for h in ("right", "left", "both")},
+        "left_out": [names[i] for i in sorted(valid - set(hands))],
     }
 
 
@@ -184,6 +248,7 @@ async def start_recording(
     mode: str = "free",
     tempo_percent: float = 100.0,
     show_score: bool = True,
+    parts: list[int] | None = None,
 ) -> dict:
     """Start recording the user's playing from the MIDI input.
 
@@ -196,6 +261,7 @@ async def start_recording(
     reference: optional reference title/path; enables rest-aware auto-stop and auto-compare.
     hand: 'both' | 'right' | 'left' - what the user is practicing.
     bars: e.g. '9-16' to practice a section.
+    parts: part indexes to practice for this take only (overrides hand and the saved choice).
     silence_sec: stop after this much silence (no keys held). With a reference the
       timeout is stretched to cover the longest written rest still ahead.
     Recording waits up to 2 minutes for the first note. Then call wait_for_recording.
@@ -207,7 +273,7 @@ async def start_recording(
         return {"error": f"{mode} mode needs a reference to follow."}
     if recorder.active:
         return {"error": "A recording is already running. Call stop_recording first."}
-    meta = {"reference": None, "hand": hand, "bars": bars, "split_note": split_note, "mode": mode}
+    meta = {"reference": None, "hand": hand, "bars": bars, "split_note": split_note, "mode": mode, "parts": parts}
     rests = None
     selection = None
     session = None
@@ -215,7 +281,7 @@ async def start_recording(
     try:
         if reference:
             score = await asyncio.to_thread(library.get_score, reference)
-            notes, selection, _ = _selection(score, hand, bars, split_note)
+            notes, selection, _ = _selection(score, hand, bars, split_note, parts)
             if not notes:
                 return {"error": f"No reference notes for hand={hand} bars={bars}."}
             rests = RestProfile.from_notes(notes)
@@ -298,7 +364,8 @@ def _compare(take_meta: dict, reference: str | None, hand: str | None, bars: str
     bars = bars if bars is not None else take_meta.get("bars")
     split_note = split_note or take_meta.get("split_note") or 60
     score = library.get_score(reference)
-    ref_notes, selection, bar_range = _selection(score, hand, bars, split_note)
+    parts = take_meta.get("parts") if score.path == take_meta.get("reference") else None
+    ref_notes, selection, bar_range = _selection(score, hand, bars, split_note, parts)
     t_notes, t_pedal = library.take_notes(take_meta)
     started = time.perf_counter()
     report = analysis.compare(score, ref_notes, t_notes, t_pedal, bars_given=bar_range is not None, split_note=split_note, detail=detail)
@@ -371,7 +438,7 @@ async def _finished_result(status: dict, auto_compare: bool) -> dict:
 
 
 @mcp.tool()
-async def show_score(reference: str | None = None, hand: str = "both", bars: str | None = None, open_browser: bool = True, split_note: int = 60) -> dict:
+async def show_score(reference: str | None = None, hand: str = "both", bars: str | None = None, open_browser: bool = True, split_note: int = 60, parts: list[int] | None = None) -> dict:
     """Show a reference on the live sheet-music page (http://127.0.0.1:8765/) and in the
     web visualizer's notation strip when its Coach link is on. Defaults to the latest take's reference."""
     try:
@@ -380,7 +447,7 @@ async def show_score(reference: str | None = None, hand: str = "both", bars: str
             if not reference:
                 return {"error": "No reference given and the latest take has none."}
         score = await asyncio.to_thread(library.get_score, reference)
-        notes, selection, _ = _selection(score, hand, bars, split_note)
+        notes, selection, _ = _selection(score, hand, bars, split_note, parts)
         url = hub.start()
         hub.load_score(score)
         hub.marks([], reset=True)
@@ -645,6 +712,11 @@ def _is_take(source: str) -> bool:
     return any(t["id"] == source for t in library.list_takes())
 
 
+def _take_parts(meta: dict, score) -> list[int] | None:
+    """Parts a take was recorded against, if it was against this score."""
+    return meta.get("parts") if score.path == meta.get("reference") else None
+
+
 def _take_segment(meta: dict, bars: tuple[int, int] | None, reference: str | None, hand: str):
     notes, pedal = library.take_notes(meta)
     if not notes:
@@ -656,7 +728,7 @@ def _take_segment(meta: dict, bars: tuple[int, int] | None, reference: str | Non
         if not ref:
             raise ValueError("Bars on a take need a reference to locate them.")
         score = library.get_score(ref)
-        ref_notes, _ = select_notes(score, meta.get("hand") or "both", split_note=split)
+        ref_notes, _ = select_notes(score, meta.get("hand") or "both", parts=_take_parts(meta, score), split_note=split)
         t0, t1, slope = analysis.take_range_for_bars(score, ref_notes, notes, bars)
         t0 = max(notes[0].start, t0 - 0.05)
     if hand == "right":
@@ -676,13 +748,15 @@ async def play(
     output_port: str | None = None,
     channel: int = 1,
     split_note: int = 60,
+    parts: list[int] | None = None,
 ) -> dict:
     """Play a reference or a take on the MIDI output (the JUNO by default). Returns immediately.
 
     source: reference title/path, 'latest', or a take id.
     bars: '9-16'; hand: 'both'|'right'|'left'; tempo_percent: 70 = slower practice speed;
     loops: repeat count (max 20). Notes are sent on `channel` (1-16) without program changes,
-    so the keyboard's current sound is used.
+    so the keyboard's current sound is used. parts: play only these part indexes of a
+    reference (e.g. just the bass line); otherwise the saved part choice, without drums.
     """
     try:
         bar_range = parse_bars(bars)
@@ -693,7 +767,7 @@ async def play(
             label = f"take {meta['id']}"
         else:
             score = await asyncio.to_thread(library.get_score, source)
-            notes, _, _ = _selection(score, hand, bars, split_note)
+            notes, _, _ = _selection(score, hand, bars, split_note, parts)
             if not notes:
                 return {"error": "Nothing to play for that hand / bar range."}
             pedal = score.pedal
@@ -743,7 +817,7 @@ async def play_comparison(
         hand = meta.get("hand") or "both"
         notes, pedal, t0, t1, slope = await asyncio.to_thread(_take_segment, meta, bar_range, ref, "both")
         take_events = build_events(notes, pedal, t0, t1)
-        ref_notes, _ = select_notes(score, hand, bars=bar_range, split_note=meta.get("split_note") or 60)
+        ref_notes, _ = select_notes(score, hand, parts=_take_parts(meta, score), bars=bar_range, split_note=meta.get("split_note") or 60)
         r0, r1 = score.bar_range_times(*bar_range)
         speed = 1 / slope if reference_tempo == "match" else 1.0
         ref_events = build_events(ref_notes, score.pedal, r0, r1, speed)

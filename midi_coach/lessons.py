@@ -22,7 +22,7 @@ import re
 import time
 
 from .library import home
-from .notes import Score, load_score
+from .notes import Score, load_score, select_notes
 
 _KEY_RE = re.compile(r"^([A-Ga-g])([#b-]?)(m|min|minor)?$")
 
@@ -188,7 +188,7 @@ def learn_events(score: Score, side) -> list[dict]:
     """Note events for the visualizer's Learn Mode: channel 0 = right hand, 1 = left."""
     return [
         {"ms": round(n.start * 1000, 1), "durationMs": round(max(50.0, n.duration * 1000), 1), "note": n.pitch, "channel": 0 if side(n) == "right" else 1}
-        for n in score.notes
+        for n in select_notes(score)[0]  # drums and parts the user left out don't belong in Learn Mode
     ]
 
 

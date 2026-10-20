@@ -18,6 +18,29 @@ MUSICXML_SUFFIXES = {".xml", ".musicxml", ".mxl"}
 MIDI_SUFFIXES = {".mid", ".midi"}
 
 _NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
+# General MIDI program names (program_change 0-127). Channel 10 is always drums.
+GM_PROGRAMS = [
+    "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
+    "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavinet",
+    "Celesta", "Glockenspiel", "Music Box", "Vibraphone", "Marimba", "Xylophone", "Tubular Bells", "Dulcimer",
+    "Drawbar Organ", "Percussive Organ", "Rock Organ", "Church Organ", "Reed Organ", "Accordion", "Harmonica", "Tango Accordion",
+    "Nylon Guitar", "Steel Guitar", "Jazz Guitar", "Clean Electric Guitar",
+    "Muted Guitar", "Overdriven Guitar", "Distortion Guitar", "Guitar Harmonics",
+    "Acoustic Bass", "Fingered Bass", "Picked Bass", "Fretless Bass", "Slap Bass 1", "Slap Bass 2", "Synth Bass 1", "Synth Bass 2",
+    "Violin", "Viola", "Cello", "Contrabass", "Tremolo Strings", "Pizzicato Strings", "Orchestral Harp", "Timpani",
+    "String Ensemble 1", "String Ensemble 2", "Synth Strings 1", "Synth Strings 2", "Choir Aahs", "Voice Oohs", "Synth Voice", "Orchestra Hit",
+    "Trumpet", "Trombone", "Tuba", "Muted Trumpet", "French Horn", "Brass Section", "Synth Brass 1", "Synth Brass 2",
+    "Soprano Sax", "Alto Sax", "Tenor Sax", "Baritone Sax", "Oboe", "English Horn", "Bassoon", "Clarinet",
+    "Piccolo", "Flute", "Recorder", "Pan Flute", "Blown Bottle", "Shakuhachi", "Whistle", "Ocarina",
+    "Square Lead", "Sawtooth Lead", "Calliope Lead", "Chiff Lead", "Charang Lead", "Voice Lead", "Fifths Lead", "Bass + Lead",
+    "New Age Pad", "Warm Pad", "Polysynth Pad", "Choir Pad", "Bowed Pad", "Metallic Pad", "Halo Pad", "Sweep Pad",
+    "Rain FX", "Soundtrack FX", "Crystal FX", "Atmosphere FX", "Brightness FX", "Goblins FX", "Echoes FX", "Sci-fi FX",
+    "Sitar", "Banjo", "Shamisen", "Koto", "Kalimba", "Bagpipe", "Fiddle", "Shanai",
+    "Tinkle Bell", "Agogo", "Steel Drums", "Woodblock", "Taiko Drum", "Melodic Tom", "Synth Drum", "Reverse Cymbal",
+    "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet", "Telephone Ring", "Helicopter", "Applause", "Gunshot",
+]
+DRUM_CHANNEL = 9  # MIDI channel 10, 0-based
+
 _SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 _FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
 
@@ -52,6 +75,20 @@ class Part:
     low: int = 127
     high: int = 0
     mean_pitch: float = 0.0
+    program: int | None = None  # General MIDI program; None = never set (sounds as piano)
+    drums: bool = False
+
+    @property
+    def instrument(self) -> str:
+        if self.drums:
+            return "Drums"
+        if self.program is None:
+            return "Piano (no instrument set)"
+        return GM_PROGRAMS[self.program]
+
+    @property
+    def is_piano(self) -> bool:
+        return not self.drums and (self.program is None or self.program < 8)
 
 
 @dataclass
@@ -74,6 +111,7 @@ class Score:
     bars: list[Bar]
     tempos: list[tuple[float, float]]  # (seconds, bpm)
     duration: float
+    hands: dict[int, str] = field(default_factory=dict)  # confirmed part -> 'right' | 'left' | 'both'
     _bar_starts: list[float] = field(default_factory=list, repr=False)
 
     def __post_init__(self) -> None:
@@ -160,6 +198,7 @@ def load_midi(path: str | pathlib.Path) -> Score:
 
     tempo_changes: list[tuple[int, int]] = []
     sig_changes: list[tuple[int, int, int]] = []
+    programs: dict[int, list[tuple[int, int]]] = {}  # channel -> [(tick, program)]
     for track in mid.tracks:
         tick = 0
         for msg in track:
@@ -168,9 +207,12 @@ def load_midi(path: str | pathlib.Path) -> Score:
                 tempo_changes.append((tick, msg.tempo))
             elif msg.type == "time_signature":
                 sig_changes.append((tick, msg.numerator, msg.denominator))
+            elif msg.type == "program_change":
+                programs.setdefault(msg.channel, []).append((tick, msg.program))
     tmap = _TempoMap(ppq, tempo_changes)
 
     parts: dict[tuple[int, int], Part] = {}
+    first_tick: dict[tuple[int, int], int] = {}
     notes: list[Note] = []
     note_keys: list[tuple[int, int]] = []
     pedal: list[tuple[float, int]] = []
@@ -193,7 +235,8 @@ def load_midi(path: str | pathlib.Path) -> Score:
                 start_tick, vel = stack.pop(0)
                 key = (t_idx, msg.channel)
                 if key not in parts:
-                    parts[key] = Part(index=-1, track=t_idx, channel=msg.channel, name=track_name)
+                    parts[key] = Part(index=-1, track=t_idx, channel=msg.channel, name=track_name, drums=msg.channel == DRUM_CHANNEL)
+                first_tick[key] = min(first_tick.get(key, start_tick), start_tick)
                 notes.append(Note(msg.note, tmap.to_seconds(start_tick), tmap.to_seconds(tick), vel, beat=start_tick / ppq))
                 note_keys.append(key)
             elif msg.type == "control_change" and msg.control == 64:
@@ -212,6 +255,12 @@ def load_midi(path: str | pathlib.Path) -> Score:
             part.name = f"{part.name} (ch {part.channel + 1})"
     for n, key in zip(notes, note_keys):
         n.part = parts[key].index
+    for key, part in parts.items():
+        # The instrument sounding at the part's first note (else the channel's first program).
+        changes = sorted(programs.get(part.channel, []))
+        before = [prog for tick, prog in changes if tick <= first_tick[key]]
+        if before or changes:
+            part.program = before[-1] if before else changes[0][1]
     for part in ordered:
         pitches = [n.pitch for n in notes if n.part == part.index]
         part.note_count = len(pitches)
@@ -283,6 +332,17 @@ def _name_side(name: str) -> str | None:
     return None
 
 
+def playable_parts(score: Score) -> list[Part]:
+    """Parts that could be played on a keyboard: they have notes and aren't drums."""
+    return [p for p in score.parts if p.note_count > 0 and not p.drums]
+
+
+def _split(notes: list[Note], hand: str, split_note: int) -> list[Note]:
+    if hand == "right":
+        return [n for n in notes if n.pitch >= split_note]
+    return [n for n in notes if n.pitch < split_note]
+
+
 def select_notes(
     score: Score,
     hand: str = "both",
@@ -292,17 +352,32 @@ def select_notes(
 ) -> tuple[list[Note], dict]:
     """Pick the notes of one hand (or explicit parts) within an optional bar range.
 
-    Returns (notes, info) where info explains how the selection was made.
+    Precedence: explicit parts, then the user's confirmed part choice (score.hands),
+    then a guess from track names / register / pitch split. Drums are left out unless
+    asked for by part number. Returns (notes, info) where info explains the selection.
     """
     hand = (hand or "both").lower()
     info: dict = {"hand": hand}
     notes = score.notes
+    playable = playable_parts(score)
     if parts:
         wanted = set(parts)
         notes = [n for n in notes if n.part in wanted]
         info["method"] = f"parts {sorted(wanted)}"
+    elif score.hands:
+        if hand in ("right", "left"):
+            whole = {i for i, h in score.hands.items() if h == hand}
+            shared = {i for i, h in score.hands.items() if h == "both"}
+            notes = [n for n in notes if n.part in whole] + _split([n for n in notes if n.part in shared], hand, split_note)
+            notes.sort(key=lambda n: (n.start, n.pitch))
+            used = sorted(whole | shared)
+        else:
+            used = sorted(score.hands)
+            notes = [n for n in notes if n.part in score.hands]
+        info["method"] = f"your chosen parts {used}"
     elif hand in ("right", "left"):
-        playable = [p for p in score.parts if p.note_count > 0]
+        keep = {p.index for p in playable}
+        notes = [n for n in notes if n.part in keep]
         sides = {p.index: _name_side(p.name) for p in playable}
         named = [i for i, s in sides.items() if s == hand]
         if named and any(s for s in sides.values() if s != hand):
@@ -314,18 +389,103 @@ def select_notes(
             notes = [n for n in notes if n.part == chosen.index]
             info["method"] = f"part {chosen.index} ('{chosen.name}') by register"
         else:
-            if hand == "right":
-                notes = [n for n in notes if n.pitch >= split_note]
-            else:
-                notes = [n for n in notes if n.pitch < split_note]
+            notes = _split(notes, hand, split_note)
             info["method"] = f"pitch split at {note_name(split_note)}"
     else:
-        info["method"] = "all parts"
+        keep = {p.index for p in playable}
+        if len(keep) < sum(1 for p in score.parts if p.note_count > 0):
+            notes = [n for n in notes if n.part in keep]
+            info["method"] = "all parts except drums"
+        else:
+            info["method"] = "all parts"
     if bars:
         t0, t1 = score.bar_range_times(*bars)
         notes = [n for n in notes if t0 - 1e-6 <= n.start < t1 - 1e-6]
         info["bars"] = f"{bars[0]}-{bars[1]}"
     return list(notes), info
+
+
+_MELODY_WORDS = ("melody", "vocal", "voice", "vox", "lead", "sing", "solo", "tune")
+# Instrument families that usually carry a tune: voices, reeds, pipes, synth leads.
+_MELODY_PROGRAMS = set(range(52, 55)) | set(range(64, 88))
+
+
+def _is_bass(p: Part) -> bool:
+    return (p.program is not None and 32 <= p.program <= 39) or "bass" in p.name.lower()
+
+
+def _melody_part(parts: list[Part]) -> tuple[Part, str] | None:
+    """The part most likely to carry the tune, and why."""
+    tunes = [p for p in parts if not _is_bass(p)]
+    named = [p for p in tunes if any(w in p.name.lower() for w in _MELODY_WORDS)]
+    if named:
+        return max(named, key=lambda p: p.note_count), "named as the melody"
+    leads = [p for p in tunes if p.program in _MELODY_PROGRAMS]
+    if leads:
+        return max(leads, key=lambda p: p.note_count), "a melody instrument"
+    if tunes:
+        return max(tunes, key=lambda p: p.mean_pitch), "the highest part"
+    return None
+
+
+def suggest_hands(score: Score) -> dict:
+    """Guess which parts to play with which hand, with the reasons, for the user to confirm.
+
+    Returns {"right": [...], "left": [...], "both": [...], "reasons": [...]}; a part in
+    "both" is shared between the hands by pitch. Parts in none of the lists are left out.
+    """
+    out: dict = {"right": [], "left": [], "both": [], "reasons": []}
+    playable = playable_parts(score)
+    if not playable:
+        out["reasons"].append("No playable parts (only drums or no notes).")
+        return out
+    pianos = [p for p in playable if p.is_piano]
+    if pianos:
+        sides = {p.index: _name_side(p.name) for p in pianos}
+        if len(pianos) == 2 or ("right" in sides.values() and "left" in sides.values()):
+            if "right" in sides.values() and "left" in sides.values():
+                for p in pianos:
+                    out[sides[p.index] or "both"].append(p.index)
+                out["reasons"].append("Piano parts named for each hand.")
+            else:
+                hi, lo = sorted(pianos, key=lambda p: -p.mean_pitch)
+                out["right"].append(hi.index)
+                out["left"].append(lo.index)
+                out["reasons"].append(f"Two piano parts: the higher ('{hi.name}') for the right hand, the lower ('{lo.name}') for the left.")
+        else:
+            out["both"] = [p.index for p in pianos]
+            names = ", ".join(f"'{p.name}'" for p in pianos)
+            out["reasons"].append(f"Piano part(s) {names}, shared between the hands by pitch.")
+        others = [p for p in playable if not p.is_piano]
+        if others:
+            out["reasons"].append(f"Left out {len(others)} non-piano part(s).")
+            tune = _melody_part(others)
+            if tune:
+                out["reasons"].append(f"Alternative: part {tune[0].index} '{tune[0].name}' ({tune[0].instrument}) is {tune[1]}, to play the tune instead.")
+        return out
+
+    if len(playable) == 1:
+        p = playable[0]
+        out["both"].append(p.index)
+        out["reasons"].append(f"Only one playable part ({p.instrument}), shared between the hands by pitch.")
+        return out
+    busiest = max(p.note_count for p in playable)
+    substantial = [p for p in playable if p.note_count >= busiest * 0.1]
+    melody, why = _melody_part(substantial) or (None, "")
+    basses = [p for p in substantial if _is_bass(p) and p is not melody]
+    bass = max(basses, key=lambda p: p.note_count) if basses else None
+    bass_why = "the bass line"
+    if bass is None:
+        rest = [p for p in substantial if p is not melody]
+        bass = min(rest, key=lambda p: p.mean_pitch) if rest else None
+        bass_why = "the lowest part"
+    if melody:
+        out["right"].append(melody.index)
+        out["reasons"].append(f"No piano part. Right hand: part {melody.index} '{melody.name}' ({melody.instrument}), {why}.")
+    if bass:
+        out["left"].append(bass.index)
+        out["reasons"].append(f"Left hand: part {bass.index} '{bass.name}' ({bass.instrument}), {bass_why}.")
+    return out
 
 
 def notes_from_events(events: list[tuple[float, list[int]]]) -> tuple[list[Note], list[tuple[float, int]]]:
