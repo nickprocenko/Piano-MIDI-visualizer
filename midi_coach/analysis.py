@@ -21,7 +21,7 @@ import statistics
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 
-from .notes import Note, Score, note_name, pedal_intervals, _name_side
+from .notes import Note, Score, note_name, pedal_intervals, playable_parts, _name_side
 
 REF_GROUP_TOL = 0.03
 TAKE_GROUP_TOL = 0.07
@@ -239,7 +239,10 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
 
 def side_resolver(score: Score, split_note: int = 60):
     """Return a function Note -> 'right'/'left' for reference notes."""
-    playable = [p for p in score.parts if p.note_count > 0]
+    if score.hands:
+        hands = score.hands
+        return lambda n: hands[n.part] if hands.get(n.part) in ("right", "left") else ("right" if n.pitch >= split_note else "left")
+    playable = playable_parts(score)
     sides = {p.index: _name_side(p.name) for p in playable}
     if any(s == "right" for s in sides.values()) and any(s == "left" for s in sides.values()):
         return lambda n: sides.get(n.part) or ("right" if n.pitch >= split_note else "left")

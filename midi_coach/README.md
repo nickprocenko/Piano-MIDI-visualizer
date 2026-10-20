@@ -118,7 +118,8 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 |------|--------------|
 | `list_midi_ports` | Show MIDI inputs/outputs |
 | `find_reference` | Fuzzy search the reference library by title |
-| `inspect_reference` | Parts (track + channel), which hand each is, bars, tempo, pedal, long rests |
+| `inspect_reference` | Parts (track + channel) with their instrument, which hand each is, bars, tempo, pedal, long rests; suggests which parts to play |
+| `set_parts` | Save which parts you play with which hand (remembered per file) |
 | `start_recording` | Record from the input; optional reference / hand / bars; `mode` = free / wait / rehearsal |
 | `wait_for_recording` | Block until the take ends; returns the comparison (or standalone analysis) |
 | `stop_recording` | End the take now |
@@ -137,6 +138,23 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `get_chord_chart` | A chart's key, capo, chords, per-section progression and text; transpose; with `reference`, suggests the transpose that matches the score |
 | `chords_in_score` | Names the chord in each bar (or half bar, or beat) of a reference from its notes, plus the estimated key |
 | `search_youtube` | Recordings, performances and tutorials for a piece |
+
+## Band arrangements
+
+MIDI files downloaded from sites like freemidi.org or midiworld.com are usually full-band
+arrangements rather than piano scores. `inspect_reference` names each part's instrument from
+its General MIDI program (channel 10 is drums) and suggests what to play: the piano part if
+there is one, otherwise the melody in your right hand and the bass line in your left. Claude
+shows you the parts and asks before going on, for example:
+
+> 1 Track 3 — Acoustic Bass (low, E1–A2) · 4 Track 6 — Voice Oohs (melody) · 9 Drums …
+> There's no piano part. I'd use the vocal melody in your right hand and the bass in your
+> left. Sound right?
+
+Your answer is saved with `set_parts` (in `<home>/part_choices.json`), and recording,
+comparison, playback, the score and Learn Mode all use those parts from then on. Drums are
+always left out unless asked for by part number. If the file changes so its parts no longer
+match, the saved choice is ignored and you're asked again.
 
 ## Cross-referencing charts and recordings
 

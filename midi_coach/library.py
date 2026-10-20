@@ -102,10 +102,57 @@ def get_score(ref: str) -> Score:
     mtime = path.stat().st_mtime
     cached = _score_cache.get(str(path))
     if cached and cached[0] == mtime:
-        return cached[1]
-    score = load_score(path)
-    _score_cache[str(path)] = (mtime, score)
+        score = cached[1]
+    else:
+        score = load_score(path)
+        _score_cache[str(path)] = (mtime, score)
+    score.hands = load_hands(score)
     return score
+
+
+# ---------------------------------------------------------------------------
+# Part choices: which parts of a reference the user plays with which hand
+# ---------------------------------------------------------------------------
+
+
+def _choices_path() -> pathlib.Path:
+    return home() / "part_choices.json"
+
+
+def _load_choices() -> dict:
+    try:
+        return json.loads(_choices_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def load_hands(score: Score) -> dict[int, str]:
+    """The saved part -> hand choice for a score; empty if none, or if the file's parts changed."""
+    saved = _load_choices().get(score.path)
+    if not saved:
+        return {}
+    names = {p.index: p.name for p in score.parts}
+    hands = {}
+    for key, entry in saved["parts"].items():
+        if names.get(int(key)) != entry["name"]:
+            return {}
+        hands[int(key)] = entry["hand"]
+    return hands
+
+
+def save_hands(score: Score, hands: dict[int, str]) -> None:
+    """Save (or with an empty dict, forget) the part -> hand choice for a score."""
+    choices = _load_choices()
+    if hands:
+        names = {p.index: p.name for p in score.parts}
+        choices[score.path] = {
+            "saved": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "parts": {str(i): {"name": names[i], "hand": h} for i, h in sorted(hands.items())},
+        }
+    else:
+        choices.pop(score.path, None)
+    _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
+    score.hands = dict(hands)
 
 
 # ---------------------------------------------------------------------------

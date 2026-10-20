@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
 import sys
 import time
@@ -13,7 +14,7 @@ import mido
 import pytest
 
 from midi_coach import analysis, library, midi_io
-from midi_coach.notes import Note, load_score, notes_from_events, parse_bars, select_notes
+from midi_coach.notes import Note, load_score, notes_from_events, parse_bars, select_notes, suggest_hands
 
 BPM = 100
 BEAT = 60 / BPM
@@ -743,3 +744,106 @@ def test_chords_in_score_and_chart_comparison(ref, monkeypatch):
         assert "Unknown tab type" in res["error"]
 
     asyncio.run(run())
+
+
+def _write_band(path):
+    """4 bars of a band arrangement: drums, bass, chord guitar and a sung melody."""
+    mid = mido.MidiFile(ticks_per_beat=PPQ)
+    meta = mido.MidiTrack()
+    meta.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(BPM)))
+    mid.tracks.append(meta)
+
+    def track(name, channel, program, pitches_per_beat):
+        tr = mido.MidiTrack()
+        tr.append(mido.MetaMessage("track_name", name=name))
+        if program is not None:
+            tr.append(mido.Message("program_change", program=program, channel=channel))
+        for beat in range(16):
+            for pitch in pitches_per_beat(beat):
+                tr.append(mido.Message("note_on", note=pitch, velocity=70, channel=channel, time=0))
+            for k, pitch in enumerate(pitches_per_beat(beat)):
+                tr.append(mido.Message("note_off", note=pitch, velocity=0, channel=channel, time=PPQ if k == 0 else 0))
+        mid.tracks.append(tr)
+
+    track("Drums", 9, None, lambda b: [36, 42])
+    track("Track 2", 1, 33, lambda b: [40 + (b % 4)])  # fingered bass, unnamed
+    track("Gtr", 2, 29, lambda b: [55, 59, 62])  # overdriven guitar chords
+    track("Lead Vocal", 3, 53, lambda b: [67 + (b % 5)])  # voice oohs
+    mid.save(str(path))
+    return path
+
+
+def test_instruments_and_drums_detected(ref, tmp_path):
+    band = load_score(_write_band(tmp_path / "songs" / "Band Song.mid"))
+    by_name = {p.name: p for p in band.parts}
+    assert by_name["Drums"].drums and by_name["Drums"].instrument == "Drums"
+    assert by_name["Track 2"].instrument == "Fingered Bass"
+    assert by_name["Gtr"].instrument == "Overdriven Guitar"
+    assert by_name["Lead Vocal"].instrument == "Voice Oohs"
+    assert ref.parts[0].instrument == "Piano (no instrument set)" and ref.parts[0].is_piano
+    everything, info = select_notes(band)
+    assert not any(n.part == by_name["Drums"].index for n in everything)
+    assert info["method"] == "all parts except drums"
+    rh, _ = select_notes(band, "right")
+    assert 36 not in {n.pitch for n in rh} and 42 not in {n.pitch for n in rh}
+
+
+def test_suggest_hands_for_band_and_piano(ref, tmp_path):
+    band = load_score(_write_band(tmp_path / "songs" / "Band Song.mid"))
+    by_name = {p.name: p.index for p in band.parts}
+    guess = suggest_hands(band)
+    assert guess["right"] == [by_name["Lead Vocal"]] and guess["left"] == [by_name["Track 2"]], guess
+    assert suggest_hands(ref)["right"] == [0] and suggest_hands(ref)["left"] == [1]
+
+
+def test_part_choice_is_asked_saved_and_used(ref, tmp_path):
+    from midi_coach import server
+
+    _write_band(tmp_path / "songs" / "Band Song.mid")
+
+    async def run():
+        plain = await server.inspect_reference("etude")
+        assert plain["ask_user"] is False
+
+        info = await server.inspect_reference("band song")
+        assert info["ask_user"] is True and not info["part_choice"]["confirmed"]
+        parts = {p["name"]: p for p in info["parts"]}
+        assert parts["Drums"]["hand"] == "not played (drums)"
+        assert parts["Track 2"]["instrument"] == "Fingered Bass"
+        vocal, bass, gtr = parts["Lead Vocal"]["index"], parts["Track 2"]["index"], parts["Gtr"]["index"]
+
+        bad = await server.set_parts("band song", right=[vocal], left=[vocal])
+        assert "error" in bad
+        saved = await server.set_parts("band song", right=[vocal], left=[bass])
+        assert "error" not in saved, saved
+        assert any("Gtr" in name for name in saved["left_out"])
+
+        library._score_cache.clear()  # the choice survives a reload
+        again = await server.inspect_reference("band song")
+        assert again["ask_user"] is False and again["part_choice"]["right"] == [vocal]
+        assert {p["name"]: p["hand"] for p in again["parts"]}["Gtr"] == "not played"
+
+        score = library.get_score("band song")
+        right, info = select_notes(score, "right")
+        assert {n.part for n in right} == {vocal} and "chosen" in info["method"]
+        both, _ = select_notes(score)
+        assert {n.part for n in both} == {vocal, bass}
+        side = analysis.side_resolver(score)
+        assert side(next(n for n in score.notes if n.part == bass)) == "left"
+        only_gtr, _ = select_notes(score, "both", parts=[gtr])
+        assert {n.part for n in only_gtr} == {gtr}
+
+        await server.set_parts("band song", clear=True)
+        assert library.get_score("band song").hands == {}
+
+    asyncio.run(run())
+
+
+def test_saved_choice_ignored_when_file_changes(ref, tmp_path):
+    path = _write_band(tmp_path / "songs" / "Band Song.mid")
+    score = library.get_score("band song")
+    library.save_hands(score, {3: "right"})
+    assert library.get_score("band song").hands == {3: "right"}
+    _write_reference(path)  # same file name, different parts
+    os.utime(path, (time.time() + 5, time.time() + 5))
+    assert library.get_score("band song").hands == {}
