@@ -1554,8 +1554,11 @@ def test_keyboard_part_suggestions():
     # An organ riff in the treble only, plus a bass guitar: the bass line fills the left hand.
     organ = [(t, (72, 76, 79)[k % 3], 0.25) for k, t in enumerate(eighths)]
     bass = [(t, 36, 0.5) for t in eighths[::2]]
-    out = suggest_hands(_band([(18, "Organ", organ), (33, "Bass", bass), (6, "Harpsichord", organ[:10])]))
+    band = _band([(18, "Organ", organ), (33, "Bass", bass), (6, "Harpsichord", organ[:10])])
+    out = suggest_hands(band)
     assert out["right"] == [0] and out["left"] == [1]
+    left, info = select_notes(band, "left")  # the bass guitar is played an octave up, as bass parts are written
+    assert {n.pitch for n in left} == {48} and info["octave_up"] == [1] and any("octave up" in r for r in out["reasons"])
 
     # Two piano tracks that are one player's hands; and a full piano part with a boogie bass track.
     rh = [(t, (72, 76)[k % 2], 0.25) for k, t in enumerate(eighths)]

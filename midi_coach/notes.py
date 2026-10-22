@@ -10,7 +10,7 @@ from __future__ import annotations
 import bisect
 import pathlib
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import mido
 
@@ -465,7 +465,7 @@ def split_resolver(score: Score, parts: set[int], split_note: int = 60):
     key = (frozenset(parts), split_note)
     sides = score._sides.get(key)
     if sides is None:
-        sides = score._sides[key] = split_hands([n for n in score.notes if n.part in parts], split_note)
+        sides = score._sides[key] = split_hands(as_played(score, [n for n in score.notes if n.part in parts]), split_note)
     return lambda n: sides.get((round(n.start, 4), n.pitch)) or ("right" if n.pitch >= split_note else "left")
 
 
@@ -534,7 +534,28 @@ def select_notes(
         t0, t1 = score.bar_range_times(*bars)
         notes = [n for n in notes if t0 - 1e-6 <= n.start < t1 - 1e-6]
         info["bars"] = f"{bars[0]}-{bars[1]}"
-    return list(notes), info
+    notes = as_played(score, notes)
+    raised = sorted(octave_up_parts(score) & {n.part for n in notes})
+    if raised:
+        info["octave_up"] = raised
+    return notes, info
+
+
+OCTAVE_UP_BELOW = 48  # a bass part averaging below C3 is played an octave up
+
+
+def octave_up_parts(score: Score) -> set[int]:
+    """Bass-guitar parts, played an octave up on the keyboard: bass parts are written an
+    octave above where they sound, and so a 61-key keyboard (lowest note C2) reaches them.
+    Parts the file already has in that range stay where they are."""
+    return {p.index for p in score.parts
+            if not p.drums and not _is_keyboard(p) and _is_bass(p) and p.note_count and p.mean_pitch < OCTAVE_UP_BELOW}
+
+
+def as_played(score: Score, notes: list[Note]) -> list[Note]:
+    """The notes as the user plays them: bass-guitar parts an octave up (octave_up_parts)."""
+    up = octave_up_parts(score)
+    return [replace(n, pitch=n.pitch + 12) if n.part in up else n for n in notes] if up else list(notes)
 
 
 _MELODY_WORDS = ("melody", "vocal", "voice", "vox", "lead", "sing", "solo", "tune")
@@ -543,7 +564,7 @@ _MELODY_PROGRAMS = set(range(52, 55)) | set(range(64, 88))
 
 
 def _is_bass(p: Part) -> bool:
-    return (p.program is not None and 32 <= p.program <= 39) or "bass" in p.name.lower()
+    return not p.drums and ((p.program is not None and 32 <= p.program <= 39) or "bass" in p.name.lower())
 
 
 def _melody_part(parts: list[Part]) -> tuple[Part, str] | None:
@@ -672,6 +693,14 @@ def suggest_hands(score: Score) -> dict:
     Returns {"right": [...], "left": [...], "both": [...], "reasons": [...]}; a part in
     "both" is shared between the hands by pitch. Parts in none of the lists are left out.
     """
+    out = _suggest_hands(score)
+    for i in sorted(octave_up_parts(score) & set(out["right"] + out["left"] + out["both"])):
+        out["reasons"].append(f"Part {i} '{score.parts[i].name}' is played an octave up, as bass parts are written "
+                              "(it also keeps it on a 61-key keyboard).")
+    return out
+
+
+def _suggest_hands(score: Score) -> dict:
     out: dict = {"right": [], "left": [], "both": [], "reasons": []}
     playable = playable_parts(score)
     if not playable:

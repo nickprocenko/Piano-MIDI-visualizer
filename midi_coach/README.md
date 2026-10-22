@@ -231,7 +231,9 @@ part (piano or organ) if there is one, otherwise the melody in your right hand a
 line in your left. Tracks that only double another (note for note or an octave apart) are
 ignored; two tracks that are clearly one player's two hands are given a hand each; a
 separate bass-register piano track joins the left hand; and a keyboard part that stays in the
-treble gets the bass line in the left hand. Claude
+treble gets the bass line in the left hand. A bass-guitar part you play is moved up an octave,
+as bass parts are written (and so a 61-key keyboard reaches it); the sheet, grading and
+playback all use it there. Claude
 shows you the parts and asks before going on, for example:
 
 > 1 Track 3 — Acoustic Bass (low, E1–A2) · 4 Track 6 — Voice Oohs (melody) · 9 Drums …
@@ -307,3 +309,6 @@ python -m pytest midi_coach/tests
 ```
 
 The tests use synthetic performances and a fake `rtmidi` module, so they run without hardware.
+`test_sheet_conventions.py` also holds the piano sheets of a few band files from the downloaded
+`reference/` library to piano-notation conventions (reach, clefs, accidentals, marks); songs that
+aren't downloaded are skipped.
