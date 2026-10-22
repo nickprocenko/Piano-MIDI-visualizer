@@ -56,7 +56,8 @@ def validate_tiny(text: str) -> None:
     if bad:
         raise ValueError(
             f"Unrecognized notes {bad} in {text!r}. Octaves: c = C4, c' = C5, C = C3, CC = C2; "
-            "sharps f#, flats b-, durations 1 2 4 8 16 with dots, rests r4, chords chord{c4 e g}."
+            "sharps f#, flats b- (after octave marks: c'#, not c#'), durations 1 2 4 8 16 with dots, "
+            "rests r4, chords chord{c4 e g}."
         )
 
 

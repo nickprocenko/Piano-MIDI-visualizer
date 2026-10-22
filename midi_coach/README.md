@@ -14,10 +14,90 @@ Ask Claude things like:
 - *"Wait mode on bars 1–8, right hand — I'm learning the notes."*
 - *"Rehearsal at 80%, whole piece."*
 
+## Practice from the sheet-music page
+
+The coach page (**http://127.0.0.1:8765/**) has its own menu, so you can practice without
+asking Claude to start each run:
+
+| Control | What it does |
+|---------|--------------|
+| Lesson | Any lesson in `%USERPROFILE%\MidiCoach\lessons` (newest first), or the score Claude just showed |
+| Input | MIDI input to listen on (remembered). If the keyboard is busy — e.g. the visualizer has it open — the `Coach` loopMIDI port is used instead |
+| Learn / Rehearse / Record | Learn = the cursor waits for the right notes (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`); Record = play over the metronome and get it back as sheet music (below) |
+| Hand, Bars | Practice one hand (the other is ignored) or a bar range |
+| Loop | Restart at the end of the range; each pass is saved and graded as its own take |
+| Start / Stop | One session at a time, shared with Claude |
+| Metronome | BPM (type it, **Tap** it, or **Match score**), beats per bar, subdivision (quarters to sextuplets), six sounds, accent on beat 1, volume and a separate volume for the subdivisions. **M** starts/stops it. **Follow score**: Rehearse runs start with a count-in and the clicks follow the score — its tempo changes, time signatures and pickup bars, at your Tempo % — instead of waiting for your first note. Runs in the browser: no lag, no cost |
+| Voice | The **Maestro**, a strict-teacher NPC, talks to you in a dialogue box (click to skip, click again to close). When you press Start it greets you with what it knows: the piece, its key signature, your best score on it, how long you've been away. When a looped run ends it sums up: passes, your best one, your weak bar. After each pass it speaks: a verdict, the exact slip ("Bar 3: that's F sharp, not F"), where you froze, rushed or dragged, how it compares with the last pass, and one instruction ("Isolate bar 3, five clean times in a row"). The wording changes every pass. Claude's own comments (`say`) are spoken too, at the volume you set. The *Natural (Kokoro)* voices sound human; the Windows voices are the fallback. Your choice is remembered. Browsers only let a page speak after you've clicked it once |
+
+**Natural voice (Kokoro).** [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) is a small open
+speech model that runs on your PC — free, offline, nothing leaves the machine. After installing
+the requirements, download the model once (~340 MB, into `%USERPROFILE%\MidiCoach\kokoro`) and
+hear a test line:
+
+```bat
+.venv\Scripts\python -m midi_coach.tts
+.venv\Scripts\python -m midi_coach.tts "Keep the thumb under." bm_george
+```
+
+Restart Claude Desktop (or the practice page) afterwards. Each line takes about a second to
+generate, so the coach speaks just after a pass ends, not mid-pass.
+
+**Record mode.** Pick **Record**, set the metronome's BPM and beats per bar, press **● Record**,
+and play after the count-in (one bar, two if the bar is short). Press Stop when you're done
+(10 seconds of silence also stops). What you played is snapped to the beat — sixteenths, or
+triplets where they fit clearly better — split between the hands by where they are on the keyboard (not at a fixed key), given a key signature,
+and saved as a lesson (`Recording 2026-10-20 17-52`) that appears on the page straight away,
+ready to practise in Learn or Rehearse. It's a readable sketch, not an engraving: notes held
+under a moving line in the same hand are shortened. Claude's `transcribe_take` does the same for
+any take, e.g. free play recorded without a click (it estimates the tempo; tell it the BPM if it
+gets it wrong).
+
+After each pass the page shows a one-line summary (e.g. *Pass 3 · Learn: 29/30 notes, 2 wrong,
+bar 3 slowest, score 93*) and the bar heat map. Runs you start there are the same session as
+Claude's `start_recording`, so with Claude Desktop open you can say *"give me feedback on
+that"* and it picks up the pass with `wait_for_recording` / `compare_take`.
+
+Without Claude Desktop: `.venv\Scripts\python -m midi_coach.practice` opens the page with
+your newest lesson. Every pass is still saved, so Claude can review them later (`progress`).
+Don't run it while Claude Desktop's midi-coach is running — they'd compete for the keyboard.
+
+## Talk to the Maestro (voice chat, optional)
+
+Tap **🎤 Talk** on the coach page, speak, tap again (or hold it, or hold **Space**, and let go
+when you're done), or type in the box next to it. A level meter shows whether the microphone
+hears you; pick the microphone in the menu next to it. The JUNO-DS's USB audio input is
+not a microphone, so plug in a headset or USB mic. The Maestro
+answers out loud in character and can run the practice for you:
+
+- *"Hello. How did that go?"* / *"What's my best on this?"*
+- *"Loop bars five to eight in Rehearse at seventy percent."* / *"Left hand only."* / *"Stop."*
+- *"Play bars one to four for me."* (through the keyboard)
+- *"Write me a G major arpeggio exercise."* / *"Switch to the C major scale."*
+
+Your speech is transcribed **on your PC** (Whisper `base.en`, downloaded once, ~145 MB, to
+`%USERPROFILE%\MidiCoach\whisper`). Only the text, plus a short summary of your practice,
+goes to Claude: **Haiku 5.5** for the conversation and commands, **Sonnet 5.5** when it
+writes a lesson (with server-side fallback enabled, so a declined request is retried on
+another model).
+
+This uses the **Claude API** (pay as you go), not your Claude subscription:
+
+1. Create a key at console.anthropic.com and add credit.
+2. Save it as `%USERPROFILE%\MidiCoach\anthropic_api_key.txt` (just the key), or set
+   `ANTHROPIC_API_KEY` in the midi-coach `env` block of Claude Desktop's config.
+3. Reload the coach page. The button switches on and shows today's spend.
+
+Every request's cost is added up in `%USERPROFILE%\MidiCoach\ai_spend.json`. After
+`MIDI_COACH_DAILY_CAP` dollars in a day (default **$0.50**) the Maestro stops calling the API
+until tomorrow. A typical exchange on Haiku costs well under a cent; a new lesson from Sonnet,
+a few cents.
+
 ## Custom lessons, pushed live
 
-Ask Claude for an exercise and it appears in the visualizer's Learn Mode (falling notes plus
-sheet music) and on the coach page **immediately** — no file to save or load. For example:
+Ask Claude for an exercise and it appears on the coach page **immediately** — no file to
+save or load. Ask for it "in the visualizer" too and it is also pushed into the visualizer's
+Learn Mode (falling notes plus sheet music). For example:
 
 - *"Write me a 4-bar left-hand exercise for the jump in bar 12."*
 - *"Make a lesson out of my three worst bars from that take, right hand only."*
@@ -30,7 +110,8 @@ bar-by-bar readout so Claude can check it, saves it to `%USERPROFILE%\MidiCoach\
 and publishes it. Lessons are normal references afterwards, so recording, Wait/Rehearsal
 grading, heat maps and `progress` all work on them.
 
-The visualizer must be connected (Settings → Hardware → *Practice Coach* → Connect; it
+For the visualizer push (`to_visualizer=True`) the visualizer must be connected (Settings →
+Hardware → *Practice Coach* → Connect; it
 reconnects automatically after a reload). A lesson that arrives while you're in the middle
 of something replaces the current Learn Mode song; a page that connects later receives the
 latest lesson without auto-starting it.
@@ -132,8 +213,10 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `stop_playback` | Stop, release notes and pedal |
 | `show_score` | Show a reference on the live sheet-music page |
 | `show_heatmap` | Draw a take's bar heat map on the live score |
-| `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and push it into Learn Mode |
-| `send_lesson` | Push an existing lesson or reference into Learn Mode |
+| `say` | Speak a short comment aloud on the coach page (browser voice; mute with the page's Voice switch) |
+| `transcribe_take` | Write a take out as sheet music (a two-staff lesson): Record-mode takes use their metronome grid, others get an estimated tempo or the `bpm` you give |
+| `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and show it on the coach page (`to_visualizer` also pushes it into Learn Mode) |
+| `send_lesson` | Show an existing lesson or reference on the coach page (`to_visualizer`: Learn Mode too) |
 | `search_chord_charts` | Search Ultimate Guitar (chords, tabs, bass, ukulele, drums, Guitar Pro), plus sheet-music search links |
 | `get_chord_chart` | A chart's key, capo, chords, per-section progression and text; transpose; with `reference`, suggests the transpose that matches the score |
 | `chords_in_score` | Names the chord in each bar (or half bar, or beat) of a reference from its notes, plus the estimated key |
@@ -209,6 +292,8 @@ Takes are saved as `.mid` plus `.json` in `%USERPROFILE%\MidiCoach\takes` (overr
 | `MIDI_COACH_CONFIG` | `<repo>/config.json` | Where to read `search_folders` |
 | `MIDI_COACH_DISPLAY_PORT` | `8765` | Live score server port (next free port if taken) |
 | `MIDI_COACH_NO_BROWSER` | — | Set to stop Claude opening the browser automatically |
+| `ANTHROPIC_API_KEY` | `~/MidiCoach/anthropic_api_key.txt` | API key for talking to the Maestro |
+| `MIDI_COACH_DAILY_CAP` | `0.50` | Daily voice-chat spending limit in dollars |
 
 ## Development
 

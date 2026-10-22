@@ -40,6 +40,8 @@ GM_PROGRAMS = [
     "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet", "Telephone Ring", "Helicopter", "Applause", "Gunshot",
 ]
 DRUM_CHANNEL = 9  # MIDI channel 10, 0-based
+GRID_TOL = 0.025  # quarter notes: how far from a 16th / triplet-8th a note may start and still count as on the grid
+LIVE_GRID_FIT = 0.7  # below this share of notes on the grid, a file was played live
 
 _SHARP_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 _FLAT_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]
@@ -113,6 +115,20 @@ class Score:
     duration: float
     hands: dict[int, str] = field(default_factory=dict)  # confirmed part -> 'right' | 'left' | 'both'
     _bar_starts: list[float] = field(default_factory=list, repr=False)
+    _played_live: bool | None = field(default=None, repr=False)
+    # Set when the beat grid was recovered (regrid.py): seconds <-> beats, and how well it fit.
+    beat_map: object | None = field(default=None, repr=False)
+    regrid: dict | None = field(default=None, repr=False)
+    _sides: dict = field(default_factory=dict, repr=False)  # split_resolver's cache
+
+    def beat_of(self, t: float) -> float:
+        """Beat (quarter notes from the start) at a time in seconds."""
+        if self.beat_map is not None:
+            return self.beat_map.beat_at(t)
+        bar = self.bar_at(t)
+        if bar is None or bar.end <= bar.start:
+            return t * 2.0
+        return bar.start_beat + (t - bar.start) / (bar.end - bar.start) * (bar.end_beat - bar.start_beat)
 
     def __post_init__(self) -> None:
         self._bar_starts = [b.start for b in self.bars]
@@ -136,6 +152,22 @@ class Score:
         first = max(1, min(first, len(self.bars)))
         last = max(first, min(last, len(self.bars)))
         return self.bars[first - 1].start, self.bars[last - 1].end
+
+    def grid_fit(self) -> float:
+        """Share of notes starting on a 16th or triplet-8th of the file's own beat. Files
+        written in a sequencer or notation program are ~1.0; a performance recorded live,
+        whose beats don't line up with the file's bar lines, scores far lower."""
+        if not self.notes:
+            return 1.0
+        on_grid = sum(1 for n in self.notes if any(abs(n.beat * d - round(n.beat * d)) <= GRID_TOL * d for d in (4, 3)))
+        return on_grid / len(self.notes)
+
+    @property
+    def played_live(self) -> bool:
+        """No reliable beat grid: bar numbers, the metronome and sheet music would be wrong."""
+        if self._played_live is None:
+            self._played_live = len(self.notes) >= 50 and self.grid_fit() < LIVE_GRID_FIT
+        return self._played_live
 
     def bpm_at(self, t: float) -> float:
         bpm = self.tempos[0][1] if self.tempos else 120.0
@@ -192,8 +224,36 @@ def _load_musicxml(path: pathlib.Path) -> Score:
     return score
 
 
+def _tolerate_bad_meta() -> None:
+    """Keep a damaged meta event (a key signature with mode 255, an SMPTE offset with an
+    unknown frame rate...) as an unknown one instead of rejecting the whole file. Nothing
+    here reads those events; tempo and time signature still decode normally."""
+    from mido.midifiles import meta, midifiles
+
+    original = meta.build_meta_message
+    if getattr(midifiles.build_meta_message, "tolerant", False):
+        return
+
+    def build(meta_type, data, delta=0):
+        try:
+            return original(meta_type, data, delta)
+        except Exception:  # KeySignatureError, KeyError, IndexError...: any undecodable meta event
+            return meta.UnknownMetaMessage(meta_type, data, time=delta)
+
+    build.tolerant = True
+    midifiles.build_meta_message = build
+
+
+_tolerate_bad_meta()
+
+
 def load_midi(path: str | pathlib.Path) -> Score:
-    mid = mido.MidiFile(str(path))
+    try:
+        mid = mido.MidiFile(str(path))
+    except (OSError, ValueError, EOFError, KeyError, IndexError):
+        # Files from MIDI sites are sometimes slightly malformed (e.g. a data byte over
+        # 127); the lenient reader clips such values instead of giving up.
+        mid = mido.MidiFile(str(path), clip=True)
     ppq = mid.ticks_per_beat
 
     tempo_changes: list[tuple[int, int]] = []
@@ -337,10 +397,81 @@ def playable_parts(score: Score) -> list[Part]:
     return [p for p in score.parts if p.note_count > 0 and not p.drums]
 
 
-def _split(notes: list[Note], hand: str, split_note: int) -> list[Note]:
-    if hand == "right":
-        return [n for n in notes if n.pitch >= split_note]
-    return [n for n in notes if n.pitch < split_note]
+CHORD_GAP = 0.035  # seconds: notes starting this close together are one chord
+HAND_REACH = 14  # semitones one hand spans (a ninth), counting the keys it is still holding
+HOLD_WINDOW = 4.0  # seconds: a key held longer than this is taken to be ringing on the pedal, not blocking the hand
+CROSS_COST = 2.0  # per note on the far side of split_note: a note crosses only when it's clearly the other hand's
+
+
+def split_hands(notes: list[Note], split_note: int = 60) -> dict[tuple[float, int], str]:
+    """Divide the notes of one part between the hands, chord by chord, the way a pianist
+    would rather than at a fixed key. Each chord is cut where both hands stay within reach
+    (counting keys they still hold) and nearest to where each hand has just been; split_note
+    only decides close calls. So an inner line around middle C stays in one hand, and a
+    bass note held under an arpeggio keeps the arpeggio out of the left hand.
+
+    A hand's place is its outer note (the left hand's lowest, the right hand's highest: the
+    bass and the tune), so an octave or a full chord in one hand costs nothing extra.
+
+    Returns {(start rounded to 4 places, pitch): 'right' | 'left'}."""
+    sides: dict[tuple[float, int], str] = {}
+    pos = {"left": split_note - 12.0, "right": split_note + 7.0}  # each hand's outer note, smoothed
+
+    def edge(side: str, group: list[int]) -> int:
+        return group[0] if side == "left" else group[-1]
+
+    held: list[tuple[float, float, int, str]] = []  # (start, end, pitch, side) of keys still down
+    ordered = sorted(notes, key=lambda n: (n.start, n.pitch))
+    i = 0
+    while i < len(ordered):
+        t = ordered[i].start
+        j = i
+        while j < len(ordered) and ordered[j].start - t <= CHORD_GAP:
+            j += 1
+        chord, i = ordered[i:j], j
+        held = [h for h in held if h[1] > t + CHORD_GAP and t - h[0] < HOLD_WINDOW]
+        holding = {s: [p for _, _, p, hs in held if hs == s] for s in pos}
+        pitches = sorted({n.pitch for n in chord})
+
+        def cost(k: int) -> float:
+            total = 0.0
+            for side, group in (("left", pitches[:k]), ("right", pitches[k:])):
+                if not group:
+                    continue
+                reach = group + holding[side]
+                total += 10 * max(0, max(reach) - min(reach) - HAND_REACH)
+                total += abs(edge(side, group) - pos[side])
+                total += CROSS_COST * sum((p >= split_note) != (side == "right") for p in group)
+            if k and holding["right"] and pitches[k - 1] > min(holding["right"]):
+                total += 10  # the left hand would cross over a key the right hand holds
+            if k < len(pitches) and holding["left"] and pitches[k] < max(holding["left"]):
+                total += 10
+            return total
+
+        k = min(range(len(pitches) + 1), key=cost)
+        for side, group in (("left", pitches[:k]), ("right", pitches[k:])):
+            if group:
+                pos[side] = (pos[side] + edge(side, group)) / 2
+        for n in chord:
+            side = "left" if n.pitch in pitches[:k] else "right"
+            sides[(round(n.start, 4), n.pitch)] = side
+            held.append((n.start, n.end, n.pitch, side))
+    return sides
+
+
+def split_resolver(score: Score, parts: set[int], split_note: int = 60):
+    """Note -> 'right' | 'left' for the notes of parts the hands share. The split is worked
+    out over the whole piece, so one hand, a bar range and the sheet all agree."""
+    key = (frozenset(parts), split_note)
+    sides = score._sides.get(key)
+    if sides is None:
+        sides = score._sides[key] = split_hands([n for n in score.notes if n.part in parts], split_note)
+    return lambda n: sides.get((round(n.start, 4), n.pitch)) or ("right" if n.pitch >= split_note else "left")
+
+
+def _split(score: Score, notes: list[Note], hand: str, split_note: int, parts: set[int]) -> list[Note]:
+    side = split_resolver(score, parts, split_note)
+    return [n for n in notes if side(n) == hand]
 
 
 def select_notes(
@@ -360,21 +491,22 @@ def select_notes(
     info: dict = {"hand": hand}
     notes = score.notes
     playable = playable_parts(score)
+    hands = effective_hands(score)
     if parts:
         wanted = set(parts)
         notes = [n for n in notes if n.part in wanted]
         info["method"] = f"parts {sorted(wanted)}"
-    elif score.hands:
+    elif hands:
         if hand in ("right", "left"):
-            whole = {i for i, h in score.hands.items() if h == hand}
-            shared = {i for i, h in score.hands.items() if h == "both"}
-            notes = [n for n in notes if n.part in whole] + _split([n for n in notes if n.part in shared], hand, split_note)
+            whole = {i for i, h in hands.items() if h == hand}
+            shared = {i for i, h in hands.items() if h == "both"}
+            notes = [n for n in notes if n.part in whole] + _split(score, [n for n in notes if n.part in shared], hand, split_note, shared)
             notes.sort(key=lambda n: (n.start, n.pitch))
             used = sorted(whole | shared)
         else:
-            used = sorted(score.hands)
-            notes = [n for n in notes if n.part in score.hands]
-        info["method"] = f"your chosen parts {used}"
+            used = sorted(hands)
+            notes = [n for n in notes if n.part in hands]
+        info["method"] = f"your chosen parts {used}" if score.hands else f"suggested parts {used} (not confirmed yet)"
     elif hand in ("right", "left"):
         keep = {p.index for p in playable}
         notes = [n for n in notes if n.part in keep]
@@ -389,8 +521,8 @@ def select_notes(
             notes = [n for n in notes if n.part == chosen.index]
             info["method"] = f"part {chosen.index} ('{chosen.name}') by register"
         else:
-            notes = _split(notes, hand, split_note)
-            info["method"] = f"pitch split at {note_name(split_note)}"
+            notes = _split(score, notes, hand, split_note, keep)
+            info["method"] = f"split between the hands by register (around {note_name(split_note)})"
     else:
         keep = {p.index for p in playable}
         if len(keep) < sum(1 for p in score.parts if p.note_count > 0):
@@ -426,6 +558,24 @@ def _melody_part(parts: list[Part]) -> tuple[Part, str] | None:
     if tunes:
         return max(tunes, key=lambda p: p.mean_pitch), "the highest part"
     return None
+
+
+def is_plain_piano(score: Score) -> bool:
+    """One or two piano parts and nothing else: no part choice to make."""
+    playable = playable_parts(score)
+    return all(p.is_piano for p in playable) and len(playable) <= 2 and len(playable) == sum(1 for p in score.parts if p.note_count)
+
+
+def effective_hands(score: Score) -> dict[int, str]:
+    """Part -> 'right' | 'left' | 'both' for the parts the user plays: their confirmed
+    choice, else the suggestion for a band arrangement (so the sheet music and the grading
+    agree before anyone confirms). Empty for a plain piano file: every note counts."""
+    if score.hands:
+        return score.hands
+    if is_plain_piano(score):
+        return {}
+    guess = suggest_hands(score)
+    return {i: h for h in ("right", "left", "both") for i in guess[h]}
 
 
 def suggest_hands(score: Score) -> dict:

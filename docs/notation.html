@@ -14,9 +14,12 @@
       inset: 0;
       overflow: hidden;
     }
+    body.pannable #viewport { cursor: grab; touch-action: none; }
+    body.pannable.dragging #viewport { cursor: grabbing; }
     #score-track {
       position: absolute;
       top: 0; left: 0;
+      transform-origin: 0 0;
       will-change: transform;
     }
     #osmd-div {
@@ -159,8 +162,12 @@ window.addEventListener('message', async e => {
     updatePosition(e.data.ms);
   } else if (e.data.type === 'clear') {
     clearScore();
+  } else if (e.data.type === 'pan') {
+    if (e.data.reset) panPx = 0; else panBy(e.data.dx || 0);
   } else if (e.data.type === 'cursorBeat') {
     beatMode = true;
+    panPx = 0;  // the cursor moved: snap back to it
+    document.body.classList.add('pannable');
     beatTarget = e.data.beat; beatBps = e.data.bps || 0; beatAt = performance.now();
     if (beatBps > 0) beatShown = beatTarget;
   } else if (e.data.type === 'marks') {
@@ -179,7 +186,9 @@ window.addEventListener('message', async e => {
 function clearScore() {
   rendered = false;
   timestampMap = [];
-  beatMap = []; noteEntries = []; measureMap = []; beatMode = false;
+  beatMap = []; noteEntries = []; measureMap = []; beatMode = false; panPx = 0;
+  fit = {top: 0, h: 0};
+  document.body.classList.remove('pannable');
   document.getElementById('heat-layer').innerHTML = '';
   scoreTrack.style.transform = 'translateX(0px)';
   document.getElementById('osmd-div').innerHTML = '';
@@ -190,7 +199,9 @@ function clearScore() {
 async function loadScore(musicXml) {
   rendered     = false;
   timestampMap = [];
-  beatMap = []; noteEntries = []; measureMap = []; beatMode = false;
+  beatMap = []; noteEntries = []; measureMap = []; beatMode = false; panPx = 0;
+  fit = {top: 0, h: 0};
+  document.body.classList.remove('pannable');
   document.getElementById('heat-layer').innerHTML = '';
   statusEl.style.display = 'flex';
   statusEl.textContent   = 'Rendering score…';
@@ -242,14 +253,9 @@ async function loadScore(musicXml) {
     statusEl.style.display = 'none';
     rendered = true;
 
-    // Let parent resize the notation strip to fit actual rendered height
-    try {
-      const svgEl = document.querySelector('#osmd-div svg');
-      if (svgEl) {
-        const h = Math.ceil(svgEl.getBoundingClientRect().height);
-        window.parent.postMessage({type: 'height', h}, '*');
-      }
-    } catch(_) {}
+    // Let parent resize the notation strip to fit the drawn score (margins trimmed, unscaled)
+    measureScore();
+    if (fit.h) window.parent.postMessage({type: 'height', h: Math.ceil(fit.h + 2 * FIT_PAD)}, '*');
 
     buildTimestampMap();
     window.parent.postMessage({type:'ready'}, '*');
@@ -477,20 +483,90 @@ function getXForTime(ms) {
   return a.xPx + t * (b.xPx - a.xPx);
 }
 
+// ── Fit to the strip ──────────────────────────────────────────────────────────
+// OSMD leaves wide empty page margins, so measure what is actually drawn, centre
+// it vertically and scale it down when the strip is shorter than the score.
+// Positions (beatMap etc.) stay in unscaled track pixels; trackTransform scales them.
+const FIT_PAD = 8;
+let fit = {top: 0, h: 0};  // drawn score's top and height within the track at scale 1
+
+function measureScore() {
+  const svg = document.querySelector('#osmd-div svg');
+  if (!svg) return;
+  try {
+    const box = svg.getBBox();
+    const r = svg.getBoundingClientRect();
+    const vb = svg.viewBox && svg.viewBox.baseVal;
+    const k = vb && vb.height ? r.height / vb.height : 1;
+    const y0 = vb && vb.height ? vb.y : 0;
+    fit = {top: r.top - scoreTrack.getBoundingClientRect().top + (box.y - y0) * k, h: box.height * k};
+  } catch (_) {
+    fit = {top: 0, h: 0};
+  }
+}
+
+function fitScale() {
+  return fit.h ? Math.min(1, Math.max(0.35, (window.innerHeight - 2 * FIT_PAD) / fit.h)) : 1;
+}
+
+function trackTransform(x, s) {
+  const ty = fit.h ? (window.innerHeight - fit.h * s) / 2 - fit.top * s : 0;
+  return `translate(${x.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${s.toFixed(4)})`;
+}
+
+// ── Manual panning (midi-coach) ───────────────────────────────────────────────
+// Drag or scroll the score to look around while the cursor is parked; the next
+// cursor update snaps back. Disabled while it moves at tempo (rehearsal).
+let panPx = 0;
+
+function panBy(dx) {
+  if (!rendered || !beatMode || beatBps > 0 || !beatMap.length) return;
+  const s = fitScale();
+  const width = document.getElementById('osmd-div').offsetWidth * s;
+  const x = getXForBeat(beatShown) * s;
+  // Keep some part of the score under the playhead: 0 <= x - panPx <= width.
+  panPx = Math.max(x - width, Math.min(x, panPx + dx));
+}
+
+const viewportEl = document.getElementById('viewport');
+viewportEl.addEventListener('wheel', e => {
+  if (!document.body.classList.contains('pannable')) return;
+  e.preventDefault();
+  panBy(-(Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY));
+}, {passive: false});
+
+let dragX = null;
+viewportEl.addEventListener('pointerdown', e => {
+  if (!document.body.classList.contains('pannable')) return;
+  dragX = e.clientX;
+  viewportEl.setPointerCapture(e.pointerId);
+  document.body.classList.add('dragging');
+});
+viewportEl.addEventListener('pointermove', e => {
+  if (dragX === null) return;
+  panBy(e.clientX - dragX);
+  dragX = e.clientX;
+});
+const endDrag = () => { dragX = null; document.body.classList.remove('dragging'); };
+viewportEl.addEventListener('pointerup', endDrag);
+viewportEl.addEventListener('pointercancel', endDrag);
+
 // ── Animation loop ────────────────────────────────────────────────────────────
 function tick() {
   requestAnimationFrame(tick);
   if (!rendered || timestampMap.length === 0) return;
   const phX   = window.innerWidth * PLAYHEAD_FRAC;
+  const s     = fitScale();
   if (beatMode && beatMap.length) {
     const now = performance.now();
     if (beatBps > 0) beatShown = beatTarget + beatBps * (now - beatAt) / 1000;
     else beatShown += (beatTarget - beatShown) * 0.18;  // ease toward the waiting chord
-    scoreTrack.style.transform = `translateX(${(phX - getXForBeat(beatShown)).toFixed(1)}px)`;
+    if (beatBps > 0) panPx = 0;
+    scoreTrack.style.transform = trackTransform(phX - getXForBeat(beatShown) * s + panPx, s);
     return;
   }
   const noteX = getXForTime(currentMs);
-  scoreTrack.style.transform = `translateX(${(phX - noteX).toFixed(1)}px)`;
+  scoreTrack.style.transform = trackTransform(phX - noteX * s, s);
 }
 tick();
 </script>

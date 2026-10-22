@@ -26,6 +26,22 @@ def home() -> pathlib.Path:
     return path
 
 
+def derived_path(source: pathlib.Path | str, kind: str, extra: str = "") -> pathlib.Path:
+    """Cache file for something worked out from a reference (a recovered beat grid, a piano
+    sheet...). Named after the source's path, size and date plus `extra` (e.g. the part
+    choice), so editing the file or changing the choice gives a new name and the old result
+    is simply never used again. The folder is always safe to delete."""
+    import hashlib
+
+    p = pathlib.Path(source)
+    st = p.stat()
+    key = hashlib.sha1(f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}|{extra}".encode()).hexdigest()[:12]
+    folder = home() / "derived"
+    folder.mkdir(exist_ok=True)
+    stem = re.sub(r"[^A-Za-z0-9]+", "-", p.stem).strip("-")[:40] or "file"
+    return folder / f"{stem}-{key}.{kind}"
+
+
 def reference_folders() -> list[pathlib.Path]:
     folders: list[pathlib.Path] = []
     config_path = pathlib.Path(os.environ.get("MIDI_COACH_CONFIG") or REPO_ROOT / "config.json")
@@ -47,11 +63,14 @@ def reference_folders() -> list[pathlib.Path]:
     return out
 
 
+BROKEN_DIR = "_broken"  # unreadable downloads are moved into a folder of this name and skipped
+
+
 def scan_references() -> list[pathlib.Path]:
     files: dict[str, pathlib.Path] = {}
     for folder in reference_folders():
         for f in folder.rglob("*"):
-            if f.is_file() and f.suffix.lower() in REF_SUFFIXES:
+            if f.is_file() and f.suffix.lower() in REF_SUFFIXES and BROKEN_DIR not in f.relative_to(folder).parts:
                 files.setdefault(str(f).lower(), f)
     return sorted(files.values(), key=lambda p: p.name.lower())
 
@@ -105,9 +124,30 @@ def get_score(ref: str) -> Score:
         score = cached[1]
     else:
         score = load_score(path)
+        if path.suffix.lower() in MIDI_SUFFIXES and score.played_live:
+            score = _regridded(score, path)
         _score_cache[str(path)] = (mtime, score)
     score.hands = load_hands(score)
     return score
+
+
+def _regridded(score: Score, path: pathlib.Path) -> Score:
+    """The score on its recovered beat grid, if one can be found (cached on disk)."""
+    from . import regrid
+
+    cache = derived_path(path, "beatmap.json", f"regrid-v{regrid.VERSION}")
+    try:
+        data = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        found = regrid.track(score.notes, score.tempos[0][1] if score.tempos else 120.0)
+        data = {"failed": True} if found is None else {"map": found[0].to_json(), "quality": found[1]}
+        try:
+            cache.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            pass
+    if data.get("failed"):
+        return score  # truly free playing: stays played_live
+    return regrid.apply(score, regrid.BeatMap.from_json(data["map"]), data["quality"])
 
 
 # ---------------------------------------------------------------------------

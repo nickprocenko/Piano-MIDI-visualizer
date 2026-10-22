@@ -24,11 +24,72 @@
   #conn { font-size: 12px; color: var(--muted); }
   #conn.live::before { content: '● '; color: var(--hit); }
   #conn.down::before { content: '● '; color: var(--miss); }
+  #menu, #metro { display: flex; align-items: center; gap: 10px 18px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid rgba(255,255,255,.08); flex-wrap: wrap; }
+  #menu label, #metro label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  #menu select, #menu input[type=number], #metro select, #metro input[type=number] { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  #menu input[type=number], #metro input[type=number] { width: 52px; }
+  #metro { padding-top: 6px; padding-bottom: 8px; }
+  #metro button { padding: 4px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #metro button:disabled { opacity: .4; cursor: default; }
+  #m-go { min-width: 118px; border-color: var(--accent) !important; color: var(--accent) !important; font-weight: 600 !important; }
+  #m-go.on { background: var(--accent); color: #031414 !important; }
+  #m-vol { width: 90px; }
+  #m-dots { display: inline-flex; gap: 5px; }
+  #m-dots i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.14); transition: background .05s; }
+  #m-dots i.accent { box-shadow: inset 0 0 0 1px var(--accent); }
+  #m-dots i.lit { background: var(--accent); }
+  #lesson { max-width: 240px; }
+  #port { max-width: 180px; }
+  #voice-name { max-width: 170px; }
+  #voice-vol { width: 80px; }
+  #talk { padding: 6px 14px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; color: var(--accent);
+          font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; user-select: none; touch-action: none; }
+  #talk.rec { background: var(--miss); border-color: var(--miss); color: #fff; animation: pulse 1s ease-in-out infinite; }
+  #talk:disabled { opacity: .4; cursor: default; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(212,32,32,.25); } }
+  #ai-spend { font-size: 11px; color: var(--muted); }
+  #level { display: none; width: 46px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.12); overflow: hidden; vertical-align: middle; }
+  #level.on { display: inline-block; }
+  #level i { display: block; height: 100%; width: 0; background: var(--hit); transition: width .06s; }
+  #mic { max-width: 170px; }
+  #ask { width: 190px; background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 5px 8px; font: inherit; }
+  #ask:disabled { opacity: .4; }
+  #heard { padding: 0 20px; color: var(--muted); font-size: 13px; font-style: italic; min-height: 1.3em; }
+  .seg { display: inline-flex; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; overflow: hidden; }
+  .seg button { background: transparent; color: var(--muted); border: 0; padding: 5px 12px; font: inherit; cursor: pointer; }
+  .seg button.on { background: var(--accent); color: #031414; font-weight: 600; }
+  #go { margin-left: auto; min-width: 84px; padding: 6px 16px; border: 0; border-radius: 5px; background: var(--hit); color: #fff; font: 600 14px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #go.stop { background: var(--miss); }
+  #go:disabled { opacity: .45; cursor: default; }
+  #menu.running .setting, #metro.running .m-lock { opacity: .5; pointer-events: none; }
+  #menu.record .play-only, #menu:not(.record) .record-only { display: none; }
+  #go.rec { background: var(--miss); }
+  #last { padding: 6px 20px; color: var(--muted); font-size: 13px; min-height: 1.5em; }
+  #last b { color: var(--text); font-weight: 600; }
   main { flex: 1; display: flex; align-items: center; padding: 16px 0; min-height: 0; }
-  #strip { width: 100%; height: min(420px, 100%); border-top: 1px solid rgba(255,255,255,.08); border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(8,10,16,.88); }
+  #strip { width: 100%; height: min(var(--strip-h, 420px), 100%); border-top: 1px solid rgba(255,255,255,.08); border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(8,10,16,.88); }
   iframe { width: 100%; height: 100%; border: 0; display: block; }
+  iframe[hidden] { display: none; }
+  #sheet-notice { max-width: 640px; margin: 48px auto; padding: 0 20px; color: var(--muted); font-size: 15px; text-align: center; }
   footer { display: flex; gap: 18px; padding: 10px 20px; color: var(--muted); font-size: 12px; flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,.08); }
   .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  /* NPC dialogue box: the Maestro (built-in remarks) or Claude (the say tool) */
+  #npc { position: fixed; left: 20px; bottom: 60px; z-index: 20; display: flex; gap: 14px; align-items: flex-start;
+         max-width: min(600px, calc(100vw - 40px)); padding: 12px 18px 14px 12px; cursor: pointer;
+         background: rgba(14,17,26,.97); border: 2px solid var(--accent); border-radius: 10px;
+         box-shadow: 0 10px 34px rgba(0,0,0,.55); opacity: 0; transform: translateY(14px);
+         transition: opacity .25s, transform .25s; pointer-events: none; }
+  #npc.show { opacity: 1; transform: none; pointer-events: auto; }
+  #npc-face { flex: none; width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center;
+              background: radial-gradient(circle at 35% 30%, #23a3a3, #053636); color: #fff;
+              font: 32px/1 'Segoe UI Symbol', 'Noto Music', serif; box-shadow: inset 0 0 0 2px rgba(255,255,255,.15); }
+  #npc.claude { border-color: #d97757; }
+  #npc.claude #npc-face { background: radial-gradient(circle at 35% 30%, #e8956f, #6b2a12); font-size: 28px; }
+  #npc.claude #npc-name { color: #e8956f; }
+  #npc-name { color: var(--accent); font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 3px; }
+  #npc-text { font-size: 15.5px; line-height: 1.45; min-height: 1.45em; }
+  #npc.done #npc-text::after { content: ' ▼'; font-size: 11px; color: var(--muted); animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
   .heat { display: inline-block; width: 60px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; background: linear-gradient(90deg, hsl(120,85%,55%), hsl(60,85%,55%), hsl(0,85%,55%)); }
 </style>
 </head>
@@ -38,12 +99,60 @@
   <div id="status">Ask Claude to show a score or start a practice run.</div>
   <div id="conn" class="down">connecting…</div>
 </header>
-<main><div id="strip"><iframe id="sheet" src="notation.html" title="Sheet music"></iframe></div></main>
+<div id="menu">
+  <label class="setting">Lesson <select id="lesson"><option value="">loading…</option></select></label>
+  <label class="setting">Input <select id="port"></select></label>
+  <span class="seg setting" id="mode">
+    <button data-mode="learn" title="The cursor waits for the right notes">Learn</button>
+    <button data-mode="rehearse" title="The cursor moves at tempo; notes are graded as they pass">Rehearse</button>
+    <button data-mode="record" title="Play over the metronome; what you play is written out as sheet music">Record</button>
+  </span>
+  <label class="setting play-only">Hand <select id="hand"><option value="both">Both</option><option value="right">Right</option><option value="left">Left</option></select></label>
+  <label class="setting play-only">Bars <input type="number" id="from" min="1" placeholder="1"> – <input type="number" id="to" min="1" placeholder="end"></label>
+  <label class="setting" id="tempo-wrap">Tempo <input type="range" id="tempo" min="30" max="150" step="5" value="100"> <span id="tempo-val">100%</span></label>
+  <label class="setting play-only"><input type="checkbox" id="loop"> Loop</label>
+  <span class="record-only" id="record-hint" style="color:var(--muted);font-size:12px">Records at the metronome's BPM and beats/bar below, after a count-in</span>
+  <label id="voice-wrap" title="Read Claude's comments and each pass summary aloud"><input type="checkbox" id="voice"> Voice <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
+  <span><button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
+    <span id="level" aria-hidden="true"><i></i></span>
+    <select id="mic" title="Microphone" hidden></select>
+    <input id="ask" type="text" placeholder="…or type to the Maestro" disabled> <span id="ai-spend"></span></span>
+  <button id="go">Start</button>
+</div>
+<div id="metro">
+  <button id="m-go" title="Start / stop the metronome (M)">♩ Metronome</button>
+  <label class="m-lock">BPM <input type="number" id="m-bpm" min="20" max="300" value="80"></label>
+  <button id="m-tap" class="m-lock" title="Tap this a few times in time to set the tempo">Tap</button>
+  <button id="m-match" class="m-lock" disabled title="Use the score's tempo (scaled by the Rehearse tempo %) and time signature">Match score</button>
+  <label class="m-lock">Beats/bar <input type="number" id="m-beats" min="1" max="16" value="4"></label>
+  <label>Subdivision <select id="m-sub">
+    <option value="1">♩ Quarters</option><option value="2">♪♪ Eighths</option>
+    <option value="3">Triplets</option><option value="4">Sixteenths</option>
+    <option value="5">Quintuplets</option><option value="6">Sextuplets</option>
+  </select></label>
+  <label>Sound <select id="m-sound">
+    <option value="click">Click</option><option value="wood">Woodblock</option><option value="beep">Beep</option>
+    <option value="hat">Hi-hat</option><option value="cowbell">Cowbell</option><option value="rim">Rimshot</option>
+  </select></label>
+  <label title="Make beat 1 of each bar stand out"><input type="checkbox" id="m-accent" checked> Accent</label>
+  <label title="Rehearse runs start with a count-in and the metronome clicks along with the score (its tempo changes and time signatures, at your Tempo %)"><input type="checkbox" id="m-follow"> Follow score</label>
+  <label>Volume <input type="range" id="m-vol" min="0" max="100" step="5" value="70"></label>
+  <label title="How loud the in-between clicks are, compared to the beat">Sub vol <input type="range" id="m-subvol" min="0" max="100" step="5" value="50" style="width:70px"></label>
+  <span id="m-dots" aria-hidden="true"></span>
+</div>
+<div id="last"></div>
+<div id="heard"></div>
+<main><div id="strip"><iframe id="sheet" src="notation.html" title="Sheet music"></iframe><p id="sheet-notice" hidden></p></div></main>
+<div id="npc" role="status" aria-live="polite" title="Click to skip / close">
+  <div id="npc-face" aria-hidden="true">𝄞</div>
+  <div><div id="npc-name">Maestro</div><div id="npc-text"></div></div>
+</div>
 <footer>
   <span><i class="sw" style="background:#00a6b8"></i>Play next</span>
   <span><i class="sw" style="background:var(--hit)"></i>Hit</span>
   <span><i class="sw" style="background:var(--miss)"></i>Missed</span>
   <span><i class="heat"></i>Bar heat map: clean → most problems</span>
+  <span>Drag, scroll or ← → to look around · Home = back to the cursor</span>
 </footer>
 <script>
 "use strict";
@@ -61,12 +170,29 @@ window.addEventListener('message', e => {
     scoreReady = true;
     queue.forEach(m => frame.contentWindow.postMessage(m, '*'));
     queue = [];
+  } else if (e.data.type === 'height') {
+    // Fit the strip to the drawn score (it scales down itself when the page is shorter).
+    document.getElementById('strip').style.setProperty('--strip-h', Math.max(120, e.data.h) + 'px');
   } else if (e.data.type === 'error') {
     statusEl.textContent = 'Sheet music error: ' + e.data.msg;
   }
 });
 
+// Arrow keys look around the score (Shift = further), Home jumps back to the cursor.
+document.addEventListener('keydown', e => {
+  if (!scoreReady || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+  const step = e.shiftKey ? 600 : 150;
+  const msg = e.key === 'ArrowRight' ? {type: 'pan', dx: -step} : e.key === 'ArrowLeft' ? {type: 'pan', dx: step}
+    : e.key === 'Home' ? {type: 'pan', reset: true} : null;
+  if (!msg) return;
+  e.preventDefault();
+  frame.contentWindow.postMessage(msg, '*');
+});
+
+let sheetShown = true;
+
 function forward(msg) {
+  if (!sheetShown) return;  // nothing drawn to mark
   if (scoreReady) frame.contentWindow.postMessage(msg, '*');
   else queue.push(msg);
 }
@@ -79,7 +205,13 @@ async function loadScore(version) {
     const res = await fetch('score', {cache: 'no-store'});
     const payload = await res.json();
     if (payload.version !== version) return;  // a newer score arrived meanwhile
-    frame.contentWindow.postMessage({type: 'loadScore', xml: payload.xml}, '*');
+    readScoreTempo(payload);
+    // A live recording or a huge file comes without sheet music, with the reason instead.
+    sheetShown = !!payload.xml;
+    $('sheet-notice').textContent = payload.notice || '';
+    $('sheet-notice').hidden = sheetShown;
+    frame.hidden = !sheetShown;
+    if (sheetShown) frame.contentWindow.postMessage({type: 'loadScore', xml: payload.xml}, '*');
   } catch (err) {
     statusEl.textContent = 'Could not load score: ' + err;
   }
@@ -94,13 +226,739 @@ function connect() {
     if (msg.type === 'score') {
       titleEl.textContent = msg.title;
       document.title = 'Piano Coach · ' + msg.title;
-      if (msg.version !== scoreVersion) { scoreVersion = msg.version; loadScore(msg.version); }
+      if (msg.version !== scoreVersion) { scoreVersion = msg.version; loadScore(msg.version); loadLessons(); }
       return;
     }
     if (msg.type === 'status') { statusEl.textContent = msg.text; return; }  // shown in the header
+    if (msg.type === 'practice') { showPractice(msg); return; }
+    if (msg.type === 'say') { showNpc(msg.text, msg.speaker); speak(msg.text, msg.interrupt); return; }
+    if (msg.type === 'metronome') { metroFollow(msg); return; }
+    if (msg.type === 'lesson') return;  // the visualizer's Learn Mode push; this page uses its own menu
     forward(msg);
   };
+  es.addEventListener('open', () => { loadPorts(); loadLessons(); loadVoices(); loadVoiceStatus(); });
 }
+
+// -- practice menu -----------------------------------------------------------
+
+const $ = id => document.getElementById(id);
+const menu = $('menu'), go = $('go'), lessonSel = $('lesson'), portSel = $('port');
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('coach.' + k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('coach.' + k, v); } catch (e) {} },
+};
+let running = false, mode = store.get('mode', 'learn');
+
+async function cmd(name, body) {
+  const res = await fetch('cmd/' + name, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
+  const out = await res.json();
+  if (out.error) throw new Error(out.error);
+  return out;
+}
+
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  $('tempo-wrap').style.display = m === 'rehearse' ? '' : 'none';
+  menu.classList.toggle('record', m === 'record');
+  if (!running) showGo();
+  store.set('mode', m);
+}
+
+function showGo() {
+  go.textContent = running ? 'Stop' : mode === 'record' ? '● Record' : 'Start';
+  go.classList.toggle('stop', running);
+  go.classList.toggle('rec', !running && mode === 'record');
+}
+
+async function loadPorts() {
+  try {
+    const {inputs, default: dflt} = await cmd('ports');
+    const saved = store.get('port', '');
+    portSel.innerHTML = '';
+    for (const name of inputs) portSel.add(new Option(name, name));
+    portSel.value = inputs.includes(saved) ? saved : (dflt || inputs[0] || '');
+  } catch (err) { statusEl.textContent = 'Could not list MIDI inputs: ' + err.message; }
+}
+
+async function loadLessons() {
+  try {
+    const {lessons, current} = await cmd('lessons');
+    lessonSel.innerHTML = '';
+    if (!lessons.some(l => l.path === current)) lessonSel.add(new Option(current ? titleEl.textContent : '— pick a lesson —', current || ''));
+    for (const l of lessons) lessonSel.add(new Option(l.title, l.path));
+    lessonSel.value = current || '';
+  } catch (err) { statusEl.textContent = 'Could not list lessons: ' + err.message; }
+}
+
+function showPractice(p) {
+  running = !!p.running;
+  menu.classList.toggle('running', running);
+  const s = p.settings || {};
+  // A recording's grid is fixed when it starts, so its tempo can't change mid-take.
+  $('metro').classList.toggle('running', running && s.mode === 'record');
+  showGo();
+  const where = p.port ? ` · listening on <b>${esc(p.port)}</b>` : '';
+  const pass = running && s.loop ? ` · pass ${p.pass}` : '';
+  $('last').innerHTML = (p.last ? esc(p.last) : '') + (running ? (p.last ? ' · ' : '') + 'running' + pass + where : '');
+}
+
+// -- voice -------------------------------------------------------------------
+
+// Natural voices (Kokoro) are synthesized by the coach server (GET tts); the
+// browser's Windows voices are the fallback. Option values: 'kokoro:<id>' / 'web:<name>'.
+const synth = window.speechSynthesis, voiceBox = $('voice'), voiceSel = $('voice-name'), voiceVol = $('voice-vol');
+let kokoroVoices = [], speaking = null;
+const pending = [];
+
+async function loadVoices() {
+  try {
+    const res = await fetch('tts/voices', {cache: 'no-store'});
+    kokoroVoices = res.ok ? (await res.json()).voices || [] : [];
+  } catch (err) { kokoroVoices = []; }
+  fillVoices();
+}
+
+function fillVoices() {
+  const web = synth ? synth.getVoices() : [];
+  $('voice-wrap').style.display = kokoroVoices.length || web.length ? '' : 'none';
+  if (!kokoroVoices.length && !web.length) return;
+  const saved = store.get('voiceName', '');  // only set when you pick one; otherwise prefer Kokoro
+  voiceSel.innerHTML = '';
+  const group = (label, items) => {
+    if (!items.length) return;
+    const g = document.createElement('optgroup');
+    g.label = label;
+    for (const [value, text] of items) g.appendChild(new Option(text, value));
+    voiceSel.appendChild(g);
+  };
+  group('Natural (Kokoro)', kokoroVoices.map(v => ['kokoro:' + v.id, v.label]));
+  group('Windows', web.map(v => ['web:' + v.name, v.name.replace(/^Microsoft /, '')]));
+  const values = [...voiceSel.options].map(o => o.value);
+  const english = web.find(v => v.default && v.lang.startsWith('en')) || web.find(v => v.lang.startsWith('en')) || web[0];
+  voiceSel.value = values.includes(saved) ? saved : kokoroVoices.length ? 'kokoro:' + kokoroVoices[0].id : 'web:' + english.name;
+}
+
+function speak(text, interrupt) {
+  if (!voiceBox.checked || !text) return;
+  // Browsers only let a page play sound once it has been clicked.
+  if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+    statusEl.textContent = 'Click anywhere on this page to let the coach speak.';
+    return;
+  }
+  if (interrupt) stopSpeaking();
+  const v = voiceSel.value || '';
+  if (!v.startsWith('kokoro:')) return speakWeb(text, v.slice(4));
+  // Fetch now, so the next line is ready by the time the current one ends.
+  const url = 'tts?' + new URLSearchParams({text, voice: v.slice(7)});
+  pending.push({text, ready: fetch(url).then(r => r.ok ? r.blob() : Promise.reject(new Error('speech ' + r.status)))});
+  if (!speaking) playNext();
+}
+
+async function playNext() {
+  const item = pending.shift();
+  speaking = item || null;
+  if (!item) return;
+  try {
+    const blob = await item.ready;
+    if (speaking !== item) return;  // stopped meanwhile
+    const audio = item.audio = new Audio(URL.createObjectURL(blob));
+    audio.volume = voiceVol.value / 100;
+    audio.onended = audio.onerror = () => { URL.revokeObjectURL(audio.src); if (speaking === item) playNext(); };
+    await audio.play();
+  } catch (err) {
+    if (speaking !== item) return;
+    speakWeb(item.text, null);  // Kokoro unavailable: use the browser's voice for this line
+    playNext();
+  }
+}
+
+function speakWeb(text, name) {
+  if (!synth) return;
+  const u = new SpeechSynthesisUtterance(text);
+  u.voice = synth.getVoices().find(v => v.name === name) || null;
+  u.volume = voiceVol.value / 100;
+  synth.speak(u);
+}
+
+function stopSpeaking() {
+  pending.length = 0;
+  if (speaking && speaking.audio) speaking.audio.pause();
+  speaking = null;
+  if (synth) synth.cancel();
+}
+
+// -- NPC dialogue box: typewriter text; click once to finish the line, again to close --
+
+const npc = $('npc');
+let npcFull = '', npcTyping = null, npcTimer = null;
+
+function showNpc(text, speaker) {
+  const claude = speaker === 'Claude';
+  npc.classList.toggle('claude', claude);
+  $('npc-name').textContent = speaker || 'Maestro';
+  $('npc-face').textContent = claude ? '✻' : '𝄞';
+  clearInterval(npcTyping);
+  clearTimeout(npcTimer);
+  npcFull = text;
+  npc.classList.remove('done');
+  npc.classList.add('show');
+  let shown = 0;
+  $('npc-text').textContent = '';
+  npcTyping = setInterval(() => {
+    shown = Math.min(npcFull.length, shown + 1);
+    $('npc-text').textContent = npcFull.slice(0, shown);
+    if (shown >= npcFull.length) finishNpc();
+  }, 30);
+}
+
+function finishNpc() {
+  clearInterval(npcTyping);
+  $('npc-text').textContent = npcFull;
+  npc.classList.add('done');
+  clearTimeout(npcTimer);
+  npcTimer = setTimeout(hideNpc, 6000 + npcFull.length * 45);  // time to read (and hear) it
+}
+
+function hideNpc() {
+  clearInterval(npcTyping);
+  clearTimeout(npcTimer);
+  npc.classList.remove('show');
+}
+
+npc.addEventListener('click', () => (npc.classList.contains('done') ? hideNpc() : finishNpc()));
+
+// -- talk to the Maestro: hold the button (or Space), speak, let go -------------
+// The recording goes to the coach server, which transcribes it locally (Whisper) and
+// asks Claude; the answer arrives as a 'say' event (dialogue box + voice).
+
+const talkBtn = $('talk'), micSel = $('mic');
+let micStream = null, micRecorder = null, micChunks = [], talking = false, voiceReady = false, voiceCap = 0;
+let latched = false, pressedAt = 0, meter = null;
+const TALK_IDLE = '🎤 Talk';
+
+// Microphones: chosen in the menu (remembered). Labels are only readable after permission.
+async function loadMics() {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  const mics = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput' && d.deviceId !== 'communications');
+  const saved = store.get('mic', '');
+  micSel.innerHTML = '';
+  for (const m of mics) micSel.add(new Option(m.label || 'Microphone', m.deviceId));
+  if (mics.some(m => m.deviceId === saved)) micSel.value = saved;
+  micSel.hidden = mics.length < 2 || !mics[0].label;
+  const real = mics.filter(m => !/juno/i.test(m.label));
+  if (mics.length && mics[0].label && !real.length) {
+    $('heard').textContent = 'The only microphone input is the JUNO-DS audio, which carries the keyboard, not your voice. ' +
+                             'Plug in a headset or USB mic, or type to the Maestro.';
+  }
+}
+
+async function openMic() {
+  const want = micSel.value || store.get('mic', '');
+  const current = micStream?.getAudioTracks()[0]?.getSettings().deviceId;
+  if (micStream && (!want || current === want)) return micStream;
+  micStream?.getTracks().forEach(t => t.stop());
+  micStream = await navigator.mediaDevices.getUserMedia({audio: want ? {deviceId: {exact: want}} : true});
+  loadMics();  // labels are available now
+  return micStream;
+}
+
+micSel.addEventListener('change', () => { store.set('mic', micSel.value); micSel.blur(); });
+
+// A level meter while listening, so you can see whether the microphone hears you.
+function startMeter(stream) {
+  try {
+    const ctx = new AudioContext();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    const data = new Uint8Array(analyser.fftSize);
+    $('level').classList.add('on');
+    meter = {ctx, timer: setInterval(() => {
+      analyser.getByteTimeDomainData(data);
+      let peak = 0;
+      for (const v of data) peak = Math.max(peak, Math.abs(v - 128));
+      $('level').firstChild.style.width = Math.min(100, peak / 0.6) + '%';
+    }, 60)};
+  } catch (err) { meter = null; }
+}
+
+function stopMeter() {
+  if (!meter) return;
+  clearInterval(meter.timer);
+  meter.ctx.close();
+  meter = null;
+  $('level').classList.remove('on');
+}
+
+async function loadVoiceStatus() {
+  try {
+    const s = await cmd('voice_status');
+    voiceReady = s.available;
+    voiceCap = s.cap;
+    talkBtn.disabled = $('ask').disabled = !s.available;
+    talkBtn.title = s.available ? 'Tap to talk, tap again to send (or hold it, or hold Space)' : s.reason;
+    if (s.available) loadMics().catch(() => {});
+    showSpend(s.spent_today);
+  } catch (err) {
+    voiceReady = false;
+    talkBtn.disabled = $('ask').disabled = true;
+  }
+}
+
+function showAnswer(out) {
+  $('heard').textContent = out.heard ? `You: “${out.heard}”` : '';
+  if (out.error) showNpc(out.error, 'Maestro');  // the reply itself arrives as a 'say' event
+  if (out.spent_today !== undefined) showSpend(out.spent_today);
+}
+
+$('ask').addEventListener('keydown', async e => {
+  const text = e.target.value.trim();
+  if (e.key !== 'Enter' || !text) return;
+  e.target.value = '';
+  e.target.disabled = true;
+  stopSpeaking();
+  showNpc('…', 'Maestro');
+  try {
+    const res = await fetch('cmd/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text})});
+    showAnswer(await res.json());
+  } catch (err) {
+    showNpc('I lost you there. ' + err.message, 'Maestro');
+  } finally {
+    e.target.disabled = !voiceReady;
+    e.target.focus();
+  }
+});
+
+function showSpend(spent) {
+  $('ai-spend').textContent = voiceReady ? `AI $${(+spent).toFixed(3)} of $${(+voiceCap).toFixed(2)} today` : '';
+}
+
+async function startTalking() {
+  if (!voiceReady || talking || talkBtn.disabled) return;
+  talking = true;
+  latched = false;
+  stopSpeaking();
+  talkBtn.classList.add('rec');
+  talkBtn.textContent = '● Listening…';
+  try {
+    await openMic();
+  } catch (err) {
+    talking = false;
+    talkBtn.classList.remove('rec');
+    talkBtn.textContent = TALK_IDLE;
+    $('heard').textContent = (err.name === 'NotFoundError' ? 'No microphone found.' : 'Microphone blocked (' + err.message + ').') +
+                             ' Plug in a mic or allow it from the icon in the address bar, or type to the Maestro.';
+    return;
+  }
+  if (!talking) {  // let go while Chrome was asking for the microphone
+    $('heard').textContent = 'Microphone ready. Tap Talk (or hold Space) and speak.';
+    return;
+  }
+  startMeter(micStream);
+  micChunks = [];
+  micRecorder = new MediaRecorder(micStream);
+  micRecorder.ondataavailable = e => { if (e.data.size) micChunks.push(e.data); };
+  micRecorder.onstop = sendTalk;
+  micRecorder.start();
+  $('heard').textContent = 'Listening… let go when you’re done.';
+}
+
+function stopTalking() {
+  if (!talking) return;
+  talking = latched = false;
+  stopMeter();
+  talkBtn.classList.remove('rec');
+  talkBtn.textContent = TALK_IDLE;
+  if (micRecorder && micRecorder.state !== 'inactive') micRecorder.stop();
+}
+
+async function sendTalk() {
+  const blob = new Blob(micChunks, {type: micRecorder.mimeType || 'audio/webm'});
+  if (blob.size < 1500) {
+    $('heard').textContent = 'That was too short. Keep holding the whole time you speak.';
+    return;
+  }
+  talkBtn.disabled = true;
+  $('heard').textContent = 'Transcribing…';
+  showNpc('…', 'Maestro');
+  try {
+    const res = await fetch('voice', {method: 'POST', headers: {'Content-Type': blob.type}, body: blob});
+    showAnswer(await res.json());
+  } catch (err) {
+    $('heard').textContent = '';
+    showNpc('I lost you there. ' + err.message, 'Maestro');
+  } finally {
+    talkBtn.disabled = !voiceReady;
+  }
+}
+
+// Space talks unless you're typing text (a focused dropdown or checkbox doesn't count).
+const typing = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|number|search)$/.test(el.type));
+// Tap = start, tap again = send (touchscreens); press and hold = talk until you let go.
+talkBtn.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  if (latched) return stopTalking();
+  pressedAt = Date.now();
+  talkBtn.setPointerCapture(e.pointerId);  // letting go outside the button still ends a hold
+  startTalking();
+});
+talkBtn.addEventListener('pointercancel', () => { if (!latched) stopTalking(); });
+talkBtn.addEventListener('pointerup', () => {
+  if (!talking) return;
+  if (Date.now() - pressedAt < 400) {  // a tap: keep listening until the next tap
+    latched = true;
+    talkBtn.textContent = '● Listening… tap to send';
+  } else {
+    stopTalking();
+  }
+});
+talkBtn.addEventListener('contextmenu', e => e.preventDefault());  // long-press on touch screens
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || typing(e.target)) return;
+  e.preventDefault();  // also keeps Space from clicking a focused button
+  if (!e.repeat) startTalking();
+});
+document.addEventListener('keyup', e => {
+  if (e.code !== 'Space' || typing(e.target)) return;
+  e.preventDefault();
+  stopTalking();
+});
+
+if (synth) synth.onvoiceschanged = fillVoices;
+fillVoices();
+voiceBox.checked = !!store.get('voice', '1');
+voiceBox.addEventListener('change', () => {
+  store.set('voice', voiceBox.checked ? '1' : '');
+  if (voiceBox.checked) speak('Voice on.', true); else stopSpeaking();
+});
+voiceSel.addEventListener('change', () => { store.set('voiceName', voiceSel.value); speak('This is my voice.', true); });
+voiceVol.value = store.get('voiceVol', '100');
+voiceVol.addEventListener('change', () => { store.set('voiceVol', voiceVol.value); speak('Volume ' + voiceVol.value + ' percent.', true); });
+
+// -- metronome ----------------------------------------------------------------
+// Runs in the browser (Web Audio), scheduled a little ahead on the audio clock so
+// it stays steady even when the page is busy. Free-running when you start it here;
+// during a Rehearse run with Follow score, or a recording, the server sends the
+// grid (metronome event) and the clicks follow the run instead.
+
+const metro = {ctx: null, timer: null, next: 0, tick: 0, noise: null, score: null, plan: null, pi: 0, driven: false};
+const mGo = $('m-go'), mBpm = $('m-bpm'), mBeats = $('m-beats'), mSub = $('m-sub'), mSound = $('m-sound');
+const mVol = $('m-vol'), mSubVol = $('m-subvol'), mAccent = $('m-accent'), mDots = $('m-dots');
+const clampBpm = v => Math.min(300, Math.max(20, Math.round(+v || 80)));
+
+function metroSettings() {
+  return {bpm: clampBpm(mBpm.value), beats: Math.min(16, Math.max(1, Math.round(+mBeats.value || 4))), sub: +mSub.value || 1};
+}
+
+function drawDots(count) {
+  const beats = count || metroSettings().beats;
+  mDots.innerHTML = '';
+  for (let i = 0; i < beats; i++) {
+    const d = document.createElement('i');
+    if (i === 0 && mAccent.checked) d.className = 'accent';
+    mDots.appendChild(d);
+  }
+}
+
+function noiseBuffer(ctx) {
+  const buf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  return buf;
+}
+
+// level: 0 = accented downbeat, 1 = beat, 2 = subdivision.
+function metroSound(t, level) {
+  const ctx = metro.ctx, kind = mSound.value;
+  let gain = mVol.value / 100;
+  if (level === 2) gain *= mSubVol.value / 100;
+  if (level === 0) gain = Math.min(1, gain * 1.35);
+  if (gain <= 0) return;
+  const pitch = level === 0 ? 1.5 : level === 2 ? 0.8 : 1;
+  const out = ctx.createGain();
+  out.connect(ctx.destination);
+  const env = (dur, peak = gain) => {
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(peak, t + 0.002);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  };
+  const osc = (type, freq, dur, dest = out) => {
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    o.connect(dest);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+    return o;
+  };
+  const noise = (dur, filterType, freq, q = 1) => {
+    const src = ctx.createBufferSource();
+    src.buffer = metro.noise;
+    const f = ctx.createBiquadFilter();
+    f.type = filterType;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    src.connect(f).connect(out);
+    src.start(t);
+    src.stop(t + dur + 0.02);
+  };
+  if (kind === 'beep') {
+    env(0.09); osc('sine', 880 * pitch, 0.09);
+  } else if (kind === 'wood') {
+    env(0.06); const o = osc('triangle', 1200 * pitch, 0.06);
+    o.frequency.exponentialRampToValueAtTime(700 * pitch, t + 0.05);
+    noise(0.015, 'bandpass', 2500 * pitch, 3);
+  } else if (kind === 'hat') {
+    env(level === 0 ? 0.12 : 0.05); noise(0.12, 'highpass', 7000 * pitch);
+  } else if (kind === 'cowbell') {
+    env(0.25, gain * 0.6);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 2600 * pitch; bp.Q.value = 1;
+    bp.connect(out);
+    osc('square', 540 * pitch, 0.25, bp); osc('square', 800 * pitch, 0.25, bp);
+  } else if (kind === 'rim') {
+    env(0.04); osc('triangle', 1700 * pitch, 0.04); noise(0.03, 'bandpass', 3500 * pitch, 2);
+  } else {  // click
+    env(0.03); osc('square', 1800 * pitch, 0.03); noise(0.01, 'highpass', 4000);
+  }
+}
+
+function metroCtx() {
+  if (!metro.ctx) {
+    metro.ctx = new AudioContext({latencyHint: 'interactive'});
+    metro.noise = noiseBuffer(metro.ctx);
+  }
+  metro.ctx.resume();
+  return metro.ctx;
+}
+
+// Called from a click, so the browser lets the page make sound when the server's grid arrives.
+function metroUnlock() { try { metroCtx(); } catch (e) {} }
+
+// Sound reaches your ears this much after it is scheduled; runs are timed to what you hear.
+const outLatency = () => Math.min(0.1, (metro.ctx.outputLatency || 0) + (metro.ctx.baseLatency || 0));
+
+function lightDot(beat, beats, at) {
+  setTimeout(() => {
+    if (!metro.timer) return;
+    if (mDots.children.length !== beats) drawDots(beats);
+    [...mDots.children].forEach((d, i) => d.classList.toggle('lit', i === beat));
+  }, Math.max(0, (at + outLatency() - metro.ctx.currentTime) * 1000));
+}
+
+function metroSchedule() {
+  const now = metro.ctx.currentTime, horizon = now + 0.12;
+  if (metro.plan) {  // a run's grid from the server
+    while (metro.pi < metro.plan.length && metro.plan[metro.pi].t < horizon) {
+      const c = metro.plan[metro.pi++];
+      if (c.t < now - 0.01) continue;  // too late to play
+      metroSound(c.t, c.level);
+      if (c.beat !== undefined) lightDot(c.beat, c.beats, c.t);
+    }
+    if (metro.pi >= metro.plan.length && now > (metro.plan.at(-1)?.t || 0) + 0.3) metroStop();
+    return;
+  }
+  const {bpm, beats, sub} = metroSettings();
+  const step = 60 / bpm / sub;
+  while (metro.next < horizon) {
+    const perBar = beats * sub;
+    const pos = metro.tick % perBar;
+    const onBeat = pos % sub === 0;
+    const level = !onBeat ? 2 : pos === 0 && mAccent.checked && beats > 1 ? 0 : 1;
+    metroSound(metro.next, level);
+    if (onBeat) lightDot(pos / sub, beats, metro.next);
+    metro.next += step;
+    metro.tick = (metro.tick + 1) % perBar;
+  }
+}
+
+function metroRun() {
+  metro.timer = setInterval(metroSchedule, 25);
+  metroSchedule();
+  mGo.classList.add('on');
+  mGo.textContent = '■ Metronome';
+}
+
+// Free-running clicks from `at` (audio time), or right away.
+function metroStart(at) {
+  const ctx = metroCtx();
+  metro.plan = null;
+  metro.tick = 0;
+  metro.next = at ?? ctx.currentTime + 0.06;
+  metroRun();
+}
+
+function metroStop() {
+  clearInterval(metro.timer);
+  metro.timer = null;
+  metro.plan = null;
+  metro.driven = false;
+  mGo.classList.remove('on');
+  mGo.textContent = '♩ Metronome';
+  drawDots();
+}
+
+// The server's grid for a run: bars of a score ({bars: [{t, len, beats, accent}]}, the first
+// ones being the count-in) or a recording's steady tempo ({bpm, beats, count_in_beats}).
+function metroFollow(msg) {
+  if (msg.stop) { if (metro.driven) metroStop(); return; }
+  let ctx;
+  try { ctx = metroCtx(); } catch (e) { return; }
+  metroStop();
+  const base = ctx.currentTime + (msg.start_in || 0) - outLatency();
+  if (msg.bars) {
+    const sub = metroSettings().sub, plan = [];
+    for (const bar of msg.bars) {
+      const beatLen = bar.len / bar.beats;
+      for (let k = 0; k < bar.beats; k++) {
+        const t = base + bar.t + k * beatLen;
+        plan.push({t, level: k === 0 && bar.accent && mAccent.checked && bar.beats > 1 ? 0 : 1, beat: k, beats: bar.beats});
+        for (let s = 1; s < sub; s++) plan.push({t: t + s * beatLen / sub, level: 2});
+      }
+    }
+    metro.plan = plan;
+    metro.pi = 0;
+    metroRun();
+  } else {
+    mBpm.value = clampBpm(msg.bpm);
+    mBeats.value = msg.beats;
+    metroStart(base);
+  }
+  metro.driven = true;
+}
+
+const metroToggle = () => (metro.timer ? metroStop() : metroStart());
+
+// Restart the bar so a new time signature or subdivision starts on beat 1.
+function metroRestartBar() {
+  drawDots();
+  if (metro.timer) { metro.tick = 0; metro.next = Math.max(metro.next, metro.ctx.currentTime + 0.05); }
+}
+
+// Tempo and time signature of the score (quarter-note BPM; compound meters like 6/8
+// count in dotted quarters with triplet subdivision). The server reads them from the
+// file; the MusicXML is the fallback. A live recording has no beat grid at all.
+function readScoreTempo(payload) {
+  const xml = payload.xml || '', t = payload.tempo;
+  const grid = payload.grid !== false;
+  $('m-follow').disabled = !grid;
+  $('m-follow').parentElement.title = grid
+    ? 'Rehearse runs start with a count-in and the metronome clicks along with the score (its tempo changes and time signatures, at your Tempo %)'
+    : 'This file was recorded live, so it has no steady beat to follow';
+  const tempo = !grid ? 0 : t ? t.bpm : +(/<sound[^>]*\btempo="([\d.]+)"/.exec(xml) || [])[1] || 0;
+  const beats = t ? t.beats : +(/<beats>(\d+)<\/beats>/.exec(xml) || [])[1] || 0;
+  const type = t ? t.type : +(/<beat-type>(\d+)<\/beat-type>/.exec(xml) || [])[1] || 0;
+  let bpm = tempo, count = beats, sub = 0;
+  if (tempo && type) bpm = tempo * type / 4;  // tempo is per quarter; count in the meter's own beat
+  if (type === 8 && beats % 3 === 0 && beats > 3) { count = beats / 3; bpm = tempo / 1.5; sub = 3; }
+  metro.score = bpm ? {bpm, beats: count || 4, sub} : null;
+  $('m-match').disabled = !metro.score;
+  $('m-match').title = metro.score
+    ? `Score: ${Math.round(bpm)} BPM, ${beats}/${type} (scaled by the Rehearse tempo %)`
+    : grid ? 'This score has no tempo marking' : 'This file was recorded live, so it has no steady tempo';
+  if ($('m-follow').checked && !running) matchScore();
+}
+
+function matchScore() {
+  if (!metro.score) return;
+  const pct = mode === 'rehearse' ? +$('tempo').value : 100;
+  mBpm.value = clampBpm(metro.score.bpm * pct / 100);
+  mBeats.value = metro.score.beats;
+  if (metro.score.sub) mSub.value = String(metro.score.sub);
+  saveMetro();
+  metroRestartBar();
+}
+
+$('m-match').addEventListener('click', matchScore);
+$('tempo').addEventListener('input', () => { if ($('m-follow').checked && mode === 'rehearse') matchScore(); });
+$('m-follow').addEventListener('change', () => { saveMetro(); if ($('m-follow').checked) matchScore(); });
+
+let taps = [];
+$('m-tap').addEventListener('click', () => {
+  const now = performance.now();
+  taps = taps.filter(t => now - t < 3000).concat(now).slice(-6);
+  if (taps.length < 2) return;
+  const gaps = taps.slice(1).map((t, i) => t - taps[i]);
+  mBpm.value = clampBpm(60000 / (gaps.reduce((a, b) => a + b) / gaps.length));
+  saveMetro();
+});
+
+function saveMetro() {
+  store.set('metro', JSON.stringify({bpm: mBpm.value, beats: mBeats.value, sub: mSub.value, sound: mSound.value,
+    vol: mVol.value, subvol: mSubVol.value, accent: mAccent.checked, follow: $('m-follow').checked}));
+}
+
+function loadMetro() {
+  let s = {};
+  try { s = JSON.parse(store.get('metro', '{}')) || {}; } catch (e) {}
+  if (s.bpm) mBpm.value = s.bpm;
+  if (s.beats) mBeats.value = s.beats;
+  if (s.sub) mSub.value = s.sub;
+  if (s.sound) mSound.value = s.sound;
+  if (s.vol !== undefined) mVol.value = s.vol;
+  if (s.subvol !== undefined) mSubVol.value = s.subvol;
+  if (s.accent !== undefined) mAccent.checked = s.accent;
+  if (s.follow !== undefined) $('m-follow').checked = s.follow;
+  drawDots();
+}
+
+mGo.addEventListener('click', metroToggle);
+mBpm.addEventListener('change', () => { mBpm.value = clampBpm(mBpm.value); saveMetro(); });
+[mBeats, mSub, mAccent].forEach(el => el.addEventListener('change', () => { saveMetro(); metroRestartBar(); }));
+[mSound, mVol, mSubVol].forEach(el => el.addEventListener('change', saveMetro));
+// Hear the new sound / volume straight away when stopped.
+[mSound, mVol].forEach(el => el.addEventListener('change', () => {
+  if (metro.timer) return;
+  metroSound(metroCtx().currentTime + 0.02, 1);
+}));
+document.addEventListener('keydown', e => {
+  if (e.code !== 'KeyM' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || typing(e.target) || e.target.tagName === 'SELECT') return;
+  e.preventDefault();
+  metroToggle();
+});
+loadMetro();
+
+function esc(t) { return String(t).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]); }
+
+document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+$('tempo').addEventListener('input', e => { $('tempo-val').textContent = e.target.value + '%'; store.set('tempo', e.target.value); });
+portSel.addEventListener('change', () => store.set('port', portSel.value));
+$('hand').addEventListener('change', e => store.set('hand', e.target.value));
+$('loop').addEventListener('change', e => store.set('loop', e.target.checked ? '1' : ''));
+portSel.addEventListener('focus', loadPorts);
+lessonSel.addEventListener('change', async () => {
+  if (!lessonSel.value) return;
+  try { await cmd('load', {lesson: lessonSel.value}); $('from').value = ''; $('to').value = ''; }
+  catch (err) { statusEl.textContent = err.message; loadLessons(); }
+});
+
+go.addEventListener('click', async () => {
+  go.disabled = true;
+  try {
+    if (running) { await cmd('stop'); return; }
+    metroUnlock();  // the server's metronome event arrives in a moment; let it make sound
+    if (mode === 'record') {
+      const {bpm, beats} = metroSettings();
+      await cmd('record', {bpm, beats, port: portSel.value});
+      return;
+    }
+    const from = $('from').value, to = $('to').value;
+    const bars = from || to ? `${from || 1}-${to || from || 9999}` : '';
+    await cmd('start', {mode, hand: $('hand').value, bars, tempo: +$('tempo').value, loop: $('loop').checked, port: portSel.value,
+                        count_in: mode === 'rehearse' && $('m-follow').checked && !$('m-follow').disabled});
+  } catch (err) {
+    statusEl.textContent = err.message;
+  } finally {
+    go.disabled = false;
+  }
+});
+
+setMode(mode);
+$('hand').value = store.get('hand', 'both');
+$('tempo').value = store.get('tempo', '100');
+$('tempo-val').textContent = $('tempo').value + '%';
+$('loop').checked = !!store.get('loop', '');
 connect();
 </script>
 </body>

@@ -3992,6 +3992,7 @@ class CoachLink{
       const res=await fetch(this.base+'score',{cache:'no-store'});
       const payload=await res.json();
       if(payload.version!==this.version)return;
+      if(!payload.xml){this._status(m.title+': no sheet music ('+(payload.notice||'not available')+')');return;}
       const r=this.app._notationRenderer;
       this.app._coachActive=true;
       document.getElementById('notation-strip').classList.add('visible');
@@ -4009,6 +4010,7 @@ class CoachLink{
       return;
     }
     if(m.type==='session'){this.sessionActive=!!m.active;return;}
+    if(m.type==='say')return;  // spoken by the coach page
     // While Learn Mode plays a lesson it scrolls the strip itself; only a live coach
     // session (wait / rehearsal grading) takes the cursor over.
     if(m.type==='cursorBeat'&&!m.live&&this.app._learn?.active)return;

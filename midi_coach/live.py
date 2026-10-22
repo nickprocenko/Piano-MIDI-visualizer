@@ -5,7 +5,9 @@ wait       The cursor holds on each chord until every note of it is played
            stuck on each bar is recorded.
 rehearsal  The cursor moves at a fixed tempo (tempo_percent of the score) once
            the first note is played, and notes are graded hit / missed as they
-           pass (like Synthesia's Song Recital).
+           pass (like Synthesia's Song Recital). With count_in, a one-bar
+           metronome count-in starts the clock instead, and the coach page's
+           metronome clicks along with the score (metronome_grid).
 
 Judgement happens here, in Python, so every display (coach page, visualizer)
 just renders the events pushed through DisplayHub.
@@ -24,16 +26,47 @@ from .notes import Note, Score, note_name
 
 HIT_WINDOW_SEC = 0.2
 MODES = ("wait", "rehearsal")
+MIN_COUNT_IN_SEC = 1.6  # a count-in shorter than this (fast 2/4) gets a second bar
+
+
+def metronome_grid(score: Score, ref_notes: list[Note], speed: float) -> dict:
+    """Clicks for the bars a run covers, in real seconds at this speed.
+
+    Returns {count_in, bars: [{t, len, beats, accent}]} where t is measured from the start
+    of the count-in and the count-in bar(s) come first. Bar lengths come from the score's
+    own timing, so tempo changes and time signatures are followed.
+    """
+    first_t = min(n.start for n in ref_notes)
+    last_t = max(n.end for n in ref_notes)
+    covered = [b for b in score.bars if b.end > first_t + 1e-6 and b.start < last_t - 1e-6] or score.bars[:1]
+    origin = covered[0].start
+    first = covered[0]
+    unit_sec = 60.0 / score.bpm_at(first.start) * 4 / first.denominator / speed  # one beat of the time signature
+    bar_sec = first.numerator * unit_sec
+    count_bars = 2 if bar_sec < MIN_COUNT_IN_SEC else 1
+    count_in = count_bars * bar_sec
+    bars = [{"t": round(k * bar_sec, 4), "len": round(bar_sec, 4), "beats": first.numerator, "accent": True} for k in range(count_bars)]
+    for i, b in enumerate(covered):
+        beats = max(1, round((b.end_beat - b.start_beat) * b.denominator / 4))
+        bars.append({
+            "t": round(count_in + (b.start - origin) / speed, 4),
+            "len": round((b.end - b.start) / speed, 4),
+            "beats": beats,
+            "accent": not (i == 0 and beats < b.numerator),  # a pickup bar has no downbeat
+        })
+    return {"count_in": round(count_in, 4), "origin": origin, "bars": bars}
 
 
 class LiveSession:
-    def __init__(self, mode: str, score: Score, ref_notes: list[Note], hub: DisplayHub | None, tempo_percent: float = 100.0) -> None:
+    def __init__(self, mode: str, score: Score, ref_notes: list[Note], hub: DisplayHub | None, tempo_percent: float = 100.0,
+                 count_in: bool = False) -> None:
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
         self.mode = mode
         self.score = score
         self.hub = hub
         self.speed = max(0.1, tempo_percent / 100)
+        self.grid = metronome_grid(score, ref_notes, self.speed) if count_in and mode == "rehearsal" and ref_notes else None
         self.groups = group_onsets(ref_notes, REF_GROUP_TOL)
         self.notes = sorted(ref_notes, key=lambda n: (n.start, n.pitch))
         self._lock = threading.Lock()
@@ -42,6 +75,7 @@ class LiveSession:
         self.misses = 0
         self.wrong = 0
         self.bar_stats: dict[int, dict] = {}
+        self.slips: list[dict] = []  # wait mode: wrong key vs the chord it was waiting for
         # wait mode
         self._idx = 0
         self._pending: dict[int, list[Note]] = {}
@@ -80,11 +114,13 @@ class LiveSession:
         total = len(self.notes)
         if self.mode == "wait":
             bar = self._bar(self.groups[min(self._idx, len(self.groups) - 1)].onset) if self.groups else 1
-            text = f"Wait mode · bar {bar} · {self.hits}/{total} notes · {self.wrong} wrong"
+            text = f"Learn · bar {bar} · {self.hits}/{total} notes · {self.wrong} wrong"
         elif self._clock is None:
-            text = f"Rehearsal {round(self.speed * 100)}% · play the first note to start"
+            text = f"Rehearse {round(self.speed * 100)}% · play the first note to start"
+        elif time.perf_counter() < self._clock:
+            text = f"Rehearse {round(self.speed * 100)}% · count-in…"
         else:
-            text = f"Rehearsal {round(self.speed * 100)}% · {self.hits} hit · {self.misses} missed · {self.wrong} wrong"
+            text = f"Rehearse {round(self.speed * 100)}% · {self.hits} hit · {self.misses} missed · {self.wrong} wrong"
         if self.done_reason:
             text += " · finished"
         self.hub.status(text)
@@ -122,6 +158,14 @@ class LiveSession:
                 first = self.groups[0]
                 self.hub.marks([(n.beat, n.pitch, "pending") for n in first.notes])
                 self.hub.cursor(self._beat[0], live=True)
+            if self.grid:
+                # The count-in starts the clock: the first note is due when it ends (plus any
+                # rest before it in its bar), whether or not anything has been played.
+                lead = (self.groups[0].onset - self.grid["origin"]) / self.speed
+                self._clock = now + self.grid["count_in"] + lead
+                if self.hub:
+                    self.hub.metronome({"start_in": 0.05, "bars": self.grid["bars"]})
+                    self._clock += 0.05
             self._ticker = threading.Thread(target=self._tick, daemon=True)
             self._ticker.start()
         self._status()
@@ -129,6 +173,8 @@ class LiveSession:
     def stop(self) -> None:
         if not self._stop.is_set() and self.hub:
             self.hub.session(False, self.mode)
+            if self.grid:
+                self.hub.metronome(None)
         self._stop.set()
 
     def should_stop(self) -> str | None:
@@ -169,6 +215,8 @@ class LiveSession:
         elif pitch not in self._hit_now:
             self.wrong += 1
             self._stat(self._bar(g.onset))["wrong"] += 1
+            if len(self.slips) < 50:
+                self.slips.append({"bar": self._bar(g.onset), "played": pitch, "expected": sorted(self._pending)})
             if self.hub:
                 self.hub.flash(note_name(pitch))
             self._status()
@@ -182,6 +230,8 @@ class LiveSession:
             if pitch not in {n.pitch for n in first.notes}:
                 return  # noodling before the start doesn't count
             self._clock = now
+        elif now < self._clock - HIT_WINDOW_SEC:
+            return  # during the count-in
         candidates = [
             n for n in self.notes
             if n.pitch == pitch and id(n) not in self._status_note and abs(self._real(n) - now) <= HIT_WINDOW_SEC
@@ -203,12 +253,16 @@ class LiveSession:
 
     def _tick(self) -> None:
         last_cursor = 0.0
+        counting = self.grid is not None
         end_ref = max(n.end for n in self.notes)
         while not self._stop.wait(0.05):
             now = time.perf_counter()
             with self._lock:
-                if self._clock is None or self.done_reason:
+                if self._clock is None or self.done_reason or now < self._clock:
                     continue
+                if counting:
+                    counting = False
+                    self._status()  # "count-in…" -> the running score
                 missed = []
                 for n in self.notes:
                     if id(n) in self._status_note:
@@ -247,6 +301,7 @@ class LiveSession:
                 "notes_total": len(self.notes),
                 "median_bar_wait_sec": round(statistics.median(waits), 2) if waits else None,
                 "per_bar": {str(k): {**v, "wait_sec": round(v["wait_sec"], 2)} for k, v in sorted(self.bar_stats.items())},
+                "slips": list(self.slips),
             }
 
 
