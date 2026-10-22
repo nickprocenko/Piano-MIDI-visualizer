@@ -1526,6 +1526,70 @@ def test_one_track_piano_file_gets_a_grand_staff(ref, tmp_path):
     assert xml.count("<score-part ") == 2 and "<sign>F</sign>" in xml
 
 
+def _band(parts):
+    """A Score from [(program, name, [(start sec, pitch, length sec)...])], 4/4 at 120."""
+    from midi_coach.notes import Bar, Part, Score
+
+    notes, out_parts = [], []
+    for i, (program, name, spec) in enumerate(parts):
+        ns = [Note(p, t, t + d, 70, part=i, beat=t * 2) for t, p, d in spec]
+        notes += ns
+        pitches = [n.pitch for n in ns]
+        out_parts.append(Part(i, i + 1, 9 if program == "drums" else i, name, len(ns), min(pitches), max(pitches),
+                              sum(pitches) / len(pitches), None if program == "drums" else program, program == "drums"))
+    end = max(n.end for n in notes)
+    bars = [Bar(k + 1, 2.0 * k, 2.0 * (k + 1), 4, 4, 4.0 * k, 4.0 * (k + 1)) for k in range(int(end // 2) + 1)]
+    return Score("band.mid", sorted(notes, key=lambda n: (n.start, n.pitch)), out_parts, [], bars, [(0.0, 120.0)], end)
+
+
+def test_keyboard_part_suggestions():
+    eighths = [k * 0.25 for k in range(64)]  # 8 bars of eighths
+    # A piano part, an electric piano that only doubles it, and an organ an octave above the piano.
+    piano = [(t, (60, 64, 67, 48)[k % 4], 0.25) for k, t in enumerate(eighths)]
+    score = _band([(0, "Piano", piano), (4, "E.Piano", piano[:20]), (18, "Organ", [(t, p + 12, d) for t, p, d in piano])])
+    out = suggest_hands(score)
+    assert out["both"] == [0] and not out["right"] and not out["left"]
+    assert any("only doubles part 0" in r for r in out["reasons"]) and sum("only doubles" in r for r in out["reasons"]) == 2
+
+    # An organ riff in the treble only, plus a bass guitar: the bass line fills the left hand.
+    organ = [(t, (72, 76, 79)[k % 3], 0.25) for k, t in enumerate(eighths)]
+    bass = [(t, 36, 0.5) for t in eighths[::2]]
+    out = suggest_hands(_band([(18, "Organ", organ), (33, "Bass", bass), (6, "Harpsichord", organ[:10])]))
+    assert out["right"] == [0] and out["left"] == [1]
+
+    # Two piano tracks that are one player's hands; and a full piano part with a boogie bass track.
+    rh = [(t, (72, 76)[k % 2], 0.25) for k, t in enumerate(eighths)]
+    lh = [(t, (48, 55)[k % 2], 0.5) for k, t in enumerate(eighths[::2])]
+    out = suggest_hands(_band([(0, "Track 2", rh), (0, "Track 3", lh), (25, "Guitar", rh)]))
+    assert out["right"] == [0] and out["left"] == [1]
+    full = [(t, p, 0.25) for t in eighths for p in ((43, 72, 76) if t % 1 == 0 else (72,))]
+    out = suggest_hands(_band([(0, "Piano", full), (0, "Piano", lh), (25, "Guitar", rh)]))
+    assert out["both"] == [0] and out["left"] == [1]  # the full part needs both hands: not a hand of a pair
+
+
+def test_grand_staff_clefs_keys_and_short_notes():
+    from fractions import Fraction as F
+
+    from music21 import converter
+
+    from midi_coach.transcribe import grand_staff
+
+    # D flat major: written with 5 flats, not C sharp major's 7 sharps.
+    events = [("right", F(b * 4 + k), F(b * 4 + k + 1), p) for b in range(4) for k, p in enumerate((61, 65, 68, 73))]
+    events += [("left", F(b * 4), F(b * 4 + 4), 49) for b in range(4)]
+    out = grand_staff(events, "t")
+    assert out["key"] == "Db" and "<fifths>-5</fifths>" in out["xml"]
+    # A right hand that drops low for two bars changes to bass clef and back.
+    events = [("right", F(b * 4 + k), F(b * 4 + k + 1), 48 if b in (1, 2) else 72) for b in range(4) for k in range(4)]
+    events += [("left", F(b * 4), F(b * 4 + 4), 36) for b in range(4)]
+    right = converter.parseData(grand_staff(events, "t")["xml"]).parts[0]
+    assert [(float(c.getOffsetInHierarchy(right)), c.sign) for c in right.recurse().getElementsByClass("Clef")] == [(0.0, "G"), (4.0, "F"), (12.0, "G")]
+    # A short note on an eighth before a gap is written as an eighth, not a 16th and a rest.
+    events = [("right", F(k, 2), F(k, 2) + F(1, 4), 72) for k in range(0, 8, 2)] + [("left", F(0), F(4), 48)]
+    notes = converter.parseData(grand_staff(events, "t")["xml"]).parts[0].recurse().notes
+    assert [n.quarterLength for n in notes] == [0.5] * 4
+
+
 def test_grand_staff_voices_spelling_and_lengths():
     from fractions import Fraction as F
 

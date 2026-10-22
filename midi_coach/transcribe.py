@@ -151,6 +151,9 @@ def grand_staff(
     except Exception:
         found = m21key.Key("C")
     sharps = found.sharps
+    if abs(sharps) > 6:  # C sharp major (7 sharps) is written as D flat major (5 flats)
+        sharps += -12 if sharps > 0 else 12
+        found = m21key.KeySignature(sharps).asKey(found.mode)
     local = _local_sharps(events, bar_ql, bars, sharps)
 
     def spelled(midi: int, at: Fraction):
@@ -165,19 +168,21 @@ def grand_staff(
     score = stream.Score()
     score.metadata = metadata.Metadata(title=title)
     count = 0
-    for hand, clef_obj in (("right", clef.TrebleClef()), ("left", clef.BassClef())):
+    for hand in ("right", "left"):
         part = stream.Part()
         part.partName = "Right Hand" if hand == "right" else "Left Hand"
-        part.insert(0, clef_obj)
+        hand_events = [(on, end, p) for h, on, end, p in events if h == hand]
+        for at, name in _clefs(hand, hand_events, bar_ql, bars):
+            part.insert(at, clef.TrebleClef() if name == "treble" else clef.BassClef())
         part.insert(0, meter.TimeSignature(time_signature))
         part.insert(0, m21key.KeySignature(sharps))
         if hand == "right":
             for at, bpm in tempo_marks or []:
                 part.insert(at, tempo.MetronomeMark(number=round(bpm)))
-        voices = _voices([(on, end, p) for h, on, end, p in events if h == hand])
+        voices = _voices(hand_events)
         for k, notes_in_voice in enumerate(voices):
             target = part if len(voices) == 1 else stream.Voice(id=str(k + 1))
-            count += _write_voice(target, notes_in_voice, legato_gap, spelled, chord, note, tie)
+            count += _write_voice(target, notes_in_voice, legato_gap, total, spelled, chord, note, tie)
             if target is not part:
                 target.makeRests(fillGaps=True, inPlace=True, timeRangeFromBarDuration=False, refStreamOrTimeRange=[0, total])
                 part.insert(0, target)
@@ -203,6 +208,33 @@ def grand_staff(
 
 
 HELD_BEATS = 2  # a note still sounding this long after the hand's next chord gets a voice of its own
+TO_BASS, TO_TREBLE = 55, 65  # a bar whose middle note is below G3 / above F4 changes to that clef
+
+
+def _clefs(hand: str, events: list[tuple[Fraction, Fraction, int]], bar_ql: Fraction, bars: int) -> list[tuple[Fraction, str]]:
+    """(offset, 'treble' | 'bass') for a hand's staff: its own clef, changed for bars that sit
+    well into the other clef's range rather than writing them on three or more ledger lines,
+    and changed back once the hand is on its own side of middle C again."""
+    home = "treble" if hand == "right" else "bass"
+    by_bar: dict[int, list[int]] = {}
+    for on, _, p in events:
+        by_bar.setdefault(min(int(on // bar_ql), bars - 1), []).append(p)
+    out: list[tuple[Fraction, str]] = []
+    current = home
+    for b in range(bars):
+        ps = sorted(by_bar.get(b, []))
+        if not ps:
+            continue
+        mid = ps[len(ps) // 2]
+        want = current
+        if current == "treble" and mid < TO_BASS or current == "bass" and mid > TO_TREBLE:
+            want = "bass" if current == "treble" else "treble"
+        elif current != home and (mid >= 60) == (home == "treble"):
+            want = home
+        if want != current or not out:
+            out.append((b * bar_ql if out else Fraction(0), want))
+            current = want
+    return out or [(Fraction(0), home)]
 
 
 def _voices(events: list[tuple[Fraction, Fraction, int]]) -> list[list[tuple[Fraction, Fraction, int]]]:
@@ -232,8 +264,9 @@ def _voices(events: list[tuple[Fraction, Fraction, int]]) -> list[list[tuple[Fra
     return [moving, held] if mean(moving) >= mean(held) else [held, moving]
 
 
-def _write_voice(target, events, legato_gap: Fraction, spelled, chord, note, tie) -> int:
-    """Insert one voice's notes into a Part or Voice as chords; returns how many notes."""
+def _write_voice(target, events, legato_gap: Fraction, limit: Fraction, spelled, chord, note, tie) -> int:
+    """Insert one voice's notes into a Part or Voice as chords, none past `limit` (the end of
+    the last bar); returns how many notes."""
     chords: dict[Fraction, list[tuple[Fraction, int]]] = {}
     for on, end, p in events:
         chords.setdefault(on, []).append((end, p))
@@ -241,10 +274,14 @@ def _write_voice(target, events, legato_gap: Fraction, spelled, chord, note, tie
     count = 0
     for i, on in enumerate(onsets):
         end = max(e for e, _ in chords[on])
+        nxt = onsets[i + 1] if i + 1 < len(onsets) else limit
         if i + 1 < len(onsets):
-            nxt = onsets[i + 1]
             # Released a little early (up to a 16th, or a quarter of the note): write it held.
             end = nxt if nxt - end <= max(legato_gap, (end - on) / 4) else min(end, nxt)
+        # A short note on an eighth with nothing until the next eighth is an eighth (played
+        # short), not a 16th and a dotted-eighth rest.
+        if (on * 2).denominator == 1 and end - on < Fraction(1, 2) <= nxt - on:
+            end = on + Fraction(1, 2)
         pitches = sorted({p for _, p in chords[on]})
         pieces = _pieces(on, end - on)
         for k, (start, length) in enumerate(pieces):
@@ -280,8 +317,10 @@ def _local_sharps(events: list[tuple[str, Fraction, Fraction, int]], bar_ql: Fra
             for profile, major in ((_MAJOR, True), (_MINOR, False)):
                 r = _correlation(hist, [profile[(pc - tonic) % 12] for pc in range(12)])
                 if r > best_r:
+                    # Of the two spellings (F sharp or G flat major), the one nearer the key signature.
                     fifths = ((tonic if major else tonic + 3) * 7) % 12
-                    best, best_r = fifths - 12 if fifths > 6 else fifths, r
+                    best = min((s for s in (fifths, fifths - 12) if abs(s) <= 7), key=lambda s: (abs(s - default), abs(s)))
+                    best_r = r
         out.append(best)
     return out
 

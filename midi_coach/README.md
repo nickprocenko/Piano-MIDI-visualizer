@@ -226,8 +226,12 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 
 MIDI files downloaded from sites like freemidi.org or midiworld.com are usually full-band
 arrangements rather than piano scores. `inspect_reference` names each part's instrument from
-its General MIDI program (channel 10 is drums) and suggests what to play: the piano part if
-there is one, otherwise the melody in your right hand and the bass line in your left. Claude
+its General MIDI program (channel 10 is drums) and suggests what to play: the main keyboard
+part (piano or organ) if there is one, otherwise the melody in your right hand and the bass
+line in your left. Tracks that only double another (note for note or an octave apart) are
+ignored; two tracks that are clearly one player's two hands are given a hand each; a
+separate bass-register piano track joins the left hand; and a keyboard part that stays in the
+treble gets the bass line in the left hand. Claude
 shows you the parts and asks before going on, for example:
 
 > 1 Track 3 — Acoustic Bass (low, E1–A2) · 4 Track 6 — Voice Oohs (melody) · 9 Drums …

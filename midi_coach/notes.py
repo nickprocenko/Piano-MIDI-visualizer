@@ -560,6 +560,94 @@ def _melody_part(parts: list[Part]) -> tuple[Part, str] | None:
     return None
 
 
+_ORGANS = range(16, 21)  # drawbar, percussive, rock, church and reed organ: keyboard parts too
+DOUBLING = 0.8  # share of a part's notes also in a bigger part (same pitch or an octave away) for it to be a doubling
+MINOR_PART = 0.15  # a keyboard part with fewer notes than this share of the main one is fills, not a hand
+ONE_HANDED = 0.9  # share of a part's notes above middle C for it to be a right-hand-only part
+
+
+def _is_keyboard(p: Part) -> bool:
+    return p.is_piano or (p.program is not None and p.program in _ORGANS)
+
+
+def _part_notes(score: Score, p: Part) -> list[Note]:
+    return [n for n in score.notes if n.part == p.index]
+
+
+def _share_below(score: Score, p: Part, split_note: int) -> float:
+    notes = _part_notes(score, p)
+    return sum(n.pitch < split_note for n in notes) / max(1, len(notes))
+
+
+def _doublings(score: Score, parts: list[Part]) -> dict[int, int]:
+    """Parts that only double another, note for note or an octave apart, as band files often
+    do to thicken a sound: {doubling part: part it doubles}. Of two equal parts the one
+    a piano, else nearer the middle of the keyboard, is kept."""
+    starts: dict[int, dict[int, list[float]]] = {}  # part -> pitch -> sorted start times
+    for p in parts:
+        by_pitch = starts[p.index] = {}
+        for n in _part_notes(score, p):
+            by_pitch.setdefault(n.pitch, []).append(n.start)
+        for times in by_pitch.values():
+            times.sort()
+
+    def found(times: list[float] | None, t: float) -> bool:  # a note within CHORD_GAP of t
+        if not times:
+            return False
+        k = bisect.bisect_left(times, t - CHORD_GAP)
+        return k < len(times) and times[k] <= t + CHORD_GAP
+
+    order = sorted(parts, key=lambda p: (-p.note_count, not p.is_piano, abs(p.mean_pitch - 67), p.index))
+    out: dict[int, int] = {}
+    for i, small in enumerate(order):
+        mine = _part_notes(score, small)
+        for big in order[:i]:
+            theirs = starts[big.index]
+            if big.index not in out and any(sum(found(theirs.get(n.pitch + d), n.start) for n in mine) >= DOUBLING * len(mine) for d in (0, 12, -12)):
+                out[small.index] = big.index
+                break
+    return out
+
+
+def _two_handed(score: Score, p: Part) -> bool:
+    """A part that needs both hands: more than 5% of its chords span over a tenth."""
+    chords: dict[float, list[int]] = {}
+    for n in _part_notes(score, p):
+        chords.setdefault(round(n.start / CHORD_GAP), []).append(n.pitch)
+    wide = sum(max(ps) - min(ps) > HAND_REACH + 2 for ps in chords.values())
+    return wide > 0.05 * max(1, len(chords))
+
+
+def _bass_partner(score: Score, main: Part, parts: list[Part], split_note: int = 60) -> Part | None:
+    """A substantial keyboard part in the bass, playing alongside the main one (a boogie left
+    hand on its own track, say): the left hand plays it as well."""
+    for p in sorted(parts, key=lambda p: -p.note_count):
+        if p is main or p.note_count < MINOR_PART * main.note_count or _share_below(score, p, split_note) < ONE_HANDED:
+            continue
+        bars_main = {score.position(n.start)[0] for n in _part_notes(score, main)}
+        bars_p = {score.position(n.start)[0] for n in _part_notes(score, p)}
+        if len(bars_main & bars_p) >= 0.5 * len(bars_p):
+            return p
+    return None
+
+
+def _hand_pair(score: Score, a: Part, b: Part, split_note: int = 60) -> bool:
+    """Two keyboard parts that are one player's two hands: both substantial, neither needing
+    two hands itself, the higher one above middle C and the lower below it (90% of their
+    notes), playing in the same bars. (Parts that overlap are two keyboards, a piano and its
+    melody, or a full piano part and an extra bass track.)"""
+    if min(a.note_count, b.note_count) < MINOR_PART * max(a.note_count, b.note_count):
+        return False
+    if _two_handed(score, a) or _two_handed(score, b):
+        return False
+    hi, lo = sorted((a, b), key=lambda p: -p.mean_pitch)
+    if _share_below(score, hi, split_note) > 1 - ONE_HANDED or _share_below(score, lo, split_note + 8) < ONE_HANDED:
+        return False  # each mostly on its own side of middle C (the left hand may reach up to G4)
+    bars_hi = {score.position(n.start)[0] for n in _part_notes(score, hi)}
+    bars_lo = {score.position(n.start)[0] for n in _part_notes(score, lo)}
+    return len(bars_hi & bars_lo) >= 0.5 * min(len(bars_hi), len(bars_lo))
+
+
 def is_plain_piano(score: Score) -> bool:
     """One or two piano parts and nothing else: no part choice to make."""
     playable = playable_parts(score)
@@ -589,26 +677,49 @@ def suggest_hands(score: Score) -> dict:
     if not playable:
         out["reasons"].append("No playable parts (only drums or no notes).")
         return out
-    pianos = [p for p in playable if p.is_piano]
-    if pianos:
-        sides = {p.index: _name_side(p.name) for p in pianos}
-        if len(pianos) == 2 or ("right" in sides.values() and "left" in sides.values()):
-            if "right" in sides.values() and "left" in sides.values():
-                for p in pianos:
-                    out[sides[p.index] or "both"].append(p.index)
-                out["reasons"].append("Piano parts named for each hand.")
-            else:
-                hi, lo = sorted(pianos, key=lambda p: -p.mean_pitch)
+    keys = [p for p in playable if _is_keyboard(p)]
+    if keys:
+        doubled = _doublings(score, keys)
+        for i, j in doubled.items():
+            out["reasons"].append(f"Part {i} '{score.parts[i].name}' only doubles part {j}: left out.")
+        keys = [p for p in keys if p.index not in doubled]
+        sides = {p.index: _name_side(p.name) for p in keys}
+        if "right" in sides.values() and "left" in sides.values():
+            for p in keys:
+                out[sides[p.index] or "both"].append(p.index)
+            out["reasons"].append("Keyboard parts named for each hand.")
+        else:
+            main = max(keys, key=lambda p: p.note_count)
+            partner = next((p for p in sorted(keys, key=lambda p: -p.note_count) if p is not main and _hand_pair(score, main, p)), None)
+            basses = [p for p in playable if _is_bass(p) and not _is_keyboard(p)]
+            if partner:
+                hi, lo = sorted((main, partner), key=lambda p: -p.mean_pitch)
                 out["right"].append(hi.index)
                 out["left"].append(lo.index)
-                out["reasons"].append(f"Two piano parts: the higher ('{hi.name}') for the right hand, the lower ('{lo.name}') for the left.")
-        else:
-            out["both"] = [p.index for p in pianos]
-            names = ", ".join(f"'{p.name}'" for p in pianos)
-            out["reasons"].append(f"Piano part(s) {names}, shared between the hands by pitch.")
-        others = [p for p in playable if not p.is_piano]
+                out["reasons"].append(f"Two {hi.instrument.lower()} parts that are a player's two hands: part {hi.index} '{hi.name}' (higher) "
+                                      f"for the right, part {lo.index} '{lo.name}' for the left.")
+            elif _share_below(score, main, 60) < 1 - ONE_HANDED and basses:
+                # A keyboard part in the treble only leaves the left hand idle: give it the bass line.
+                bass = max(basses, key=lambda p: p.note_count)
+                out["right"].append(main.index)
+                out["left"].append(bass.index)
+                out["reasons"].append(f"Right hand: the {main.instrument.lower()} part '{main.name}', which stays above middle C. "
+                                      f"Left hand: part {bass.index} '{bass.name}' ({bass.instrument}), the bass line.")
+            else:
+                out["both"].append(main.index)
+                out["reasons"].append(f"The {main.instrument.lower()} part '{main.name}', shared between the hands by register.")
+                bass_part = _bass_partner(score, main, keys)
+                if bass_part:
+                    out["left"].append(bass_part.index)
+                    out["reasons"].append(f"Left hand also plays part {bass_part.index} '{bass_part.name}', a {bass_part.instrument.lower()} part in the bass.")
+            extra = [p for p in keys if p.index not in out["right"] + out["left"] + out["both"]]
+            if extra:
+                names = ", ".join(f"{p.index} '{p.name}' ({p.instrument}, {p.note_count} notes)" for p in extra)
+                out["reasons"].append(f"Other keyboard parts left out (a second keyboard or fills): {names}.")
+        chosen = set(out["right"] + out["left"] + out["both"])
+        others = [p for p in playable if not _is_keyboard(p) and p.index not in chosen]
         if others:
-            out["reasons"].append(f"Left out {len(others)} non-piano part(s).")
+            out["reasons"].append(f"Left out {len(others)} non-keyboard part(s).")
             tune = _melody_part(others)
             if tune:
                 out["reasons"].append(f"Alternative: part {tune[0].index} '{tune[0].name}' ({tune[0].instrument}) is {tune[1]}, to play the tune instead.")
