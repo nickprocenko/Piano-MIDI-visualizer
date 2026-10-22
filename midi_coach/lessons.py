@@ -1,7 +1,8 @@
 """Custom lessons: build MusicXML from compact notation or excerpt a reference.
 
-Lessons are saved to <home>/lessons/<slug>.musicxml, so they are also normal
-references for recording, comparison and progress tracking.
+Lessons are saved to <home>/lessons/<category>/<slug>.musicxml, so they are also normal
+references for recording, comparison and progress tracking. Each category is a folder
+(CATEGORIES first, then any the user makes); files directly in <home>/lessons are 'Unsorted'.
 
 Notation (music21 tinyNotation, one string per hand)
 ----------------------------------------------------
@@ -18,19 +19,96 @@ Notation (music21 tinyNotation, one string per hand)
 
 from __future__ import annotations
 
+import json
+import pathlib
 import re
 import time
 
-from .library import home
-from .notes import Score, load_score, select_notes
+from .library import _choices_path, _load_choices, home
+from .notes import MIDI_SUFFIXES, MUSICXML_SUFFIXES, Score, load_score, select_notes
 
 _KEY_RE = re.compile(r"^([A-Ga-g])([#b-]?)(m|min|minor)?$")
 
+# Lesson menu groups, in menu order. Any other folder under lessons/ is a category too.
+CATEGORIES = ("Solo piano", "Vocals & accompaniment", "Exercises", "Recordings")
+EXERCISES, RECORDINGS = "Exercises", "Recordings"
+UNSORTED = "Unsorted"
+LESSON_SUFFIXES = MUSICXML_SUFFIXES | MIDI_SUFFIXES
 
-def lessons_dir():
+
+def lessons_dir(category: str | None = None) -> pathlib.Path:
     path = home() / "lessons"
+    if category and category != UNSORTED:
+        path = path / _category_folder(category)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _category_folder(category: str) -> str:
+    """The folder for a category: a known one matched without case, else the name made safe."""
+    for known in CATEGORIES:
+        if category.strip().lower() == known.lower():
+            return known
+    name = re.sub(r'[<>:"/\\|?*]+', "", category).strip(" .")
+    if not name:
+        raise ValueError(f"Not a usable category name: {category!r}")
+    return name
+
+
+def list_lessons() -> list[dict]:
+    """Every lesson, newest first, with its category (the folder it's in)."""
+    root = lessons_dir()
+    found = []
+    for p in [root, *sorted(d for d in root.iterdir() if d.is_dir())]:
+        category = UNSORTED if p == root else p.name
+        found += [(f, category) for f in p.iterdir() if f.is_file() and f.suffix.lower() in LESSON_SUFFIXES]
+    found.sort(key=lambda fc: -fc[0].stat().st_mtime)
+    return [{"title": f.stem, "path": str(f), "category": c} for f, c in found]
+
+
+def categories(listed: list[dict]) -> list[str]:
+    """Menu order: the standard categories, then the user's own, then Unsorted (empty ones left out)."""
+    used = {item["category"] for item in listed}
+    extra = sorted(used - set(CATEGORIES) - {UNSORTED}, key=str.lower)
+    return [c for c in (*CATEGORIES, *extra, UNSORTED) if c in used]
+
+
+def move_lesson(source: str, category: str, title: str | None = None) -> str:
+    """Move a lesson (or any reference file) into a category, optionally renaming it. Takes and
+    the saved part choice that point at the old path are updated, so progress history follows."""
+    old = pathlib.Path(source).resolve()
+    if not old.is_file():
+        raise FileNotFoundError(f"No lesson file {source}")
+    name = re.sub(r'[<>:"/\\|?*]+', "", title).strip(" .") if title else old.stem
+    new = (lessons_dir(category) / f"{name or old.stem}{old.suffix}").resolve()
+    if new == old:
+        return str(new)
+    if new.exists():
+        raise FileExistsError(f"{new.name} is already in {category}.")
+    old.rename(new)
+    _repoint(str(old), str(new))
+    return str(new)
+
+
+def _repoint(old: str, new: str) -> None:
+    def swap(value):
+        if isinstance(value, str):
+            return new if value == old else value
+        if isinstance(value, list):
+            return [swap(v) for v in value]
+        if isinstance(value, dict):
+            return {k: swap(v) for k, v in value.items()}
+        return value
+
+    for f in (home() / "takes").glob("*.json"):
+        text = f.read_text(encoding="utf-8")
+        if json.dumps(old)[1:-1] not in text:
+            continue
+        f.write_text(json.dumps(swap(json.loads(text)), indent=2), encoding="utf-8")
+    choices = _load_choices()
+    if old in choices:
+        choices[new] = choices.pop(old)
+        _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
 
 
 def _slug(title: str) -> str:
@@ -128,12 +206,13 @@ def build_lesson(
     key: str | int | None = "C",
     tempo_bpm: float = 80,
     musicxml: str | None = None,
+    category: str = EXERCISES,
 ) -> tuple[str, Score]:
     """Create and save a lesson. Returns (path, parsed score)."""
     from music21 import converter, metadata, meter, stream
     from music21.musicxml.m21ToXml import GeneralObjectExporter
 
-    path = lessons_dir() / f"{_slug(title)}.musicxml"
+    path = lessons_dir(category) / f"{_slug(title)}.musicxml"
     if musicxml:
         converter.parseData(musicxml)  # raises if it isn't valid MusicXML
         path.write_text(musicxml, encoding="utf-8")
@@ -160,7 +239,7 @@ def build_lesson(
     return str(path), load_score(path)
 
 
-def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title: str) -> tuple[str, Score]:
+def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title: str, category: str = EXERCISES) -> tuple[str, Score]:
     """Cut bars (and optionally one hand) out of a reference into a new lesson."""
     from music21 import converter, metadata, stream
     from music21.musicxml.m21ToXml import GeneralObjectExporter
@@ -180,7 +259,7 @@ def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title:
         excerpt = new
     excerpt.metadata = metadata.Metadata(title=title)
     xml = GeneralObjectExporter(excerpt).parse().decode("utf-8")
-    path = lessons_dir() / f"{_slug(title)}.musicxml"
+    path = lessons_dir(category) / f"{_slug(title)}.musicxml"
     path.write_text(xml, encoding="utf-8")
     return str(path), load_score(path)
 

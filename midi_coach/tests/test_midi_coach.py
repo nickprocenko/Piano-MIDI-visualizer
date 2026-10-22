@@ -919,6 +919,36 @@ def test_excerpt_lesson_one_hand(ref):
     assert sorted({n.pitch for n in score.notes}) == [48, 52, 55]
 
 
+def test_lesson_categories_and_moving_keeps_history(ref):
+    import pathlib
+
+    from midi_coach import lessons, server
+
+    path, _ = lessons.build_lesson("Scale", right="c4 d e f g a b c'")
+    assert pathlib.Path(path).parent.name == "Exercises"  # new lessons are exercises by default
+    song, _ = lessons.build_lesson("Song", right="c4 d e f", category="vocals & ACCOMPANIMENT")
+    assert pathlib.Path(song).parent.name == "Vocals & accompaniment"
+    loose = lessons.lessons_dir() / "old.musicxml"
+    loose.write_text(pathlib.Path(path).read_text(encoding="utf-8"), encoding="utf-8")
+
+    # A take and a part choice on the lesson must follow it when it moves.
+    score = library.get_score(path)
+    library.save_hands(score, {0: "right"})
+    take = library.save_take([(0.0, [0x90, 60, 80]), (0.5, [0x80, 60, 0])], {"reference": path})
+    moved = lessons.move_lesson(path, "Solo piano", "C major scale")
+    assert pathlib.Path(moved).name == "C major scale.musicxml" and not pathlib.Path(path).exists()
+    assert library.get_take(take["id"])["reference"] == moved
+    assert library.load_hands(library.get_score(moved)) == {0: "right"}
+    with pytest.raises(FileExistsError):
+        lessons.move_lesson(song, "Solo piano", "C major scale")
+
+    menu = server._cmd_lessons({})
+    assert menu["categories"] == ["Solo piano", "Vocals & accompaniment", "Unsorted"]
+    assert {(x["title"], x["category"]) for x in menu["lessons"]} == {
+        ("C major scale", "Solo piano"), ("song", "Vocals & accompaniment"), ("old", "Unsorted")}
+    assert json.loads(json.dumps(menu))  # the page gets it as JSON
+
+
 def test_create_lesson_tool_publishes(ref, monkeypatch):
     import json
     import urllib.request

@@ -491,9 +491,8 @@ def _cmd_ports(_body: dict) -> dict:
 
 
 def _cmd_lessons(_body: dict) -> dict:
-    files = [p for p in lessons.lessons_dir().iterdir() if p.suffix.lower() in MUSICXML_SUFFIXES | {".mid", ".midi"}]
-    files.sort(key=lambda p: -p.stat().st_mtime)
-    return {"lessons": [{"title": p.stem, "path": str(p)} for p in files], "current": hub.score_path}
+    listed = lessons.list_lessons()
+    return {"lessons": listed, "categories": lessons.categories(listed), "current": hub.score_path}
 
 
 def _cmd_load(body: dict) -> dict:
@@ -610,7 +609,7 @@ def _transcribe_to_lesson(notes, bpm: float, beats_per_bar: int, downbeat: float
                           split_note: int = 60, triplets: str = "auto") -> dict:
     title = title or transcribe.default_title()
     out = transcribe.transcribe(notes, bpm, beats_per_bar, downbeat, split_note, title, triplets)
-    folder = lessons.lessons_dir()
+    folder = lessons.lessons_dir(lessons.RECORDINGS)
     stem = lessons._slug(title)
     path = folder / f"{stem}.musicxml"
     n = 2
@@ -1023,6 +1022,7 @@ async def create_lesson(
     tempo_percent: float = 100,
     autostart: bool = True,
     to_visualizer: bool = False,
+    category: str = "Exercises",
 ) -> dict:
     """Create a practice lesson and show it on the coach sheet-music page, where the user
     picks the input, Learn (wait) or Rehearse mode, hand, bars, tempo and loop, and starts.
@@ -1040,6 +1040,8 @@ async def create_lesson(
     key: 'C', 'G', 'Bb', 'F#m', 'Am' (minor with m) or sharps count like -3.
     to_visualizer: also push it into the web visualizer's Learn Mode. practice_mode ('wait' or
       'rehearsal' at tempo_percent) and autostart only apply to that visualizer push.
+    category: the Lesson menu group (a folder): 'Exercises' (default), 'Solo piano',
+      'Vocals & accompaniment', 'Recordings', or a new name. organize_lesson moves one later.
     Returns the saved path (use it as `reference` for start_recording / compare_take) and a
     bar-by-bar readout - check it matches what you intended before telling the user.
     """
@@ -1049,9 +1051,9 @@ async def create_lesson(
             if not bar_range:
                 return {"error": "from_reference needs bars, e.g. '9-12'."}
             ref_path = str(library.resolve_reference(from_reference))
-            path, score = await asyncio.to_thread(lessons.excerpt_lesson, ref_path, bar_range, hand, title)
+            path, score = await asyncio.to_thread(lessons.excerpt_lesson, ref_path, bar_range, hand, title, category)
         else:
-            path, score = await asyncio.to_thread(lessons.build_lesson, title, right, left, time_signature, key, tempo_bpm, musicxml)
+            path, score = await asyncio.to_thread(lessons.build_lesson, title, right, left, time_signature, key, tempo_bpm, musicxml, category)
         if not score.notes:
             return {"error": "The lesson has no notes.", "path": path}
         side = analysis.side_resolver(score)
@@ -1089,6 +1091,27 @@ async def send_lesson(lesson: str, practice_mode: str = "wait", tempo_percent: f
     except Exception as exc:
         return _err(exc)
     return {"path": score.path, "sent": sent, "display": hub.url}
+
+
+@mcp.tool()
+async def organize_lesson(lesson: str, category: str, title: str | None = None) -> dict:
+    """Move a lesson - or a piece from the reference library - into a Lesson menu category, so
+    it is listed under that heading on the coach page. category: 'Solo piano', 'Vocals &
+    accompaniment', 'Exercises', 'Recordings' or a new name (a new folder). title renames it.
+    Takes and the saved part choice follow the file, so progress history is kept."""
+    if recorder.active:
+        return {"error": "A practice run is going; stop_recording first."}
+    try:
+        old = str(library.resolve_reference(lesson))
+        new = await asyncio.to_thread(lessons.move_lesson, old, category, title)
+    except Exception as exc:
+        return _err(exc)
+    library._score_cache.pop(old, None)
+    if hub.score_path and pathlib.Path(hub.score_path).resolve() == pathlib.Path(old).resolve():
+        await asyncio.to_thread(_show, library.get_score(new), [])  # it's on screen: follow it
+    listed = lessons.list_lessons()
+    return {"path": new, "category": next((x["category"] for x in listed if x["path"] == new), category),
+            "menu": {c: [x["title"] for x in listed if x["category"] == c] for c in lessons.categories(listed)}}
 
 
 @mcp.tool()

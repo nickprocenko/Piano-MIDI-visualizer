@@ -21,7 +21,7 @@ asking Claude to start each run:
 
 | Control | What it does |
 |---------|--------------|
-| Lesson | Any lesson in `%USERPROFILE%\MidiCoach\lessons` (newest first), or the score Claude just showed |
+| Lesson | Any lesson in `%USERPROFILE%\MidiCoach\lessons`, grouped by category (newest first in each), or the score Claude just showed. See [Lesson categories](#lesson-categories) |
 | Input | MIDI input to listen on (remembered). If the keyboard is busy — e.g. the visualizer has it open — the `Coach` loopMIDI port is used instead |
 | Learn / Rehearse / Record | Learn = the cursor waits for the right notes (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`); Record = play over the metronome and get it back as sheet music (below) |
 | Hand, Bars | Practice one hand (the other is ignored) or a bar range |
@@ -47,7 +47,7 @@ generate, so the coach speaks just after a pass ends, not mid-pass.
 and play after the count-in (one bar, two if the bar is short). Press Stop when you're done
 (10 seconds of silence also stops). What you played is snapped to the beat — sixteenths, or
 triplets where they fit clearly better — split between the hands by where they are on the keyboard (not at a fixed key), given a key signature,
-and saved as a lesson (`Recording 2026-10-20 17-52`) that appears on the page straight away,
+and saved as a lesson (`Recording 2026-10-20 17-52`, under *Recordings*) that appears on the page straight away,
 ready to practise in Learn or Rehearse. It's a readable sketch, not an engraving: notes held
 under a moving line in the same hand are shortened. Claude's `transcribe_take` does the same for
 any take, e.g. free play recorded without a click (it estimates the tempo; tell it the BPM if it
@@ -106,9 +106,26 @@ Learn Mode (falling notes plus sheet music). For example:
 Claude writes each hand in music21 *tinyNotation* (`g4 a b c' d'2 r4 d'8 c' b1`,
 chords as `chord{GG2 BB D}`), full MusicXML, or cuts an excerpt from a reference. The
 server validates it (a typo is rejected instead of silently dropped), returns a
-bar-by-bar readout so Claude can check it, saves it to `%USERPROFILE%\MidiCoach\lessons`
+bar-by-bar readout so Claude can check it, saves it to `%USERPROFILE%\MidiCoach\lessons\Exercises`
 and publishes it. Lessons are normal references afterwards, so recording, Wait/Rehearsal
 grading, heat maps and `progress` all work on them.
+
+### Lesson categories
+
+Each folder in `%USERPROFILE%\MidiCoach\lessons` is a heading in the page's Lesson menu:
+
+| Category | What goes there |
+|----------|-----------------|
+| Solo piano | Piano arrangements of whole pieces (both hands, melody included) |
+| Vocals & accompaniment | Songs with a vocal line (and lyrics) above the piano part you play |
+| Exercises | Scales, drills and excerpts — where Claude's and the Maestro's new lessons go |
+| Recordings | Your Record-mode takes written out as sheet music |
+
+Any other folder you make there becomes a category too; files left directly in `lessons`
+show under *Unsorted*. Ask Claude to file something (*"put the Rousseau Piano Man under Solo
+piano"*) and `organize_lesson` moves it — from the lessons or from the reference library —
+and updates your takes and saved part choice so progress history stays with it. Moving files
+yourself in Explorer works for the menu, but takes would still point at the old path.
 
 For the visualizer push (`to_visualizer=True`) the visualizer must be connected (Settings →
 Hardware → *Practice Coach* → Connect; it
@@ -217,6 +234,7 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `transcribe_take` | Write a take out as sheet music (a two-staff lesson): Record-mode takes use their metronome grid, others get an estimated tempo or the `bpm` you give |
 | `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and show it on the coach page (`to_visualizer` also pushes it into Learn Mode) |
 | `send_lesson` | Show an existing lesson or reference on the coach page (`to_visualizer`: Learn Mode too) |
+| `organize_lesson` | Move a lesson or reference into a Lesson menu category (optionally renaming it); takes and part choices follow |
 | `search_chord_charts` | Search Ultimate Guitar (chords, tabs, bass, ukulele, drums, Guitar Pro), plus sheet-music search links |
 | `get_chord_chart` | A chart's key, capo, chords, per-section progression and text; transpose; with `reference`, suggests the transpose that matches the score |
 | `chords_in_score` | Names the chord in each bar (or half bar, or beat) of a reference from its notes, plus the estimated key |

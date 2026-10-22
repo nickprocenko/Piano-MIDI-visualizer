@@ -293,10 +293,15 @@ async function loadPorts() {
 
 async function loadLessons() {
   try {
-    const {lessons, current} = await cmd('lessons');
+    const {lessons, categories, current} = await cmd('lessons');
     lessonSel.innerHTML = '';
     if (!lessons.some(l => l.path === current)) lessonSel.add(new Option(current ? titleEl.textContent : '— pick a lesson —', current || ''));
-    for (const l of lessons) lessonSel.add(new Option(l.title, l.path));
+    for (const category of categories) {  // one group per lesson folder, newest first inside
+      const group = document.createElement('optgroup');
+      group.label = category;
+      for (const l of lessons) if (l.category === category) group.appendChild(new Option(l.title, l.path));
+      lessonSel.appendChild(group);
+    }
     lessonSel.value = current || '';
   } catch (err) { statusEl.textContent = 'Could not list lessons: ' + err.message; }
 }

@@ -238,6 +238,10 @@ async function loadScore(musicXml) {
     er.PageLeftMargin   = 5;
     er.PageRightMargin  = 5;
     er.RenderSingleHorizontalStaffline = true;
+    // OSMD caps the single line at 32767 px (a canvas limit; we draw SVG) and wraps the rest onto a
+    // second row, which the strip shows stacked under the first (e.g. bar 251 under bar 1 in a long
+    // song with lyrics). Allow ~1000 px per bar; OSMD trims the page to the drawn width afterwards.
+    er.SheetMaximumWidth = Math.max(32767, 1000 * osmd.Sheet.SourceMeasures.length);
     er.RenderArpeggios      = true;
     er.RenderPedals         = true;
     er.RenderFermatas       = true;
