@@ -24,13 +24,20 @@
   #conn { font-size: 12px; color: var(--muted); }
   #conn.live::before { content: '● '; color: var(--hit); }
   #conn.down::before { content: '● '; color: var(--miss); }
-  #menu, #metro { display: flex; align-items: center; gap: 10px 18px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid rgba(255,255,255,.08); flex-wrap: wrap; }
-  #menu label, #metro label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
-  #menu select, #menu input[type=number], #metro select, #metro input[type=number] { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 4px 6px; font: inherit; }
-  #menu input[type=number], #metro input[type=number] { width: 52px; }
-  #metro { padding-top: 6px; padding-bottom: 8px; }
-  #metro button { padding: 4px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
-  #metro button:disabled { opacity: .4; cursor: default; }
+  #menu { display: flex; align-items: center; gap: 10px 18px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid rgba(255,255,255,.08); flex-wrap: wrap; }
+  #menu label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  #menu select, #menu input[type=number] { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  #menu input[type=number] { width: 52px; }
+  /* Metronome: start button + beat dots in the menu bar, everything else in a drop-down */
+  #metro-wrap { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+  #metro-wrap button { padding: 4px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #metro-wrap button:disabled { opacity: .4; cursor: default; }
+  #m-menu { padding: 4px 8px !important; color: var(--muted) !important; font-size: 12px !important; }
+  #m-menu[aria-expanded=true] { border-color: var(--accent) !important; color: var(--text) !important; }
+  #metro { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 340px; max-width: calc(100vw - 40px);
+           flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; background: var(--panel);
+           border: 1px solid rgba(255,255,255,.15); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+  #metro.open { display: flex; }
   #m-go { min-width: 118px; border-color: var(--accent) !important; color: var(--accent) !important; font-weight: 600 !important; }
   #m-go.on { background: var(--accent); color: #031414 !important; }
   #m-vol { width: 90px; }
@@ -111,34 +118,37 @@
   <label class="setting play-only">Bars <input type="number" id="from" min="1" placeholder="1"> – <input type="number" id="to" min="1" placeholder="end"></label>
   <label class="setting" id="tempo-wrap">Tempo <input type="range" id="tempo" min="30" max="150" step="5" value="100"> <span id="tempo-val">100%</span></label>
   <label class="setting play-only"><input type="checkbox" id="loop"> Loop</label>
-  <span class="record-only" id="record-hint" style="color:var(--muted);font-size:12px">Records at the metronome's BPM and beats/bar below, after a count-in</span>
+  <span id="metro-wrap">
+    <button id="m-go" title="Start / stop the metronome (M)">♩ Metronome</button>
+    <button id="m-menu" aria-haspopup="true" aria-expanded="false" aria-controls="metro" title="Metronome settings">80 BPM ▾</button>
+    <span id="m-dots" aria-hidden="true"></span>
+    <div id="metro" role="dialog" aria-label="Metronome settings">
+      <label class="m-lock">BPM <input type="number" id="m-bpm" min="20" max="300" value="80"></label>
+      <button id="m-tap" class="m-lock" title="Tap this a few times in time to set the tempo">Tap</button>
+      <button id="m-match" class="m-lock" disabled title="Use the score's tempo (scaled by the Rehearse tempo %) and time signature">Match score</button>
+      <label class="m-lock">Beats/bar <input type="number" id="m-beats" min="1" max="16" value="4"></label>
+      <label>Subdivision <select id="m-sub">
+        <option value="1">♩ Quarters</option><option value="2">♪♪ Eighths</option>
+        <option value="3">Triplets</option><option value="4">Sixteenths</option>
+        <option value="5">Quintuplets</option><option value="6">Sextuplets</option>
+      </select></label>
+      <label>Sound <select id="m-sound">
+        <option value="click">Click</option><option value="wood">Woodblock</option><option value="beep">Beep</option>
+        <option value="hat">Hi-hat</option><option value="cowbell">Cowbell</option><option value="rim">Rimshot</option>
+      </select></label>
+      <label title="Make beat 1 of each bar stand out"><input type="checkbox" id="m-accent" checked> Accent</label>
+      <label title="Rehearse runs start with a count-in and the metronome clicks along with the score (its tempo changes and time signatures, at your Tempo %)"><input type="checkbox" id="m-follow"> Follow score</label>
+      <label>Volume <input type="range" id="m-vol" min="0" max="100" step="5" value="70"></label>
+      <label title="How loud the in-between clicks are, compared to the beat">Sub vol <input type="range" id="m-subvol" min="0" max="100" step="5" value="50" style="width:70px"></label>
+    </div>
+  </span>
+  <span class="record-only" id="record-hint" style="color:var(--muted);font-size:12px">Records at the metronome's BPM and beats/bar, after a count-in</span>
   <label id="voice-wrap" title="Read Claude's comments and each pass summary aloud"><input type="checkbox" id="voice"> Voice <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
   <span><button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
     <span id="level" aria-hidden="true"><i></i></span>
     <select id="mic" title="Microphone" hidden></select>
     <input id="ask" type="text" placeholder="…or type to the Maestro" disabled> <span id="ai-spend"></span></span>
   <button id="go">Start</button>
-</div>
-<div id="metro">
-  <button id="m-go" title="Start / stop the metronome (M)">♩ Metronome</button>
-  <label class="m-lock">BPM <input type="number" id="m-bpm" min="20" max="300" value="80"></label>
-  <button id="m-tap" class="m-lock" title="Tap this a few times in time to set the tempo">Tap</button>
-  <button id="m-match" class="m-lock" disabled title="Use the score's tempo (scaled by the Rehearse tempo %) and time signature">Match score</button>
-  <label class="m-lock">Beats/bar <input type="number" id="m-beats" min="1" max="16" value="4"></label>
-  <label>Subdivision <select id="m-sub">
-    <option value="1">♩ Quarters</option><option value="2">♪♪ Eighths</option>
-    <option value="3">Triplets</option><option value="4">Sixteenths</option>
-    <option value="5">Quintuplets</option><option value="6">Sextuplets</option>
-  </select></label>
-  <label>Sound <select id="m-sound">
-    <option value="click">Click</option><option value="wood">Woodblock</option><option value="beep">Beep</option>
-    <option value="hat">Hi-hat</option><option value="cowbell">Cowbell</option><option value="rim">Rimshot</option>
-  </select></label>
-  <label title="Make beat 1 of each bar stand out"><input type="checkbox" id="m-accent" checked> Accent</label>
-  <label title="Rehearse runs start with a count-in and the metronome clicks along with the score (its tempo changes and time signatures, at your Tempo %)"><input type="checkbox" id="m-follow"> Follow score</label>
-  <label>Volume <input type="range" id="m-vol" min="0" max="100" step="5" value="70"></label>
-  <label title="How loud the in-between clicks are, compared to the beat">Sub vol <input type="range" id="m-subvol" min="0" max="100" step="5" value="50" style="width:70px"></label>
-  <span id="m-dots" aria-hidden="true"></span>
 </div>
 <div id="last"></div>
 <div id="heard"></div>
@@ -645,13 +655,22 @@ voiceVol.addEventListener('change', () => { store.set('voiceVol', voiceVol.value
 const metro = {ctx: null, timer: null, next: 0, tick: 0, noise: null, score: null, plan: null, pi: 0, driven: false};
 const mGo = $('m-go'), mBpm = $('m-bpm'), mBeats = $('m-beats'), mSub = $('m-sub'), mSound = $('m-sound');
 const mVol = $('m-vol'), mSubVol = $('m-subvol'), mAccent = $('m-accent'), mDots = $('m-dots');
+const mMenu = $('m-menu'), mPanel = $('metro');
 const clampBpm = v => Math.min(300, Math.max(20, Math.round(+v || 80)));
 
 function metroSettings() {
   return {bpm: clampBpm(mBpm.value), beats: Math.min(16, Math.max(1, Math.round(+mBeats.value || 4))), sub: +mSub.value || 1};
 }
 
+// The drop-down's button shows the tempo, so it can be read without opening it.
+function metroSummary() {
+  const {bpm, beats} = metroSettings();
+  mMenu.textContent = `${bpm} BPM ▾`;
+  mMenu.title = `Metronome settings (${bpm} BPM, ${beats} beats/bar)`;
+}
+
 function drawDots(count) {
+  metroSummary();
   const beats = count || metroSettings().beats;
   mDots.innerHTML = '';
   for (let i = 0; i < beats; i++) {
@@ -823,6 +842,7 @@ function metroFollow(msg) {
   } else {
     mBpm.value = clampBpm(msg.bpm);
     mBeats.value = msg.beats;
+    metroSummary();
     metroStart(base);
   }
   metro.driven = true;
@@ -887,7 +907,23 @@ $('m-tap').addEventListener('click', () => {
 function saveMetro() {
   store.set('metro', JSON.stringify({bpm: mBpm.value, beats: mBeats.value, sub: mSub.value, sound: mSound.value,
     vol: mVol.value, subvol: mSubVol.value, accent: mAccent.checked, follow: $('m-follow').checked}));
+  metroSummary();
 }
+
+function metroMenu(open) {
+  mPanel.classList.toggle('open', open);
+  mMenu.setAttribute('aria-expanded', open);
+  if (!open) return;
+  // Keep the drop-down on screen when the menu bar has wrapped it near the right edge.
+  mPanel.style.left = '0px';
+  const over = mPanel.getBoundingClientRect().right - (window.innerWidth - 16);
+  if (over > 0) mPanel.style.left = `${-over}px`;
+}
+
+mMenu.addEventListener('click', () => metroMenu(!mPanel.classList.contains('open')));
+document.addEventListener('click', e => { if (!$('metro-wrap').contains(e.target)) metroMenu(false); });
+window.addEventListener('blur', () => metroMenu(false));  // a click on the sheet goes to its iframe
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && mPanel.classList.contains('open')) { metroMenu(false); mMenu.focus(); } });
 
 function loadMetro() {
   let s = {};
