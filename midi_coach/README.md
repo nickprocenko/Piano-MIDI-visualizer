@@ -46,8 +46,9 @@ generate, so the coach speaks just after a pass ends, not mid-pass.
 
 **The sheet strip.** The playhead stays in the middle and the score scrolls under it on a smooth
 curve through the notes, so the speed doesn't jump from note to note; small timing corrections
-from the coach are blended in rather than jumped to. The same strip is the visualizer's sheet
-music, so it does this there too.
+from the coach are blended in rather than jumped to. Once bar 1 scrolls away, the clefs, key
+signature and time signature stay pinned at the left edge and change where the score changes
+them. The same strip is the visualizer's sheet music, so it does this there too.
 
 **Record mode.** Pick **Record**, set the metronome's BPM and beats per bar, press **● Record**,
 and play after the count-in (one bar, two if the bar is short). Press Stop when you're done

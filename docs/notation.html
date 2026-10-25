@@ -45,6 +45,20 @@
       pointer-events: none;
       z-index: 90;
     }
+    /* Clef, key and time signature pinned to the left once bar 1's own have scrolled away */
+    #key-header {
+      position: absolute;
+      top: 0; left: 0;
+      transform-origin: 0 0;
+      background: #fff;
+      box-shadow: 6px 0 10px -6px rgba(0, 0, 0, .45);
+      pointer-events: none;
+      z-index: 95;
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    #key-header.show { opacity: 1; }
+    #key-header svg { display: block; }
     /* midi-coach overlays: bar heat map (scrolls with the score), wrong-key flash, HUD */
     #heat-layer {
       position: absolute;
@@ -112,6 +126,7 @@
     <div id="osmd-div"></div>
     <div id="heat-layer"></div>
   </div>
+  <div id="key-header"></div>
   <div id="flash"></div>
   <div id="hud"></div>
   <div id="playhead"></div>
@@ -205,6 +220,7 @@ function clearScore() {
   fit = {top: 0, h: 0};
   document.body.classList.remove('pannable');
   document.getElementById('heat-layer').innerHTML = '';
+  clearHeaders();
   scoreTrack.style.transform = 'translateX(0px)';
   document.getElementById('osmd-div').innerHTML = '';
   statusEl.style.display = 'flex';
@@ -218,6 +234,7 @@ async function loadScore(musicXml) {
   fit = {top: 0, h: 0};
   document.body.classList.remove('pannable');
   document.getElementById('heat-layer').innerHTML = '';
+  clearHeaders();
   statusEl.style.display = 'flex';
   statusEl.textContent   = 'Rendering score…';
   scoreTrack.style.transform = 'translateX(0px)';
@@ -277,6 +294,7 @@ async function loadScore(musicXml) {
     if (fit.h) window.parent.postMessage({type: 'height', h: Math.ceil(fit.h + 2 * FIT_PAD)}, '*');
 
     buildTimestampMap();
+    try { buildHeaders(); } catch (err) { console.error('[OSMD] key header failed:', err); clearHeaders(); }
     window.parent.postMessage({type:'ready'}, '*');
   } catch (err) {
     statusEl.textContent = 'Error rendering score:\n' + (err.message || err);
@@ -568,6 +586,102 @@ function trackTransform(x, s) {
   return `translate(${x.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${s.toFixed(4)})`;
 }
 
+// ── Pinned clef / key / time signature ────────────────────────────────────────
+// The single-line score only draws them at bar 1 and where they change, so they scroll out of
+// sight. Draw them again in a box pinned to the left edge, with OSMD's own VexFlow classes
+// (taken from the rendered staves) at the same height as the staves, one drawing per change.
+// The box fades in once bar 1's own signatures reach it, and shows the state at the playhead.
+const keyHeaderEl = document.getElementById('key-header');
+let headers = [];      // [{x, el, w}]: x = track px where this state starts; el = its <svg>; w = its width
+let headerTop = 0;     // the score SVG's top within the track (unscaled)
+let headerOwnEnd = 0;  // track px where bar 1's own clef/key/time end
+let headerShown = null;
+
+function clearHeaders() {
+  headers = []; headerShown = null;
+  keyHeaderEl.innerHTML = '';
+  keyHeaderEl.classList.remove('show');
+  document.getElementById('hud').style.left = '';
+}
+
+function buildHeaders() {
+  const O = opensheetmusicdisplay, conv = O.VexFlowConverter;
+  const svgEl = document.querySelector('#osmd-div svg');
+  const rows = osmd.GraphicSheet.MeasureList;
+  const staves = (rows[0] || []).map(gm => gm && gm.stave);
+  if (!svgEl || !staves.length || staves.some(st => !st)) return;
+  const trackRect = scoreTrack.getBoundingClientRect(), svgRect = svgEl.getBoundingClientRect();
+  const ox = svgRect.left - trackRect.left;
+  headerTop = svgRect.top - trackRect.top;
+  headerOwnEnd = ox + staves[0].getNoteStartX();
+  const Stave = staves[0].constructor, Context = staves[0].getContext().constructor;
+  const unit = 10 * osmd.zoom;
+
+  // Clef, key and time of every staff at the start of each bar; a new drawing where one changes.
+  // OSMD files a clef change at a barline under the end of the bar before.
+  const state = staves.map(() => ({clef: null, key: null, time: null}));
+  const states = [];
+  const measures = osmd.Sheet.SourceMeasures;
+  measures.forEach((sm, mi) => {
+    let changed = mi === 0;
+    const before = mi > 0 ? measures[mi - 1].LastInstructionsStaffEntries || [] : [];
+    [before, sm.FirstInstructionsStaffEntries || []].forEach(entries => entries.forEach((entry, si) => {
+      if (!entry || !state[si]) return;
+      for (const ins of entry.Instructions || []) {
+        if (ins instanceof O.ClefInstruction) {
+          const c = conv.Clef(ins, 'default');
+          const k = c.type + (c.annotation || '');
+          if (!state[si].clef || state[si].clef.k !== k) { state[si].clef = {k, ...c}; changed = true; }
+        } else if (ins instanceof O.KeyInstruction) {
+          const k = conv.keySignature(ins);
+          if (state[si].key !== k) { state[si].key = k; changed = true; }
+        } else if (ins instanceof O.RhythmInstruction) {
+          const r = ins.Rhythm, k = r ? `${r.Numerator}/${r.Denominator}` : null;
+          if (k && state[si].time !== k) { state[si].time = k; changed = true; }
+        }
+      }
+    }));
+    const gm = (rows[mi] || []).find(Boolean);
+    if (changed && gm) states.push({x: ox + gm.PositionAndShape.AbsolutePosition.x * unit, staves: state.map(st => ({...st}))});
+  });
+
+  for (const st of states) {
+    const holder = document.createElement('div');
+    const ctx = new Context(holder);
+    const drawn = staves.map((orig, si) => {
+      const s = new Stave(8, orig.y, 0, {...orig.options});
+      const want = st.staves[si];
+      if (want.clef) s.addClef(want.clef.type, want.clef.size, want.clef.annotation);
+      if (want.key && want.key !== 'C') s.addKeySignature(want.key);
+      if (want.time) s.addTimeSignature(want.time);
+      return s;
+    });
+    const w = Math.ceil(Math.max(...drawn.map(s => s.getNoteStartX())) + 10);
+    ctx.resize(w, svgRect.height);
+    drawn.forEach(s => { s.setWidth(w - 8); s.setContext(ctx).draw(); });
+    const el = holder.querySelector('svg');
+    if (el) headers.push({x: st.x, el, w});
+  }
+}
+
+// trackX, s: where the track is drawn this frame. Picks the drawing for the bar under the playhead.
+function updateHeader(trackX, s, phX) {
+  if (!headers.length) return;
+  const at = (phX - trackX) / s;
+  let h = headers[0];
+  for (const c of headers) { if (c.x <= at) h = c; else break; }
+  if (h !== headerShown) {
+    keyHeaderEl.replaceChildren(h.el);
+    keyHeaderEl.style.width = h.w + 'px';
+    headerShown = h;
+  }
+  const ty = fit.h ? (window.innerHeight - fit.h * s) / 2 - fit.top * s : 0;
+  keyHeaderEl.style.transform = `translate(0px, ${(ty + headerTop * s).toFixed(1)}px) scale(${s.toFixed(4)})`;
+  const show = trackX + headerOwnEnd * s < h.w * s;
+  keyHeaderEl.classList.toggle('show', show);
+  document.getElementById('hud').style.left = show ? Math.round(h.w * s + 10) + 'px' : '';
+}
+
 // ── Manual panning (midi-coach) ───────────────────────────────────────────────
 // Drag or scroll the score to look around while the cursor is parked; the next
 // cursor update snaps back. Disabled while it moves at tempo (rehearsal).
@@ -614,11 +728,14 @@ function tick() {
   if (beatMode && beatMap.length) {
     beatShown = cursorBeatAt(performance.now());
     if (gliding()) panPx = 0;
-    scoreTrack.style.transform = trackTransform(phX - getXForBeat(beatShown) * s + panPx, s);
+    const x = phX - getXForBeat(beatShown) * s + panPx;
+    scoreTrack.style.transform = trackTransform(x, s);
+    updateHeader(x, s, phX);
     return;
   }
   const noteX = getXForTime(currentMs);
   scoreTrack.style.transform = trackTransform(phX - noteX * s, s);
+  updateHeader(phX - noteX * s, s, phX);
 }
 tick();
 </script>
