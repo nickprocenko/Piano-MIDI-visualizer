@@ -646,6 +646,81 @@ def test_maestro_greets_celebrates_and_signs_off():
     assert coach.wrap_up() is None  # a single pass gets no sign-off
 
 
+def test_autopilot_changes_the_practice_like_a_teacher():
+    from midi_coach import autopilot
+
+    def p(grade, hot=None):
+        return {"grade": grade, "hot_bar": hot, "hot_count": 2 if hot else 0}
+
+    pilot = autopilot.Autopilot()
+    settings = {"mode": "wait", "hand": "both", "bars": "1-12", "tempo_percent": 80}
+    pilot.start(settings)
+    history = []
+
+    def step(*passes):
+        history.extend(passes)
+        out = pilot.decide(history, settings, 20)
+        if out:
+            settings.update(out[0])
+        return out
+
+    assert step(p("close", 6)) is None
+    changes, said = step(p("shaky", 6))  # bar 6 twice: loop it with a bar either side
+    assert changes == {"bars": "5-7"} and "5 to 7" in said
+    assert step(p("clean"), p("clean")) is None  # counted from the change: two isn't three
+    changes, said = step(p("clean"))
+    assert changes == {"bars": "1-12"} and "bars 1 to 12" in said
+    assert step(p("clean"), p("clean")) is None
+    changes, _ = step(p("clean"))  # Learn, three clean: Rehearse at 70%
+    assert changes == {"mode": "rehearsal", "tempo_percent": 70}
+    changes, said = step(p("rough"))
+    assert changes == {"tempo_percent": 60} and "60 percent" in said
+    changes, _ = step(p("rough"))
+    assert changes == {"tempo_percent": 50}
+    assert step(p("rough")) is None  # slowest already, and one rough pass since the change
+    changes, _ = step(p("rough"))  # two rough in a row with both hands
+    assert changes == {"hand": "right"}
+    assert pilot.can_undo and pilot.undo(len(history)) == {"hand": "both"} and not pilot.can_undo
+    settings["hand"] = "both"
+    changes, _ = step(p("rough"), p("rough"))
+    assert changes == {"hand": "right"}
+    changes, _ = step(p("clean"), p("clean"))
+    assert changes == {"hand": "left"}
+    changes, said = step(p("clean"), p("clean"))
+    assert changes == {"hand": "both"} and "both hands" in said.lower()
+    step(p("clean"), p("clean"))
+    changes, _ = step(p("clean"))
+    assert changes == {"tempo_percent": 55}
+    settings["tempo_percent"] = 100
+    assert step(p("clean"), p("clean"), p("clean")) is None  # already at full tempo
+
+
+def test_autopilot_runs_between_loop_passes_and_undo_puts_it_back(ref, monkeypatch, tmp_path):
+    from midi_coach import display, remarks, server
+
+    hub = display.DisplayHub()
+    said = []
+    monkeypatch.setattr(server, "hub", hub)
+    monkeypatch.setattr(hub, "say", lambda text, interrupt=False, speaker="Claude": said.append(text) or 0)
+    monkeypatch.setattr(server, "_coach", remarks.Coach(memory=lambda: tmp_path / "maestro.json"))
+    monkeypatch.setattr(server, "_autopilot", server.autopilot.Autopilot())
+    monkeypatch.setattr(server.threading, "Timer", lambda *a, **k: types.SimpleNamespace(start=lambda: None))
+    settings = {"reference": ref.path, "mode": "rehearsal", "hand": "both", "bars": None, "tempo_percent": 90,
+                "loop": True, "autopilot": True}
+    monkeypatch.setattr(server, "_practice", {**server._practice, "settings": settings, "pass": 1, "stopping": False})
+    server._autopilot.start(settings)
+    rough = {"mode": "rehearsal", "hits": 4, "missed": 12, "wrong_presses": 3, "notes_total": 16, "per_bar": {},
+             "slips": [], "tempo_percent": 90}
+    server._end_pass("reached the end", rough, None)
+    assert settings["tempo_percent"] == 80 and "80 percent" in said[-1]
+    assert len(said[-1].split(". ")) <= 2  # how it went, then the change
+    out = server._voice_reply("Undo!")
+    assert out["actions"] == ["undo"] and settings["tempo_percent"] == 90 and "90 percent" in out["reply"]
+    assert said[-1] == out["reply"]
+    server._end_pass("reached the end", {**rough, "missed": 0, "wrong_presses": 0, "hits": 16}, None)  # clean: no change
+    assert settings["tempo_percent"] == 90 and not server._autopilot.can_undo
+
+
 def test_maestro_style_is_a_setting(monkeypatch, tmp_path):
     import json
 

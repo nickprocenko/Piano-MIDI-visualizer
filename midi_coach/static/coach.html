@@ -118,6 +118,7 @@
   <label class="setting play-only">Bars <input type="number" id="from" min="1" placeholder="1"> – <input type="number" id="to" min="1" placeholder="end"></label>
   <label class="setting" id="tempo-wrap">Tempo <input type="range" id="tempo" min="30" max="150" step="5" value="100"> <span id="tempo-val">100%</span></label>
   <label class="setting play-only"><input type="checkbox" id="loop"> Loop</label>
+  <label class="setting play-only" title="With Loop on, the Maestro changes the bars, hand, tempo or mode between passes the way a teacher would, and says what it did. Say “no” or “undo” to put it back."><input type="checkbox" id="autopilot"> Maestro decides</label>
   <span id="metro-wrap">
     <button id="m-go" title="Start / stop the metronome (M)">♩ Metronome</button>
     <button id="m-menu" aria-haspopup="true" aria-expanded="false" aria-controls="metro" title="Metronome settings">80 BPM ▾</button>
@@ -314,6 +315,22 @@ async function loadLessons() {
   } catch (err) { statusEl.textContent = 'Could not list lessons: ' + err.message; }
 }
 
+// The run's settings, as the Maestro (autopilot, voice) or Claude last set them: the menu
+// shows where things stand, and Start picks up from there.
+function showRunSettings(s) {
+  setMode(s.mode === 'wait' ? 'learn' : 'rehearse');
+  $('hand').value = s.hand || 'both';
+  const [from, to] = (s.bars || '').split('-');
+  $('from').value = from || '';
+  $('to').value = s.bars ? (to || from) : '';
+  if (s.tempo_percent) $('tempo').value = Math.round(s.tempo_percent);
+  $('tempo-val').textContent = $('tempo').value + '%';
+  $('loop').checked = !!s.loop;
+  $('autopilot').checked = !!s.autopilot;
+  store.set('hand', $('hand').value); store.set('tempo', $('tempo').value);
+  store.set('loop', s.loop ? '1' : ''); store.set('autopilot', s.autopilot ? '1' : '');
+}
+
 async function loadStyle() {
   try { $('style').value = (await cmd('maestro')).style; } catch (err) {}
 }
@@ -323,6 +340,7 @@ function showPractice(p) {
   running = !!p.running;
   menu.classList.toggle('running', running);
   const s = p.settings || {};
+  if (s.mode === 'wait' || s.mode === 'rehearsal') showRunSettings(s);
   // A recording's grid is fixed when it starts, so its tempo can't change mid-take.
   $('metro').classList.toggle('running', running && s.mode === 'record');
   showGo();
@@ -983,6 +1001,10 @@ $('style').addEventListener('change', async e => {
 });
 $('hand').addEventListener('change', e => store.set('hand', e.target.value));
 $('loop').addEventListener('change', e => store.set('loop', e.target.checked ? '1' : ''));
+$('autopilot').addEventListener('change', e => {
+  store.set('autopilot', e.target.checked ? '1' : '');
+  if (e.target.checked) $('loop').checked = true, store.set('loop', '1');  // it acts between loop passes
+});
 portSel.addEventListener('focus', loadPorts);
 lessonSel.addEventListener('change', async () => {
   if (!lessonSel.value) return;
@@ -1002,7 +1024,8 @@ go.addEventListener('click', async () => {
     }
     const from = $('from').value, to = $('to').value;
     const bars = from || to ? `${from || 1}-${to || from || 9999}` : '';
-    await cmd('start', {mode, hand: $('hand').value, bars, tempo: +$('tempo').value, loop: $('loop').checked, port: portSel.value,
+    await cmd('start', {mode, hand: $('hand').value, bars, tempo: +$('tempo').value, loop: $('loop').checked,
+                        autopilot: $('autopilot').checked, port: portSel.value,
                         count_in: mode === 'rehearse' && $('m-follow').checked && !$('m-follow').disabled});
   } catch (err) {
     statusEl.textContent = err.message;
@@ -1016,6 +1039,7 @@ $('hand').value = store.get('hand', 'both');
 $('tempo').value = store.get('tempo', '100');
 $('tempo-val').textContent = $('tempo').value + '%';
 $('loop').checked = !!store.get('loop', '');
+$('autopilot').checked = !!store.get('autopilot', '');
 connect();
 </script>
 </body>

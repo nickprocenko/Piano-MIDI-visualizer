@@ -20,7 +20,7 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import analysis, chat, deep, harmony, lessons, library, live, remarks, stt, transcribe, web
+from . import analysis, autopilot, chat, deep, harmony, lessons, library, live, remarks, stt, transcribe, web
 from .display import DisplayHub, sheet_problem
 from .midi_io import Player, PortError, Recorder, RestProfile, build_events, list_ports, resolve_port
 from .notes import MUSICXML_SUFFIXES, is_plain_piano, note_name, notes_from_events, parse_bars, select_notes, split_hands, suggest_hands
@@ -277,6 +277,7 @@ _begin_lock = threading.Lock()
 # Spoken teacher remark after each pass; remembers the run's earlier passes, and keeps its
 # style and recent wording in maestro.json between sessions.
 _coach = remarks.Coach(memory=lambda: library.home() / "maestro.json")
+_autopilot = autopilot.Autopilot()  # "Maestro decides": changes the next loop pass like a teacher would
 
 
 def _publish_practice(**changes) -> None:
@@ -321,14 +322,80 @@ def _end_pass(reason: str | None, summary: dict | None, report: dict | None) -> 
         hub.status(line)
     settings = _practice.get("settings") or {}
     again = bool(settings.get("loop")) and reason in FINISHED_REASONS and not _practice["stopping"]
+    remark = None
+    if reason in FINISHED_REASONS:  # a pass you stopped halfway isn't graded
+        try:
+            remark = _coach.remark(summary, report)
+            if again and settings.get("autopilot"):
+                change = _autopilot_step(settings)
+                if change:  # how it went, then what changes; the change replaces the advice
+                    remark = " ".join(filter(None, [_coach.last_lead, change]))
+        except Exception as exc:
+            log.warning("Maestro remark failed: %s", exc)
     _npc_say(
-        # A pass you stopped halfway isn't graded; the run's sign-off follows the last pass.
-        lambda: _coach.remark(summary, report) if reason in FINISHED_REASONS else None,
-        lambda: None if again else _coach.wrap_up(),
+        lambda: remark,
+        # The run's sign-off follows the last pass (not a pass restarted by undo).
+        lambda: None if again or _practice.get("restarting") else _coach.wrap_up(),
     )
     _publish_practice(running=again, last=line or _practice["last"])
     if again:
         threading.Timer(1.5, _next_pass).start()
+
+
+def _autopilot_step(settings: dict) -> str | None:
+    """Let the autopilot change the next pass's settings; returns what the Maestro says about it."""
+    last_bar = len(library.get_score(settings["reference"]).bars)
+    out = _autopilot.decide(_coach.history, settings, last_bar)
+    if not out:
+        return None
+    changes, said = out
+    settings.update(changes)
+    return said
+
+
+_UNDO_RE = re.compile(r"^(no|nope|no thanks|undo|undo that|stop that|cancel that|go back|put it back)$")
+_HAND_NAMES = {"both": "both hands", "right": "the right hand", "left": "the left hand"}
+
+
+def _undo_autopilot() -> str | None:
+    """Put back what the autopilot last changed; a pass already running restarts with it."""
+    before = _autopilot.undo(len(_coach.history))
+    if before is None:
+        return None
+    settings = _practice.get("settings") or {}
+    settings.update(before)
+    what = []
+    if "mode" in before:
+        what.append(_MODE_NAMES.get(before["mode"], before["mode"]))
+    if "hand" in before:
+        what.append(_HAND_NAMES.get(before["hand"] or "both", before["hand"]))
+    if "bars" in before:
+        what.append(autopilot._bars_text(before["bars"], len(library.get_score(settings["reference"]).bars)))
+    if "tempo_percent" in before and "mode" not in before:
+        what.append(f"{round(float(before['tempo_percent']))} percent")
+    if recorder.active:
+        threading.Thread(target=_restart_pass, daemon=True).start()
+    else:
+        _publish_practice()
+    return "Okay, back to " + " and ".join(what) + "."
+
+
+def _restart_pass() -> None:
+    _practice["stopping"] = _practice["restarting"] = True
+    try:
+        recorder.stop()
+        deadline = time.time() + 3
+        while recorder.active and time.time() < deadline:
+            time.sleep(0.05)
+    finally:
+        _practice["restarting"] = False
+    try:
+        out = _begin(**_practice["settings"], pass_no=max(1, _practice["pass"]))
+    except Exception as exc:
+        out = {"error": str(exc)}
+    if "error" in out:
+        hub.status(f"Could not restart the pass: {out['error']}")
+        _publish_practice(running=False)
 
 
 def _npc_say(*lines) -> None:
@@ -429,6 +496,7 @@ def _begin(
     pass_no: int = 1,
     parts: list[int] | None = None,
     count_in: bool = False,
+    autopilot: bool = False,
 ) -> dict:
     mode = (mode or "free").lower()
     mode = PAGE_MODES.get(mode, mode)
@@ -444,7 +512,7 @@ def _begin(
         settings = {"reference": reference, "hand": hand, "bars": bars, "mode": mode, "tempo_percent": tempo_percent,
                     "input_port": input_port, "split_note": split_note, "silence_sec": silence_sec,
                     "max_minutes": max_minutes, "show_score": show_score, "loop": loop, "source": source,
-                    "parts": parts, "count_in": count_in}
+                    "parts": parts, "count_in": count_in, "autopilot": autopilot}
         meta = {"reference": None, "hand": hand, "bars": bars, "split_note": split_note, "mode": mode, "source": source,
                 "parts": parts}
         if loop:
@@ -484,6 +552,7 @@ def _begin(
         _practice["stopping"] = False
         _publish_practice(running=True, settings=settings, port=port, source=source, **{"pass": pass_no})
         if pass_no == 1:
+            _autopilot.start(settings)
             if session:
                 _npc_say(lambda: _coach.start(_coach_context(score, hand, mode, tempo_percent)))
             else:
@@ -539,6 +608,7 @@ def _cmd_start(body: dict) -> dict:
         loop=bool(body.get("loop")),
         source="page",
         count_in=bool(body.get("count_in")),
+        autopilot=bool(body.get("autopilot")) and bool(body.get("loop")),
     )
     out.pop("rests", None)
     return out
@@ -677,7 +747,8 @@ def _voice_context() -> str:
     if settings:
         run = (f"{_MODE_NAMES.get(settings.get('mode'), settings.get('mode'))} mode, hand {hand}, "
                f"bars {settings.get('bars') or 'all'}, tempo {settings.get('tempo_percent')}%, "
-               f"loop {'on' if settings.get('loop') else 'off'}")
+               f"loop {'on' if settings.get('loop') else 'off'}"
+               + (", the autopilot changes the practice between passes" if settings.get("autopilot") else ""))
         lines.append(f"Run going now ({run}), pass {_practice.get('pass')}." if _practice.get("running")
                      else f"No run going. Last run: {run}.")
     else:
@@ -712,7 +783,7 @@ def _voice_start(mode: str, hand: str = "both", bars: str = "", tempo_percent: i
             time.sleep(0.05)
     last = _practice.get("settings") or {}
     return _cmd_start({"mode": mode, "hand": hand, "bars": bars or None, "tempo": tempo_percent, "loop": loop,
-                       "port": last.get("input_port"), "count_in": last.get("count_in")})
+                       "port": last.get("input_port"), "count_in": last.get("count_in"), "autopilot": last.get("autopilot")})
 
 
 def _voice_play(bars: str = "", hand: str = "both", tempo_percent: int = 100) -> dict:
@@ -769,6 +840,12 @@ _voice = chat.VoiceChat(
 
 def _voice_reply(heard: str) -> dict:
     """Answer what was said; the reply is spoken and shown by the Maestro on every open page."""
+    # "No" / "undo" right after an autopilot change reverses it here, at once and for free.
+    if _autopilot.can_undo and _UNDO_RE.match(re.sub(r"[^a-z' ]+", "", (heard or "").lower()).strip()):
+        text = _undo_autopilot()
+        if text:
+            _npc_say(lambda: text)
+            return {"heard": heard, "reply": text, "actions": ["undo"], "cost": 0.0}
     try:
         out = _voice.ask(heard)
     except chat.Unavailable as exc:

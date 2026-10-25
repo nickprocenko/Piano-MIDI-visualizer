@@ -440,6 +440,7 @@ class Coach:
         self._recent: dict[str, list[str]] = {}
         self._style = DEFAULT_STYLE
         self._loaded = memory is None
+        self.last_lead: str | None = None  # the first sentence of the last full remark
 
     # -- style and memory --------------------------------------------------------
 
@@ -665,6 +666,7 @@ class Coach:
             lead = self._pick("milestone", **{"pass": _num(n)})
         news = (lead is not None or prev is None or f["grade"] != prev["grade"]
                 or (pool is not None and run <= 2) or (f["grade"] == "clean" and streak in STREAK_NEWS))
+        self.last_lead = None
         if not news:
             said = None if f["grade"] == "clean" else self._pick("same")
             self._save()
@@ -693,4 +695,5 @@ class Coach:
         else:
             point = self._pick("do-close")
         self._save()
+        self.last_lead = lead
         return f"{lead} {point}"
