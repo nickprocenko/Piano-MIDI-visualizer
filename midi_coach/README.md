@@ -44,6 +44,11 @@ hear a test line:
 Restart Claude Desktop (or the practice page) afterwards. Each line takes about a second to
 generate, so the coach speaks just after a pass ends, not mid-pass.
 
+**The sheet strip.** The playhead stays in the middle and the score scrolls under it on a smooth
+curve through the notes, so the speed doesn't jump from note to note; small timing corrections
+from the coach are blended in rather than jumped to. The same strip is the visualizer's sheet
+music, so it does this there too.
+
 **Record mode.** Pick **Record**, set the metronome's BPM and beats per bar, press **● Record**,
 and play after the count-in (one bar, two if the bar is short). Press Stop when you're done
 (10 seconds of silence also stops). What you played is snapped to the beat — sixteenths, or

@@ -140,12 +140,18 @@ let timestampMap = [];
 let pxPerMs      = 0.18;
 
 // Beat-driven mode (midi-coach): positions in quarter notes instead of ms.
-let beatMap      = [];   // [{q, xPx}] sorted by q
+let beatMap      = [];   // [{q, xPx, m}] sorted by q; m = slope dx/dq for the smooth curve
 let noteEntries  = [];   // [{q, pitch, el}] one per rendered notehead group
 let measureMap   = [];   // [{q, x0, x1}] barline-to-barline extent of each measure
 let beatMode     = false;
 let beatTarget   = 0, beatShown = 0, beatBps = 0, beatAt = 0;
 let beatUntil    = null;  // Learn mode: glide at beatBps, park here
+// The page runs the cursor on its own clock from the last update. When an update disagrees with
+// where the cursor is drawn, the difference (beatOffset) fades out over beatEase ms instead of
+// jumping: network jitter in Rehearse, playing a chord early in Learn.
+let beatOffset   = 0, beatEase = 150;
+const REHEARSE_EASE_MS = 300, LEARN_EASE_MS = 150;
+const REHEARSE_SNAP_BEATS = 0.5, LEARN_SNAP_BEATS = 8;  // further off than this: a seek or a restart, so jump
 const gliding = () => beatBps > 0 && (beatUntil === null || beatShown < beatUntil - 0.01);
 const MARK_COLORS = { hit: '#159a3c', missed: '#d42020', pending: '#00a6b8' };
 
@@ -167,12 +173,18 @@ window.addEventListener('message', async e => {
   } else if (e.data.type === 'pan') {
     if (e.data.reset) panPx = 0; else panBy(e.data.dx || 0);
   } else if (e.data.type === 'cursorBeat') {
+    const now = performance.now();
+    const drawn = beatMode && beatMap.length ? cursorBeatAt(now) : null;
     beatMode = true;
     panPx = 0;  // the cursor moved: snap back to it
     document.body.classList.add('pannable');
-    beatTarget = e.data.beat; beatBps = e.data.bps || 0; beatAt = performance.now();
+    beatTarget = e.data.beat; beatBps = e.data.bps || 0; beatAt = now;
     beatUntil = typeof e.data.until === 'number' ? e.data.until : null;
-    if (beatBps > 0 && beatUntil === null) beatShown = beatTarget;
+    const steady = beatBps > 0 && beatUntil === null;  // Rehearse: moving at tempo
+    beatEase = steady ? REHEARSE_EASE_MS : LEARN_EASE_MS;
+    beatOffset = drawn === null ? 0 : drawn - cursorBase(now);
+    if (Math.abs(beatOffset) > (steady ? REHEARSE_SNAP_BEATS : LEARN_SNAP_BEATS)) beatOffset = 0;
+    beatShown = cursorBeatAt(now);
   } else if (e.data.type === 'marks') {
     applyMarks(e.data.marks || [], !!e.data.reset);
   } else if (e.data.type === 'heat') {
@@ -305,21 +317,52 @@ function applyMarks(marks, reset) {
   }
 }
 
+// Where the cursor is (in beats) at time `now`: the last update moved on at its tempo
+// (parking at beatUntil in Learn), plus what is left of the correction.
+function cursorBase(now) {
+  if (!(beatBps > 0)) return beatTarget;
+  const at = beatTarget + beatBps * (now - beatAt) / 1000;
+  return beatUntil === null ? at : Math.min(at, beatUntil);
+}
+
+function cursorBeatAt(now) {
+  const t = (now - beatAt) / beatEase;
+  const left = t >= 1 ? 0 : 0.5 * (1 + Math.cos(Math.PI * t));  // eases out, no jolt at either end
+  return cursorBase(now) + beatOffset * left;
+}
+
+// Slopes for a smooth, never-backwards curve through the note positions (Fritsch-Carlson):
+// notes aren't spaced in proportion to their length, so straight lines from note to note
+// make the score speed up and slow down at every note.
+function smoothBeatMap() {
+  const n = beatMap.length;
+  if (n < 2) { beatMap.forEach(p => { p.m = 0; }); return; }
+  const d = [];
+  for (let i = 0; i < n - 1; i++) d.push((beatMap[i + 1].xPx - beatMap[i].xPx) / (beatMap[i + 1].q - beatMap[i].q));
+  beatMap[0].m = d[0];
+  beatMap[n - 1].m = d[n - 2];
+  for (let i = 1; i < n - 1; i++) beatMap[i].m = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { beatMap[i].m = beatMap[i + 1].m = 0; continue; }
+    const a = beatMap[i].m / d[i], b = beatMap[i + 1].m / d[i], h = a * a + b * b;
+    if (h > 9) { const k = 3 / Math.sqrt(h); beatMap[i].m = k * a * d[i]; beatMap[i + 1].m = k * b * d[i]; }
+  }
+}
+
 function getXForBeat(q) {
   const n = beatMap.length;
   if (n === 0) return 0;
   if (n === 1) return beatMap[0].xPx;
+  if (q <= beatMap[0].q) return beatMap[0].xPx + (q - beatMap[0].q) * beatMap[0].m;
+  if (q >= beatMap[n - 1].q) return beatMap[n - 1].xPx + (q - beatMap[n - 1].q) * beatMap[n - 1].m;
   let lo = 0, hi = n - 1;
-  if (q <= beatMap[0].q) { lo = 0; hi = 1; }
-  else if (q >= beatMap[n - 1].q) { lo = n - 2; hi = n - 1; }
-  else {
-    while (lo < hi - 1) {
-      const mid = (lo + hi) >> 1;
-      if (beatMap[mid].q <= q) lo = mid; else hi = mid;
-    }
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (beatMap[mid].q <= q) lo = mid; else hi = mid;
   }
-  const a = beatMap[lo], b = beatMap[hi];
-  return a.xPx + (q - a.q) * (b.xPx - a.xPx) / ((b.q - a.q) || 1);
+  const a = beatMap[lo], b = beatMap[hi], h = b.q - a.q, t = (q - a.q) / h;
+  const t2 = t * t, t3 = t2 * t;
+  return (2 * t3 - 3 * t2 + 1) * a.xPx + (t3 - 2 * t2 + t) * h * a.m + (-2 * t3 + 3 * t2) * b.xPx + (t3 - t2) * h * b.m;
 }
 
 // Barline x for a bar boundary at beat q; falls back to note positions.
@@ -389,7 +432,10 @@ function buildTimestampMap() {
         const r   = curEl.getBoundingClientRect();
         const xPx = r.left - trackRect.left + r.width * 0.5;
         const q   = ts.RealValue * 4.0;
-        if (beatMap.length === 0 || q > beatMap[beatMap.length - 1].q) beatMap.push({q, xPx});
+        // Inside a multi-bar rest OSMD's cursor can step back left; skip those points so the
+        // score never scrolls backwards.
+        const last = beatMap[beatMap.length - 1];
+        if (!last || (q > last.q && xPx >= last.xPx)) beatMap.push({q, xPx});
         try {
           const mi = osmd.cursor.iterator.CurrentMeasureIndex;
           if (!measureMap[mi]) {
@@ -428,6 +474,7 @@ function buildTimestampMap() {
     catch (err) { console.error('[OSMD] graphic fallback failed:', err); }
   }
 
+  smoothBeatMap();
   map.sort((a, b) => a.timeMs - b.timeMs);
   timestampMap = map;
 
@@ -565,12 +612,7 @@ function tick() {
   const phX   = window.innerWidth * PLAYHEAD_FRAC;
   const s     = fitScale();
   if (beatMode && beatMap.length) {
-    const now = performance.now();
-    const at = beatTarget + beatBps * (now - beatAt) / 1000;
-    if (beatBps > 0 && beatUntil === null) beatShown = at;
-    // Learn mode flows at tempo to the waiting chord; eased so playing it early doesn't jerk.
-    else if (beatBps > 0) beatShown += (Math.min(at, beatUntil) - beatShown) * 0.18;
-    else beatShown += (beatTarget - beatShown) * 0.18;  // ease toward the waiting chord
+    beatShown = cursorBeatAt(performance.now());
     if (gliding()) panPx = 0;
     scoreTrack.style.transform = trackTransform(phX - getXForBeat(beatShown) * s + panPx, s);
     return;
