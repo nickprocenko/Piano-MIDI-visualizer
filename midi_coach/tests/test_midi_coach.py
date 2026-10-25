@@ -565,18 +565,56 @@ def test_remarks_name_the_mistake_and_vary():
     slip = {"bar": 2, "played": 65, "expected": [66]}
     first = coach.remark(_wait_summary([2], [slip]))
     assert "F sharp" in first and "bar 2" in first.lower()
-    again = coach.remark(_wait_summary([2], [slip]))
+    again = coach.remark(_wait_summary([2], [slip]))  # second time: how to fix it
     assert "F sharp" in again and again != first
+    third = coach.remark(_wait_summary([2], [slip]))  # nothing new: a word or two
+    assert len(third.split()) <= 2
     frozen = coach.remark(_wait_summary(stall=(3, 12.0)))
     assert "bar 3" in frozen.lower() and not frozen.startswith("Clean")
     assert coach.history[-1]["grade"] != "clean"
 
-    # Clean loop passes: never the same sentence twice in a row, and the streak is noticed.
+    # Clean loop passes: quiet except the first and the streak at three and five.
     coach.reset()
     said = [coach.remark(_wait_summary(), {"scores": {"overall": 98}}) for _ in range(6)]
-    assert all(a != b for a, b in zip(said, said[1:]))
-    assert any("in a row" in s or "clean passes" in s for s in said[1:])
+    assert [s is not None for s in said] == [True, False, True, False, True, False]
+    assert "three" in said[2].lower() and "five" in said[4].lower()
     assert coach.remark(None) is None
+
+
+def test_remarks_stay_short_and_fresh(tmp_path):
+    import random
+    import re
+
+    from midi_coach import remarks
+
+    # Every phrase is one sentence (a remark is two of them), every pool has room to vary.
+    for pools in [remarks.COMMON, *remarks.VOICE.values()]:
+        for name, pool in pools.items():
+            assert len(pool) >= 8, name
+            for line in pool:
+                assert len(re.findall(r"[.!?](?=\s|$)", line)) == 1, line
+    assert remarks.VOICE["warm"].keys() == remarks.VOICE["strict"].keys()
+
+    # Warm by default; the style and the recent wording survive a restart.
+    memory = tmp_path / "maestro.json"
+    coach = remarks.Coach(random.Random(3), memory=lambda: memory)
+    assert coach.style == "warm"
+    rough = {"mode": "wait", "hits": 4, "missed": 0, "wrong_presses": 12, "notes_total": 16, "per_bar": {}, "slips": []}
+    for _ in range(3):
+        said = coach.remark(rough)
+        assert len(re.findall(r"[.!?](?=\s|$)", said)) <= 2
+    coach.style = "strict"
+    later = remarks.Coach(random.Random(3), memory=lambda: memory)
+    assert later.style == "strict" and later._recent == coach._recent
+    said_before = list(coach._recent["warm:verdict-rough"])
+    later.style = "warm"
+    assert later._pick("verdict-rough") not in said_before
+    try:
+        later.style = "mean"
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown style accepted")
 
 
 def test_maestro_greets_celebrates_and_signs_off():
@@ -599,12 +637,28 @@ def test_maestro_greets_celebrates_and_signs_off():
     coach.start({"title": "Etude", "mode": "wait", "best_before": 90})
     first = coach.remark(_wait_summary(), {"scores": {"overall": 95}})
     second = coach.remark(_wait_summary(), {"scores": {"overall": 97}})
-    records = [s for s in (first, second) if "record" in s.lower() or "personal best" in s.lower()]
-    assert len(records) == 1 and "95" in first  # announced once, on the first pass that beats it
-    assert coach.wrap_up() and "two passes" in coach.wrap_up().lower()
+    third = coach.remark(_wait_summary(), {"scores": {"overall": 96}})
+    records = [s for s in (first, second, third) if s and ("record" in s.lower() or "best" in s.lower())]
+    assert records == [first] and "95" in first  # announced once, on the first pass that beats it
+    assert coach.wrap_up() and "three passes" in coach.wrap_up().lower()
     coach.start({"title": "Etude", "mode": "wait"})
     coach.remark(_wait_summary())
     assert coach.wrap_up() is None  # a single pass gets no sign-off
+
+
+def test_maestro_style_is_a_setting(monkeypatch, tmp_path):
+    import json
+
+    from midi_coach import display, remarks, server
+
+    monkeypatch.setenv("MIDI_COACH_HOME", str(tmp_path))
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_coach", remarks.Coach(memory=lambda: tmp_path / "maestro.json"))
+    monkeypatch.setattr(server, "_practice", {**server._practice, "settings": None, "last": None, "running": False})
+    assert server._cmd_maestro({}) == {"style": "warm", "styles": ["warm", "strict"]}
+    assert server._voice.actions["set_style"](style="strict")["style"] == "strict"
+    assert "Teaching style: strict." in server._voice_context()
+    assert json.loads((tmp_path / "maestro.json").read_text())["style"] == "strict"
 
 
 def test_coach_context_reads_key_title_and_history(ref, tmp_path, monkeypatch):

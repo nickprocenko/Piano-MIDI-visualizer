@@ -274,12 +274,22 @@ PAGE_MODES = {"learn": "wait", "rehearse": "rehearsal"}
 FINISHED_REASONS = ("finished the piece", "reached the end")
 _practice: dict = {"running": False, "settings": None, "port": None, "pass": 0, "last": None, "source": None, "stopping": False}
 _begin_lock = threading.Lock()
-_coach = remarks.Coach()  # spoken teacher remark after each pass; remembers the run's earlier passes
+# Spoken teacher remark after each pass; remembers the run's earlier passes, and keeps its
+# style and recent wording in maestro.json between sessions.
+_coach = remarks.Coach(memory=lambda: library.home() / "maestro.json")
 
 
 def _publish_practice(**changes) -> None:
     _practice.update(changes)
-    hub.practice({k: v for k, v in _practice.items() if k != "stopping"})
+    hub.practice({**{k: v for k, v in _practice.items() if k != "stopping"}, "style": _coach.style})
+
+
+def _cmd_maestro(body: dict) -> dict:
+    """The Maestro's style (warm / strict): read it, or set it with {"style": ...}."""
+    if body.get("style"):
+        _coach.style = str(body["style"]).lower()
+        _publish_practice()
+    return {"style": _coach.style, "styles": list(remarks.STYLES)}
 
 
 def _pass_line(summary: dict | None, report: dict | None) -> str | None:
@@ -649,7 +659,7 @@ def _voice_context() -> str:
     """What Claude sees each turn: the lesson, the run, recent passes, history."""
     settings = _practice.get("settings") or {}
     hand = settings.get("hand") or "both"
-    lines = [time.strftime("Local time: %A %I:%M %p.").replace(" 0", " ")]
+    lines = [time.strftime("Local time: %A %I:%M %p.").replace(" 0", " "), f"Teaching style: {_coach.style}."]
     if hub.score_path:
         score = library.get_score(hub.score_path)
         ctx = _coach_context(score, hand, settings.get("mode") or "wait", settings.get("tempo_percent") or 100)
@@ -751,6 +761,7 @@ _voice = chat.VoiceChat(
         "create_lesson": _voice_create,
         "hand_off": _voice_hand_off,
         "remember": deep.remember,
+        "set_style": lambda style: _cmd_maestro({"style": style}),
     },
     context=_voice_context,
 )
@@ -789,7 +800,7 @@ def _cmd_voice_status(_body: dict) -> dict:
 
 
 PAGE_COMMANDS = {"ports": _cmd_ports, "lessons": _cmd_lessons, "load": _cmd_load, "start": _cmd_start, "stop": _cmd_stop,
-                 "record": _cmd_record,
+                 "record": _cmd_record, "maestro": _cmd_maestro,
                  "voice_status": _cmd_voice_status, "chat": lambda body: _voice_reply(body.get("text", ""))}
 hub.commands.update(PAGE_COMMANDS)
 hub.voice_handler = _voice_audio

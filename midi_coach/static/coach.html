@@ -143,6 +143,8 @@
     </div>
   </span>
   <span class="record-only" id="record-hint" style="color:var(--muted);font-size:12px">Records at the metronome's BPM and beats/bar, after a count-in</span>
+  <label title="How the Maestro coaches you: Warm is encouraging, Strict is dry and demanding">Maestro <select id="style">
+    <option value="warm">Warm</option><option value="strict">Strict</option></select></label>
   <label id="voice-wrap" title="Read Claude's comments and each pass summary aloud"><input type="checkbox" id="voice"> Voice <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
   <span><button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
     <span id="level" aria-hidden="true"><i></i></span>
@@ -246,7 +248,7 @@ function connect() {
     if (msg.type === 'lesson') return;  // the visualizer's Learn Mode push; this page uses its own menu
     forward(msg);
   };
-  es.addEventListener('open', () => { loadPorts(); loadLessons(); loadVoices(); loadVoiceStatus(); });
+  es.addEventListener('open', () => { loadPorts(); loadLessons(); loadVoices(); loadVoiceStatus(); loadStyle(); });
 }
 
 // -- practice menu -----------------------------------------------------------
@@ -312,7 +314,12 @@ async function loadLessons() {
   } catch (err) { statusEl.textContent = 'Could not list lessons: ' + err.message; }
 }
 
+async function loadStyle() {
+  try { $('style').value = (await cmd('maestro')).style; } catch (err) {}
+}
+
 function showPractice(p) {
+  if (p.style) $('style').value = p.style;  // also changed by voice ("be gentler")
   running = !!p.running;
   menu.classList.toggle('running', running);
   const s = p.settings || {};
@@ -971,6 +978,9 @@ function esc(t) { return String(t).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': 
 document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 $('tempo').addEventListener('input', e => { $('tempo-val').textContent = e.target.value + '%'; store.set('tempo', e.target.value); });
 portSel.addEventListener('change', () => store.set('port', portSel.value));
+$('style').addEventListener('change', async e => {
+  try { await cmd('maestro', {style: e.target.value}); } catch (err) { statusEl.textContent = err.message; loadStyle(); }
+});
 $('hand').addEventListener('change', e => store.set('hand', e.target.value));
 $('loop').addEventListener('change', e => store.set('loop', e.target.checked ? '1' : ''));
 portSel.addEventListener('focus', loadPorts);
