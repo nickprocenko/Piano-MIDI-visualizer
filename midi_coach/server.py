@@ -20,7 +20,7 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import analysis, chat, harmony, lessons, library, live, remarks, stt, transcribe, web
+from . import analysis, chat, deep, harmony, lessons, library, live, remarks, stt, transcribe, web
 from .display import DisplayHub, sheet_problem
 from .midi_io import Player, PortError, Recorder, RestProfile, build_events, list_ports, resolve_port
 from .notes import MUSICXML_SUFFIXES, is_plain_piano, note_name, notes_from_events, parse_bars, select_notes, split_hands, suggest_hands
@@ -69,6 +69,11 @@ progression); chords_in_score names each bar's chord from the reference's notes,
 get_chord_chart(reference=...) suggests the transpose that lines a chart up with the score.
 search_youtube finds recordings and tutorials. Charts are fan-made: when chart and score
 disagree, trust the score and say so.
+The Maestro (the page's voice chat) passes big questions to Claude Code on the user's
+subscription; when that can't run they wait in maestro_inbox - check it when the user asks
+about the Maestro's inbox or a question they asked at the keyboard. pianist_notes is the
+Maestro's notebook on the user (goals, pieces, weak spots); read it before a long lesson and
+add to it with remember.
 Timing numbers are relative to the user's own local tempo; playing slower than
 the score is not an error. Velocity 1-127: ~40 soft, ~64 medium, ~95 loud.
 """
@@ -500,7 +505,8 @@ def _cmd_load(body: dict) -> dict:
         return {"error": "Stop the current run before switching lessons."}
     score = library.get_score(body["lesson"])
     _show(score, score.notes)
-    hub.status(f"{pathlib.Path(score.path).stem} · pick Learn or Rehearse and press Start")
+    tag = lessons.made_from(lessons.source_note(score.path))
+    hub.status(f"{pathlib.Path(score.path).stem}{f' ({tag})' if tag else ''} · pick Learn or Rehearse and press Start")
     return {"path": score.path, "bars": len(score.bars)}
 
 
@@ -680,6 +686,11 @@ def _voice_context() -> str:
         lines.append(f"Latest pass line on screen: {_practice['last']}.")
     if _said:
         lines.append(f'You (the Maestro) last said: "{_said[-1]}"')
+    if _deep.busy:
+        lines.append("The senior teacher is still working on the last question you handed off.")
+    notes = deep.read_notes(1500)
+    if notes:
+        lines.append(f"Your notebook on the pianist:\n{notes}")
     return "\n".join(lines)
 
 
@@ -717,6 +728,19 @@ def _voice_create(title: str, right: str = "", left: str = "", time_signature: s
     return out
 
 
+_deep = deep.DeepTeacher(deep.Endpoint(mcp), speak=lambda text: _npc_say(lambda: text))
+
+
+def _voice_hand_off(question: str) -> dict:
+    context = _voice_context()
+    if hub.score_path:
+        context += f"\nLesson file (the reference for the tools): {hub.score_path}"
+    out = _deep.ask(question, context)
+    if out.get("handed_off"):
+        hub.flash("The Maestro is thinking it over…")
+    return out
+
+
 _voice = chat.VoiceChat(
     actions={
         "start_practice": _voice_start,
@@ -725,6 +749,8 @@ _voice = chat.VoiceChat(
         "progress": _voice_progress,
         "switch_lesson": lambda name: _cmd_load({"lesson": name}),
         "create_lesson": _voice_create,
+        "hand_off": _voice_hand_off,
+        "remember": deep.remember,
     },
     context=_voice_context,
 )
@@ -758,6 +784,7 @@ def _cmd_voice_status(_body: dict) -> dict:
     status = _voice.status()
     if status["available"]:
         stt.warm_up()
+    status["deep_available"], status["deep_reason"] = _deep.available()
     return status
 
 
@@ -1022,7 +1049,7 @@ async def create_lesson(
     tempo_percent: float = 100,
     autostart: bool = True,
     to_visualizer: bool = False,
-    category: str = "Exercises",
+    category: str | None = None,
 ) -> dict:
     """Create a practice lesson and show it on the coach sheet-music page, where the user
     picks the input, Learn (wait) or Rehearse mode, hand, bars, tempo and loop, and starts.
@@ -1040,8 +1067,10 @@ async def create_lesson(
     key: 'C', 'G', 'Bb', 'F#m', 'Am' (minor with m) or sharps count like -3.
     to_visualizer: also push it into the web visualizer's Learn Mode. practice_mode ('wait' or
       'rehearsal' at tempo_percent) and autostart only apply to that visualizer push.
-    category: the Lesson menu group (a folder): 'Exercises' (default), 'Solo piano',
-      'Vocals & accompaniment', 'Recordings', or a new name. organize_lesson moves one later.
+    category: the Lesson menu group (a folder). Default: 'AI exercises' for a lesson you
+      compose (right/left or musicxml), 'Exercises' for an excerpt of a real piece. Others:
+      'Needs review', 'Solo piano', 'Vocals & accompaniment', 'Recordings', or a new name.
+      organize_lesson moves one later.
     Returns the saved path (use it as `reference` for start_recording / compare_take) and a
     bar-by-bar readout - check it matches what you intended before telling the user.
     """
@@ -1051,9 +1080,10 @@ async def create_lesson(
             if not bar_range:
                 return {"error": "from_reference needs bars, e.g. '9-12'."}
             ref_path = str(library.resolve_reference(from_reference))
-            path, score = await asyncio.to_thread(lessons.excerpt_lesson, ref_path, bar_range, hand, title, category)
+            path, score = await asyncio.to_thread(lessons.excerpt_lesson, ref_path, bar_range, hand, title, category or lessons.EXERCISES)
         else:
-            path, score = await asyncio.to_thread(lessons.build_lesson, title, right, left, time_signature, key, tempo_bpm, musicxml, category)
+            path, score = await asyncio.to_thread(lessons.build_lesson, title, right, left, time_signature, key, tempo_bpm, musicxml,
+                                                  category or lessons.AI_EXERCISES)
         if not score.notes:
             return {"error": "The lesson has no notes.", "path": path}
         side = analysis.side_resolver(score)
@@ -1094,6 +1124,30 @@ async def send_lesson(lesson: str, practice_mode: str = "wait", tempo_percent: f
 
 
 @mcp.tool()
+async def make_song_lesson(reference: str, title: str | None = None, melody_part: int | None = None,
+                           category: str = "Needs review", show: bool = True) -> dict:
+    """Make a song lesson from a band file: its vocal line (with the MIDI file's karaoke
+    lyrics, if any) over the piano part the user plays, with time and key signature changes.
+    Saved in 'Needs review' (until the user has checked it against the music) with a note on
+    where it came from. melody_part: the tune's part index from inspect_reference, when the
+    one found from the part names is wrong (check 'vocal' in the result: a sound effect or
+    the highest strings is a guess). Report 'check' - the notes read back must equal the
+    source's - and that it needs review."""
+    from . import songs
+
+    if recorder.active:
+        return {"error": "A practice run is going; stop_recording first."}
+    try:
+        out = await asyncio.to_thread(songs.song_lesson, reference, title, melody_part, category)
+        if show:
+            score = await asyncio.to_thread(library.get_score, out["path"])
+            await asyncio.to_thread(_publish_lesson, out["path"], score, "wait", 100, False, False)
+    except Exception as exc:
+        return _err(exc)
+    return out
+
+
+@mcp.tool()
 async def organize_lesson(lesson: str, category: str, title: str | None = None) -> dict:
     """Move a lesson - or a piece from the reference library - into a Lesson menu category, so
     it is listed under that heading on the coach page. category: 'Solo piano', 'Vocals &
@@ -1127,12 +1181,41 @@ async def say(text: str, interrupt: bool = False) -> dict:
     if not text:
         return {"error": "Nothing to say."}
     url = hub.start()
-    listeners = hub.say(text, interrupt)
+    if _deep.busy:  # a question the Maestro handed off: the answer is in the Maestro's voice
+        _deep.spoken += 1
+        _said.append(text)
+        del _said[:-3]
+        listeners = hub.say(text, interrupt, speaker=remarks.NPC_NAME)
+    else:
+        listeners = hub.say(text, interrupt)
     if listeners:
         return {"spoken": True, "pages": listeners}
     if not os.environ.get("MIDI_COACH_NO_BROWSER"):
         hub.open_browser()
     return {"spoken": False, "note": f"No coach page was open, so nothing was heard. Opened {url}; ask the user to click the page once (browsers only let a page speak after a click), then say it again."}
+
+
+@mcp.tool()
+async def pianist_notes() -> dict:
+    """The Maestro's notebook on the user: goals, pieces they're learning, weak spots, how they
+    like to be taught, where the last lesson left off. Read it before a long lesson."""
+    return {"notes": deep.read_notes() or "(empty)"}
+
+
+@mcp.tool()
+async def remember(note: str) -> dict:
+    """Add one lasting fact about the user to the Maestro's notebook (one short line). The page's
+    voice chat reads it too. Not for things that only matter today."""
+    return deep.remember(note)
+
+
+@mcp.tool()
+async def maestro_inbox(clear: bool = True) -> dict:
+    """Questions the user asked the Maestro at the keyboard that Claude Code couldn't answer
+    (not installed, signed out, usage limit), each with the practice context at the time.
+    Answer them here; clear=True empties the inbox once read."""
+    items = deep.take_inbox(clear)
+    return {"questions": items} if items else {"questions": [], "note": "The inbox is empty."}
 
 
 @mcp.tool()

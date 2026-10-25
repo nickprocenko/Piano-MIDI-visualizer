@@ -1,8 +1,9 @@
 """Synthesia-style live practice modes, judged while the user plays.
 
 wait       The cursor holds on each chord until every note of it is played
-           (like Synthesia's Melody Practice). Wrong keys flash; time spent
-           stuck on each bar is recorded.
+           (like Synthesia's Melody Practice), then flows on at tempo_percent
+           to the next one instead of jumping through rests. Wrong keys flash;
+           time spent stuck on each bar is recorded.
 rehearsal  The cursor moves at a fixed tempo (tempo_percent of the score) once
            the first note is played, and notes are graded hit / missed as they
            pass (like Synthesia's Song Recital). With count_in, a one-bar
@@ -137,7 +138,20 @@ class LiveSession:
         self._group_started = now
         if self.hub:
             self.hub.marks([(n.beat, n.pitch, "pending") for n in g.notes])
-            self.hub.cursor(self._beat[idx], live=True)
+            beat, bps, until = self._glide(idx)
+            self.hub.cursor(beat, bps, live=True, until=until)
+
+    def _glide(self, idx: int) -> tuple:
+        """(beat, beats/sec, until) for the wait-mode cursor: from the chord just played it
+        flows at tempo through any held notes or rests and parks on the next one."""
+        target = self._beat[idx]
+        if idx == 0:
+            return target, 0.0, None
+        sec = (self._sec[idx] - self._sec[idx - 1]) / self.speed
+        beats = target - self._beat[idx - 1]
+        if sec <= 0 or beats <= 0:
+            return target, 0.0, None
+        return self._beat[idx - 1], beats / sec, target
 
     # -- lifecycle -------------------------------------------------------------
 

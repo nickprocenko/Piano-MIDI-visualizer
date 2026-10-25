@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import pathlib
 import random
 import sys
 import time
@@ -388,8 +389,8 @@ class RecordingHub:
     def marks(self, updates, reset=False):
         self.events.append(("marks", list(updates), reset))
 
-    def cursor(self, beat, bps=0.0, live=False):
-        self.events.append(("cursor", beat, bps))
+    def cursor(self, beat, bps=0.0, live=False, until=None):
+        self.events.append(("cursor", beat, bps, until))
 
     def session(self, active, mode=None):
         self.events.append(("session", active, mode))
@@ -431,8 +432,12 @@ def test_live_wait_mode(ref):
         sess.on_message(t, _on(n.pitch))
     assert sess.should_stop() == "finished the piece"
     assert sess.hits == len(notes) == len(hub.statuses("hit"))
-    cursors = [e[1] for e in hub.events if e[0] == "cursor"]
+    cursors = [e[3] if e[3] is not None else e[1] for e in hub.events if e[0] == "cursor"]
     assert cursors == sorted(cursors) and cursors[-1] == pytest.approx(3.5)  # last eighth of bar 1
+    # After each chord the cursor flows on at the score's tempo instead of jumping ahead.
+    glides = [e for e in hub.events if e[0] == "cursor" and e[3] is not None]
+    assert len(glides) == len(notes) - 1
+    assert all(g[3] - g[1] == pytest.approx(0.5) and g[2] == pytest.approx(ref.bpm_at(0) / 60) for g in glides)
     summary = sess.summary()
     assert summary["per_bar"]["1"]["wrong"] == 1
     assert summary["slips"] == [{"bar": 1, "played": 61, "expected": [72]}]
@@ -693,6 +698,58 @@ def test_voice_chat_hands_lesson_writing_to_sonnet(monkeypatch, tmp_path):
     assert '"created": "g.musicxml"' in calls[-1]["messages"][-1]["content"][0]["content"]
 
 
+def test_deep_question_runs_claude_code_on_the_subscription(monkeypatch, tmp_path):
+    import json
+    import subprocess
+    from types import SimpleNamespace as NS
+
+    from midi_coach import deep
+
+    monkeypatch.setenv("MIDI_COACH_HOME", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setattr(deep, "find_claude", lambda: "claude.exe")
+    deep.remember("Learning Clair de Lune")
+    runs, spoken = [], []
+    replies = [{"result": "Bar five is a stretch.", "session_id": "s1"},
+               {"result": "Done.", "session_id": "s1"},
+               {"is_error": True, "result": "usage limit reached"}]
+
+    def run(args, **kw):
+        runs.append({"args": args, **kw})
+        teacher.spoken += 1 if len(runs) == 2 else 0  # the second answer uses the say tool
+        return subprocess.CompletedProcess(args, 0, json.dumps({"type": "result", **replies.pop(0)}), "")
+
+    teacher = deep.DeepTeacher(NS(start=lambda: "http://127.0.0.1:8780/mcp"), spoken.append, run=run)
+    assert teacher.ask("teach me bars 5 to 8", "Lesson on screen: Clair de Lune.", wait=True)["handed_off"]
+    args, first = runs[0]["args"], runs[0]
+    assert args[args.index("--permission-mode") + 1] == "dontAsk" and "--strict-mcp-config" in args
+    assert json.loads(args[args.index("--mcp-config") + 1])["mcpServers"]["midi-coach"]["url"] == "http://127.0.0.1:8780/mcp"
+    assert "ANTHROPIC_API_KEY" not in first["env"] and "--resume" not in args  # billed to the subscription
+    assert "Learning Clair de Lune" in first["input"] and "teach me bars 5 to 8" in first["input"]
+    assert spoken == ["Bar five is a stretch."]  # answered in text, so the text is spoken
+
+    teacher.ask("next section", "", wait=True)
+    assert runs[1]["args"][-2:] == ["--resume", "s1"] and spoken == ["Bar five is a stretch."]  # it spoke with say
+
+    teacher.session_id = None
+    teacher.ask("make me a practice plan", "No lesson on screen.", wait=True)
+    assert "inbox" in spoken[-1] and not teacher.busy
+    [saved] = deep.take_inbox()
+    assert saved["question"] == "make me a practice plan" and saved["why_not_answered"] == "usage limit reached"
+    assert deep.take_inbox() == []
+
+    monkeypatch.setattr(deep, "find_claude", lambda: None)  # not installed: straight to the inbox
+    out = teacher.ask("why is this hard?", "ctx")
+    assert out["saved_to_inbox"] and len(runs) == 3 and deep.take_inbox()[0]["question"] == "why is this hard?"
+
+
+def test_voice_chat_tools_all_have_actions():
+    from midi_coach import chat, server
+
+    names = {t["name"] for t in chat.TOOLS} - {"write_lesson"}  # write_lesson runs inside chat.py
+    assert names <= set(server._voice.actions)
+
+
 def test_voice_route_and_context(monkeypatch, ref):
     import json
     import urllib.request
@@ -919,13 +976,74 @@ def test_excerpt_lesson_one_hand(ref):
     assert sorted({n.pitch for n in score.notes}) == [48, 52, 55]
 
 
+def test_beats_follow_a_tempo_change_inside_a_bar(tmp_path):
+    # 4/4 at 60 bpm, slowing to 30 bpm on beat 3 of bar 1 (a ritardando written beat by beat).
+    mid = mido.MidiFile(ticks_per_beat=480)
+    track = mido.MidiTrack()
+    mid.tracks.append(track)
+    path = tmp_path / "rit.mid"
+    track.append(mido.MetaMessage("time_signature", numerator=4, denominator=4, time=0))
+    track.append(mido.MetaMessage("set_tempo", tempo=1_000_000, time=0))
+    track.append(mido.Message("note_on", note=60, velocity=80, time=0))
+    track.append(mido.Message("note_off", note=60, velocity=0, time=480))
+    track.append(mido.Message("note_on", note=62, velocity=80, time=0))
+    track.append(mido.Message("note_off", note=62, velocity=0, time=480))
+    track.append(mido.MetaMessage("set_tempo", tempo=2_000_000, time=0))
+    for i, n in enumerate((64, 65, 67, 69)):
+        track.append(mido.Message("note_on", note=n, velocity=80, time=0))
+        track.append(mido.Message("note_off", note=n, velocity=0, time=480))
+    mid.save(path)
+    score = load_score(path)
+    # Beats 0,1 take a second each; beats 2,3 (still bar 1) and 4,5 take two seconds each.
+    assert [round(n.start, 3) for n in score.notes] == [0.0, 1.0, 2.0, 4.0, 6.0, 8.0]
+    assert [round(n.beat, 3) for n in score.notes] == [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+    assert score.position(score.notes[3].start) == (1, 4.0)
+    assert round(score.beat_of(1.5), 3) == 1.5 and round(score.beat_of(2.0), 3) == 2.0  # before / at the change
+
+
+def test_musicxml_grace_notes_are_not_graded(tmp_path):
+    from music21 import meter, note, stream
+    from music21.musicxml.m21ToXml import GeneralObjectExporter
+
+    part = stream.Part([meter.TimeSignature("4/4")])
+    part.append(note.Note("D5", quarterLength=0.5).getGrace())  # a flick into the B
+    part.append([note.Note("B4", quarterLength=2), note.Note("D5", quarterLength=1), note.Rest(quarterLength=1)])
+    path = tmp_path / "grace.musicxml"
+    path.write_text(GeneralObjectExporter(stream.Score([part])).parse().decode("utf-8"), encoding="utf-8")
+    score = load_score(path)
+    # Only the real notes, with their written lengths (the grace D5 used to hang on until beat 3).
+    assert [(n.pitch, round(n.beat, 3), round(score.beat_of(n.end) - n.beat, 3)) for n in score.notes] == [(71, 0.0, 2.0), (74, 2.0, 1.0)]
+
+
+def test_musicxml_ties_follow_each_pitch_in_a_chord(tmp_path):
+    from music21 import chord, meter, note, stream, tie
+    from music21.musicxml.m21ToXml import GeneralObjectExporter
+
+    def piece(pitches, ties, ql):
+        c = chord.Chord([note.Note(p) for p in pitches], quarterLength=ql)
+        for n, t in zip(c.notes, ties):
+            n.tie = tie.Tie(t) if t else None
+        return c
+
+    # A held top G4 (1.5 beats) over an E4 struck twice: the chord ties differ per pitch.
+    part = stream.Part([meter.TimeSignature("2/4"), piece(["E4", "G4"], [None, "start"], 1),
+                        piece(["E4", "G4"], [None, "stop"], 0.5), note.Rest(quarterLength=0.5)])
+    path = tmp_path / "held.musicxml"
+    path.write_text(GeneralObjectExporter(stream.Score([part])).parse().decode("utf-8"), encoding="utf-8")
+    score = load_score(path)
+    got = sorted((n.pitch, round(n.beat, 3), round(score.beat_of(n.end) - n.beat, 3)) for n in score.notes)
+    assert got == [(64, 0.0, 1.0), (64, 1.0, 0.5), (67, 0.0, 1.5)]
+
+
 def test_lesson_categories_and_moving_keeps_history(ref):
     import pathlib
 
     from midi_coach import lessons, server
 
     path, _ = lessons.build_lesson("Scale", right="c4 d e f g a b c'")
-    assert pathlib.Path(path).parent.name == "Exercises"  # new lessons are exercises by default
+    assert pathlib.Path(path).parent.name == "AI exercises"  # a composed lesson is the AI's own
+    cut, _ = lessons.excerpt_lesson(ref.path, (1, 2), "both", "etude bars 1-2")
+    assert pathlib.Path(cut).parent.name == "Exercises"  # an excerpt of a real piece
     song, _ = lessons.build_lesson("Song", right="c4 d e f", category="vocals & ACCOMPANIMENT")
     assert pathlib.Path(song).parent.name == "Vocals & accompaniment"
     loose = lessons.lessons_dir() / "old.musicxml"
@@ -943,10 +1061,70 @@ def test_lesson_categories_and_moving_keeps_history(ref):
         lessons.move_lesson(song, "Solo piano", "C major scale")
 
     menu = server._cmd_lessons({})
-    assert menu["categories"] == ["Solo piano", "Vocals & accompaniment", "Unsorted"]
+    assert menu["categories"] == ["Solo piano", "Vocals & accompaniment", "Exercises", "Unsorted"]
     assert {(x["title"], x["category"]) for x in menu["lessons"]} == {
-        ("C major scale", "Solo piano"), ("song", "Vocals & accompaniment"), ("old", "Unsorted")}
+        ("C major scale", "Solo piano"), ("song", "Vocals & accompaniment"), ("etude-bars-1-2", "Exercises"), ("old", "Unsorted")}
     assert json.loads(json.dumps(menu))  # the page gets it as JSON
+
+
+def test_song_lesson_vocals_over_piano(ref, tmp_path):
+    import pathlib
+
+    from music21 import converter
+
+    from midi_coach import lessons, songs
+
+    # A band file: piano chords and a sung line with lyrics; C major, a 2/4 bar, then E major.
+    mid = mido.MidiFile(ticks_per_beat=480)
+    meta, piano, voice = mido.MidiTrack(), mido.MidiTrack(), mido.MidiTrack()
+    mid.tracks += [meta, piano, voice]
+    meta.append(mido.MetaMessage("set_tempo", tempo=500000, time=0))
+    meta.append(mido.MetaMessage("time_signature", numerator=4, denominator=4, time=0))
+    meta.append(mido.MetaMessage("time_signature", numerator=2, denominator=4, time=480 * 8))
+    meta.append(mido.MetaMessage("time_signature", numerator=4, denominator=4, time=480 * 2))
+    piano.append(mido.MetaMessage("track_name", name="Piano", time=0))
+    voice.append(mido.MetaMessage("track_name", name="Vocals", time=0))
+    voice.append(mido.Message("program_change", program=53, channel=1, time=0))
+
+    def beats():  # (beat, tonic): C for bars 1-2, the 2/4 bar 3, bars 4-10; E from bar 11 for 10 bars
+        b = 0
+        for _ in range(8 + 2 + 28):
+            yield b, 0
+            b += 1
+        for _ in range(40):
+            yield b, 4
+            b += 1
+
+    words = ["Hel", "lo", "there"]
+    last_p = last_v = 0
+    for k, (b, tonic) in enumerate(beats()):
+        t = b * 480
+        chord = [48 + tonic, 52 + tonic, 55 + tonic, 60 + tonic + (0, 4, 7, 11)[k % 4]]
+        for i, p in enumerate(chord):
+            piano.append(mido.Message("note_on", note=p, velocity=80, time=(t - last_p) if i == 0 else 0))
+        for i, p in enumerate(chord):
+            piano.append(mido.Message("note_off", note=p, velocity=0, time=440 if i == 0 else 0))
+        last_p = t + 440
+        sung = 60 + tonic + (0, 2, 4, 5, 7, 9, 11)[k % 7]
+        voice.append(mido.MetaMessage("lyrics", text=(" " if k % 3 == 0 else "") + words[k % 3], time=t - last_v))
+        voice.append(mido.Message("note_on", note=sung, velocity=80, channel=1, time=0))
+        voice.append(mido.Message("note_off", note=sung, velocity=0, channel=1, time=400))
+        last_v = t + 400
+    path = pathlib.Path(os.environ["MIDI_COACH_REFERENCE_DIRS"]) / "Band - Hello [42].mid"
+    mid.save(path)
+
+    out = songs.song_lesson(str(path))
+    assert out["title"] == "Band - Hello (with vocals)" and out["category"] == "Needs review"
+    assert all(v["same as source"] for v in out["check"].values()), out["check"]
+    assert out["key_changes"] == [(1, 0), (11, 4)]  # a modulation, not the 2/4 bar
+    assert out["lyrics"].startswith("78 of 78")
+    parsed = converter.parseData(pathlib.Path(out["path"]).read_text(encoding="utf-8"))
+    vocal = parsed.parts[0]
+    assert [n.lyric for n in vocal.recurse().notes][:4] == ["Hel", "lo", "there", "Hel"]
+    assert [ts.ratioString for ts in vocal.recurse().getElementsByClass("TimeSignature")] == ["4/4", "2/4", "4/4"]
+    listed = next(x for x in lessons.list_lessons() if x["path"] == out["path"])
+    assert listed["category"] == "Needs review" and lessons.made_from(listed["source"]) == "from MIDI"
+    assert "Band - Hello [42].mid" in listed["source"] and "Vocals" in listed["source"]
 
 
 def test_create_lesson_tool_publishes(ref, monkeypatch):
@@ -1531,6 +1709,72 @@ def test_split_hands_follows_the_hands_not_middle_c():
     assert sides[(8.0, 58)] == "left" and sides[(8.0, 65)] == "right"  # the octave stays together
 
 
+def test_split_by_reach_revises_a_chord_later_notes_explain():
+    """A held chord around middle C, then stabs high above it while it rings: the chord was
+    the left hand's all along. Deciding chord by chord gave the first chord to the right hand,
+    then the stabs to the left, and kept the hands crossed for the rest of the piece."""
+    from midi_coach.notes import split_by_reach
+
+    notes = []
+    for bar in range(4):
+        t = bar * 2.5
+        notes += [Note(p, t, t + 2.45, 70) for p in (55, 60, 63)]
+        if bar:
+            notes += [Note(p, t + s, t + s + 0.08, 90) for s in (0.3, 0.9, 1.5) for p in (79, 84, 87)]
+    sides = split_by_reach(notes)
+    assert all(sides[(round(n.start, 4), n.pitch)] == ("right" if n.pitch > 70 else "left") for n in notes)
+
+
+def _installed_hand_model():
+    from midi_coach import hand_model
+
+    path = pathlib.Path(os.environ.get("MIDI_COACH_HOME") or pathlib.Path.home() / "MidiCoach") / "models" / hand_model.MODEL_FILE
+    return path if path.exists() else None
+
+
+INSTALLED_HAND_MODEL = _installed_hand_model()  # looked up before the tests move MIDI_COACH_HOME
+
+
+@pytest.mark.skipif(INSTALLED_HAND_MODEL is None, reason="hand model not installed (tools/export_pm2s_hand.py)")
+def test_hand_model_puts_a_high_tune_right_and_a_low_bass_left(monkeypatch):
+    """The model's output is the chance of the LEFT hand, though PM2S documents it as the
+    right: read the wrong way round, every note lands in the other hand. A tune up high over
+    a bass line down low must come out the obvious way."""
+    from midi_coach import hand_model
+    from midi_coach.notes import split_hands
+
+    monkeypatch.setenv("MIDI_COACH_HAND_MODEL", str(INSTALLED_HAND_MODEL))
+    tune = [Note(72 + (0, 2, 4, 5, 7, 5, 4, 2)[i % 8], i * 0.3, i * 0.3 + 0.28, 85) for i in range(64)]
+    bass = [Note(p, i * 1.2, i * 1.2 + 1.1, 65) for i, p in enumerate([36, 43, 41, 43] * 4)]
+    sides = split_hands(tune + bass)
+    assert hand_model.splitter() == "pm2s"
+    assert all(sides[(round(n.start, 4), n.pitch)] == "right" for n in tune)
+    assert all(sides[(round(n.start, 4), n.pitch)] == "left" for n in bass)
+
+
+def test_split_hands_overrules_a_model_with_the_hands_the_wrong_way_round(monkeypatch):
+    """Where the model puts its right hand below its left, it isn't listened to."""
+    from midi_coach import hand_model
+    from midi_coach.notes import split_hands
+
+    tune = [Note(76 + i % 3, i * 0.5, i * 0.5 + 0.4, 80) for i in range(40)]
+    bass = [Note(40 + i % 3, i * 2.0, i * 2.0 + 1.9, 70) for i in range(10)]
+    monkeypatch.setattr(hand_model, "left_odds", lambda notes: {(round(n.start, 4), n.pitch): 0.99 if n.pitch > 60 else 0.01 for n in notes})
+    sides = split_hands(tune + bass)
+    assert all(sides[(round(n.start, 4), n.pitch)] == "right" for n in tune)
+    assert all(sides[(round(n.start, 4), n.pitch)] == "left" for n in bass)
+
+
+def test_split_hands_without_the_model_uses_split_by_reach(monkeypatch, tmp_path):
+    from midi_coach import hand_model
+    from midi_coach.notes import split_by_reach, split_hands
+
+    notes = [Note(48 + i % 3, i * 0.5, i * 0.5 + 0.4, 70) for i in range(8)] + [Note(76, i * 0.5, i * 0.5 + 0.4, 70) for i in range(8)]
+    monkeypatch.setenv("MIDI_COACH_HAND_MODEL", str(tmp_path / "missing.onnx"))
+    assert hand_model.predict(notes) is None and hand_model.splitter() == "reach"
+    assert split_hands(notes) == split_by_reach(notes)
+
+
 def test_one_track_piano_file_gets_a_grand_staff(ref, tmp_path):
     from midi_coach import display, sheet
 
@@ -1621,6 +1865,95 @@ def test_grand_staff_clefs_keys_and_short_notes():
     events = [("right", F(k, 2), F(k, 2) + F(1, 4), 72) for k in range(0, 8, 2)] + [("left", F(0), F(4), 48)]
     notes = converter.parseData(grand_staff(events, "t")["xml"]).parts[0].recurse().notes
     assert [n.quarterLength for n in notes] == [0.5] * 4
+
+
+def test_grand_staff_key_signature_follows_modulations():
+    from fractions import Fraction as F
+
+    from music21 import converter
+
+    from midi_coach.transcribe import grand_staff
+
+    def scale_bars(first_bar, count, tonic, borrow=None):
+        out = []
+        for bar in range(first_bar, first_bar + count):
+            for k, d in enumerate((0, 2, 4, 5, 7, 9, 11, 12)):
+                at = F(bar * 4) + F(k, 2)
+                out.append(("right", at, at + F(1, 2), 60 + tonic + d))
+            out.append(("left", F(bar * 4), F(bar * 4 + 4), 48 + tonic))
+        if borrow is not None:  # one bar's chord borrowed from elsewhere: accidentals, not a new key
+            out.append(("left", F(borrow * 4), F(borrow * 4 + 4), 51))
+        return out
+
+    # C major (with a two-bar trip to E flat and one borrowed E flat), then E major to the end.
+    events = scale_bars(0, 6, 0, borrow=2) + scale_bars(6, 2, 3) + scale_bars(8, 4, 0) + scale_bars(12, 10, 4)
+    out = grand_staff(events, "t")
+    assert out["keys"] == [(1, 0), (13, 4)]
+    right = converter.parseData(out["xml"]).parts[0]
+    sigs = [(ks.getContextByClass("Measure").number, ks.sharps) for ks in right.recurse().getElementsByClass("KeySignature")]
+    assert sigs == [(1, 0), (13, 4)]
+    assert all(p.name != "A-" for n in right.measure(15).recurse().notes for p in n.pitches)  # G sharp in E major
+
+    # Time signature changes: a 2/4 bar between 4/4 bars.
+    ts = [(F(0), "4/4"), (F(4), "2/4"), (F(6), "4/4")]
+    out = grand_staff([("right", F(k), F(k + 1), 60) for k in range(10)], "t", ts)
+    bars = converter.parseData(out["xml"]).parts[0].getElementsByClass("Measure")
+    assert [m.barDuration.quarterLength for m in bars] == [4, 2, 4]
+
+
+def test_engraving_rules_catch_known_mistakes():
+    from music21 import key, meter, note, stream
+
+    from midi_coach import engraving
+
+    def bar(*items):
+        m = stream.Measure()
+        for x in items:
+            m.append(x)
+        return m
+
+    eb = note.Note("E-4", quarterLength=1)
+    eb.pitch.accidental.displayStatus = True  # a flat the key signature already gives
+    a3 = note.Note("A3", quarterLength=1)  # A natural in E flat with no sign: reads as A flat
+    first = bar(eb, note.Note("G4", quarterLength=1), a3, note.Rest(quarterLength=1))
+    first.insert(0, key.KeySignature(-3))
+    first.insert(0, meter.TimeSignature("4/4"))
+    part = stream.Part([first, bar(note.Note("C5", quarterLength=3.5), note.Note("D5", quarterLength=0.125), note.Rest(quarterLength=0.375))])
+    part.partName = "Piano"
+    found = engraving.lint(stream.Score([part]))["counts"]
+    assert found["needless-accidental"] == 1 and found["missing-accidental"] == 1
+    assert found["double-dot"] == 1 and found["too-short"] == 1
+
+
+def test_grand_staff_is_readable_without_losing_notes(tmp_path):
+    from fractions import Fraction as F
+
+    from midi_coach import engraving
+    from midi_coach.transcribe import grand_staff
+
+    # E flat major: E flats and B flats (no signs), A naturals in two octaves (both need one),
+    # a long rest starting off the beat across a barline, a run of very low bass notes, and a
+    # low sung line on a treble-8vb staff.
+    events = []
+    for b in range(8):
+        for k, p in enumerate((63, 67, 70, 75)):
+            events.append(("right", F(b * 4 + k), F(b * 4 + k + 1), p))
+        if b == 2:
+            events += [("left", F(8), F(9), 45), ("left", F(9), F(10), 57)]  # A2 then A3
+        elif b in (4, 5):
+            events += [("left", F(b * 4 + k), F(b * 4 + k + 1), 29) for k in range(4)]  # F1, four to a bar
+        else:
+            events.append(("left", F(b * 4), F(b * 4 + 4), 39))
+    tune = [(F(0), F(1), 58, ("Hey", "single")), (F(1), F(1, 2) + 1, 55, None), (F(13, 2), F(7), 51, None), (F(12), F(14), 58, None)]
+    out = grand_staff(events, "t", melody=tune)
+    report = engraving.lint(out["xml"])
+    assert not report["findings"], report["findings"][:5]
+    assert "<octave-shift" in out["xml"]  # the low F1 passage is under 8vb...
+    path = tmp_path / "t.musicxml"
+    path.write_text(out["xml"], encoding="utf-8")
+    score = load_score(path)  # ...but still graded as F1
+    assert {(round(n.beat, 3), n.pitch) for n in score.notes if n.part == 2} == {(float(on), p) for h, on, _, p in events if h == "left"}
+    assert {(round(n.beat, 3), n.pitch) for n in score.notes if n.part == 0} == {(float(on), p) for on, _, p, _ in tune}
 
 
 def test_grand_staff_voices_spelling_and_lengths():

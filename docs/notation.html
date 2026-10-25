@@ -145,6 +145,8 @@ let noteEntries  = [];   // [{q, pitch, el}] one per rendered notehead group
 let measureMap   = [];   // [{q, x0, x1}] barline-to-barline extent of each measure
 let beatMode     = false;
 let beatTarget   = 0, beatShown = 0, beatBps = 0, beatAt = 0;
+let beatUntil    = null;  // Learn mode: glide at beatBps, park here
+const gliding = () => beatBps > 0 && (beatUntil === null || beatShown < beatUntil - 0.01);
 const MARK_COLORS = { hit: '#159a3c', missed: '#d42020', pending: '#00a6b8' };
 
 function positionPlayhead() {
@@ -169,7 +171,8 @@ window.addEventListener('message', async e => {
     panPx = 0;  // the cursor moved: snap back to it
     document.body.classList.add('pannable');
     beatTarget = e.data.beat; beatBps = e.data.bps || 0; beatAt = performance.now();
-    if (beatBps > 0) beatShown = beatTarget;
+    beatUntil = typeof e.data.until === 'number' ? e.data.until : null;
+    if (beatBps > 0 && beatUntil === null) beatShown = beatTarget;
   } else if (e.data.type === 'marks') {
     applyMarks(e.data.marks || [], !!e.data.reset);
   } else if (e.data.type === 'heat') {
@@ -524,7 +527,7 @@ function trackTransform(x, s) {
 let panPx = 0;
 
 function panBy(dx) {
-  if (!rendered || !beatMode || beatBps > 0 || !beatMap.length) return;
+  if (!rendered || !beatMode || gliding() || !beatMap.length) return;
   const s = fitScale();
   const width = document.getElementById('osmd-div').offsetWidth * s;
   const x = getXForBeat(beatShown) * s;
@@ -563,9 +566,12 @@ function tick() {
   const s     = fitScale();
   if (beatMode && beatMap.length) {
     const now = performance.now();
-    if (beatBps > 0) beatShown = beatTarget + beatBps * (now - beatAt) / 1000;
+    const at = beatTarget + beatBps * (now - beatAt) / 1000;
+    if (beatBps > 0 && beatUntil === null) beatShown = at;
+    // Learn mode flows at tempo to the waiting chord; eased so playing it early doesn't jerk.
+    else if (beatBps > 0) beatShown += (Math.min(at, beatUntil) - beatShown) * 0.18;
     else beatShown += (beatTarget - beatShown) * 0.18;  // ease toward the waiting chord
-    if (beatBps > 0) panPx = 0;
+    if (gliding()) panPx = 0;
     scoreTrack.style.transform = trackTransform(phX - getXForBeat(beatShown) * s + panPx, s);
     return;
   }

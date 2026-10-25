@@ -1,7 +1,8 @@
 """Voice chat with the Maestro: you talk, Claude answers in character and runs the practice.
 
 Claude Haiku 5.5 handles conversation and commands (start, loop, tempo, stop, play a
-passage, progress); writing a new lesson is handed to Claude Sonnet 5.5.
+passage, progress); writing a new lesson is handed to Claude Sonnet 5.5, and questions that
+need real teaching to Claude Code on the pianist's subscription (hand_off, see deep.py).
 
 Needs an Anthropic API key, from ANTHROPIC_API_KEY or the file
 %USERPROFILE%\\MidiCoach\\anthropic_api_key.txt. Every request is metered from its token
@@ -51,7 +52,15 @@ history. Only quote scores and numbers that appear there; never invent them.
 Use your tools when the pianist asks you to do something (start, loop, change tempo or hand, \
 stop, play a passage for them, switch or write a lesson, check progress), then confirm \
 briefly what you did. Learn mode waits for the right notes; Rehearse mode moves at the tempo. \
-If they ask for something outside piano practice, answer briefly and steer back to the piano.\
+If they ask for something outside piano practice, answer briefly and steer back to the piano.
+
+Anything that needs real teaching, more than your three sentences, goes to hand_off: a spoken \
+lesson on the song or a section of it, how to play a hard passage, a song's background, music \
+theory, a practice plan. So does "ask Desktop", "go deeper", or "next section" during such a \
+lesson. Then just say you'll think it over; the answer comes in your voice shortly.
+
+The context may include your notebook on the pianist. When they tell you something worth \
+keeping (a goal, a piece they're learning, how they like to be taught), use remember.\
 """
 
 TOOLS = [
@@ -120,6 +129,33 @@ TOOLS = [
                                                              "difficulty if the pianist said them."},
             },
             "required": ["request"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "hand_off",
+        "description": "Pass a question that needs real teaching to the senior teacher (Claude on the "
+                       "pianist's own subscription, with the keyboard, score and your voice), who "
+                       "answers aloud as you within about a minute. If it can't, the question is "
+                       "saved for Claude Desktop; the result says which.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "The pianist's question in full, with what it "
+                                                              "refers to (lesson, bars, hand) spelled out from the context."},
+            },
+            "required": ["question"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "remember",
+        "description": "Add one lasting fact about the pianist to your notebook (goals, pieces, weak "
+                       "spots, preferences). Not for things that only matter today.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"note": {"type": "string", "description": "One short line."}},
+            "required": ["note"],
             "additionalProperties": False,
         },
     },

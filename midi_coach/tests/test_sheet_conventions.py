@@ -14,20 +14,25 @@ import pathlib
 
 import pytest
 
-from midi_coach import analysis, library, sheet
+from midi_coach import analysis, engraving, library, sheet
 from midi_coach.notes import select_notes, suggest_hands
 
 REFERENCE = library.REPO_ROOT / "reference"
 
+# Readability findings a song may still have (engraving.lint); every other song must have none.
+# Great Balls of Fire: its one-track piano gives the left hand chords over two octaves wide
+# (see 'wide' below), which no clef or 8va can make readable.
+LINT_ALLOWED = {"Jerry Lee Lewis - Great Balls of Fire [1379].mid": {"ledger-lines": 1, "busy-octave-marks": 1}}
+
 # file name: (key, suggested {hand: parts}, baseline counts)
 SONGS = {
-    "Pink Floyd - Great Gig in the Sky [3447].mid": ("Gm", {"both": [2]}, dict(wide=0, hops=2, ledger=2, accidentals=163)),
+    "Pink Floyd - Great Gig in the Sky [3447].mid": ("Gm", {"both": [2]}, dict(wide=0, hops=2, ledger=2, accidentals=85)),
     "The Beatles - Let It Be [2552].mid": ("C", {"both": [3]}, dict(wide=0, hops=0, ledger=99, accidentals=8)),
     "Billy Joel - Piano Man [157].mid": ("C", {"right": [0], "left": [1]}, dict(wide=0, hops=0, ledger=18, accidentals=48)),
     "Journey - Don't Stop Believin [3093].mid": ("Db", {"both": [0]}, dict(wide=0, hops=0, ledger=35, accidentals=0)),
     "The Doors - Light My Fire [2820].mid": ("D", {"right": [0], "left": [6]}, dict(wide=0, hops=0, ledger=7, accidentals=264)),
     "Jerry Lee Lewis - Great Balls of Fire [1379].mid": ("C", {"both": [0], "left": [1]}, dict(wide=59, hops=0, ledger=212, accidentals=198)),
-    "Queen - Bohemian Rhapsody [3476].mid": ("Bb", {"both": [2]}, dict(wide=3, hops=7, ledger=30, accidentals=433)),
+    "Queen - Bohemian Rhapsody [3476].mid": ("Bb", {"both": [2]}, dict(wide=3, hops=7, ledger=30, accidentals=246)),
 }
 MARK_REACH = 0.26  # beats: how far docs/notation.html looks for a note to mark
 
@@ -58,9 +63,9 @@ def _counts(score, xml: str) -> dict:
     ledger = accidentals = 0
     drawn: dict[int, list[float]] = {}
     for part in converter.parseData(xml).parts:
-        ks = part.recurse().getElementsByClass("KeySignature").first()
-        altered = {p.name for p in ks.alteredPitches} if ks else set()
         for x in part.recurse().notes:
+            ks = x.getContextByClass("KeySignature")  # the key signature in force at this note
+            altered = {p.name for p in ks.alteredPitches} if ks else set()
             treble = type(x.getContextByClass("Clef")).__name__ == "TrebleClef"
             for p in x.pitches:
                 ledger += (p.midi >= 88 or p.midi <= 53) if treble else (p.midi <= 33 or p.midi >= 67)
@@ -98,3 +103,7 @@ def test_band_file_sheet_follows_conventions(name, tmp_path, monkeypatch):
     assert counts.pop("unmarked") == 0  # every graded note has a drawn note for its mark
     worse = {k: (v, baseline[k]) for k, v in counts.items() if v > baseline[k] + max(2, baseline[k] // 10)}
     assert not worse, f"worse than the baseline (now, baseline): {worse}"
+    # The readability rules (midi_coach.engraving): none broken, but for known hard cases.
+    allowed = LINT_ALLOWED.get(name, {})
+    broken = {r: n for r, n in engraving.lint(out["xml"])["counts"].items() if n > allowed.get(r, 0)}
+    assert not broken, f"readability rules broken: {broken}"

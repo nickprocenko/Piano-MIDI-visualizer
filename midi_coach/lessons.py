@@ -24,14 +24,17 @@ import pathlib
 import re
 import time
 
+from .engraving import tidy_heading
 from .library import _choices_path, _load_choices, home
 from .notes import MIDI_SUFFIXES, MUSICXML_SUFFIXES, Score, load_score, select_notes
 
 _KEY_RE = re.compile(r"^([A-Ga-g])([#b-]?)(m|min|minor)?$")
 
 # Lesson menu groups, in menu order. Any other folder under lessons/ is a category too.
-CATEGORIES = ("Solo piano", "Vocals & accompaniment", "Exercises", "Recordings")
-EXERCISES, RECORDINGS = "Exercises", "Recordings"
+# Needs review: lessons made from a file (e.g. songs converted from MIDI) nobody has checked yet.
+# Exercises: cut from real pieces. AI exercises: composed entirely by Claude or the Maestro.
+CATEGORIES = ("Needs review", "Solo piano", "Vocals & accompaniment", "Exercises", "AI exercises", "Recordings")
+NEEDS_REVIEW, EXERCISES, AI_EXERCISES, RECORDINGS = "Needs review", "Exercises", "AI exercises", "Recordings"
 UNSORTED = "Unsorted"
 LESSON_SUFFIXES = MUSICXML_SUFFIXES | MIDI_SUFFIXES
 
@@ -63,7 +66,32 @@ def list_lessons() -> list[dict]:
         category = UNSORTED if p == root else p.name
         found += [(f, category) for f in p.iterdir() if f.is_file() and f.suffix.lower() in LESSON_SUFFIXES]
     found.sort(key=lambda fc: -fc[0].stat().st_mtime)
-    return [{"title": f.stem, "path": str(f), "category": c} for f, c in found]
+    return [{"title": f.stem, "path": str(f), "category": c, "source": source_note(f)} for f, c in found]
+
+
+_SOURCE_RE = re.compile(r"<source>(.*?)</source>", re.S)
+
+
+def source_note(path) -> str | None:
+    """Where a lesson came from (MusicXML <identification><source>), e.g. 'X.mid, converted
+    from MIDI: ...', or None. Only the file's head is read."""
+    import html
+
+    p = pathlib.Path(path)
+    if p.suffix.lower() not in (".xml", ".musicxml"):
+        return None
+    try:
+        with p.open(encoding="utf-8", errors="replace") as f:
+            head = f.read(8192)
+    except OSError:
+        return None
+    m = _SOURCE_RE.search(head)
+    return html.unescape(" ".join(m.group(1).split())) if m else None
+
+
+def made_from(source: str | None) -> str | None:
+    """A short tag for the menu: 'from MIDI' when the notes were converted from a MIDI file."""
+    return "from MIDI" if source and "from MIDI" in source else None
 
 
 def categories(listed: list[dict]) -> list[str]:
@@ -80,12 +108,17 @@ def move_lesson(source: str, category: str, title: str | None = None) -> str:
     if not old.is_file():
         raise FileNotFoundError(f"No lesson file {source}")
     name = re.sub(r'[<>:"/\\|?*]+', "", title).strip(" .") if title else old.stem
-    new = (lessons_dir(category) / f"{name or old.stem}{old.suffix}").resolve()
-    if new == old:
-        return str(new)
-    if new.exists():
+    new = lessons_dir(category).resolve() / f"{name or old.stem}{old.suffix}"
+    if new.exists() and new.resolve() == old:  # the same file: nothing to do, or only its capitals change
+        if new.name == old.name:
+            return str(old)
+        step = old.with_name(old.name + ".renaming")  # Windows won't rename to a name differing only in case
+        old.rename(step)
+        step.rename(new)
+    elif new.exists():
         raise FileExistsError(f"{new.name} is already in {category}.")
-    old.rename(new)
+    else:
+        old.rename(new)
     _repoint(str(old), str(new))
     return str(new)
 
@@ -206,7 +239,7 @@ def build_lesson(
     key: str | int | None = "C",
     tempo_bpm: float = 80,
     musicxml: str | None = None,
-    category: str = EXERCISES,
+    category: str = AI_EXERCISES,
 ) -> tuple[str, Score]:
     """Create and save a lesson. Returns (path, parsed score)."""
     from music21 import converter, metadata, meter, stream
@@ -234,7 +267,7 @@ def build_lesson(
         for part in score.parts:
             part.makeMeasures(inPlace=True)
             part.makeNotation(inPlace=True)
-        xml = GeneralObjectExporter(score).parse().decode("utf-8")
+        xml = tidy_heading(GeneralObjectExporter(score).parse().decode("utf-8"))
         path.write_text(xml, encoding="utf-8")
     return str(path), load_score(path)
 
@@ -258,7 +291,7 @@ def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title:
         new.insert(0, keep)
         excerpt = new
     excerpt.metadata = metadata.Metadata(title=title)
-    xml = GeneralObjectExporter(excerpt).parse().decode("utf-8")
+    xml = tidy_heading(GeneralObjectExporter(excerpt).parse().decode("utf-8"))
     path = lessons_dir(category) / f"{_slug(title)}.musicxml"
     path.write_text(xml, encoding="utf-8")
     return str(path), load_score(path)

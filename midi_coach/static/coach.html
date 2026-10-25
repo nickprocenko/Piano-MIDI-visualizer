@@ -110,7 +110,7 @@
   <label class="setting">Lesson <select id="lesson"><option value="">loading…</option></select></label>
   <label class="setting">Input <select id="port"></select></label>
   <span class="seg setting" id="mode">
-    <button data-mode="learn" title="The cursor waits for the right notes">Learn</button>
+    <button data-mode="learn" title="The cursor flows at tempo and waits on each chord for the right notes">Learn</button>
     <button data-mode="rehearse" title="The cursor moves at tempo; notes are graded as they pass">Rehearse</button>
     <button data-mode="record" title="Play over the metronome; what you play is written out as sheet music">Record</button>
   </span>
@@ -269,7 +269,7 @@ async function cmd(name, body) {
 function setMode(m) {
   mode = m;
   document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
-  $('tempo-wrap').style.display = m === 'rehearse' ? '' : 'none';
+  $('tempo-wrap').style.display = m === 'record' ? 'none' : '';  // Learn flows at it too
   menu.classList.toggle('record', m === 'record');
   if (!running) showGo();
   store.set('mode', m);
@@ -299,7 +299,13 @@ async function loadLessons() {
     for (const category of categories) {  // one group per lesson folder, newest first inside
       const group = document.createElement('optgroup');
       group.label = category;
-      for (const l of lessons) if (l.category === category) group.appendChild(new Option(l.title, l.path));
+      for (const l of lessons) {
+        if (l.category !== category) continue;
+        // Where it came from: a tag in the menu for MIDI conversions, the whole note on hover.
+        const opt = new Option(l.title + (l.source && l.source.includes('from MIDI') ? '  · from MIDI' : ''), l.path);
+        if (l.source) opt.title = l.source;
+        group.appendChild(opt);
+      }
       lessonSel.appendChild(group);
     }
     lessonSel.value = current || '';

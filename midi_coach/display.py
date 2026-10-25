@@ -181,10 +181,14 @@ class DisplayHub:
             self._heat = bars
         self._broadcast({"type": "heat", "bars": bars or []})
 
-    def cursor(self, beat: float, beats_per_sec: float = 0.0, live: bool = False) -> None:
+    def cursor(self, beat: float, beats_per_sec: float = 0.0, live: bool = False, until: float | None = None) -> None:
         """live=True: a practice session drives the cursor (the visualizer then lets it
-        override Learn Mode's own scrolling); otherwise it's just positioning."""
+        override Learn Mode's own scrolling); otherwise it's just positioning.
+        until: the cursor moves at beats_per_sec from beat and parks there (Learn mode
+        flowing through a rest to the chord it waits for)."""
         msg = {"type": "cursorBeat", "beat": round(beat, 4), "bps": round(beats_per_sec, 4), "live": live}
+        if until is not None:
+            msg["until"] = round(until, 4)
         with self._lock:
             self._cursor = msg
         self._broadcast(msg)
@@ -248,7 +252,10 @@ class DisplayHub:
             if self._heat:
                 out.append({"type": "heat", "bars": self._heat})
             if self._cursor:
-                out.append({**self._cursor, "bps": 0.0})
+                cur = {**self._cursor, "bps": 0.0}
+                if "until" in cur:  # mid-glide: a late page parks at the waiting chord
+                    cur["beat"] = cur.pop("until")
+                out.append(cur)
             if self._status:
                 out.append({"type": "status", "text": self._status})
             return out

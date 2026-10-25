@@ -8,6 +8,8 @@ results can be reported as "bar 12, beat 3".
 from __future__ import annotations
 
 import bisect
+import heapq
+import math
 import pathlib
 import tempfile
 from dataclasses import dataclass, field, replace
@@ -128,7 +130,17 @@ class Score:
         bar = self.bar_at(t)
         if bar is None or bar.end <= bar.start:
             return t * 2.0
-        return bar.start_beat + (t - bar.start) / (bar.end - bar.start) * (bar.end_beat - bar.start_beat)
+        inside = [(when, bpm) for when, bpm in self.tempos if bar.start < when < bar.end]
+        if not inside:  # one tempo through the bar: its beats are evenly spaced
+            return bar.start_beat + (t - bar.start) / (bar.end - bar.start) * (bar.end_beat - bar.start_beat)
+        # A tempo change inside the bar (a ritardando moving beat by beat): add up each stretch.
+        beat, at, bpm = bar.start_beat, bar.start, self.bpm_at(bar.start)
+        for when, value in inside:
+            if when >= t:
+                break
+            beat += (when - at) * bpm / 60
+            at, bpm = when, value
+        return beat + (t - at) * bpm / 60
 
     def __post_init__(self) -> None:
         self._bar_starts = [b.start for b in self.bars]
@@ -144,8 +156,8 @@ class Score:
         bar = self.bar_at(t)
         if bar is None:
             return 1, 1.0
-        span = max(bar.end - bar.start, 1e-6)
-        beat = 1.0 + (t - bar.start) / span * bar.numerator
+        span = max(bar.end_beat - bar.start_beat, 1e-6)
+        beat = 1.0 + (self.beat_of(t) - bar.start_beat) / span * bar.numerator
         return bar.number, round(beat, 2)
 
     def bar_range_times(self, first: int, last: int) -> tuple[float, float]:
@@ -216,12 +228,56 @@ def _load_musicxml(path: pathlib.Path) -> Score:
     from music21 import converter  # heavy import, only when needed
 
     stream = converter.parse(str(path))
+    # Grace notes are ornaments: drawn on the sheet (from the file itself), not graded. music21
+    # writes them as zero-length MIDI notes with the note-off first, which load_midi would read
+    # as a note left sounding until the next note-off of that pitch.
+    for grace in [n for n in stream.recurse().notes if n.duration.isGrace]:
+        grace.activeSite.remove(grace)
+    for part in stream.parts:
+        _join_ties(part)
     with tempfile.TemporaryDirectory() as tmp:
         midi_path = pathlib.Path(tmp) / "converted.mid"
         stream.write("midi", fp=str(midi_path))
         score = load_midi(midi_path)
     score.path = str(path)
     return score
+
+
+def _join_ties(part) -> None:
+    """Join tied notes pitch by pitch before the MIDI conversion. music21 only follows a chord's
+    own tie, so a chord that holds some notes and strikes others (a held top note over a moving
+    inner voice) would re-strike the held notes and merge the struck ones."""
+    from music21 import note
+
+    for el in list(part.recurse().getElementsByClass("Chord")):
+        if not any(n.tie for n in el.notes):
+            continue
+        site, offset = el.activeSite, el.offset
+        for n in el.notes:  # one note per pitch, each keeping its own tie
+            single = note.Note(n.pitch, quarterLength=el.quarterLength)
+            single.tie = n.tie
+            if el.volume.velocity is not None:
+                single.volume.velocity = el.volume.velocity
+            site.insert(offset, single)
+        site.remove(el)
+    held: dict[int, tuple[object, float]] = {}  # pitch -> (first note of the tied run, its end)
+    for el in sorted(part.recurse().notes, key=lambda n: n.getOffsetInHierarchy(part)):
+        if el.isChord:
+            continue  # chords left have no ties
+        kind = el.tie.type if el.tie else None
+        start = float(el.getOffsetInHierarchy(part))
+        head = held.get(el.pitch.midi)
+        if kind in ("stop", "continue") and head and abs(head[1] - start) < 1e-6:
+            head[0].quarterLength += el.quarterLength
+            el.activeSite.remove(el)
+            first = head[0]
+        else:
+            first = el
+        el.tie = None
+        if kind in ("start", "continue"):
+            held[el.pitch.midi] = (first, start + float(el.quarterLength) if first is el else head[1] + float(el.quarterLength))
+        else:
+            held.pop(el.pitch.midi, None)
 
 
 def _tolerate_bad_meta() -> None:
@@ -401,9 +457,77 @@ CHORD_GAP = 0.035  # seconds: notes starting this close together are one chord
 HAND_REACH = 14  # semitones one hand spans (a ninth), counting the keys it is still holding
 HOLD_WINDOW = 4.0  # seconds: a key held longer than this is taken to be ringing on the pedal, not blocking the hand
 CROSS_COST = 2.0  # per note on the far side of split_note: a note crosses only when it's clearly the other hand's
+BEAM = 32  # ways of splitting the piece so far kept open, so a later chord can revise an earlier one
+LINE_COST = 8.0  # passing a line of single notes (steps and small leaps) from one hand to the other
+LINE_STEP = 4  # semitones: single notes this close, one after another, are one line...
+LINE_GAP = 0.6  # seconds: ...when they follow this closely
 
 
 def split_hands(notes: list[Note], split_note: int = 60) -> dict[tuple[float, int], str]:
+    """Divide the notes of one part between the hands: split_by_reach, steered by the trained
+    hand model (hand_model.py) when it's installed. The model reads the hands from the music
+    but knows nothing of how far a hand reaches or how fast it can jump; the search keeps the
+    hands playable and weighs the model's view of every note against that. Where the model has
+    the hands the wrong way round (its right hand below its left over GUARD_NOTES notes, now
+    and then a whole piece), it isn't listened to. Lines are kept in one hand either way
+    (keep_lines_together). split_note only matters without the model.
+
+    Returns {(start rounded to 4 places, pitch): 'right' | 'left'}."""
+    from . import hand_model
+
+    odds = hand_model.left_odds(notes)
+    if odds is not None:
+        ordered = sorted(notes, key=lambda n: (n.start, n.pitch))
+        for i in range(0, len(ordered), GUARD_NOTES):
+            keys = [(round(n.start, 4), n.pitch) for n in ordered[i:i + GUARD_NOTES]]
+            right = [k[1] for k in keys if odds[k] <= 0.5]
+            left = [k[1] for k in keys if odds[k] > 0.5]
+            if right and left and sum(right) / len(right) < sum(left) / len(left):
+                odds.update((k, 0.5) for k in keys)
+    return keep_lines_together(notes, split_by_reach(notes, split_note, odds))
+
+
+GUARD_NOTES = 100  # stretch of notes in which the model's hands are checked for being the wrong way round
+MODEL_WEIGHT = 4.0  # cost per unit of surprise (-log chance) of putting a note in a hand the model doesn't expect
+
+
+def keep_lines_together(notes: list[Note], sides: dict[tuple[float, int], str]) -> dict[tuple[float, int], str]:
+    """A line of single notes - each a step or small leap (LINE_STEP) after the last, within
+    LINE_GAP - is played by one hand, not passed back and forth between the staves: a trill,
+    a tremolo, a rolled third. A line that fits in one hand (HAND_REACH) goes to the hand that
+    plays most of it; a longer one (a run across the keyboard) only loses its one-note
+    detours into the other hand."""
+    at: dict[float, list[Note]] = {}
+    for n in notes:
+        at.setdefault(round(n.start, 2), []).append(n)
+    times = sorted(at)
+    runs: list[list[Note]] = []
+    for a, b in zip(times, times[1:]):
+        x, y = at[a], at[b]
+        if len(x) == len(y) == 1 and b - a < LINE_GAP and abs(x[0].pitch - y[0].pitch) <= LINE_STEP:
+            if runs and runs[-1][-1] is x[0]:
+                runs[-1].append(y[0])
+            else:
+                runs.append([x[0], y[0]])
+    out = dict(sides)
+    for run in runs:
+        keys = [(round(n.start, 4), n.pitch) for n in run]
+        hands = [out[k] for k in keys]
+        if len(set(hands)) == 1:
+            continue
+        if max(n.pitch for n in run) - min(n.pitch for n in run) <= HAND_REACH:
+            rights = hands.count("right")
+            hand = "right" if rights * 2 > len(hands) else "left" if rights * 2 < len(hands) else hands[0]
+            for k in keys:
+                out[k] = hand
+        else:
+            for i in range(1, len(keys) - 1):
+                if hands[i - 1] == hands[i + 1] != hands[i]:
+                    out[keys[i]] = hands[i] = hands[i - 1]
+    return out
+
+
+def split_by_reach(notes: list[Note], split_note: int = 60, left_odds: dict[tuple[float, int], float] | None = None) -> dict[tuple[float, int], str]:
     """Divide the notes of one part between the hands, chord by chord, the way a pianist
     would rather than at a fixed key. Each chord is cut where both hands stay within reach
     (counting keys they still hold) and nearest to where each hand has just been; split_note
@@ -413,60 +537,124 @@ def split_hands(notes: list[Note], split_note: int = 60) -> dict[tuple[float, in
     A hand's place is its outer note (the left hand's lowest, the right hand's highest: the
     bass and the tune), so an octave or a full chord in one hand costs nothing extra.
 
+    The piece is split as a whole, not one chord at a time: the BEAM cheapest histories are
+    carried forward and the cheapest at the end wins. A chord that only makes sense in light
+    of what follows (a held chord the right hand's stabs turn out to play over) is still
+    given to the hand that can keep it. A line of single notes stays in one hand rather than
+    passing back and forth between the staves.
+
+    left_odds, the hand model's chance that each note is the left hand's, replaces split_note:
+    each note costs MODEL_WEIGHT * -log(the model's chance of the hand it's given).
+
     Returns {(start rounded to 4 places, pitch): 'right' | 'left'}."""
-    sides: dict[tuple[float, int], str] = {}
-    pos = {"left": split_note - 12.0, "right": split_note + 7.0}  # each hand's outer note, smoothed
+    ordered = sorted(notes, key=lambda n: (n.start, n.pitch))
+    chords: list[list[Note]] = []
+    for n in ordered:
+        if chords and n.start - chords[-1][0].start <= CHORD_GAP:
+            chords[-1].append(n)
+        else:
+            chords.append([n])
 
     def edge(side: str, group: list[int]) -> int:
         return group[0] if side == "left" else group[-1]
 
-    held: list[tuple[float, float, int, str]] = []  # (start, end, pitch, side) of keys still down
-    ordered = sorted(notes, key=lambda n: (n.start, n.pitch))
-    i = 0
-    while i < len(ordered):
-        t = ordered[i].start
-        j = i
-        while j < len(ordered) and ordered[j].start - t <= CHORD_GAP:
-            j += 1
-        chord, i = ordered[i:j], j
-        held = [h for h in held if h[1] > t + CHORD_GAP and t - h[0] < HOLD_WINDOW]
-        holding = {s: [p for _, _, p, hs in held if hs == s] for s in pos}
+    # A history: (cost, each hand's outer note smoothed, keys still down as (start, end, pitch,
+    # side), the last chord as (start, pitch, side) when it was a single note, and the cut of
+    # every chord so far as a linked list (k, earlier...)).
+    beam = [(0.0, {"left": split_note - 12.0, "right": split_note + 7.0}, (), None, None)]
+    for chord in chords:
+        t = chord[0].start
         pitches = sorted({n.pitch for n in chord})
+        if left_odds is None:
+            surprise = None
+        else:  # per pitch: (cost in the left hand, cost in the right hand)
+            odds = {n.pitch: min(0.99, max(0.01, left_odds.get((round(n.start, 4), n.pitch), 0.5))) for n in chord}
+            surprise = {p: (-MODEL_WEIGHT * math.log(o), -MODEL_WEIGHT * math.log(1 - o)) for p, o in odds.items()}
+        options: dict[tuple, tuple] = {}
+        for so_far, pos, held, line, trail in beam:
+            held = tuple(h for h in held if h[1] > t + CHORD_GAP and t - h[0] < HOLD_WINDOW)
+            holding = {s: [p for _, _, p, hs in held if hs == s] for s in pos}
+            for k in range(len(pitches) + 1):
+                total = so_far
+                moved = dict(pos)
+                for side, group in (("left", pitches[:k]), ("right", pitches[k:])):
+                    if not group:
+                        continue
+                    reach = group + holding[side]
+                    total += 10 * max(0, max(reach) - min(reach) - HAND_REACH)
+                    total += abs(edge(side, group) - pos[side])
+                    if surprise is None:
+                        total += CROSS_COST * sum((p >= split_note) != (side == "right") for p in group)
+                    else:
+                        total += sum(surprise[p][side == "right"] for p in group)
+                    moved[side] = (pos[side] + edge(side, group)) / 2
+                if k and holding["right"] and pitches[k - 1] > min(holding["right"]):
+                    total += 10  # the left hand would cross over a key the right hand holds
+                if k < len(pitches) and holding["left"] and pitches[k] < max(holding["left"]):
+                    total += 10
+                single = (t, pitches[0], "left" if k else "right") if len(pitches) == 1 else None
+                if single and line and t - line[0] <= LINE_GAP and abs(pitches[0] - line[1]) <= LINE_STEP and single[2] != line[2]:
+                    total += LINE_COST  # the line would hop to the other staff
+                down = held + tuple((n.start, n.end, n.pitch, "left" if n.pitch in pitches[:k] else "right") for n in chord)
+                # Histories that leave the hands in the same place holding the same keys play on
+                # alike: keep only the cheaper, so the beam holds different ideas, not copies.
+                state = (round(moved["left"]), round(moved["right"]), tuple(sorted((p, s) for _, _, p, s in down)), single and single[2])
+                if state not in options or total < options[state][0]:
+                    options[state] = (total, moved, down, single, (k, trail))
+        beam = heapq.nsmallest(BEAM, options.values(), key=lambda h: h[0])
 
-        def cost(k: int) -> float:
-            total = 0.0
-            for side, group in (("left", pitches[:k]), ("right", pitches[k:])):
-                if not group:
-                    continue
-                reach = group + holding[side]
-                total += 10 * max(0, max(reach) - min(reach) - HAND_REACH)
-                total += abs(edge(side, group) - pos[side])
-                total += CROSS_COST * sum((p >= split_note) != (side == "right") for p in group)
-            if k and holding["right"] and pitches[k - 1] > min(holding["right"]):
-                total += 10  # the left hand would cross over a key the right hand holds
-            if k < len(pitches) and holding["left"] and pitches[k] < max(holding["left"]):
-                total += 10
-            return total
-
-        k = min(range(len(pitches) + 1), key=cost)
-        for side, group in (("left", pitches[:k]), ("right", pitches[k:])):
-            if group:
-                pos[side] = (pos[side] + edge(side, group)) / 2
+    cuts: list[int] = []
+    trail = min(beam, key=lambda h: h[0])[4] if chords else None
+    while trail is not None:
+        k, trail = trail
+        cuts.append(k)
+    sides: dict[tuple[float, int], str] = {}
+    for chord, k in zip(chords, reversed(cuts)):
+        low = set(sorted({n.pitch for n in chord})[:k])
         for n in chord:
-            side = "left" if n.pitch in pitches[:k] else "right"
-            sides[(round(n.start, 4), n.pitch)] = side
-            held.append((n.start, n.end, n.pitch, side))
+            sides[(round(n.start, 4), n.pitch)] = "left" if n.pitch in low else "right"
     return sides
 
 
 def split_resolver(score: Score, parts: set[int], split_note: int = 60):
     """Note -> 'right' | 'left' for the notes of parts the hands share. The split is worked
-    out over the whole piece, so one hand, a bar range and the sheet all agree."""
-    key = (frozenset(parts), split_note)
+    out over the whole piece, so one hand, a bar range and the sheet all agree. It is kept
+    on the Score and in <home>/derived (a long piece takes the hand model a while)."""
+    from . import hand_model
+
+    key = (frozenset(parts), split_note, hand_model.splitter())
     sides = score._sides.get(key)
     if sides is None:
-        sides = score._sides[key] = split_hands(as_played(score, [n for n in score.notes if n.part in parts]), split_note)
+        sides = score._sides[key] = _cached_split(score, parts, split_note)
     return lambda n: sides.get((round(n.start, 4), n.pitch)) or ("right" if n.pitch >= split_note else "left")
+
+
+SPLIT_VERSION = 5  # bump when split_hands changes, so cached splits are worked out again
+
+
+def _cached_split(score: Score, parts: set[int], split_note: int) -> dict[tuple[float, int], str]:
+    import json
+
+    from . import hand_model, library
+
+    notes = as_played(score, [n for n in score.notes if n.part in parts])
+    if not score.path or not pathlib.Path(score.path).is_file():
+        return split_hands(notes, split_note)
+    try:
+        extra = f"hands-v{SPLIT_VERSION}|{hand_model.splitter()}|{sorted(parts)}|{split_note}|{sorted(octave_up_parts(score))}"
+        cache = library.derived_path(score.path, "hands.json", extra)
+    except OSError:
+        return split_hands(notes, split_note)
+    try:
+        return {(start, pitch): side for start, pitch, side in json.loads(cache.read_text(encoding="utf-8"))}
+    except (OSError, ValueError, TypeError):
+        pass
+    sides = split_hands(notes, split_note)
+    try:
+        cache.write_text(json.dumps([[start, pitch, side] for (start, pitch), side in sides.items()]), encoding="utf-8")
+    except OSError:
+        pass
+    return sides
 
 
 def _split(score: Score, notes: list[Note], hand: str, split_note: int, parts: set[int]) -> list[Note]:

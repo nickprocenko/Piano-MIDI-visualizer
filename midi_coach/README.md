@@ -23,7 +23,7 @@ asking Claude to start each run:
 |---------|--------------|
 | Lesson | Any lesson in `%USERPROFILE%\MidiCoach\lessons`, grouped by category (newest first in each), or the score Claude just showed. See [Lesson categories](#lesson-categories) |
 | Input | MIDI input to listen on (remembered). If the keyboard is busy — e.g. the visualizer has it open — the `Coach` loopMIDI port is used instead |
-| Learn / Rehearse / Record | Learn = the cursor waits for the right notes (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`); Record = play over the metronome and get it back as sheet music (below) |
+| Learn / Rehearse / Record | Learn = the cursor waits on each chord for the right notes, then flows on at the tempo slider's speed (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`); Record = play over the metronome and get it back as sheet music (below) |
 | Hand, Bars | Practice one hand (the other is ignored) or a bar range |
 | Loop | Restart at the end of the range; each pass is saved and graded as its own take |
 | Start / Stop | One session at a time, shared with Claude |
@@ -46,7 +46,7 @@ generate, so the coach speaks just after a pass ends, not mid-pass.
 **Record mode.** Pick **Record**, set the metronome's BPM and beats per bar, press **● Record**,
 and play after the count-in (one bar, two if the bar is short). Press Stop when you're done
 (10 seconds of silence also stops). What you played is snapped to the beat — sixteenths, or
-triplets where they fit clearly better — split between the hands by where they are on the keyboard (not at a fixed key), given a key signature,
+triplets where they fit clearly better — split between the hands as a pianist would play them (not at a fixed key; see [Splitting one part between the hands](#splitting-one-part-between-the-hands)), given a key signature,
 and saved as a lesson (`Recording 2026-10-20 17-52`, under *Recordings*) that appears on the page straight away,
 ready to practise in Learn or Rehearse. It's a readable sketch, not an engraving: notes held
 under a moving line in the same hand are shortened. Claude's `transcribe_take` does the same for
@@ -93,6 +93,33 @@ Every request's cost is added up in `%USERPROFILE%\MidiCoach\ai_spend.json`. Aft
 until tomorrow. A typical exchange on Haiku costs well under a cent; a new lesson from Sonnet,
 a few cents.
 
+### Deeper questions and song lessons (on your Claude subscription)
+
+Questions that need real teaching go from the Maestro to **Claude Code**, signed in with your
+claude.ai account, so they use your subscription rather than API credits:
+
+- *"Teach me this song."* / *"Next section."* / *"Why is bar twelve so hard?"*
+- *"What's the story behind this piece?"* / *"Explain the chords in the bridge."*
+- *"Make me a practice plan for this week."* / *"Ask Desktop."* / *"Go deeper."*
+
+The Maestro says it'll think it over. About half a minute later the answer comes in the
+Maestro's voice. A song lesson goes one section at a time: the Maestro explains the section,
+plays it through the keyboard, then starts a Learn run on those bars. A follow-up within two
+hours continues the same conversation, so *"next section"* picks up where you left off.
+
+One-time setup: install Claude Code (`irm https://claude.ai/install.ps1 | iex` in PowerShell)
+and sign in once by running `claude`. Each run connects back to the coach through a local MCP
+endpoint (`http://127.0.0.1:8780/mcp`). The run gets the coach's tools and web search, and no
+file or command access. Usage counts toward your plan's limits.
+
+If Claude Code isn't installed, or a run fails (signed out, usage limit), the question is saved
+to `~/MidiCoach/maestro_inbox.json`. In Claude Desktop, say *"check the Maestro's inbox"* and it
+answers from there.
+
+**The Maestro's notebook.** `~/MidiCoach/maestro_notes.md` holds lasting facts about you:
+goals, pieces you're learning, weak spots, how you like to be taught. The voice chat, the deep
+answers and Claude Desktop all read it and add to it (`remember`). Edit it freely.
+
 ## Custom lessons, pushed live
 
 Ask Claude for an exercise and it appears on the coach page **immediately** — no file to
@@ -106,8 +133,8 @@ Learn Mode (falling notes plus sheet music). For example:
 Claude writes each hand in music21 *tinyNotation* (`g4 a b c' d'2 r4 d'8 c' b1`,
 chords as `chord{GG2 BB D}`), full MusicXML, or cuts an excerpt from a reference. The
 server validates it (a typo is rejected instead of silently dropped), returns a
-bar-by-bar readout so Claude can check it, saves it to `%USERPROFILE%\MidiCoach\lessons\Exercises`
-and publishes it. Lessons are normal references afterwards, so recording, Wait/Rehearsal
+bar-by-bar readout so Claude can check it, saves it to `%USERPROFILE%\MidiCoach\lessons\AI exercises`
+(an excerpt of a real piece: `Exercises`) and publishes it. Lessons are normal references afterwards, so recording, Wait/Rehearsal
 grading, heat maps and `progress` all work on them.
 
 ### Lesson categories
@@ -116,16 +143,66 @@ Each folder in `%USERPROFILE%\MidiCoach\lessons` is a heading in the page's Less
 
 | Category | What goes there |
 |----------|-----------------|
+| Needs review | Lessons made from a file that nobody has checked against the music yet — new song lessons land here |
 | Solo piano | Piano arrangements of whole pieces (both hands, melody included) |
 | Vocals & accompaniment | Songs with a vocal line (and lyrics) above the piano part you play |
-| Exercises | Scales, drills and excerpts — where Claude's and the Maestro's new lessons go |
+| Exercises | Excerpts cut from real pieces (`create_lesson` with `from_reference`) |
+| AI exercises | Lessons composed entirely by Claude or the Maestro (scales, drills, studies) |
 | Recordings | Your Record-mode takes written out as sheet music |
 
 Any other folder you make there becomes a category too; files left directly in `lessons`
 show under *Unsorted*. Ask Claude to file something (*"put the Rousseau Piano Man under Solo
-piano"*) and `organize_lesson` moves it — from the lessons or from the reference library —
-and updates your takes and saved part choice so progress history stays with it. Moving files
-yourself in Explorer works for the menu, but takes would still point at the old path.
+piano"*, *"Let It Be is checked — move it to Vocals & accompaniment"*) and `organize_lesson`
+moves it — from the lessons or from the reference library — and updates your takes and saved
+part choice so progress history stays with it. Moving files yourself in Explorer works for the
+menu, but takes would still point at the old path.
+
+**Where a lesson came from** is kept in the file (MusicXML `<identification><source>`): the
+source file, whether the notes were converted from MIDI (lengths and rests read from how long
+keys were held — the part most worth checking) or taken from a MusicXML score, and what was
+changed. The Lesson menu marks MIDI conversions *· from MIDI* and shows the whole note when you
+hover over a lesson; the status line repeats the tag when you load one. Categories say what you
+practise; the source note says how far to trust the notes.
+
+### Song lessons
+
+*"Make a song lesson from Let It Be"* — `make_song_lesson` writes a band file as its vocal line
+over the piano part you play (`python -m midi_coach.songs "Let It Be" …` does the same from a
+terminal). The tune is the part named vocal / melody / lead, else a voice or lead instrument; the
+result says which (a sound effect or the highest strings is a guess — pass `melody_part`). A
+karaoke MIDI file's lyrics go under the tune. Time signature changes are kept, and the key
+signature changes where the song modulates (below). Every note read back is checked against the
+source, and the lesson goes to *Needs review* with its source note.
+
+### Readable sheet music: rules, checked and looked at
+
+Every sheet the coach writes (piano sheets, transcriptions, song lessons) is held to the rules in
+`midi_coach/engraving.py`, checked on what the reader sees — each one a mistake found once that
+must not come back: no missing or needless accidentals (none on every E flat in E flat major; a
+natural on A3 after A2 natural), no nested or odd tuplets (one grid per beat, sixteenths or
+triplet eighths), nothing shorter than a sixteenth, no double dots, no short gaps inside the
+sung line, no hyphen leading to a new word, at most two voices a staff, no needless ties,
+ledger lines kept in check with clef changes or an 8va/8vb over a passage (never a needless or
+crowded one), key changes no closer than six bars, and the title printed once. And no note of
+the source may be lost: every song lesson is read back and compared note for note (an 8vb keeps
+the true pitch for grading). A source played in live, whose beat can't be recovered, is refused.
+
+```bat
+.venv\Scripts\python -m midi_coach.engraving "%USERPROFILE%\MidiCoach\lessons\Needs review\X.musicxml" --png out
+.venv\Scripts\python -m midi_coach.render lesson.musicxml bars.png 1 8
+```
+
+The first lists the rules a score breaks, with its worst bars, and draws bars 1–8 and those bars;
+the second draws any bars, with the same library as the coach page (in a headless Chrome or
+Edge), so a score can be looked at — what the rules don't cover yet shows up there. Song lessons
+report their findings under `readability`; the tests hold the band sheets in
+`test_sheet_conventions.py` to the rules too.
+
+**Key signatures.** Piano sheets, transcriptions and song lessons choose a key signature bar by
+bar — the one leaving the fewest accidentals — and only change it where the music stays in a new
+key for a while: about six bars for a modulation that lasts (a last chorus a step up), twice that
+for a passage that comes back. A borrowed chord or a short excursion gets accidentals instead, as
+a printed score would.
 
 For the visualizer push (`to_visualizer=True`) the visualizer must be connected (Settings →
 Hardware → *Practice Coach* → Connect; it
@@ -141,7 +218,7 @@ start a session; you can also show it inside the visualizer (below).
 
 | Mode | Cursor | Grading |
 |------|--------|---------|
-| `wait` | Holds on each chord until you play every note of it (Synthesia *Melody Practice*) | Notes turn **green** as you hit them, the next chord is **cyan**, wrong keys flash in red. Time stuck per bar is recorded. |
+| `wait` | Holds on each chord until you play every note of it (Synthesia *Melody Practice*), then flows on at `tempo_percent` through held notes and rests to the next one instead of jumping | Notes turn **green** as you hit them, the next chord is **cyan**, wrong keys flash in red. Time stuck per bar is recorded. |
 | `rehearsal` | Starts on your first note and moves at `tempo_percent` (Synthesia *Song Recital*) | Notes turn **green** when hit within ±200 ms, **red** when they pass unplayed. |
 | `free` | Score shown, no live grading | Analyzed after you stop (the original behavior). |
 
@@ -235,6 +312,7 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and show it on the coach page (`to_visualizer` also pushes it into Learn Mode) |
 | `send_lesson` | Show an existing lesson or reference on the coach page (`to_visualizer`: Learn Mode too) |
 | `organize_lesson` | Move a lesson or reference into a Lesson menu category (optionally renaming it); takes and part choices follow |
+| `make_song_lesson` | A band file as its vocal line (with karaoke lyrics) over your piano part, key and time signature changes included; saved in *Needs review* with a note on where it came from |
 | `search_chord_charts` | Search Ultimate Guitar (chords, tabs, bass, ukulele, drums, Guitar Pro), plus sheet-music search links |
 | `get_chord_chart` | A chart's key, capo, chords, per-section progression and text; transpose; with `reference`, suggests the transpose that matches the score |
 | `chords_in_score` | Names the chord in each bar (or half bar, or beat) of a reference from its notes, plus the estimated key |
@@ -262,6 +340,27 @@ Your answer is saved with `set_parts` (in `<home>/part_choices.json`), and recor
 comparison, playback, the score and Learn Mode all use those parts from then on. Drums are
 always left out unless asked for by part number. If the file changes so its parts no longer
 match, the saved choice is ignored and you're asked again.
+
+### Splitting one part between the hands
+
+When both hands come from one track (a solo-piano file on one track, or a band's piano part),
+the notes are split by a search over the whole piece that keeps each hand playable: within
+reach (counting keys still held), near where it just played, a line of single notes in one
+hand. When it's installed, a trained model steers the search: the hand-part network from
+[PM2S](https://github.com/cheriell/PM2S) (Liu et al., ISMIR 2022, MIT licence), run with
+onnxruntime, which reads the hands from the music rather than from a split key. The model
+alone sometimes gives one hand a chord two octaves wide or a jump no hand makes, and now and
+then has the hands the wrong way round; the search overrules it there. Measured on the 797
+two-track piano files in `reference/` (`tools/hand_split_bench.py`), about 93% of notes go to
+the right hand with the model and 90% without (87% for a split at middle C), and seven bars
+in ten have no note in the wrong hand, against one in two.
+
+The model is one file, `%USERPROFILE%\MidiCoach\models\pm2s_hand_part.onnx` (~41 MB). It is
+built once from PM2S's published weights by `tools/export_pm2s_hand.py`, which needs PyTorch
+in a separate, throwaway environment (the steps are at the top of the script); the coach itself
+needs only onnxruntime. Check it with `.venv\Scripts\python -m midi_coach.hand_model`. Each
+split is cached in `<home>/derived`, and sheets made before the model was installed are
+rebuilt with it.
 
 ## Cross-referencing charts and recordings
 
@@ -318,6 +417,10 @@ Takes are saved as `.mid` plus `.json` in `%USERPROFILE%\MidiCoach\takes` (overr
 | `MIDI_COACH_NO_BROWSER` | — | Set to stop Claude opening the browser automatically |
 | `ANTHROPIC_API_KEY` | `~/MidiCoach/anthropic_api_key.txt` | API key for talking to the Maestro |
 | `MIDI_COACH_DAILY_CAP` | `0.50` | Daily voice-chat spending limit in dollars |
+| `MIDI_COACH_CLAUDE` | `claude` on PATH, else `~/.local/bin/claude.exe` | Claude Code, for the Maestro's deep questions |
+| `MIDI_COACH_DEEP_MODEL` | `sonnet` | Model Claude Code uses for deep questions |
+| `MIDI_COACH_MCP_PORT` | `8780` | Local MCP endpoint those runs connect to (next free port if taken) |
+| `MIDI_COACH_HAND_MODEL` | `<home>/models/pm2s_hand_part.onnx` | The hand model to split parts with; `off` uses the search instead |
 
 ## Development
 
@@ -329,4 +432,8 @@ python -m pytest midi_coach/tests
 The tests use synthetic performances and a fake `rtmidi` module, so they run without hardware.
 `test_sheet_conventions.py` also holds the piano sheets of a few band files from the downloaded
 `reference/` library to piano-notation conventions (reach, clefs, accidentals, marks); songs that
-aren't downloaded are skipped.
+aren't downloaded are skipped. The tests split hands with the search (`MIDI_COACH_HAND_MODEL=off`),
+so they pass with or without the model; one more test checks the model when it is installed.
+
+`tools/hand_split_bench.py` scores the hand split against every piano in `reference/` that is
+already on two tracks (`--scan` finds them once; `--against HEAD` adds the committed version).
