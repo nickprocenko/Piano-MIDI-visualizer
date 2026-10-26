@@ -11,6 +11,8 @@ Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/"
 - Rising-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
 - **Learn Mode** — drop a MIDI or MusicXML file, choose tracks and hands, and follow along at your own pace (Wait or Free-play)
 - **Freeplay** — just plug in and play, no file needed
+- **Sound** — Watch Play plays MIDI files out loud with a player bar (play/pause, seek, speed); a built-in synth with 12 instruments plus a drum kit, picked automatically from each track's General MIDI program or chosen per track
+- **Output routing** — send each track (and your live keyboard) to the built-in synth or any MIDI output on its own channel, to drive hardware synths or a VST through loopMIDI
 - Animated fluid ink effects (GPU-accelerated via WebGL)
 - **Shader Notes** — render the falling notes with GLSL fragment shaders (built-in presets like Twisty Ribbons and Neon Glow Bars, or paste your own Shadertoy-style `mainImage`)
 - Animated background image / GIF slideshow
@@ -54,6 +56,7 @@ Open **SETTINGS** from the main menu. Tabs:
 | Keyboard | Piano height, brightness, visibility |
 | Display | Background slides, frame rate cap |
 | Hardware | MIDI CC mappings |
+| Sound | Synth volume and reverb, where new songs and your live keyboard play, Learn mode play-along, MIDI outputs and All notes off |
 | LED Output | ESP32 serial / BLE config |
 | Audience | WebSocket URL for live audience colour votes |
 | Themes | Save / load / delete colour presets |
@@ -68,6 +71,27 @@ Open **SETTINGS** from the main menu. Tabs:
 5. Click **▶ Start Learning**.
 
 A floating transport HUD lets you pause, loop, and adjust speed without leaving the highway.
+
+Learn mode plays the parts you set to **—** (not yours) along with you, on each track's output. Change this under **Settings → Sound → Play along**.
+
+## Sound and MIDI output routing
+
+**▶ Watch Play** plays the file out loud. The bottom bar has play/pause (Space), stop, seek, speed, the synth volume and a **♪ Sound** button that opens the routing settings.
+
+Each track row (on the track screen and in the sidebar **Tracks** tab) has a destination:
+
+- **Built-in synth**: choose an instrument (Grand Piano, Electric Piano, Organ, Strings, Warm Pad, Brass, Synth Lead, Flute, Guitar / Pluck, Bass, Marimba / Vibes, Bells, Drum Kit) and a level. **Auto** follows the file's General MIDI program changes, and channel 10 is the drum kit.
+- **MIDI → *port***: send the track to a hardware synth or a virtual port. Pick the channel (or keep the file's) and a program change (or pass the file's own). The file's pedal, controllers and pitch bend go too, and they are brought up to date when you seek.
+- **Off**.
+
+Routes are saved for each song. **Settings → Sound** also sets:
+
+- where new songs play;
+- **all tracks** of the open song at once;
+- where your live keyboard goes (Off by default, because the keyboard has its own sound), on any channel;
+- **All notes off**.
+
+To play a VST, create a virtual port with [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html), select it as the MIDI input in your plugin host or DAW, then choose it in the visualizer. If the live keyboard's output loops back into the selected input, the thru turns itself off.
 
 ## Practice Coach for Claude (`midi_coach/`)
 

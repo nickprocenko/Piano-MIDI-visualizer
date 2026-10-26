@@ -176,6 +176,24 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 #lhud-set-b{background:rgba(210,70,70,.18);border-color:rgba(210,70,70,.6);color:rgba(240,100,100,1);font-weight:700;padding:4px 10px}
 #lhud-set-b:hover{background:rgba(210,70,70,.32)}
 #lhud-loop-a-time,#lhud-loop-b-time{font-size:10px;opacity:.7;min-width:30px}
+/* Watch Play — bottom player bar */
+#player-hud{display:none;position:fixed;bottom:0;left:0;right:0;background:rgba(10,12,18,.93);align-items:center;gap:10px;padding:8px 16px;flex-wrap:wrap;z-index:999;backdrop-filter:blur(10px);border-top:1px solid rgba(255,255,255,.1);box-shadow:0 -4px 28px rgba(0,0,0,.55)}
+#player-hud.visible{display:flex}
+#player-hud button{padding:4px 12px;border-radius:5px;border:1px solid var(--border);background:var(--btn-bg);color:var(--text);cursor:pointer;font-family:inherit;font-size:13px}
+#player-hud button:hover{background:var(--btn-hover)}
+#player-hud label{font-size:11px;opacity:.7;white-space:nowrap}
+#player-hud select{background:var(--btn-bg);border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:12px;padding:2px 4px}
+#ph-time{font-size:11px;opacity:.7;white-space:nowrap;font-variant-numeric:tabular-nums;min-width:76px}
+#ph-seek{flex:1;min-width:120px;accent-color:var(--accent);cursor:pointer}
+#ph-vol{width:80px;accent-color:var(--accent);cursor:pointer}
+/* Track routing (track config screen + Tracks tab) */
+.track-row{flex-wrap:wrap}
+.track-route{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.track-route select{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:11px;padding:3px 4px;max-width:190px}
+.track-route input[type=range]{width:70px;accent-color:var(--accent)}
+.snd-out{font-size:12px;color:var(--on-color);margin-bottom:4px}
+.snd-out.none{color:var(--muted)}
+.snd-hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.45}
 /* Scenes sidebar tab */
 .scene-item{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border)}
 .scene-item:last-child{border-bottom:none}
@@ -266,6 +284,17 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
     </div>
   </div>
 </div>
+<div id="player-hud">
+  <button id="ph-play" title="Play / pause (Space)">▶</button>
+  <button id="ph-stop" title="Stop and go back to the start">■</button>
+  <span id="ph-time">0:00 / 0:00</span>
+  <input type="range" id="ph-seek" min="0" max="1000" value="0" title="Seek">
+  <label for="ph-speed">Speed</label>
+  <select id="ph-speed"><option value="50">50%</option><option value="75">75%</option><option value="90">90%</option><option value="100" selected>100%</option><option value="110">110%</option><option value="125">125%</option><option value="150">150%</option></select>
+  <label for="ph-vol">Synth</label>
+  <input type="range" id="ph-vol" min="0" max="100" data-au="synth_volume" title="Built-in synth volume">
+  <button id="ph-sound" title="Instruments and MIDI output routing">♪ Sound</button>
+</div>
 <div id="notation-strip">
   <div id="notation-drag-handle">⠿</div>
   <div id="notation-svg-wrap">
@@ -339,6 +368,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
     <button class="snav-btn" data-stab="display">Display</button>
     <div class="snav-title">Hardware</div>
     <button class="snav-btn" data-stab="hardware">Hardware</button>
+    <button class="snav-btn" data-stab="sound">Sound</button>
     <button class="snav-btn" data-stab="led">LED Output</button>
     <button class="snav-btn" data-stab="audience">Audience</button>
     <div class="snav-title">Presets</div>
@@ -392,6 +422,8 @@ const Config = {
     kick_chat:{enabled:0, channel_slug:'', chatroom_id:'', transition_ms:600},
     coach:{enabled:0, url:'http://127.0.0.1:8765/'},
     hardware:{sustain_enabled:1,midi_cc_mappings:[]},
+    // dest: 'off' | 'synth' | 'out:<MIDI output name>'; live_ch 0 keeps the keyboard's channel
+    audio:{synth_volume:70, reverb:20, default_dest:'synth', live_dest:'off', live_ch:0, live_inst:'piano', learn_sound:'others'},
     profiles:[],
     active_profile_id:'',
     learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:true, notation_y:200, loop_start_ms:0, loop_end_ms:0},
@@ -435,6 +467,7 @@ const Config = {
   get kc(){return this.data.kick_chat;},
   get coach(){return this.data.coach;},
   get lrn(){return this.data.learn;},
+  get au(){return this.data.audio;},
 };
 Config.load();
 
@@ -828,6 +861,7 @@ class MidiHandler{
     }
   }
   _onMsg(d){
+    this._app?._liveMidi(d);
     const st=d[0]&0xF0,ch=d[0]&0x0F,n=d[1],v=d[2];
     if(st===0x90&&v>0){
       if(this.activeNotes.has(n))this.reattackedNotes.add(n);
@@ -872,8 +906,9 @@ class MidiHandler{
   }
   _startQwerty(){
     this._qwerty=true; this.portName='Computer Keyboard'; this.connected=true;
-    window.addEventListener('keydown',this._kd=e=>{if(e.repeat)return;const n=QWERTY[e.code];if(n!=null){e.preventDefault();this.activeNotes.add(n);if(this._app?._learn?.active)this._app._onLearnNoteOn(n,0);}});
-    window.addEventListener('keyup',this._ku=e=>{const n=QWERTY[e.code];if(n!=null)this.activeNotes.delete(n);});
+    const typing=e=>/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName);
+    window.addEventListener('keydown',this._kd=e=>{if(e.repeat)return;const n=QWERTY[e.code];if(n!=null){e.preventDefault();this.activeNotes.add(n);if(!typing(e))this._app?._liveMidi([0x90,n,100],true);if(this._app?._learn?.active)this._app._onLearnNoteOn(n,0);}});
+    window.addEventListener('keyup',this._ku=e=>{const n=QWERTY[e.code];if(n!=null){this.activeNotes.delete(n);this._app?._liveMidi([0x80,n,0],true);}});
   }
   _stopQwerty(){
     if(this._kd)window.removeEventListener('keydown',this._kd);
@@ -1098,8 +1133,11 @@ function parseMidi(buf){
       if(tp===0x90||tp===0x80){
         const n=u8(),vel=u8();
         evts.push({tick,type:tp===0x90?'on':'off',ch:st&0x0F,n,vel,ti});
-      }else if(tp===0xB0||tp===0xA0||tp===0xE0){u8();u8();}
-      else if(tp===0xC0||tp===0xD0){u8();}
+      }else if(tp===0xB0){const c=u8(),val=u8();evts.push({tick,type:'cc',ch:st&0x0F,cc:c,value:val});}
+      else if(tp===0xE0){const lsb=u8(),msb=u8();evts.push({tick,type:'bend',ch:st&0x0F,value:(msb<<7)|lsb});}
+      else if(tp===0xC0){evts.push({tick,type:'program',ch:st&0x0F,program:u8()});}
+      else if(tp===0xA0){u8();u8();}
+      else if(tp===0xD0){u8();}
       else if(st===0xFF){
         const mt=u8(),ml=vlq();
         if(mt===0x51&&ml===3)evts.push({tick,type:'tempo',us:(u8()<<16)|(u8()<<8)|u8()});
@@ -1127,8 +1165,13 @@ function parseMidi(buf){
   for(let ti=0;ti<tracks.length;ti++) for(const e of tracks[ti]){
     if(e.type==='on'||e.type==='off')
       all.push({timeMs:tickToMs(e.tick),type:e.type==='on'?'noteon':'noteoff',note:e.n,velocity:e.vel,channel:e.ch??0,track:ti});
+    else if(e.type==='cc')all.push({timeMs:tickToMs(e.tick),type:'cc',cc:e.cc,value:e.value,channel:e.ch,track:ti});
+    else if(e.type==='bend')all.push({timeMs:tickToMs(e.tick),type:'bend',value:e.value,channel:e.ch,track:ti});
+    else if(e.type==='program')all.push({timeMs:tickToMs(e.tick),type:'program',program:e.program,channel:e.ch,track:ti});
   }
-  all.sort((a,b)=>a.timeMs-b.timeMs||(a.type==='noteoff'?-1:1));
+  // At the same moment: note-offs, then programs and controllers, then note-ons
+  const rank=e=>e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0)?0:e.type==='noteon'?2:1;
+  all.sort((a,b)=>a.timeMs-b.timeMs||rank(a)-rank(b));
   all._trackNames=trackNames;
   return all;
 }
@@ -1176,24 +1219,65 @@ function parseMidiMeta(buf){
 }
 
 class MidiFilePlayer{
-  constructor(){this.events=[];this.playing=false;this.t0=0;this.pos=0;this.idx=0;this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';this.meta=null;this._trackNames=[];}
+  constructor(){
+    this.events=[];this.playing=false;this.pos=0;this._wall=0;this.speed=1;this.idx=0;this.sidx=0;this.durationMs=0;
+    this.activeNotes=new Set();this.noteChannel=new Map();this.noteVelocity=new Map();this.filename='';this.meta=null;this._trackNames=[];
+    this.programs={vid:[],ch:[]};  // first program change per track+channel and per channel
+    // Sound hooks: onSound(event, performance.now() time) gets every event up to
+    // SOUND_LOOKAHEAD_MS ahead of the playhead; onStart(posMs) on play/resume; onHalt(natural) on stop
+    this.onSound=null;this.onStart=null;this.onHalt=null;
+  }
   load(buf,name){
     this.filename=name; const evts=parseMidi(buf); this.events=evts; this._trackNames=evts._trackNames||[];
     try{this.meta=parseMidiMeta(buf);}catch(e){this.meta=null;}
+    this.durationMs=evts.length?evts[evts.length-1].timeMs:0;
+    this.programs={vid:[],ch:[]};
+    for(const e of evts)if(e.type==='program'){
+      const vid=e.track*16+e.channel;
+      this.programs.vid[vid]??=e.program; this.programs.ch[e.channel]??=e.program;
+    }
     this.stop();
   }
-  play(){if(!this.events.length)return;this.playing=true;this.t0=performance.now()-this.pos;this.idx=this._seek(this.pos);}
-  pause(){this.playing=false;this.pos=performance.now()-this.t0;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();}
-  stop(){this.playing=false;this.pos=0;this.idx=0;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();}
+  get positionMs(){return this.playing?Math.min(this.durationMs,this.pos+(performance.now()-this._wall)*this.speed):this.pos;}
+  play(){
+    if(!this.events.length)return;
+    if(this.pos>=this.durationMs)this.pos=0;
+    this.playing=true;this._wall=performance.now();this.idx=this.sidx=this._seek(this.pos);
+    this.onStart?.(this.pos);
+  }
+  pause(){
+    if(this.playing)this.pos=this.positionMs;
+    this.playing=false;this._clearNotes();this.onHalt?.(false);
+  }
+  stop(){this.playing=false;this.pos=0;this.idx=this.sidx=0;this._clearNotes();this.onHalt?.(false);}
+  seek(ms){
+    const was=this.playing;
+    if(was)this.pause();
+    this.pos=Math.max(0,Math.min(ms,this.durationMs));this.idx=this.sidx=this._seek(this.pos);
+    if(was)this.play();
+  }
+  setSpeed(s){
+    if(this.playing){this.pos=this.positionMs;this._wall=performance.now();}
+    this.speed=s;
+  }
+  _clearNotes(){this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();}
   update(){
     if(!this.playing)return false;
-    const el=performance.now()-this.t0; let ch=false;
+    const now=performance.now(), el=this.pos+(now-this._wall)*this.speed; let ch=false;
+    if(this.onSound){
+      const horizon=el+SOUND_LOOKAHEAD_MS*this.speed;
+      while(this.sidx<this.events.length&&this.events[this.sidx].timeMs<=horizon){
+        const e=this.events[this.sidx++], when=now+(e.timeMs-el)/this.speed;
+        if(e.type==='noteon'&&e.velocity>0&&when<now-80)continue;  // frames stalled (background tab): skip, don't burst
+        this.onSound(e,Math.max(now,when));
+      }
+    }
     while(this.idx<this.events.length&&this.events[this.idx].timeMs<=el){
       const e=this.events[this.idx++];
       if(e.type==='noteon'&&e.velocity>0){this.activeNotes.add(e.note);this.noteChannel.set(e.note,(e.track??0)*16+(e.channel??0));this.noteVelocity.set(e.note,e.velocity);ch=true;}
       else if(e.type==='noteoff'||(e.type==='noteon'&&e.velocity===0)){this.activeNotes.delete(e.note);this.noteChannel.delete(e.note);this.noteVelocity.delete(e.note);ch=true;}
     }
-    if(this.idx>=this.events.length){this.playing=false;this.activeNotes.clear();this.noteChannel.clear();this.noteVelocity.clear();this.pos=0;return true;}
+    if(this.idx>=this.events.length){this.playing=false;this._clearNotes();this.pos=0;this.idx=this.sidx=0;this.onHalt?.(true);return true;}
     return ch;
   }
   getChannelInfo(){
@@ -2369,6 +2453,38 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <button class="action-btn" id="btn-cfg-export">Export…</button>
 <label class="action-btn" style="cursor:pointer">Import… <input type="file" id="inp-cfg-import" accept=".json" style="display:none"></label>
 </div></div>`,
+    sound:(()=>{
+      const au=Config.au, sel='style="flex:1;min-width:0;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px"';
+      const insts=INSTRUMENTS.map(i=>`<option value="${i.id}">${i.name}</option>`).join('');
+      const chans=`<option value="0">Same as the keyboard</option>`+[...Array(16)].map((_,i)=>`<option value="${i+1}">Channel ${i+1}</option>`).join('');
+      const slider=(lbl,k)=>`<div class="row"><label>${lbl}</label><input type="range" min="0" max="100" value="${au[k]}" data-au="${k}"><span class="val" data-au-val="${k}">${au[k]}</span></div>`;
+      return `<div class="section"><h2>Built-in Synth</h2>
+${slider('Volume','synth_volume')}
+${slider('Reverb','reverb')}
+<div class="row"><label>Try an instrument</label><select class="snd-test-inst" ${sel}>${insts}</select><button class="action-btn snd-test">Play</button></div>
+<p class="snd-hint">Watch Play plays every track through the built-in synth unless you send it somewhere else. Each track can have its own instrument, or Auto picks one from the file's General MIDI program.</p>
+</div>
+<div class="section"><h2>Track Outputs</h2>
+<div class="row"><label>New songs play on</label><select data-au-sel="default_dest" data-dest-sel ${sel}></select></div>
+<div class="row"><label>This song: all tracks</label><select class="snd-all-dest" data-dest-sel ${sel}></select><button class="action-btn snd-all-apply">Apply</button></div>
+<p class="snd-hint">Set a single track's output, channel and program under its name in the Tracks list, or on the track screen before you press play. Routes are remembered for each song.</p>
+</div>
+<div class="section"><h2>Your Keyboard (Live)</h2>
+<div class="row"><label>Send to</label><select data-au-sel="live_dest" data-dest-sel data-off-label="Off (keyboard sounds itself)" ${sel}></select></div>
+<div class="row"><label>Channel</label><select data-au-sel="live_ch" ${sel}>${chans}</select></div>
+<div class="row"><label>Synth instrument</label><select data-au-sel="live_inst" ${sel}>${insts}</select></div>
+<p class="snd-hint">Leave Off if your keyboard has its own sound. Pick a MIDI output to play a hardware synth or a VST from this keyboard, re-mapped to any channel. Pedal, pitch bend and controllers go with it. The mouse and the computer keyboard use the built-in synth while this is Off.</p>
+</div>
+<div class="section"><h2>Learn Mode</h2>
+<div class="row"><label>Play along</label><select data-au-sel="learn_sound" ${sel}><option value="others">Parts set to — (not yours)</option><option value="all">All parts</option><option value="off">Off</option></select></div>
+<p class="snd-hint">Plays the parts you aren't learning as the cursor reaches them, each on its track's output. In Wait mode they wait for you too.</p>
+</div>
+<div class="section"><h2>MIDI Outputs</h2>
+<div class="snd-outputs"></div>
+<div class="row" style="margin-top:8px"><button class="action-btn snd-refresh">Find MIDI outputs</button><button class="action-btn snd-panic" style="margin-left:6px">All notes off</button></div>
+<p class="snd-hint">For a VST: create a virtual port with loopMIDI, choose it as the MIDI input in your plugin host (or DAW), then pick it here. Give each track its own channel to drive a multi-timbral instrument. Needs Chrome or Edge.</p>
+</div>`;
+    })(),
     hardware:`<div class="section"><h2>Sustain Pedal (CC 64)</h2>
 <div class="row"><label>Enable Piano Sustain</label>
 <div class="toggle-btn${hw.sustain_enabled?' on':''}" id="btn-hw-sustain">${hw.sustain_enabled?'On':'Off'}</div></div>
@@ -3359,6 +3475,37 @@ function wireSettings(root, app){
   const btnKickD=root.querySelector('#btn-kick-disconnect');
   if(btnKickD) btnKickD.addEventListener('click',()=>{app.kickChat.disconnect();});
   if(kickTrans) kickTrans.addEventListener('change',()=>{Config.kc.transition_ms=parseInt(kickTrans.value)||600;Config.save();});
+  // Sound
+  root.querySelectorAll('input[type=range][data-au]').forEach(el=>el.addEventListener('input',()=>setAudio(el.dataset.au,+el.value)));
+  root.querySelectorAll('select[data-au-sel]').forEach(el=>{
+    const k=el.dataset.auSel;
+    if(el.hasAttribute('data-dest-sel'))fillDestSelect(el,Config.au[k]); else el.value=String(Config.au[k]);
+    el.addEventListener('change',()=>setAudio(k,typeof Config._d.audio[k]==='number'?+el.value:el.value));
+  });
+  root.querySelectorAll('.snd-all-dest').forEach(el=>fillDestSelect(el,'synth'));
+  root.querySelectorAll('select[data-dest-sel]').forEach(el=>el.addEventListener('pointerdown',()=>app.router.ensureAccess()));
+  root.querySelectorAll('.snd-all-dest').forEach(el=>el.addEventListener('change',()=>{el.dataset.v=el.value;}));
+  root.querySelectorAll('.snd-all-apply').forEach(el=>el.addEventListener('click',()=>{
+    const v=el.parentElement.querySelector('.snd-all-dest').value;
+    if(!app._channelConfig?.some(Boolean)){app._showToast('Open a song first');return;}
+    app._routeAllTracks(v);
+    app._showToast('All tracks → '+(v==='synth'?'built-in synth':v==='off'?'off':v.slice(4)));
+  }));
+  root.querySelectorAll('.snd-test').forEach(el=>el.addEventListener('click',()=>{
+    const inst=el.parentElement.querySelector('.snd-test-inst').value;
+    const notes=inst==='drums'?[36,42,38,42,36,36,38,46]:[60,64,67,72];
+    notes.forEach((n,i)=>{
+      const t=performance.now()+(inst==='drums'?i*180:i*60);
+      app._synth.noteOn('test',n,100,inst,t);
+      app._synth.noteOff('test',n,t+(inst==='drums'?100:1200-i*60));
+    });
+  }));
+  root.querySelectorAll('.snd-refresh').forEach(el=>el.addEventListener('click',async()=>{
+    if(!await app.router.ensureAccess())app._showToast('MIDI access was blocked or isn\'t available (use Chrome or Edge)');
+    syncAudioControls();
+  }));
+  root.querySelectorAll('.snd-panic').forEach(el=>el.addEventListener('click',()=>{app.router.panic();app._showToast('All notes off');}));
+  syncAudioControls();
   // Practice Coach (midi-coach)
   const coachUrl=root.querySelector('#coach-url');
   const btnCoachC=root.querySelector('#btn-coach-connect');
@@ -3620,41 +3767,409 @@ function buildPanel(container, tabBar, tabs, app){
 }
 
 // ═══════════════════════════════════════════════════════
-// AUDIO SYNTH
+// SOUND — built-in synth instruments and output routing
 // ═══════════════════════════════════════════════════════
+// A patch is a few oscillators through a lowpass into an amp envelope:
+//   osc [wave, ratio to the note, gain, detune cents]; a attack s, d decay time constant s,
+//   s sustain level (0 = the note dies away by itself), r release s; ks makes low notes ring
+//   longer; f lowpass {hz, kt × note freq, vel hz at full velocity, env hz at onset, ed s, q};
+//   fm sine modulator {r ratio, i index, ed s}; vib {rate, cents, delay s}; noise burst
+//   {g, ed s, hz}; spread pans by pitch.
+const INSTRUMENTS=[
+  {id:'piano',name:'Grand Piano',osc:[['triangle',1,1,0],['sine',2,.3,1],['sawtooth',1,.06,-2],['sine',3,.08,0]],a:.003,d:1.3,s:0,r:.25,ks:.9,f:{hz:300,kt:2,vel:5200,env:2600,ed:.5,q:.4},noise:{g:.04,ed:.015,hz:3000},spread:.5},
+  {id:'epiano',name:'Electric Piano',osc:[['sine',1,1,0],['sine',2,.12,3]],fm:{r:1,i:1.4,ed:.45},a:.002,d:1.6,s:0,r:.3,ks:.6,spread:.4},
+  {id:'organ',name:'Organ',osc:[['sine',.5,.5,0],['sine',1,1,0],['sine',2,.6,0],['sine',3,.35,0],['sine',4,.3,0],['sine',8,.12,0]],a:.006,d:.05,s:.9,r:.06,vib:{rate:6.3,cents:7,delay:0}},
+  {id:'strings',name:'Strings',osc:[['sawtooth',1,.6,-8],['sawtooth',1,.6,8],['sawtooth',2,.1,0]],a:.25,d:.6,s:.85,r:.45,f:{hz:700,kt:1.2,vel:1800,q:.3},vib:{rate:5.2,cents:9,delay:.35},spread:.3},
+  {id:'pad',name:'Warm Pad',osc:[['sawtooth',1,.5,-12],['sawtooth',1,.5,12],['triangle',.5,.5,0]],a:.6,d:1.5,s:.8,r:1.3,f:{hz:400,kt:.8,vel:800,env:1500,ed:2.5,q:1.5}},
+  {id:'brass',name:'Brass',osc:[['sawtooth',1,.8,0],['sawtooth',1,.4,6]],a:.05,d:.3,s:.8,r:.15,f:{hz:250,kt:1,vel:2400,env:1800,ed:.25,q:1}},
+  {id:'lead',name:'Synth Lead',osc:[['square',1,.6,0],['sawtooth',1,.45,7]],a:.008,d:.2,s:.75,r:.12,f:{hz:1000,kt:2,vel:2200,env:1500,ed:.3,q:3},vib:{rate:5.5,cents:14,delay:.3}},
+  {id:'flute',name:'Flute',osc:[['sine',1,1,0],['triangle',2,.12,0]],a:.07,d:.2,s:.85,r:.12,noise:{g:.08,ed:.12,hz:2200},vib:{rate:5,cents:12,delay:.25}},
+  {id:'guitar',name:'Guitar / Pluck',osc:[['sawtooth',1,.6,0],['triangle',1,.5,4]],a:.002,d:.9,s:0,r:.15,ks:.6,f:{hz:200,kt:1.5,vel:2600,env:3500,ed:.12,q:1.5},spread:.3},
+  {id:'bass',name:'Bass',osc:[['sawtooth',1,.55,0],['sine',1,.9,0]],a:.004,d:.7,s:.45,r:.07,f:{hz:150,kt:1.2,vel:900,env:1300,ed:.15,q:2}},
+  {id:'mallet',name:'Marimba / Vibes',osc:[['sine',1,1,0],['sine',4,.2,0],['sine',10,.05,0]],a:.002,d:.45,s:0,r:.2,ks:.7,spread:.5},
+  {id:'bells',name:'Bells',osc:[['sine',1,1,0]],fm:{r:3.5,i:2.2,ed:1},a:.002,d:2.2,s:0,r:.8,ks:.3,spread:.4},
+  {id:'drums',name:'Drum Kit'},
+];
+const INSTRUMENT_BY_ID=Object.fromEntries(INSTRUMENTS.map(i=>[i.id,i]));
+const GM_NAMES=('Acoustic Grand Piano,Bright Acoustic Piano,Electric Grand Piano,Honky-tonk Piano,Electric Piano 1,Electric Piano 2,Harpsichord,Clavinet,'+
+  'Celesta,Glockenspiel,Music Box,Vibraphone,Marimba,Xylophone,Tubular Bells,Dulcimer,'+
+  'Drawbar Organ,Percussive Organ,Rock Organ,Church Organ,Reed Organ,Accordion,Harmonica,Tango Accordion,'+
+  'Nylon Guitar,Steel Guitar,Jazz Guitar,Clean Guitar,Muted Guitar,Overdriven Guitar,Distortion Guitar,Guitar Harmonics,'+
+  'Acoustic Bass,Fingered Bass,Picked Bass,Fretless Bass,Slap Bass 1,Slap Bass 2,Synth Bass 1,Synth Bass 2,'+
+  'Violin,Viola,Cello,Contrabass,Tremolo Strings,Pizzicato Strings,Orchestral Harp,Timpani,'+
+  'String Ensemble 1,String Ensemble 2,Synth Strings 1,Synth Strings 2,Choir Aahs,Voice Oohs,Synth Voice,Orchestra Hit,'+
+  'Trumpet,Trombone,Tuba,Muted Trumpet,French Horn,Brass Section,Synth Brass 1,Synth Brass 2,'+
+  'Soprano Sax,Alto Sax,Tenor Sax,Baritone Sax,Oboe,English Horn,Bassoon,Clarinet,'+
+  'Piccolo,Flute,Recorder,Pan Flute,Blown Bottle,Shakuhachi,Whistle,Ocarina,'+
+  'Square Lead,Saw Lead,Calliope Lead,Chiff Lead,Charang Lead,Voice Lead,Fifths Lead,Bass + Lead,'+
+  'New Age Pad,Warm Pad,Polysynth Pad,Choir Pad,Bowed Pad,Metallic Pad,Halo Pad,Sweep Pad,'+
+  'Rain FX,Soundtrack FX,Crystal FX,Atmosphere FX,Brightness FX,Goblins FX,Echoes FX,Sci-fi FX,'+
+  'Sitar,Banjo,Shamisen,Koto,Kalimba,Bagpipe,Fiddle,Shanai,'+
+  'Tinkle Bell,Agogo,Steel Drums,Woodblock,Taiko Drum,Melodic Tom,Synth Drum,Reverse Cymbal,'+
+  'Guitar Fret Noise,Breath Noise,Seashore,Bird Tweet,Telephone Ring,Helicopter,Applause,Gunshot').split(',');
+// The built-in instrument closest to a General MIDI program (channel 10 is the drum kit)
+function gmInstrument(prog,ch){
+  if(ch===9)return 'drums';
+  const p=prog|0;
+  if(p===4||p===5)return 'epiano';
+  if(p<8)return 'piano';
+  if(p<16)return [8,9,10,14].includes(p)?'bells':p===15?'guitar':'mallet';
+  if(p<24)return 'organ';
+  if(p<32)return p===29||p===30?'lead':'guitar';
+  if(p<40)return 'bass';
+  if(p===45||p===46)return 'guitar';
+  if(p===47)return 'mallet';
+  if(p<52)return 'strings';
+  if(p<56)return 'pad';
+  if(p<64)return 'brass';
+  if(p<72)return 'lead';
+  if(p<80)return 'flute';
+  if(p<88)return 'lead';
+  if(p<104)return 'pad';
+  if(p<112)return 'guitar';
+  if(p<120)return 'mallet';
+  return 'pad';
+}
+// A parsed file event as a raw channel message
+function evMsg(e){
+  const c=e.channel??0;
+  switch(e.type){
+    case 'noteon':return[0x90|c,e.note,e.velocity];
+    case 'noteoff':return[0x80|c,e.note,0];
+    case 'cc':return[0xB0|c,e.cc,e.value];
+    case 'program':return[0xC0|c,e.program];
+    case 'bend':return[0xE0|c,e.value&127,e.value>>7];
+  }
+  return null;
+}
+function escHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
+
+const SOUND_LOOKAHEAD_MS=100;  // file playback schedules notes this far ahead of the playhead
+const MAX_VOICES=72;
+
+// Polyphonic Web Audio synth. Voices belong to a `part` (a file track, Learn mode's
+// accompaniment, the live keyboard) so sustain, pitch bend and stopping act per part.
 class AudioSynth{
-  constructor(){this._ctx=null;this._active=new Map();}
+  constructor(){this._ctx=null;this._voices=[];this._held=new Map();this._sus=new Set();this._bend=new Map();this._vol=.7;this._rev=.12;}
   _ac(){
-    if(!this._ctx)this._ctx=new(window.AudioContext||window.webkitAudioContext)();
-    if(this._ctx.state==='suspended')this._ctx.resume();
+    if(!this._ctx){
+      const AC=window.AudioContext||window.webkitAudioContext;
+      if(!AC)return null;
+      const ac=this._ctx=new AC({latencyHint:'interactive'});
+      this._bus=ac.createGain();
+      this._master=ac.createGain(); this._master.gain.value=this._vol;
+      const comp=ac.createDynamicsCompressor();
+      comp.threshold.value=-14; comp.knee.value=12; comp.ratio.value=4; comp.attack.value=.003; comp.release.value=.25;
+      this._verb=ac.createConvolver(); this._verb.buffer=this._impulse(2.2);
+      this._wet=ac.createGain(); this._wet.gain.value=this._rev;
+      this._bus.connect(this._master); this._bus.connect(this._verb); this._verb.connect(this._wet); this._wet.connect(this._master);
+      this._master.connect(comp); comp.connect(ac.destination);
+      const n=ac.sampleRate*2, buf=ac.createBuffer(1,n,ac.sampleRate), d=buf.getChannelData(0);
+      for(let i=0;i<n;i++)d[i]=Math.random()*2-1;
+      this._noise=buf;
+    }
+    if(this._ctx.state==='suspended')this._ctx.resume().catch(()=>{});
     return this._ctx;
   }
-  noteOn(note){
+  _impulse(sec){
+    const ac=this._ctx, n=Math.floor(ac.sampleRate*sec), b=ac.createBuffer(2,n,ac.sampleRate);
+    for(let c=0;c<2;c++){const d=b.getChannelData(c);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,3);}
+    return b;
+  }
+  setVolume(pct){this._vol=Math.max(0,pct)/100;if(this._master)this._master.gain.setTargetAtTime(this._vol,this._ctx.currentTime,.03);}
+  setReverb(pct){this._rev=Math.max(0,pct)/100*.6;if(this._wet)this._wet.gain.setTargetAtTime(this._rev,this._ctx.currentTime,.03);}
+  // `when` is a performance.now() time; missing or past means now
+  _t(when){const ac=this._ctx;return ac.currentTime+(when==null?0:Math.max(0,(when-performance.now())/1000));}
+  noteOn(part,note,vel,instId,when,vol=1){
     const ac=this._ac();
-    this.noteOff(note);
-    const freq=440*Math.pow(2,(note-69)/12);
-    const gain=ac.createGain();
-    gain.connect(ac.destination);
-    gain.gain.setValueAtTime(0,ac.currentTime);
-    gain.gain.linearRampToValueAtTime(0.18,ac.currentTime+0.006);
-    gain.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+2.0);
-    const o1=ac.createOscillator(),o2=ac.createOscillator();
-    o1.type='triangle';o1.frequency.value=freq;
-    o2.type='triangle';o2.frequency.value=freq*2;
-    const g2=ac.createGain();g2.gain.value=0.25;o2.connect(g2);g2.connect(gain);
-    o1.connect(gain);
-    o1.start();o2.start();
-    o1.stop(ac.currentTime+2.0);o2.stop(ac.currentTime+2.0);
-    this._active.set(note,{gain});
+    if(!ac||vel<=0)return;
+    const t=this._t(when), inst=INSTRUMENT_BY_ID[instId]||INSTRUMENTS[0], drum=inst.id==='drums';
+    for(const vc of this._voices){
+      if(vc.part!==part)continue;
+      if(vc.note===note&&!vc.released)this._release(vc,t,.05);  // restrike
+      else if(drum&&(note===42||note===44)&&vc.note===46)this._kill(vc,t);  // closed hi-hat chokes the open one
+    }
+    if(this._voices.length>=MAX_VOICES)this._kill(this._voices.find(v=>v.released)||this._voices[0],t);
+    const vc=drum?this._drum(note,vel,t,vol):this._tone(inst,part,note,vel,t,vol);
+    vc.part=part; vc.note=note;
+    this._voices.push(vc);
+    const key=part+'|'+note;
+    vc.srcs[0].onended=()=>{
+      const i=this._voices.indexOf(vc); if(i>=0)this._voices.splice(i,1);
+      try{vc.out.disconnect();vc.tail.disconnect();}catch(e){}
+      if(this._held.get(key)===vc)this._held.delete(key);
+    };
+    if(!drum)this._held.set(key,vc);
   }
-  noteOff(note){
-    const n=this._active.get(note);if(!n)return;
-    const{gain}=n,ac=this._ctx;
-    gain.gain.cancelScheduledValues(ac.currentTime);
-    gain.gain.setValueAtTime(gain.gain.value,ac.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001,ac.currentTime+0.08);
-    this._active.delete(note);
+  _tone(inst,part,note,vel,t,vol){
+    const ac=this._ctx, f=440*2**((note-69)/12), v=vel/127, bend=this._bend.get(part)||0;
+    const peak=.2*vol*(.12+.88*v**1.6);
+    const out=ac.createGain(); out.gain.value=0;
+    let tail=out;
+    if(inst.spread&&ac.createStereoPanner){
+      const p=ac.createStereoPanner(); p.pan.value=Math.max(-1,Math.min(1,(note-64)/40*inst.spread));
+      out.connect(p); tail=p;
+    }
+    tail.connect(this._bus);
+    let pre=out;
+    if(inst.f){
+      const F=inst.f, fl=ac.createBiquadFilter();
+      fl.type='lowpass'; fl.Q.value=F.q??.7;
+      const base=Math.min(16000,F.hz+F.kt*f+F.vel*v);
+      fl.frequency.setValueAtTime(Math.min(16000,base+(F.env||0)*v),t);
+      if(F.env)fl.frequency.setTargetAtTime(base,t+.003,F.ed||.2);
+      fl.connect(out); pre=fl;
+    }
+    const sum=inst.osc.reduce((s,o)=>s+o[2],0), srcs=[], oscs=[];
+    for(const[w,r,g,dt]of inst.osc){
+      const o=ac.createOscillator(), og=ac.createGain();
+      o.type=w; o.frequency.value=f*r; o._dt=dt; o.detune.value=dt+bend;
+      og.gain.value=g/sum; o.connect(og); og.connect(pre);
+      srcs.push(o); oscs.push(o);
+    }
+    if(inst.fm){
+      const m=ac.createOscillator(), mg=ac.createGain(), idx=f*inst.fm.i*(.3+.7*v);
+      m.frequency.value=f*inst.fm.r; m._dt=0; m.detune.value=bend;
+      mg.gain.setValueAtTime(idx,t); mg.gain.setTargetAtTime(idx*.12,t,inst.fm.ed);
+      m.connect(mg); oscs.forEach(o=>mg.connect(o.frequency));
+      srcs.push(m); oscs.push(m);
+    }
+    if(inst.vib){
+      const l=ac.createOscillator(), lg=ac.createGain();
+      l.frequency.value=inst.vib.rate;
+      lg.gain.setValueAtTime(0,t); lg.gain.linearRampToValueAtTime(inst.vib.cents,t+inst.vib.delay+.3);
+      l.connect(lg); oscs.forEach(o=>lg.connect(o.detune));
+      srcs.push(l);
+    }
+    let noise=null;
+    if(inst.noise){
+      const bp=ac.createBiquadFilter(), ng=ac.createGain();
+      noise=ac.createBufferSource(); noise.buffer=this._noise; noise.loop=true;
+      bp.type='bandpass'; bp.frequency.value=inst.noise.hz; bp.Q.value=.8;
+      ng.gain.setValueAtTime(inst.noise.g*(.4+.6*v),t); ng.gain.setTargetAtTime(0,t,inst.noise.ed);
+      noise.connect(bp); bp.connect(ng); ng.connect(pre);
+      srcs.push(noise);
+    }
+    const dec=inst.d*(inst.ks?2**((60-note)/24*inst.ks):1);
+    const g=out.gain;
+    g.setValueAtTime(0,t); g.linearRampToValueAtTime(peak,t+inst.a); g.setTargetAtTime(peak*inst.s,t+inst.a,dec);
+    const endAt=inst.s>0?Infinity:t+inst.a+dec*5.5;
+    for(const s of srcs){
+      if(s===noise)s.start(t,Math.random()*1.5); else s.start(t);
+      if(endAt<Infinity)s.stop(endAt);
+    }
+    return {srcs,oscs,out,tail,r:inst.r,endAt,released:false,sustained:false};
   }
+  // General MIDI drum notes, synthesized
+  _drum(note,vel,t,vol){
+    const ac=this._ctx, v=vel/127, out=ac.createGain(), srcs=[];
+    out.gain.value=.5*vol*(.15+.85*v**1.4); out.connect(this._bus);
+    const env=(node,peak,dec)=>{const g=ac.createGain();g.gain.setValueAtTime(peak,t);g.gain.exponentialRampToValueAtTime(.001,t+dec);node.connect(g);g.connect(out);};
+    const tone=(f0,f1,dec,peak,type='sine')=>{const o=ac.createOscillator();o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+dec);env(o,peak,dec);srcs.push(o);};
+    const noise=(type,hz,dec,peak,q=.7)=>{const s=ac.createBufferSource(),fl=ac.createBiquadFilter();s.buffer=this._noise;fl.type=type;fl.frequency.value=hz;fl.Q.value=q;s.connect(fl);env(fl,peak,dec);srcs.push(s);};
+    let len=.3;
+    if(note===35||note===36){tone(160,42,.32,1.2);len=.35;}                                  // kick
+    else if(note===38||note===40){tone(200,150,.1,.5,'triangle');noise('highpass',1500,.2,.8);} // snare
+    else if(note===37){tone(820,800,.05,.5,'triangle');noise('bandpass',3000,.03,.4,2);len=.08;} // side stick
+    else if(note===39){noise('bandpass',1200,.18,1,1.2);}                                     // clap
+    else if(note===42||note===44){noise('highpass',7500,.06,.6);len=.08;}                     // closed / pedal hat
+    else if(note===46){noise('highpass',7000,.4,.6);len=.45;}                                 // open hat
+    else if(note===49||note===52||note===55||note===57){noise('highpass',5000,1.6,.55);len=1.7;} // crash
+    else if(note===51||note===53||note===59){noise('bandpass',6500,.8,.4,1.5);tone(480,470,.6,.08,'square');len=.85;} // ride
+    else if(note>=41&&note<=50){const f0=70+(note-41)*14;tone(f0*1.6,f0,.35,.9);len=.4;}       // toms
+    else{tone(300+note*6,250+note*5,.12,.5,'triangle');noise('bandpass',2500+note*20,.06,.3,1.5);len=.15;}
+    for(const s of srcs){s.start(t);s.stop(t+len+.05);}
+    return {srcs,oscs:[],out,tail:out,r:.05,endAt:t+len+.05,released:true,sustained:false,drum:true};
+  }
+  _hold(param,t){if(param.cancelAndHoldAtTime)param.cancelAndHoldAtTime(t);else param.cancelScheduledValues(t);}
+  _release(vc,t,r){
+    if(vc.released)return;
+    vc.released=true;
+    const rel=Math.max(.01,r??vc.r);
+    this._hold(vc.out.gain,t); vc.out.gain.setTargetAtTime(0,t,rel/4);
+    const end=Math.min(vc.endAt,t+rel*1.6+.02);
+    for(const s of vc.srcs)try{s.stop(end);}catch(e){}
+  }
+  _kill(vc,t){
+    vc.released=true;
+    this._hold(vc.out.gain,t); vc.out.gain.setTargetAtTime(0,t,.012);
+    for(const s of vc.srcs)try{s.stop(Math.min(vc.endAt,t+.08));}catch(e){}
+  }
+  noteOff(part,note,when){
+    const key=part+'|'+note, vc=this._held.get(key);
+    if(!vc)return;
+    this._held.delete(key);
+    if(this._sus.has(part))vc.sustained=true;
+    else this._release(vc,this._t(when));
+  }
+  sustain(part,on,when){
+    if(on){this._sus.add(part);return;}
+    this._sus.delete(part);
+    if(!this._ctx)return;
+    const t=this._t(when);
+    for(const vc of this._voices)if(vc.part===part&&vc.sustained){vc.sustained=false;this._release(vc,t);}
+  }
+  bend(part,cents,when){
+    this._bend.set(part,cents);
+    if(!this._ctx)return;
+    const t=this._t(when);
+    for(const vc of this._voices)if(vc.part===part)for(const o of vc.oscs)o.detune.setTargetAtTime(o._dt+cents,t,.004);
+  }
+  // Silence the parts `match` accepts: fade out fast, or with each note's own release when soft
+  allOff(match=()=>true,soft=false){
+    for(const p of [...this._sus])if(match(p))this._sus.delete(p);
+    for(const p of [...this._bend.keys()])if(match(p))this._bend.delete(p);
+    for(const[k,vc]of this._held)if(match(vc.part))this._held.delete(k);
+    if(!this._ctx)return;
+    const t=this._ctx.currentTime;
+    for(const vc of this._voices){
+      if(!match(vc.part))continue;
+      vc.sustained=false;
+      if(!soft)this._kill(vc,t); else if(!vc.drum)this._release(vc,t);
+    }
+  }
+}
+
+// Sends each part to its route: the built-in synth, or a Web MIDI output on a chosen channel
+// (hardware, or a VST host listening on a loopMIDI port). A route is {dest, ch, prog, vol}:
+// dest 'off' | 'synth' | 'out:<port name>', ch 0 = keep the source channel else 1–16,
+// prog -1 = pass the file's program changes else send this one, vol % for the synth.
+class SoundRouter{
+  constructor(synth){
+    this.synth=synth; this._access=null;
+    this._sounding=new Map();  // MIDIOutput → {notes: Map(ch<<7|note → {part,at}), chans: Map(ch → {parts,pedalAt})}
+    this._missing=new Set(); this.onPortsChanged=null; this.onMissing=null;
+  }
+  async ensureAccess(){
+    if(this._access)return true;
+    if(!navigator.requestMIDIAccess)return false;
+    try{this._access=await navigator.requestMIDIAccess({sysex:false});}catch(e){return false;}
+    this._access.addEventListener('statechange',()=>{this._missing.clear();this.onPortsChanged?.();});
+    this.onPortsChanged?.();
+    return true;
+  }
+  outputs(){return this._access?[...this._access.outputs.values()].filter(o=>o.state!=='disconnected').map(o=>o.name):[];}
+  _port(dest){
+    const name=dest.slice(4);
+    if(this._access)for(const o of this._access.outputs.values())if(o.name===name&&o.state!=='disconnected')return o;
+    if(!this._missing.has(name)){this._missing.add(name);this.onMissing?.(name);}
+    return null;
+  }
+  // msg is a channel message on the source channel; `inst` is the synth instrument for the part
+  send(part,route,msg,when,inst){
+    const dest=route?.dest||'off';
+    if(dest==='off'||!msg)return;
+    const st=msg[0]&0xF0, ch=msg[0]&0x0F;
+    if(dest==='synth'){
+      if(st===0x90&&msg[2]>0)this.synth.noteOn(part,msg[1],msg[2],inst,when,(route.vol??100)/100);
+      else if(st===0x80||st===0x90)this.synth.noteOff(part,msg[1],when);
+      else if(st===0xB0&&msg[1]===64)this.synth.sustain(part,msg[2]>=64,when);
+      else if(st===0xB0&&(msg[1]===120||msg[1]===123))this.synth.allOff(p=>p===part,msg[1]===123);
+      else if(st===0xE0)this.synth.bend(part,(((msg[2]<<7)|msg[1])-8192)/8192*200,when);
+      return;
+    }
+    if(!dest.startsWith('out:')||(st===0xC0&&route.prog>=0))return;
+    const out=this._port(dest);
+    if(!out)return;
+    const oc=route.ch>0?route.ch-1:ch, data=Array.from(msg), now=performance.now();
+    data[0]=st|oc;
+    try{if(when!=null&&when>now)out.send(data,when);else out.send(data);}catch(e){return;}
+    let s=this._sounding.get(out);
+    if(!s)this._sounding.set(out,s={notes:new Map(),chans:new Map()});
+    let c=s.chans.get(oc);
+    if(!c)s.chans.set(oc,c={parts:new Set(),pedalAt:0});
+    c.parts.add(part);
+    const at=Math.max(now,when??now);
+    if(st===0x90&&data[2]>0)s.notes.set(oc<<7|data[1],{part,at});
+    else if(st===0x80||st===0x90)s.notes.delete(oc<<7|data[1]);
+    else if(st===0xB0&&data[1]===64)c.pedalAt=at;
+  }
+  // A part starts or resumes: send the route's fixed program, then the program and
+  // controllers the source had reached by then
+  start(part,route,ch,chase,inst){
+    if(route?.dest?.startsWith('out:')&&route.prog>=0)this.send(part,{...route,prog:-1},[0xC0|ch,route.prog]);
+    for(const m of chase)this.send(part,route,m,undefined,inst);
+  }
+  // Silence the parts `match` accepts. Notes already queued on a MIDI output can't be
+  // recalled, so their note-offs are queued just behind them.
+  allOff(match=()=>true,soft=false){
+    this.synth.allOff(match,soft);
+    const now=performance.now();
+    for(const[out,s]of this._sounding){
+      try{
+        for(const[k,n]of s.notes){
+          if(!match(n.part))continue;
+          s.notes.delete(k);
+          const off=[0x80|(k>>7),k&127,0];
+          if(n.at>now)out.send(off,n.at+1); else out.send(off);
+        }
+        for(const[ch,c]of s.chans){
+          if(![...c.parts].some(match))continue;
+          for(const p of [...c.parts])if(match(p))c.parts.delete(p);
+          if(c.pedalAt>now)out.send([0xB0|ch,64,0],c.pedalAt+1); else out.send([0xB0|ch,64,0]);
+        }
+      }catch(e){}
+    }
+  }
+  // Panic: everything off on every channel of every output
+  panic(){
+    this.allOff();
+    if(!this._access)return;
+    for(const o of this._access.outputs.values()){
+      if(o.state==='disconnected')continue;
+      try{for(let c=0;c<16;c++){o.send([0xB0|c,64,0]);o.send([0xB0|c,123,0]);}}catch(e){}
+    }
+  }
+}
+
+// Each file's track routes, so a song set up for hardware or a VST plays the same next time
+const RouteStore={
+  _k:'pianoVisRoutes',
+  _all(){try{return JSON.parse(localStorage.getItem(this._k)||'{}');}catch(e){return{};}},
+  load(file){return file?this._all()[file]||null:null;},
+  save(file,cfgs){
+    if(!file||!cfgs)return;
+    const all=this._all(), r={};
+    cfgs.forEach((c,vid)=>{if(c&&c.dest!==undefined)r[vid]={dest:c.dest,ch:c.ch,inst:c.inst,prog:c.prog,vol:c.vol};});
+    delete all[file]; all[file]=r;
+    const keys=Object.keys(all);
+    for(let i=0;i<keys.length-40;i++)delete all[keys[i]];
+    try{localStorage.setItem(this._k,JSON.stringify(all));}catch(e){}
+  },
+};
+
+// Destination dropdown: Off, the built-in synth, then every MIDI output by name. A saved
+// output that isn't connected stays listed so the choice isn't lost.
+function fillDestSelect(sel,value,offLabel){
+  const outs=window.app?.router.outputs()||[];
+  offLabel=offLabel||sel.dataset.offLabel||'Off';
+  sel.dataset.offLabel=offLabel;
+  const opts=[['off',offLabel],['synth','Built-in synth'],...outs.map(n=>['out:'+n,'MIDI → '+n])];
+  if(value?.startsWith('out:')&&!outs.includes(value.slice(4)))opts.push([value,'MIDI → '+value.slice(4)+' (not connected)']);
+  sel.innerHTML=opts.map(([v,l])=>`<option value="${escHtml(v)}">${escHtml(l)}</option>`).join('');
+  sel.value=value; sel.dataset.v=value;
+}
+// Bring every sound control on the page in line with Config.au and the current outputs
+function syncAudioControls(){
+  const au=Config.au;
+  document.querySelectorAll('input[data-au]').forEach(el=>{el.value=au[el.dataset.au];});
+  document.querySelectorAll('[data-au-val]').forEach(el=>{el.textContent=au[el.dataset.auVal];});
+  document.querySelectorAll('select[data-au-sel]').forEach(el=>{
+    const v=au[el.dataset.auSel];
+    if(el.hasAttribute('data-dest-sel'))fillDestSelect(el,v); else el.value=String(v);
+  });
+  document.querySelectorAll('select[data-dest-sel]:not([data-au-sel])').forEach(el=>fillDestSelect(el,el.dataset.v||'synth'));
+  const outs=window.app?.router.outputs()||[];
+  document.querySelectorAll('.snd-outputs').forEach(el=>{
+    el.innerHTML=outs.length?outs.map(n=>`<div class="snd-out">● ${escHtml(n)}</div>`).join('')
+      :`<div class="snd-out none">${window.app?.router._access?'No MIDI outputs connected.':'Not checked yet: click Find MIDI outputs.'}</div>`;
+  });
+}
+function setAudio(k,v){
+  Config.au[k]=v; schedSave();
+  window.app?._applyAudio();
+  if(k==='live_dest'||k==='live_ch')window.app?.router.allOff(p=>p==='live');
+  syncAudioControls();
 }
 
 // ─────────────────── MusicXML parser ────────────────────
@@ -4062,6 +4577,14 @@ class App{
     this.kickChat=new KickChatClient();
     this.kickChat.init(this);
     this._synth=new AudioSynth();
+    this.router=new SoundRouter(this._synth);
+    this.router.onPortsChanged=()=>syncAudioControls();
+    this.router.onMissing=name=>this._showToast(`MIDI output "${name}" isn't connected`);
+    this._fileProg=[];this._fileProgCh=[];  // programs reached during file playback, per track+channel / channel
+    this._liveWin=0;this._liveCount=0;
+    this.midiFile.onSound=(e,when)=>this._fileSound(e,when);
+    this.midiFile.onStart=pos=>this._fileStart(pos);
+    this.midiFile.onHalt=natural=>this.router.allOff(p=>p[0]==='f',natural);
     this.prevNotes=new Set();
     this._activeNotes=new Set();  // swap buffer — never allocate in frame loop
     this._newly=[];               // reused arrays — no per-frame allocation
@@ -4099,8 +4622,15 @@ class App{
     window.addEventListener('resize',()=>this._resize());
     this._setupScreens();
     this._setupHUD();
+    this._setupPlayerHud();
+    this._applyAudio();
     try{this._buildSettingsScreens();}catch(e){console.error('Settings build error:',e);}
-    document.getElementById('main-canvas').addEventListener('keydown',e=>{if(e.key==='Escape')this.showMenu();});
+    document.getElementById('main-canvas').addEventListener('keydown',e=>{
+      if(e.key==='Escape')this.showMenu();
+      else if(e.code==='Space'&&document.getElementById('player-hud').classList.contains('visible')){e.preventDefault();this._togglePlayback();}
+    });
+    // MIDI outputs: list them now only if permission was already given (no prompt at load)
+    navigator.permissions?.query({name:'midi'}).then(p=>{if(p.state==='granted')this.router.ensureAccess();}).catch(()=>{});
     this._setupKeyboardMouse();
     // Apply saved fluid state immediately (setEnabled / updateConfig are normally
     // only called on user interaction, so saved settings would otherwise be ignored)
@@ -4179,6 +4709,7 @@ class App{
       this.midiFile.update();
       for(const n of this.midiFile.activeNotes) activeNotes.add(n);
       this._hudSong.textContent=this.midiFile.filename+(this.midiFile.playing?' ▶':'');
+      this._playerHudTick();
     }else{
       for(const n of this.midi.activeNotes) activeNotes.add(n);
     }
@@ -4308,10 +4839,10 @@ class App{
       const{x,y}=toCanvas(e);
       const note=hitTest(x,y);
       if(note==null)return;
-      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._synth.noteOff(_mouseNote);}
+      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._liveMidi([0x80,_mouseNote,0],true);}
       _mouseNote=note;
       this.midi.activeNotes.add(note);
-      this._synth.noteOn(note);
+      this._liveMidi([0x90,note,100],true);
       if(this._learn?.active)this._onLearnNoteOn(note,0);
       canvas.setPointerCapture(e.pointerId);
     });
@@ -4320,12 +4851,12 @@ class App{
       const{x,y}=toCanvas(e);
       const note=hitTest(x,y);
       if(note===_mouseNote)return;
-      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._synth.noteOff(_mouseNote);}
+      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._liveMidi([0x80,_mouseNote,0],true);}
       _mouseNote=note;
-      if(note!=null){this.midi.activeNotes.add(note);this._synth.noteOn(note);if(this._learn?.active)this._onLearnNoteOn(note,0);}
+      if(note!=null){this.midi.activeNotes.add(note);this._liveMidi([0x90,note,100],true);if(this._learn?.active)this._onLearnNoteOn(note,0);}
     });
     const release=()=>{
-      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._synth.noteOff(_mouseNote);_mouseNote=null;}
+      if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._liveMidi([0x80,_mouseNote,0],true);_mouseNote=null;}
     };
     canvas.addEventListener('pointerup',release);
     canvas.addEventListener('pointercancel',release);
@@ -4342,8 +4873,8 @@ class App{
     if(window.fluidSim)window.fluidSim.resize();
     this.shaderNotes?.resize(W,H);
     // Shrink usable height by HUD height so piano sits above the transport bar
-    const hudEl=document.getElementById('learn-hud');
-    const hudH=hudEl&&hudEl.classList.contains('visible')?hudEl.offsetHeight:0;
+    const hudEl=['learn-hud','player-hud'].map(id=>document.getElementById(id)).find(el=>el?.classList.contains('visible'));
+    const hudH=hudEl?hudEl.offsetHeight:0;
     this.layout=buildLayout(W,H-hudH,Config.ks.height_percent,Config.ks.width_percent??100);
     if(this.fx)this.fx.resize(W,H); else this.fx=new FXRenderer(W,H);
   }
@@ -4677,6 +5208,7 @@ class App{
     lhud?.classList.remove('visible');
     if(lhudWasVisible)this._resize();
     this._vizActive=false;
+    this._updatePlayerHud();
   }
   showMenu(){
     this._showScreen('screen-menu');
@@ -4687,6 +5219,7 @@ class App{
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById('hud').classList.add('active');
     this._vizActive=true;
+    this._updatePlayerHud();
     this.mainCanvas.focus();
   }
   showDeviceSelect(){
@@ -4766,6 +5299,7 @@ class App{
           if(this._learn?.active)this._learnResetCursor();
         });
       });
+      row.appendChild(this._routeControls(vid,ch));
       list.appendChild(row);
     });
   }
@@ -4784,7 +5318,7 @@ class App{
       } else if(ev.type==='noteoff'||(ev.type==='noteon'&&ev.velocity===0)){
         const start=active.get(k);
         if(start){
-          events.push({ms:start.timeMs,durationMs:Math.max(50,ev.timeMs-start.timeMs),note:ev.note,channel:ev.channel,track:start.track??0});
+          events.push({ms:start.timeMs,durationMs:Math.max(50,ev.timeMs-start.timeMs),note:ev.note,velocity:start.velocity,channel:ev.channel,track:start.track??0});
           active.delete(k);
         }
       }
@@ -4936,6 +5470,7 @@ class App{
 
   _learnResetCursor(){
     const l=this._learn;
+    this._learnSoundReset();
     l._pendingChord.clear();
     const sps=Config.ns.speed_px_per_sec;
     // Time for a note to travel from the top of canvas down to the piano top
@@ -4954,6 +5489,7 @@ class App{
 
   _learnSeekTo(targetMs){
     const l=this._learn;
+    this._learnSoundReset();
     l._pendingChord.clear();
     const safeMs=Math.max(0,Math.min(targetMs,l._totalMs));
     if(Config.lrn.mode==='freeplay'){
@@ -5000,6 +5536,7 @@ class App{
 
   _learnStop(){
     const l=this._learn; l.active=false;
+    this._learnSoundReset();
     document.getElementById('lhud-playpause').textContent='▶';
     // Keep HUD visible so the timeline remains accessible for replay/seeking
     this._updateNotationVisibility();
@@ -5039,6 +5576,7 @@ class App{
         else this._learnStop();
       }
     }
+    if(l.active)this._learnSoundTick();
   }
 
   _drawLearnNotes(ctx,layout){
@@ -5084,12 +5622,15 @@ class App{
     const l=this._learn;
     if(!l._events.length){this._showToast('Load a .mid or .xml file first');return;}
     if(!this._vizActive)this.showVisualizer();
+    if(this.midiFile.playing)this.midiFile.pause();
     l.active=true;
     l._lastFrameWall=this._frameNow;
+    l._sndMs=null; this._fileProg=[]; this._fileProgCh=[];
     if(l._currentNoteMs<=0||l._currentNoteMs>=l._totalMs)this._learnResetCursor();
     const hud=document.getElementById('learn-hud');
     const hudWasHidden=hud&&!hud.classList.contains('visible');
     if(hud)hud.classList.add('visible');
+    this._updatePlayerHud();
     if(hudWasHidden)this._resize();
     const pp=document.getElementById('lhud-playpause');
     if(pp)pp.textContent='⏸';
@@ -5119,6 +5660,7 @@ class App{
 
   pauseLearn(){
     const l=this._learn; l.active=false;
+    this._learnSoundReset();
     const pp=document.getElementById('lhud-playpause');
     if(pp)pp.textContent='▶';
   }
@@ -5126,6 +5668,188 @@ class App{
   resetLearn(){
     this.pauseLearn();
     this._learnResetCursor();
+  }
+
+  // ─── Sound: tracks, Learn mode and the live keyboard → synth or MIDI outputs ───
+
+  _applyAudio(){
+    this._synth.setVolume(Config.au.synth_volume);
+    this._synth.setReverb(Config.au.reverb);
+  }
+
+  // A track's route lives on its channel-config entry, filled in from RouteStore (or the
+  // defaults) the first time it's needed
+  _routeFor(vid){
+    const cc=this._channelConfig, cfg=cc?.[vid];
+    if(!cfg)return null;
+    if(cfg.dest===undefined)
+      Object.assign(cfg,{dest:Config.au.default_dest||'synth',ch:0,inst:'auto',prog:-1,vol:100},RouteStore.load(cc._file)?.[vid]||{});
+    return cfg;
+  }
+  _instFor(vid){
+    const cfg=this._routeFor(vid);
+    if(cfg&&cfg.inst&&cfg.inst!=='auto')return cfg.inst;
+    const ch=vid%16, pr=this.midiFile.programs;
+    return gmInstrument(this._fileProg[vid]??this._fileProgCh[ch]??pr.vid[vid]??pr.ch[ch]??0,ch);
+  }
+  _routeChanged(vid){
+    RouteStore.save(this._channelConfig?._file,this._channelConfig);
+    this.router.allOff(p=>p==='f'+vid||p==='l'+vid);
+    if(this._mode==='file'&&this.midiFile.playing)this._fileStart(this.midiFile.positionMs,vid);
+  }
+
+  // Playback starts or resumes at `pos`: replay each track's program and controllers up to
+  // there, so a seek lands with the right patch, pedal and bend (optionally one track only)
+  _fileStart(pos,onlyVid){
+    if(onlyVid==null){this._fileProg=[];this._fileProgCh=[];}
+    const chase=new Map();
+    for(const e of this.midiFile.events){
+      if(e.timeMs>=pos)break;
+      if(e.type!=='cc'&&e.type!=='program'&&e.type!=='bend')continue;
+      if(e.type==='cc'&&e.cc>=120)continue;  // channel-mode messages aren't state
+      const vid=(e.track??0)*16+(e.channel??0);
+      if(e.type==='program'&&onlyVid==null){this._fileProg[vid]=e.program;this._fileProgCh[e.channel]=e.program;}
+      if(onlyVid!=null&&vid!==onlyVid)continue;
+      let m=chase.get(vid);
+      if(!m)chase.set(vid,m=new Map());
+      m.set(e.type==='cc'?e.cc:e.type,evMsg(e));
+    }
+    this._channelConfig?.forEach((cfg,vid)=>{
+      if(!cfg||cfg.muted||(onlyVid!=null&&vid!==onlyVid))return;
+      this.router.start('f'+vid,this._routeFor(vid),vid%16,[...(chase.get(vid)?.values()||[])],this._instFor(vid));
+    });
+  }
+  _fileSound(e,when){
+    const ch=e.channel??0, vid=(e.track??0)*16+ch;
+    if(e.type==='program'){this._fileProg[vid]=e.program;this._fileProgCh[ch]=e.program;}
+    const cfg=this._routeFor(vid);
+    if(!cfg||(cfg.muted&&e.type==='noteon'))return;
+    this.router.send('f'+vid,cfg,evMsg(e),when,this._instFor(vid));
+  }
+
+  // Learn mode sounds the notes the cursor passes: the parts set to — (or all parts), each on
+  // its track's route. Notes are timed by the cursor, so Wait mode holds them back with it.
+  _learnSoundTick(){
+    const l=this._learn, mode=Config.au.learn_sound, from=l._sndMs, to=l.cursorMs;
+    l._sndMs=to;
+    if(mode==='off'||from==null||to<=from||to-from>1000)return;
+    const ev=l._events, now=performance.now(), spd=Config.lrn.speed||1;
+    let lo=0,hi=ev.length;
+    while(lo<hi){const m=lo+hi>>1;ev[m].ms<=from?lo=m+1:hi=m;}
+    for(let i=lo;i<ev.length&&ev[i].ms<=to;i++){
+      const e=ev[i], ch=e.channel??0, vid=(e.track??0)*16+ch, cfg=this._routeFor(vid);
+      if(!cfg||cfg.muted||(mode==='others'&&cfg.hand!=='none'))continue;
+      const inst=this._instFor(vid);
+      this.router.send('l'+vid,cfg,[0x90|ch,e.note,e.velocity||90],undefined,inst);
+      this.router.send('l'+vid,cfg,[0x80|ch,e.note,0],now+e.durationMs/spd,inst);
+    }
+  }
+  _learnSoundReset(){this._learn._sndMs=null;this.router.allOff(p=>p[0]==='l');}
+
+  // Every channel message from the MIDI input, plus the mouse and computer keyboard
+  // (`computer`), which have no sound of their own so use the synth when live thru is off
+  _liveMidi(d,computer=false){
+    const st=d[0]&0xF0;
+    if(st<0x80||st>=0xF0)return;
+    const au=Config.au;
+    let route={dest:au.live_dest,ch:au.live_ch,prog:-1,vol:100};
+    if(route.dest==='off'){if(!computer)return;route={dest:'synth',vol:100};}
+    if(route.dest.startsWith('out:')){
+      // An output that loops back into the selected input would flood both: cut the thru
+      const now=performance.now();
+      if(now-this._liveWin>100){this._liveWin=now;this._liveCount=0;}
+      if(++this._liveCount>300){
+        this.router.allOff(p=>p==='live');
+        setAudio('live_dest','off');
+        this._showToast('MIDI feedback loop: keyboard thru turned off');
+        return;
+      }
+    }
+    this.router.send('live',route,d,undefined,au.live_inst);
+  }
+
+  // ─── Player bar (Watch Play) ───
+
+  _setupPlayerHud(){
+    const $=id=>document.getElementById(id), mf=this.midiFile;
+    const fmt=ms=>{const s=Math.max(0,ms)/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
+    this._phFmt=fmt;
+    $('ph-play').onclick=()=>this._togglePlayback();
+    $('ph-stop').onclick=()=>{mf.stop();this._playerHudTick(true);};
+    const seek=$('ph-seek');
+    seek.oninput=()=>{this._phDrag=true;$('ph-time').textContent=fmt(seek.value/1000*mf.durationMs)+' / '+fmt(mf.durationMs);};
+    seek.onchange=()=>{this._phDrag=false;mf.seek(seek.value/1000*mf.durationMs);this._playerHudTick(true);};
+    const spd=$('ph-speed');
+    spd.onchange=()=>mf.setSpeed(+spd.value/100);
+    const vol=$('ph-vol');
+    vol.value=Config.au.synth_volume;
+    vol.oninput=()=>setAudio('synth_volume',+vol.value);
+    $('ph-sound').onclick=()=>{
+      if(!this._panelOpen)this.togglePanel();
+      document.querySelector('#ptab-bar button[data-t="sound"]')?.click();
+    };
+  }
+  _togglePlayback(){
+    const mf=this.midiFile;
+    if(mf.playing)mf.pause(); else mf.play();
+    this._playerHudTick(true);
+  }
+  // The bar shows while a file is open in the visualizer and Learn mode's bar isn't up
+  _updatePlayerHud(){
+    const el=document.getElementById('player-hud');
+    if(!el)return;
+    const show=this._vizActive&&this._mode==='file'&&this.midiFile.events.length>0&&!document.getElementById('learn-hud').classList.contains('visible');
+    if(el.classList.contains('visible')===show)return;
+    el.classList.toggle('visible',show);
+    this._resize();
+    if(show)this._playerHudTick(true);
+  }
+  _playerHudTick(force){
+    const mf=this.midiFile, dur=mf.durationMs||1, pos=mf.positionMs;
+    const v=Math.round(pos/dur*1000), sec=pos/1000|0;
+    if(force||v!==this._phV){this._phV=v;if(!this._phDrag)document.getElementById('ph-seek').value=v;}
+    if(force||sec!==this._phSec){this._phSec=sec;if(!this._phDrag)document.getElementById('ph-time').textContent=this._phFmt(pos)+' / '+this._phFmt(mf.durationMs);}
+    if(force||mf.playing!==this._phPlaying){this._phPlaying=mf.playing;document.getElementById('ph-play').textContent=mf.playing?'⏸':'▶';}
+  }
+
+  // Route controls under a track row: where it plays, then the synth instrument and level,
+  // or the MIDI channel and program for an output
+  _routeControls(vid,ch){
+    const cfg=this._routeFor(vid), wrap=document.createElement('div');
+    wrap.className='track-route';
+    const auto=INSTRUMENT_BY_ID[gmInstrument(this.midiFile.programs.vid[vid]??this.midiFile.programs.ch[ch]??0,ch)].name;
+    wrap.innerHTML=`<select class="tr-dest" data-dest-sel title="Where this track plays"></select>
+      <select class="tr-inst" title="Built-in synth instrument"><option value="auto">Auto: ${auto}</option>${INSTRUMENTS.map(i=>`<option value="${i.id}">${i.name}</option>`).join('')}</select>
+      <input type="range" class="tr-vol" min="0" max="150" step="5" title="Track volume">
+      <select class="tr-ch" title="MIDI channel to send on"><option value="0">Ch ${ch+1} (file)</option>${[...Array(16)].map((_,i)=>`<option value="${i+1}">Ch ${i+1}</option>`).join('')}</select>
+      <select class="tr-prog" title="Program change sent to the output"><option value="-1">Program from file</option>${GM_NAMES.map((n,i)=>`<option value="${i}">${i+1} ${n}</option>`).join('')}</select>`;
+    const q=s=>wrap.querySelector(s), dest=q('.tr-dest'), inst=q('.tr-inst'), vol=q('.tr-vol'), chSel=q('.tr-ch'), prog=q('.tr-prog');
+    fillDestSelect(dest,cfg.dest);
+    inst.value=cfg.inst; vol.value=cfg.vol; chSel.value=String(cfg.ch); prog.value=String(cfg.prog);
+    const show=()=>{
+      const syn=cfg.dest==='synth', midi=cfg.dest.startsWith('out:');
+      inst.style.display=vol.style.display=syn?'':'none';
+      chSel.style.display=prog.style.display=midi?'':'none';
+    };
+    show();
+    dest.addEventListener('pointerdown',()=>this.router.ensureAccess());
+    dest.onchange=()=>{cfg.dest=dest.dataset.v=dest.value;show();this._routeChanged(vid);};
+    inst.onchange=()=>{cfg.inst=inst.value;this._routeChanged(vid);};
+    vol.oninput=()=>{cfg.vol=+vol.value;};
+    vol.onchange=()=>RouteStore.save(this._channelConfig?._file,this._channelConfig);
+    chSel.onchange=()=>{cfg.ch=+chSel.value;this._routeChanged(vid);};
+    prog.onchange=()=>{cfg.prog=+prog.value;this._routeChanged(vid);};
+    return wrap;
+  }
+  // Every track of the open song to one destination
+  _routeAllTracks(dest){
+    if(!this._channelConfig)return;
+    this._channelConfig.forEach((cfg,vid)=>{if(cfg){this._routeFor(vid);cfg.dest=dest;}});
+    RouteStore.save(this._channelConfig._file,this._channelConfig);
+    this.router.allOff(p=>p[0]==='f'||p[0]==='l');
+    if(this._mode==='file'&&this.midiFile.playing)this._fileStart(this.midiFile.positionMs);
+    this._refreshTracksTab();
+    if(document.getElementById('screen-tracks')?.classList.contains('active'))this.showTrackConfig();
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -5297,7 +6021,7 @@ class App{
       {id:'notes',label:'Notes'},{id:'effects',label:'Effects'},{id:'fluid',label:'Fluid'},
       {id:'shader',label:'Shader'},
       {id:'keyboard',label:'Keyboard'},{id:'display',label:'Display'},
-      {id:'hardware',label:'Hardware'},
+      {id:'hardware',label:'Hardware'},{id:'sound',label:'Sound'},
       {id:'led',label:'LED Output'},{id:'audience',label:'Audience'},
       {id:'themes',label:'Themes'},{id:'profiles',label:'Profiles'},
     ];
@@ -5309,7 +6033,7 @@ class App{
       {id:'shader',label:'Shader'},
       {id:'keyboard',label:'Keys'},{id:'display',label:'Display'},{id:'led',label:'LED'},
       {id:'audience',label:'Aud.'},{id:'themes',label:'Themes'},{id:'tracks',label:'Tracks'},
-      {id:'scenes',label:'Scenes'},
+      {id:'sound',label:'Sound'},{id:'scenes',label:'Scenes'},
     ];
     buildPanel(document.getElementById('ptab-panels'),document.getElementById('ptab-bar'),PANEL_TABS,this);
     document.querySelector('#ptab-bar button[data-t="tracks"]')
@@ -5388,6 +6112,8 @@ class App{
     if(this._learn?.active)this._learnStop();
     this.midiFile.stop();
     this.midiFile.events=[];
+    this.midiFile.durationMs=0;
+    this.midiFile.programs={vid:[],ch:[]};
     this.midiFile.filename=p.title;
     const l=this._learn;
     l._events=p.events.map(e=>({ms:e.ms,durationMs:e.durationMs,note:e.note,channel:e.channel,track:0}));
@@ -5414,6 +6140,7 @@ class App{
     const infoEl=document.getElementById('learn-info');
     if(infoEl)infoEl.textContent=l._events.length+' notes · '+fmt(l._totalMs);
     this._refreshTracksTab();
+    this._updatePlayerHud();
     this._showToast('Lesson: '+p.title);
     if(autostart){this.showVisualizer();this.startLearn();}
   }
@@ -5510,6 +6237,7 @@ class App{
     this.prevNotes.clear();
     this.trails.active.clear();
     this.midiFile.play();
+    this._updatePlayerHud();
     this._refreshTracksTab();
     this._showToast(file.name);
   }
@@ -5559,7 +6287,7 @@ class App{
         this._applyChannelConfig();
       };
       const mb=row.querySelector('.track-mute-btn');
-      mb.onclick=()=>{cfg.muted=!cfg.muted;mb.textContent=cfg.muted?'Muted':'Active';mb.classList.toggle('muted',cfg.muted);row.classList.toggle('muted',cfg.muted);this._applyChannelConfig();};
+      mb.onclick=()=>{cfg.muted=!cfg.muted;mb.textContent=cfg.muted?'Muted':'Active';mb.classList.toggle('muted',cfg.muted);row.classList.toggle('muted',cfg.muted);this._applyChannelConfig();if(cfg.muted)this.router.allOff(p=>p==='f'+vid||p==='l'+vid);};
       row.querySelectorAll('.track-hand-btn').forEach(btn=>{
         btn.addEventListener('click',()=>{
           cfg.hand=btn.dataset.hand;
@@ -5568,6 +6296,7 @@ class App{
           if(this._learn?.active)this._learnResetCursor();
         });
       });
+      row.appendChild(this._routeControls(vid,ch));
       wrap.appendChild(row);
     });
   }
