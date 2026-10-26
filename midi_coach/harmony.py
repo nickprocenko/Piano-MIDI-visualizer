@@ -101,9 +101,9 @@ def chords_by_bar(score: Score, notes: list[Note], bars: tuple[int, int] | None 
     """[{bar, beat, chord, fit}] with per_bar segments per bar; consecutive repeats are kept.
     key (e.g. from estimate_key) picks sharp or flat spelling."""
     names = spelling_for(key)
-    first, last = bars or (1, len(score.bars))
+    first, last = bars or (score.bars[0].number, score.bars[-1].number)
     out = []
-    for bar in score.bars[first - 1:last]:
+    for bar in (b for b in score.bars if first <= b.number <= last):
         span = (bar.end - bar.start) / per_bar
         for k in range(per_bar):
             t0 = bar.start + k * span

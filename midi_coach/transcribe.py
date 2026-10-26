@@ -128,8 +128,11 @@ def grand_staff(
     melody_name: str = "Vocals",
     source: str | None = None,
     composer: str | None = None,
+    clef_every: Fraction | None = None,
+    pickup: Fraction | None = None,
 ) -> dict:
-    """Write (hand, onset beat, end beat, pitch) events as a two-staff piano score.
+    """Write (hand, onset beat, end beat, pitch) events as a two-staff piano score; events
+    whose hand is 'pedals' (a bass line played with the feet) get a third staff below.
 
     Beats are quarter notes from the start of bar 1, already on a grid. Within a hand,
     notes starting together form a chord lasting until the hand's next chord, and a
@@ -144,7 +147,10 @@ def grand_staff(
     accidentals). melody: an optional tune - [(onset, end, pitch, (lyric, syllabic) or
     None)] - on a staff above the piano (treble, or treble-8vb for a low voice), with its
     lyrics. source: a note on where the score came from, kept in the file's
-    <identification><source>.
+    <identification><source>. clef_every: choose each staff's clef per span of this many
+    beats instead of per bar (a scale running four octaves inside one bar changes clef as it
+    climbs). pickup: the music starts with an upbeat this many beats long - written as a
+    short bar 0 (implicit in MusicXML), bars numbered from 1 after it, as printed music does.
     Returns {xml, bars, notes, key, keys: [(bar, key signature sharps)]}.
     """
     import bisect
@@ -155,6 +161,15 @@ def grand_staff(
     if not events and not melody:
         raise ValueError("No notes to write.")
     tune = list(melody or [])
+    shift = Fraction(0)
+    if pickup:  # lay the upbeat at the end of a full first bar, then cut that bar down (_pickup_bar)
+        first_sig = time_signature if isinstance(time_signature, str) else sorted(time_signature)[0][1]
+        shift = Fraction(meter.TimeSignature(first_sig).barDuration.quarterLength).limit_denominator(48) - Fraction(pickup)
+        events = [(h, on + shift, end + shift, p) for h, on, end, p in events]
+        tune = [(on + shift, end + shift, p, lyric) for on, end, p, lyric in tune]
+        tempo_marks = [(at + shift if at else at, bpm) for at, bpm in tempo_marks or []]
+        if not isinstance(time_signature, str):
+            time_signature = [(at + shift if at else at, sig) for at, sig in sorted(time_signature)]
     last = max([e[2] for e in events] + [m[1] for m in tune])
     bar_starts, bar_sigs, total = _bar_grid(time_signature, last)
     bars = len(bar_starts)
@@ -180,8 +195,11 @@ def grand_staff(
     def spelled(midi: int, at: Fraction):
         from music21 import pitch
 
-        here = local[bar_of(at)]
         p = pitch.Pitch(midi=midi)
+        diatonic = _diatonic_names(signatures[bar_of(at)]).get(midi % 12)
+        if diatonic:  # a note of the key signature is spelled as the key spells it
+            return next((q for q in [p, *p.getAllCommonEnharmonics()] if q.name == diatonic), p)
+        here = local[bar_of(at)]
         if p.accidental is not None and ((here < 0 and p.accidental.name == "sharp") or (here > 0 and p.accidental.name == "flat")):
             p = p.getEnharmonic()
         return p
@@ -223,13 +241,22 @@ def grand_staff(
         _plain_rests(part, bar_starts)
         part.makeMeasures(inPlace=True)
         part.makeTies(inPlace=True)
+        if shift:
+            _pickup_bar(part, shift)
         accidentals(part)
+        _beat_triplets(part)
         score.insert(0, part)
-    for hand in ("right", "left"):
+    feet =("pedals",) if any(e[0] == "pedals" for e in events) else ()
+    for hand in ("right", "left") + feet:
         part = stream.Part()
-        part.partName = "Right Hand" if hand == "right" else "Left Hand"
+        part.partName = {"right": "Right Hand", "left": "Left Hand", "pedals": "Pedals"}[hand]
         hand_events = [(on, end, p) for h, on, end, p in events if h == hand]
-        for at, name in _clefs(hand, hand_events, bar_of, bar_starts):
+        if clef_every:
+            spans = [Fraction(k) * clef_every for k in range(int(total / clef_every) + 1)]
+            clef_at = _clefs(hand, hand_events, lambda at: min(int(at // clef_every), len(spans) - 1), spans)
+        else:
+            clef_at = _clefs(hand, hand_events, bar_of, bar_starts)
+        for at, name in clef_at:
             part.insert(at, clef.TrebleClef() if name == "treble" else clef.BassClef())
         meters_and_keys(part)
         if hand == "right" and not tune:
@@ -248,6 +275,8 @@ def grand_staff(
             _plain_rests(part, bar_starts)
         part.makeMeasures(inPlace=True)
         part.makeTies(inPlace=True)
+        if shift:
+            _pickup_bar(part, shift)
         for m in part.getElementsByClass("Measure"):
             # A voice with nothing to play in a bar is left out of it, rather than drawing a whole rest.
             idle = [v for v in m.voices if not v.notes]
@@ -260,16 +289,56 @@ def grand_staff(
                     if any(n.offset < r.offset + r.quarterLength and r.offset < n.offset + n.quarterLength for n in others):
                         r.style.hideObjectOnPrint = True
         accidentals(part)
+        _beat_triplets(part)
         score.insert(0, part)
     xml = GeneralObjectExporter(score).parse().decode("utf-8")
     xml = xml.replace('<creator type="composer">Music21</creator>', "")  # music21's placeholder, not a composer
+    if shift:
+        xml = xml.replace('<measure implicit="no" number="0">', '<measure implicit="yes" number="0">')
     if source:
         from xml.sax.saxutils import escape
 
         xml = xml.replace("</encoding>", f"</encoding>\n    <source>{escape(source)}</source>", 1)
     name = found.tonic.name.replace("-", "b") + ("m" if found.mode == "minor" else "")
     return {"xml": xml, "bars": bars, "notes": count, "key": name,
-            "keys": [(bar_of(at) + 1, s) for at, s in key_changes]}
+            "keys": [(bar_of(at) + (0 if shift else 1), s) for at, s in key_changes]}
+
+
+def _pickup_bar(part, shift: Fraction) -> None:
+    """Make the first bar an upbeat: drop what comes before `shift` (rests only - the music
+    was laid out to start there), move the rest to the start, and number the bars from 0."""
+    from music21 import note as m21note
+
+    measures = list(part.getElementsByClass("Measure"))
+    if not measures:
+        return
+    first = measures[0]
+    length = first.barDuration.quarterLength - float(shift)
+    for c in [first, *first.voices]:
+        keep = [(el.offset - float(shift), el) for el in c.notesAndRests if el.offset >= float(shift) - 1e-9]
+        for el in list(c.notesAndRests):
+            c.remove(el)
+        for off, el in keep:
+            c.insert(off, el)
+        if not keep and (c is not first or not first.voices):  # with voices, the rests go in the voices
+            c.insert(0, m21note.Rest(quarterLength=length))
+    first.paddingLeft = float(shift)
+    for k, m in enumerate(measures):
+        m.number = k
+
+
+_DIATONIC: dict[int, dict[int, str]] = {}
+
+
+def _diatonic_names(sharps: int) -> dict[int, str]:
+    """Pitch class -> its note name in the key signature with this many sharps (negative:
+    flats), e.g. -4 -> {8: 'A-', ...}: the spelling a note of the key should have."""
+    if sharps not in _DIATONIC:
+        from music21 import key as m21key
+
+        scale = m21key.KeySignature(sharps).asKey("major").getScale("major")
+        _DIATONIC[sharps] = {p.pitchClass: p.name for p in scale.pitches[:7]}
+    return _DIATONIC[sharps]
 
 
 def _bar_grid(time_signature: str | list[tuple[Fraction, str]], last: Fraction) -> tuple[list[Fraction], list[str], Fraction]:
@@ -370,6 +439,30 @@ def _voices(events: list[tuple[Fraction, Fraction, int]]) -> list[list[tuple[Fra
         return [held + moving]
     mean = lambda xs: sum(p for *_, p in xs) / len(xs)  # noqa: E731
     return [moving, held] if mean(moving) >= mean(held) else [held, moving]
+
+
+def _beat_triplets(part) -> None:
+    """A triplet beat that mixes values (a quarter then two 16ths, all triplets) as one bracket
+    over the beat. music21 brackets each value on its own - the quarter's group would need two
+    beats, the 16ths' half a beat - and on export cuts the next plain note into triplet pieces to
+    fill them (an eighth written as a tied eighth and 16th triplet)."""
+    from music21 import duration
+
+    for m in part.getElementsByClass("Measure"):
+        for layer in list(m.voices) or [m]:
+            beats: dict[int, list] = {}
+            for el in layer.notesAndRests:
+                t = el.duration.tuplets
+                if len(t) == 1 and (t[0].numberNotesActual, t[0].numberNotesNormal) == (3, 2):
+                    beats.setdefault(math.floor(el.offset), []).append(el)
+            for group in beats.values():
+                kinds = {el.duration.tuplets[0].durationNormal.type for el in group}
+                if len(kinds) < 2 or sum(Fraction(el.quarterLength) for el in group) != 1:
+                    continue
+                for el in group:
+                    d = duration.Duration(type=el.duration.type, dots=el.duration.dots)
+                    d.appendTuplet(duration.Tuplet(3, 2, "eighth"))
+                    el.duration = d
 
 
 def _write_voice(target, events, legato_gap: Fraction, limit: Fraction, spelled, chord, note, tie, bar_starts=None) -> int:
@@ -597,6 +690,15 @@ def _print_accidentals(part) -> None:
     own pass reads accidentals by letter across octaves and reprints repeats)."""
     from music21 import pitch as m21pitch
 
+    def sounding_shift(el) -> int:
+        """Octaves between where a note is drawn and where it sounds: under an 8va it sounds an
+        octave up. Accidentals follow the sounding pitch, so a note under an octave mark gets
+        its own (an A4 natural drawn where an earlier A3 natural sits still shows it)."""
+        for sp in el.getSpannerSites():
+            if type(sp).__name__ == "Ottava":
+                return 1 if str(sp.type).startswith(("8va", "15ma")) else -1
+        return 0
+
     key_alter: dict[str, float] = {}
     before: dict[str, float] = {}
     for m in part.getElementsByClass("Measure"):
@@ -606,9 +708,10 @@ def _print_accidentals(part) -> None:
         items = sorted(m.recurse().notes, key=lambda el: (Fraction(el.getOffsetInHierarchy(m)).limit_denominator(96), not el.duration.isGrace))
         for el in items:
             continuing = el.tie is not None and el.tie.type in ("stop", "continue")
+            shift = sounding_shift(el)
             for p in el.pitches:
                 alter = p.alter
-                k = (p.step, p.octave)
+                k = (p.step, p.octave + shift)
                 current = state.get(k, key_alter.get(p.step, 0.0))
                 courtesy = any(s == p.step and a != alter for (s, _), a in state.items()) or before.get(p.step, alter) != alter
                 show = not continuing and (alter != current or courtesy)

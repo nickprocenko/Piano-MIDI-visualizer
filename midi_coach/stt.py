@@ -13,7 +13,7 @@ from .library import home
 
 MODEL = "base.en"
 # Words Whisper should expect, so "Rehearse" and "F sharp" come out right.
-HINT = ("Piano practice with the Maestro: Learn mode, Rehearse, bars five to eight, tempo, loop, "
+HINT = ("Piano practice with the Maestro: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, "
         "left hand, right hand, hands together, F sharp, B flat, D major scale, arpeggio, metronome.")
 
 _lock = threading.Lock()

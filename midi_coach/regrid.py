@@ -266,7 +266,7 @@ def apply(score: Score, beat_map: BeatMap, quality: dict) -> Score:
         bpm = round(60 * (b.end_beat - b.start_beat) / max(b.end - b.start, 1e-6), 1)
         if not tempos or abs(bpm - tempos[-1][1]) >= 0.5:
             tempos.append((b.start, bpm))
-    out = Score(score.path, notes, score.parts, score.pedal, bars, tempos, score.duration, dict(score.hands))
+    out = Score(score.path, notes, score.parts, score.pedal, bars, tempos, score.duration, dict(score.hands), dict(score.roles))
     out.beat_map = beat_map
     out.regrid = quality
     out._played_live = False

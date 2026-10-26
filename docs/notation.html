@@ -169,6 +169,11 @@ const REHEARSE_EASE_MS = 300, LEARN_EASE_MS = 150;
 const REHEARSE_SNAP_BEATS = 0.5, LEARN_SNAP_BEATS = 8;  // further off than this: a seek or a restart, so jump
 const gliding = () => beatBps > 0 && (beatUntil === null || beatShown < beatUntil - 0.01);
 const MARK_COLORS = { hit: '#159a3c', missed: '#d42020', pending: '#00a6b8' };
+// Which staves are drawn (midi-coach): each staff's role ('right', 'left', 'both', 'pedals',
+// 'vocals', 'other'), sent with the score, and the roles hidden from the page's Parts menu.
+let staffRoles   = null;
+let hiddenRoles  = new Set();
+let heatBars     = [];
 
 function positionPlayhead() {
   playheadEl.style.left = (window.innerWidth * PLAYHEAD_FRAC) + 'px';
@@ -180,7 +185,12 @@ window.addEventListener('resize', positionPlayhead);
 window.addEventListener('message', async e => {
   if (!e.data || typeof e.data !== 'object') return;
   if (e.data.type === 'loadScore') {
+    staffRoles = Array.isArray(e.data.staves) ? e.data.staves : null;
+    hiddenRoles = new Set(e.data.hidden || []);
     await loadScore(e.data.xml);
+  } else if (e.data.type === 'visibility') {
+    hiddenRoles = new Set(e.data.hidden || []);
+    if (rendered) await drawScore();
   } else if (e.data.type === 'updatePosition') {
     updatePosition(e.data.ms);
   } else if (e.data.type === 'clear') {
@@ -203,7 +213,8 @@ window.addEventListener('message', async e => {
   } else if (e.data.type === 'marks') {
     applyMarks(e.data.marks || [], !!e.data.reset);
   } else if (e.data.type === 'heat') {
-    drawHeat(e.data.bars || []);
+    heatBars = e.data.bars || [];
+    drawHeat(heatBars);
   } else if (e.data.type === 'flash') {
     showFlash(e.data.text);
   } else if (e.data.type === 'status') {
@@ -284,6 +295,25 @@ async function loadScore(musicXml) {
     er.RenderSlurs          = true;
     er.RenderTies           = true;
 
+    heatBars = [];
+    await drawScore();
+  } catch (err) {
+    statusEl.textContent = 'Error rendering score:\n' + (err.message || err);
+    console.error('[OSMD]', err);
+    window.parent.postMessage({type:'error', msg: String(err.message || err)}, '*');
+  }
+}
+
+// Render the loaded score with the chosen staves, and map it. Also used to show or hide
+// staves later: the cursor keeps its place (positions are in beats), marks are drawn afresh.
+async function drawScore() {
+  try {
+    rendered = false;
+    timestampMap = []; beatMap = []; noteEntries = []; measureMap = [];
+    fit = {top: 0, h: 0};
+    document.getElementById('heat-layer').innerHTML = '';
+    clearHeaders();
+    applyVisibility();
     await osmd.render();
 
     statusEl.style.display = 'none';
@@ -295,12 +325,37 @@ async function loadScore(musicXml) {
 
     buildTimestampMap();
     try { buildHeaders(); } catch (err) { console.error('[OSMD] key header failed:', err); clearHeaders(); }
+    if (heatBars.length) drawHeat(heatBars);
     window.parent.postMessage({type:'ready'}, '*');
   } catch (err) {
     statusEl.textContent = 'Error rendering score:\n' + (err.message || err);
     console.error('[OSMD]', err);
     window.parent.postMessage({type:'error', msg: String(err.message || err)}, '*');
   }
+}
+
+// Each staff's role, top to bottom: as sent with the score, else guessed from the part names
+// (a two-staff part is the right hand over the left).
+function staffRoleList(staves) {
+  if (staffRoles && staffRoles.length === staves.length) return staffRoles;
+  return staves.map(st => {
+    const ins = st.ParentInstrument, name = (ins.Name || '').toLowerCase();
+    if (/vocal|voice|vox|sing|melody/.test(name)) return 'vocals';
+    if (/pedal/.test(name)) return 'pedals';
+    if (/right|\brh\b/.test(name)) return 'right';
+    if (/left|\blh\b/.test(name)) return 'left';
+    if (ins.Staves.length === 2) return ins.Staves.indexOf(st) === 0 ? 'right' : 'left';
+    return 'other';
+  });
+}
+
+function applyVisibility() {
+  const staves = osmd.Sheet.Instruments.flatMap(ins => ins.Staves);
+  const roles = staffRoleList(staves);
+  const hidden = r => r === 'both' ? hiddenRoles.has('right') && hiddenRoles.has('left') : hiddenRoles.has(r);
+  let shown = staves.map((st, k) => !hidden(roles[k]));
+  if (!shown.some(Boolean)) shown = shown.map(() => true);  // never an empty strip
+  staves.forEach((st, k) => { st.Visible = shown[k]; });
 }
 
 function updatePosition(ms) {
@@ -457,7 +512,7 @@ function buildTimestampMap() {
         try {
           const mi = osmd.cursor.iterator.CurrentMeasureIndex;
           if (!measureMap[mi]) {
-            const gm = osmd.GraphicSheet.MeasureList[mi][0];
+            const gm = osmd.GraphicSheet.MeasureList[mi].find(Boolean);
             const svgEl = document.querySelector('#osmd-div svg');
             const ox = svgEl.getBoundingClientRect().left - trackRect.left;
             const unit = 10 * osmd.zoom;  // OSMD units -> px
@@ -608,8 +663,10 @@ function buildHeaders() {
   const O = opensheetmusicdisplay, conv = O.VexFlowConverter;
   const svgEl = document.querySelector('#osmd-div svg');
   const rows = osmd.GraphicSheet.MeasureList;
-  const staves = (rows[0] || []).map(gm => gm && gm.stave);
-  if (!svgEl || !staves.length || staves.some(st => !st)) return;
+  const staves = (rows[0] || []).filter(Boolean).map(gm => gm.stave);
+  // Instructions are filed per staff of the whole score, hidden ones included.
+  const shownIdx = osmd.Sheet.Instruments.flatMap(ins => ins.Staves).map((st, k) => st.isVisible() ? k : -1).filter(k => k >= 0);
+  if (!svgEl || !staves.length || staves.some(st => !st) || staves.length !== shownIdx.length) return;
   const trackRect = scoreTrack.getBoundingClientRect(), svgRect = svgEl.getBoundingClientRect();
   const ox = svgRect.left - trackRect.left;
   headerTop = svgRect.top - trackRect.top;
@@ -619,7 +676,7 @@ function buildHeaders() {
 
   // Clef, key and time of every staff at the start of each bar; a new drawing where one changes.
   // OSMD files a clef change at a barline under the end of the bar before.
-  const state = staves.map(() => ({clef: null, key: null, time: null}));
+  const state = osmd.Sheet.Instruments.flatMap(ins => ins.Staves).map(() => ({clef: null, key: null, time: null}));
   const states = [];
   const measures = osmd.Sheet.SourceMeasures;
   measures.forEach((sm, mi) => {
@@ -650,7 +707,7 @@ function buildHeaders() {
     const ctx = new Context(holder);
     const drawn = staves.map((orig, si) => {
       const s = new Stave(8, orig.y, 0, {...orig.options});
-      const want = st.staves[si];
+      const want = st.staves[shownIdx[si]];
       if (want.clef) s.addClef(want.clef.type, want.clef.size, want.clef.annotation);
       if (want.key && want.key !== 'C') s.addKeySignature(want.key);
       if (want.time) s.addTimeSignature(want.time);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import heapq
 import os
 import threading
 import time
@@ -387,3 +388,79 @@ class Player:
 
     def status(self) -> dict:
         return dict(self._status)
+
+
+class Accompanist:
+    """Plays the parts you aren't playing on the MIDI output during a practice run, in pieces
+    as the run reaches them (Rehearse hands over the whole run, Learn one chord at a time).
+    Only notes are sent: the keyboard you play on is usually the one sounding them, so a
+    sustain pedal or all-notes-off from here would also catch the notes you hold. With
+    pedal=True (Listen mode, where nobody is playing) the sustain pedal is sent too."""
+
+    def __init__(self, port: str | None = None, pedal: bool = False) -> None:
+        out = _open_client("output")
+        names = out.get_ports()
+        idx = resolve_port(names, port, "MIDI_COACH_OUTPUT", "output")
+        try:
+            out.open_port(idx)
+        except Exception as exc:
+            raise PortError(f"Could not open output '{names[idx]}' ({exc}).") from exc
+        self.port = names[idx]
+        self._out = out
+        self._pedal = pedal
+        self._queue: list[tuple[float, int, list[int]]] = []  # (perf_counter time, order, message)
+        self._order = 0
+        self._sounding: set[tuple[int, int]] = set()
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def schedule(self, events: list[tuple[float, list[int]]], start: float) -> None:
+        """Queue build_events output to begin at perf_counter time `start` (events already
+        past are dropped, except note-offs)."""
+        now = time.perf_counter()
+        with self._lock:
+            for t, msg in events:
+                kind = msg[0] & 0xF0
+                if kind not in (0x80, 0x90) and not (self._pedal and kind == 0xB0 and msg[1] == 64):
+                    continue
+                if kind == 0x90 and start + t < now - 0.03:
+                    continue
+                self._order += 1
+                heapq.heappush(self._queue, (start + t, self._order, msg))
+        self._wake.set()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            with self._lock:
+                due = self._queue[0][0] - time.perf_counter() if self._queue else None
+                while self._queue and self._queue[0][0] <= time.perf_counter():
+                    _, _, msg = heapq.heappop(self._queue)
+                    key = (msg[0] & 0x0F, msg[1])
+                    if msg[0] & 0xF0 == 0xB0:
+                        pass  # the sustain pedal
+                    elif msg[0] & 0xF0 == 0x90 and msg[2] > 0:
+                        self._sounding.add(key)
+                    elif key not in self._sounding:
+                        continue  # its note-on was dropped
+                    else:
+                        self._sounding.discard(key)
+                    self._out.send_message(msg)
+            self._wake.wait(0.02 if due is None else max(0.0, min(due, 0.02)))
+            self._wake.clear()
+
+    def close(self) -> None:
+        """Stop, let go of every note still sounding, and close the port."""
+        self._stop.set()
+        self._wake.set()
+        self._thread.join(1)
+        with self._lock:
+            for ch, pitch in self._sounding:
+                self._out.send_message([0x80 | ch, pitch, 0])
+            self._sounding.clear()
+            self._queue.clear()
+            if self._pedal:
+                self._out.send_message([0xB0, 64, 0])
+        self._out.close_port()

@@ -21,8 +21,10 @@ from fractions import Fraction
 RULES = {
     "missing-accidental": "a note that would be read as the wrong pitch: its sharp/flat/natural differs from the key signature and the bar so far, and none is printed",
     "needless-accidental": "a printed accidental the key signature or an earlier note in the bar already gives",
+    "wrong-enharmonic": "a note of the key signature spelled under another letter (G sharp where the key gives A flat)",
     "nested-tuplet": "a tuplet inside a tuplet",
     "odd-tuplet": "a tuplet other than a plain triplet (3 in the time of 2)",
+    "unwritable-tuplet": "a tuplet of more than nine notes (23 in the time of 16): timing the writer could not read, not a rhythm anyone wrote",
     "too-short": "a note or rest shorter than a sixteenth (sixteenth triplets included; grace notes aside)",
     "short-rest-in-tune": "a gap shorter than an eighth between two notes of the tune (hold the first note instead)",
     "busy-rests": "more than four rests drawn in one staff's bar",
@@ -32,6 +34,7 @@ RULES = {
     "key-change-soon": "a key signature change less than six bars after the previous one",
     "heading": "the title printed twice, or 'Music21' as the composer",
     "double-dot": "a double-dotted note or rest",
+    "triple-dot": "a note or rest with three or more dots: a length the writer misread, not one anyone wrote",
     "dangling-hyphen": "a lyric hyphen leading to a note with no syllable",
     "busy-octave-marks": "more than two 8va/8vb marks starting within eight bars of one staff (write the passage with ledger lines or one mark)",
     "needless-octave-mark": "an 8va/8vb over notes that would sit within three ledger lines without it",
@@ -54,9 +57,19 @@ def _ledgers(p, clef, shift: int = 0) -> int:
     return (low - d) // 2 if d < low else (d - high) // 2 if d > high else 0  # a note in a space needs no extra line
 
 
-def lint(score) -> dict:
+# The 'published' profile, for pieces kept exactly as their composers wrote them: only the
+# rules that catch a writer's mistakes. The others keep the coach's own transcriptions simple
+# (no 32nds, quintuplets or double dots...), which real repertoire legitimately breaks.
+# Nested and unwritable tuplets and triple dots stay in: graded repertoire doesn't use them,
+# so they mean the writer misread the timing.
+MISREAD_RULES = ("nested-tuplet", "unwritable-tuplet", "triple-dot")
+PUBLISHED_RULES = ("missing-accidental", "needless-accidental", "wrong-enharmonic", "heading", "needless-tie", "dangling-hyphen") + MISREAD_RULES
+
+
+def lint(score, profile: str = "full") -> dict:
     """{'findings': [(rule, part, bar, detail)], 'counts': {rule: n}, 'worst': [(bar, n)]}.
-    score: a MusicXML path, the XML text, or a parsed music21 Score."""
+    score: a MusicXML path, the XML text, or a parsed music21 Score. profile 'published':
+    only the writer-mistake rules (PUBLISHED_RULES); the rest are reported under 'exempt'."""
     from music21 import converter, duration
 
     xml = None
@@ -124,6 +137,7 @@ def lint(score) -> dict:
                 add("too-many-voices", part, bar, f"{len(m.voices)} voices")
             ks = m.keySignature or m.getContextByClass("KeySignature")
             key_alter = {p.step: p.alter for p in (ks.alteredPitches if ks else [])}
+            diatonic = {p.pitchClass: p.name for p in ks.asKey("major").getScale("major").pitches[:7]} if ks else {}
             state: dict[tuple[str, int], float] = {}
             items = sorted(((Fraction(el.getOffsetInHierarchy(m)).limit_denominator(96), not el.duration.isGrace, i, el)
                             for i, el in enumerate(m.recurse().notesAndRests)), key=lambda x: x[:3])
@@ -133,11 +147,15 @@ def lint(score) -> dict:
                 tuplets = el.duration.tuplets
                 if len(tuplets) > 1:
                     add("nested-tuplet", part, bar, f"beat {float(off) + 1:g}: " + " in ".join(f"{t.numberNotesActual}:{t.numberNotesNormal}" for t in tuplets))
+                elif tuplets and tuplets[0].numberNotesActual > 9:
+                    add("unwritable-tuplet", part, bar, f"beat {float(off) + 1:g}: {tuplets[0].numberNotesActual}:{tuplets[0].numberNotesNormal}")
                 elif tuplets and (tuplets[0].numberNotesActual, tuplets[0].numberNotesNormal) != (3, 2):
                     add("odd-tuplet", part, bar, f"beat {float(off) + 1:g}: {tuplets[0].numberNotesActual}:{tuplets[0].numberNotesNormal}")
                 if not el.duration.isGrace and 0 < ql < Fraction(1, 4):
                     add("too-short", part, bar, f"beat {float(off) + 1:g}: {el.duration.type} ({ql})")
-                if el.duration.dots > 1:
+                if el.duration.dots > 2:
+                    add("triple-dot", part, bar, f"beat {float(off) + 1:g}: {el.duration.type} with {el.duration.dots} dots")
+                elif el.duration.dots > 1:
                     add("double-dot", part, bar, f"beat {float(off) + 1:g}: {el.duration.type} with {el.duration.dots} dots")
                 if el.isRest:
                     if not el.style.hideObjectOnPrint:
@@ -154,6 +172,8 @@ def lint(score) -> dict:
                 if four_run == 3:
                     add("ledger-lines", part, bar, f"three notes in a row on four ledger lines (to {el.pitches[0].nameWithOctave})")
                 for p in el.pitches:
+                    if p.alter and diatonic.get(p.pitchClass, p.name) != p.name:
+                        add("wrong-enharmonic", part, bar, f"{p.nameWithOctave} where the key gives {diatonic[p.pitchClass]}")
                     k = (p.step, p.octave)
                     current = state.get(k, key_alter.get(p.step, 0.0))
                     alter = p.alter
@@ -180,11 +200,16 @@ def lint(score) -> dict:
                     oa = Fraction(a.getOffsetInHierarchy(m)).limit_denominator(96)
                     end = oa + Fraction(a.duration.quarterLength + b.duration.quarterLength).limit_denominator(96)
                     joined = duration.Duration(end - oa)
-                    if math.floor(oa) == math.floor(end - Fraction(1, 96)) and joined.type != "inexpressible" and joined.dots <= 1 and not joined.tuplets:
+                    if math.floor(oa) == math.floor(end - Fraction(1, 96)) and joined.type not in ("inexpressible", "complex") and joined.dots <= 1 and not joined.tuplets:
                         add("needless-tie", part, bar, f"beat {float(oa) + 1:g}: {a.duration.type} + {b.duration.type} = {joined.type}{'.' * joined.dots}")
+    exempt = Counter()
+    if profile == "published":
+        exempt = Counter(r for r, *_ in found if r not in PUBLISHED_RULES)
+        found = [f for f in found if f[0] in PUBLISHED_RULES]
     counts = Counter(r for r, *_ in found)
     by_bar = Counter(b for _, _, b, _ in found if b)
-    return {"findings": found, "counts": {r: counts.get(r, 0) for r in RULES}, "worst": by_bar.most_common(5)}
+    return {"findings": found, "counts": {r: counts.get(r, 0) for r in RULES}, "worst": by_bar.most_common(5),
+            "exempt": dict(exempt)}
 
 
 def tidy_heading(xml: str) -> str:

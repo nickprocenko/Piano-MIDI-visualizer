@@ -1043,6 +1043,68 @@ def test_page_menu_learn_loop(ref, fake_rtmidi, monkeypatch):
         server.hub.shutdown()
 
 
+def test_page_listen_plays_it_for_you(ref, fake_rtmidi, monkeypatch):
+    from midi_coach import display, server
+
+    monkeypatch.setenv("MIDI_COACH_NO_BROWSER", "1")
+    monkeypatch.setattr(server, "recorder", midi_io.Recorder())
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_live", {"session": None})
+    monkeypatch.setattr(server, "_practice", {**server._practice, "pass": 0, "last": None, "settings": None})
+    server.hub.commands.update(server.PAGE_COMMANDS)
+    url = server.hub.start() + "cmd/"
+    bar1 = [n.pitch for n in ref.notes if n.start < ref.bars[1].start]
+    try:
+        _post(url + "load", {"lesson": "etude"})
+        started = _post(url + "start", {"mode": "listen", "bars": "1", "tempo": 150, "loop": True})
+        assert started["mode"] == "listen" and started["output"] == "JUNO-DS 0", started
+        assert not server.recorder.active  # nothing to play, so the keyboard input stays closed
+        assert "error" in _post(url + "start", {"mode": "learn"})  # one run at a time
+        assert "error" in _post(url + "load", {"lesson": "etude"})
+        _until(lambda: server._practice["pass"] == 2, timeout=8)  # bar 1 played through, then looped
+        ons = [m[1] for _, m in FakeOut.sent if m[0] & 0xF0 == 0x90 and m[2]]
+        assert all(ons.count(p) >= bar1.count(p) for p in bar1)  # both hands
+        assert [0xB0, 64, 127] in [m for _, m in FakeOut.sent]  # with the sustain pedal
+        assert server.hub._cursor["live"]
+        _post(url + "stop")
+        _until(lambda: not server._practice["running"])
+        time.sleep(1.7)  # no further pass after Stop
+        assert not server._practice["running"] and server._practice["pass"] == 2
+        sounding = set()
+        for _, m in FakeOut.sent:
+            if m[0] & 0xF0 == 0x90 and m[2]:
+                sounding.add(m[1])
+            elif m[0] & 0xF0 in (0x80, 0x90):
+                sounding.discard(m[1])
+        assert not sounding and FakeOut.sent[-1][1] == [0xB0, 64, 0]  # everything let go
+        assert library.list_takes() == []  # nothing saved or graded
+    finally:
+        server._practice["stopping"] = True
+        if server._live["session"]:
+            server._live["session"].stop()
+        server.hub.shutdown()
+
+
+def test_listen_hears_the_shown_parts(ref):
+    from midi_coach import server
+
+    right = server._listen_notes(ref, ["right"], "2-3", 60)
+    both = server._listen_notes(ref, ["right", "left", "right"], "2-3", 60)
+    assert {n.part for n in right} == {0} and {n.part for n in both} == {0, 1}
+    assert len(both) == len({id(n) for n in both})
+    t0, t1 = ref.bar_range_times(2, 3)
+    assert all(t0 - 1e-6 <= n.start < t1 for n in both)
+
+
+def test_accompanist_sends_the_pedal_for_listen(fake_rtmidi):
+    acc = midi_io.Accompanist(pedal=True)
+    acc.schedule([(0.0, [0xB0, 64, 127]), (0.0, [0x90, 60, 80]), (0.0, [0xB0, 7, 100]), (5.0, [0x80, 60, 0])],
+                 time.perf_counter())
+    _until(lambda: [0x90, 60, 80] in [m for _, m in FakeOut.sent])
+    acc.close()
+    assert [m for _, m in FakeOut.sent] == [[0xB0, 64, 127], [0x90, 60, 80], [0x80, 60, 0], [0xB0, 64, 0]]
+
+
 def test_busy_keyboard_falls_back_to_coach_port(fake_rtmidi, monkeypatch):
     from midi_coach import server
 
@@ -2116,3 +2178,391 @@ def test_grand_staff_voices_spelling_and_lengths():
     assert not left.measure(3).voices  # nothing held there: one voice
     # Releases a little early or late are written as plain values, not tied 16ths.
     assert sheet._end(2.19, F(1)) == 2 and sheet._end(1.81, F(0)) == 2 and sheet._end(0.73, F(0)) == F(3, 4)
+
+
+# ---------------------------------------------------------------------------
+# Part roles (pedals, vocals), accompaniment, and the page's Songs / Lessons panel
+# ---------------------------------------------------------------------------
+
+
+def _write_organ(path):
+    """4 bars for organ and choir: a tune for the right hand, chords for the left, a bass line
+    for the feet (named Pedal) and a sung line."""
+    mid = mido.MidiFile(ticks_per_beat=PPQ)
+    meta = mido.MidiTrack()
+    meta.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(BPM)))
+    mid.tracks.append(meta)
+    for name, channel, program, pitches in (
+        ("Upper", 0, None, lambda b: [72 + b % 5]),
+        ("Lower", 1, None, lambda b: [55, 60]),
+        ("Pedal", 2, 19, lambda b: [36 + b % 3]),
+        ("Choir Vocals", 3, 52, lambda b: [67 + b % 4]),
+    ):
+        tr = mido.MidiTrack()
+        tr.append(mido.MetaMessage("track_name", name=name))
+        if program is not None:
+            tr.append(mido.Message("program_change", program=program, channel=channel))
+        for beat in range(16):
+            for pitch in pitches(beat):
+                tr.append(mido.Message("note_on", note=pitch, velocity=70, channel=channel, time=0))
+            for k, pitch in enumerate(pitches(beat)):
+                tr.append(mido.Message("note_off", note=pitch, velocity=0, channel=channel, time=PPQ if k == 0 else 0))
+        mid.tracks.append(tr)
+    mid.save(str(path))
+    return path
+
+
+def test_pedals_and_vocals_roles(ref, tmp_path):
+    from midi_coach import engraving, sheet
+    from midi_coach.notes import effective_roles
+
+    _write_organ(tmp_path / "songs" / "Organ Hymn.mid")
+    score = library.get_score("organ hymn")
+    ix = {p.name: p.index for p in score.parts}
+    upper, lower, pedal, choir = ix["Upper"], ix["Lower"], ix["Pedal"], ix["Choir Vocals"]
+    # Suggested before anyone confirms: the pedal part is for the feet, not a hand.
+    assert effective_roles(score) == {upper: "right", lower: "left", pedal: "pedals", choir: "vocals"}
+
+    def parts_of(s, hand):
+        return {n.part for n in select_notes(s, hand)[0]}
+
+    assert parts_of(score, "both") == {upper, lower}  # the hands only: no feet, never the vocals
+    assert parts_of(score, "right+pedals") == {upper, pedal}
+    assert parts_of(score, "pedals") == {pedal} and parts_of(score, "vocals") == {choir}
+    assert len(select_notes(score, "both+pedals", bars=(1, 1))[0]) == 4 * 2 + 4 + 4
+    with pytest.raises(ValueError):
+        select_notes(score, "pedals+right")
+
+    # A confirmed choice keeps the roles; score.hands stays the hands' parts only.
+    library.save_hands(score, {upper: "both", pedal: "pedals", choir: "vocals"})
+    library._score_cache.clear()
+    again = library.get_score("organ hymn")
+    assert again.roles == {upper: "both", pedal: "pedals", choir: "vocals"} and again.hands == {upper: "both"}
+    assert parts_of(again, "both") == {upper}
+
+    # The sheet: the vocal line over the piano, the pedals under it, each staff's role known.
+    library.save_hands(again, {upper: "right", lower: "left", pedal: "pedals", choir: "vocals"})
+    out = sheet.build(again)
+    assert out["staves"] == sheet.staves(again) == ["vocals", "right", "left", "pedals"]
+    names = [n.split(">", 1)[1].split("<", 1)[0] for n in out["xml"].split("<part-name")[1:]]
+    assert names == ["Vocals", "Right Hand", "Left Hand", "Pedals"], names
+    assert not engraving.lint(out["xml"])["findings"]
+    path = tmp_path / "organ.musicxml"
+    path.write_text(out["xml"], encoding="utf-8")
+    written = load_score(path)  # every pedal note is on the sheet, at its pitch
+    feet = next(p.index for p in written.parts if p.name == "Pedals")
+    assert sorted(n.pitch for n in written.notes if n.part == feet) == sorted(n.pitch for n in again.notes if n.part == pedal)
+
+
+def test_backing_is_what_you_dont_play(ref, tmp_path):
+    from midi_coach import server
+
+    _write_organ(tmp_path / "songs" / "Organ Hymn.mid")
+    score = library.get_score("organ hymn")
+    ix = {p.name: p.index for p in score.parts}
+    backing = server._backing_notes(score, "right+pedals", ["right", "left", "pedals", "vocals"], "2-3", 60)
+    assert {n.part for n in backing} == {ix["Lower"], ix["Choir Vocals"]}
+    t0, t1 = score.bar_range_times(2, 3)
+    assert all(t0 - 1e-6 <= n.start < t1 for n in backing)
+    assert server._backing_notes(score, "both", None, None, 60) == []
+
+
+def test_accompanist_sends_notes_only_and_lets_go(fake_rtmidi):
+    acc = midi_io.Accompanist()
+    assert acc.port == "JUNO-DS 0"
+    now = time.perf_counter()
+    acc.schedule([(0.0, [0xB0, 64, 127]), (0.0, [0x90, 60, 80]), (0.05, [0x80, 60, 0]),
+                  (0.0, [0x90, 64, 80]), (5.0, [0x80, 64, 0]), (9.0, [0x90, 67, 80])], now)
+    acc.schedule([(0.0, [0x90, 62, 80]), (0.1, [0x80, 62, 0])], now - 1.0)  # already past: dropped
+    _until(lambda: [0x80, 60, 0] in [m for _, m in FakeOut.sent])
+    acc.close()
+    sent = [m for _, m in FakeOut.sent]
+    assert sent == [[0x90, 60, 80], [0x90, 64, 80], [0x80, 60, 0], [0x80, 64, 0]]  # 64 let go on close; no pedal, no 67
+
+
+class FakeAccompanist:
+    def __init__(self):
+        self.scheduled = []
+        self.closed = False
+
+    def schedule(self, events, start):
+        self.scheduled.append((start, events))
+
+    def close(self):
+        self.closed = True
+
+
+def test_live_runs_play_the_backing(ref):
+    from midi_coach import live
+
+    right, _ = select_notes(ref, "right", bars=(1, 1))
+    left, _ = select_notes(ref, "left", bars=(1, 1))
+    # Learn: each chord you finish plays the left hand up to the next chord.
+    acc = FakeAccompanist()
+    sess = live.LiveSession("wait", ref, right, RecordingHub(), backing=left, accompanist=acc)
+    sess.start()
+    sess.on_message(1.0, _on(right[0].pitch))
+    start, events = acc.scheduled[0]
+    expected = {n.pitch for n in left if right[0].start <= n.start < right[1].start}
+    assert start == 1.0 and {m[1] for _, m in events if m[0] & 0xF0 == 0x90} == expected
+    for n in right[1:]:
+        sess.on_message(2.0, _on(n.pitch))
+    assert len(acc.scheduled) == len(right)
+    sess.stop()
+    assert acc.closed
+
+    # Rehearse: the whole backing once the clock starts on your first note.
+    acc = FakeAccompanist()
+    sess = live.LiveSession("rehearsal", ref, right, RecordingHub(), tempo_percent=50, backing=left, accompanist=acc)
+    sess.start()
+    try:
+        assert acc.scheduled == []
+        t0 = time.perf_counter()
+        sess.on_message(t0, _on(right[0].pitch))
+        (start, events), = acc.scheduled
+        assert start == t0
+        ons = sorted(t for t, m in events if m[0] & 0xF0 == 0x90)
+        assert ons[-1] == pytest.approx((max(n.start for n in left) - right[0].start) / 0.5)
+    finally:
+        sess.stop()
+    assert acc.closed
+
+
+def test_page_songs_lessons_and_parts(ref, tmp_path, fake_rtmidi, monkeypatch):
+    from midi_coach import display, lessons, server
+
+    _write_organ(tmp_path / "songs" / "Organ Hymn.mid")
+    monkeypatch.setattr(server, "recorder", midi_io.Recorder())
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_song_files", {"at": -1e9, "files": []})
+    server.hub.commands.update(server.PAGE_COMMANDS)
+    url = server.hub.start() + "cmd/"
+    exercise = lessons.lessons_dir(lessons.EXERCISES) / "Scale.mid"
+    _write_reference(exercise)
+    song = lessons.lessons_dir("Solo piano") / "Nocturne.mid"
+    _write_reference(song)
+    library.save_take([(0.0, [0x90, 60, 80]), (0.5, [0x80, 60, 0])], {"reference": str(exercise)})
+    try:
+        found = _post(url + "songs", {"query": "hymn organ"})
+        assert [s["title"] for s in found["songs"]] == ["Organ Hymn"]
+        assert found["total"] == 2  # the etude and the hymn: saved lessons aren't library songs
+        assert _post(url + "songs", {"query": "nothing like it"})["matches"] == 0
+        practised = _post(url + "songs", {})  # no query: library files practised lately (none yet)
+        assert practised["songs"] == [] and practised["total"] == 2
+        listed = {item["title"]: item for item in _post(url + "lessons")["lessons"]}
+        assert listed["Scale"]["kind"] == "lesson" and listed["Scale"]["history"]["runs"] == 1
+        assert listed["Nocturne"]["kind"] == "song" and listed["Nocturne"]["history"] is None
+
+        assert _post(url + "parts")["parts"] == []
+        _post(url + "load", {"lesson": "organ hymn"})
+        parts = _post(url + "parts")
+        assert not parts["confirmed"] and parts["roles"] == ["right", "left", "pedals", "vocals"]
+        assert {p["name"]: p["role"] for p in parts["parts"]} == {
+            "Upper": "right", "Lower": "left", "Pedal": "pedals", "Choir Vocals": "vocals"}
+        payload = server.hub._score_payload
+        assert payload["staves"] == ["vocals", "right", "left", "pedals"] and payload["path"].endswith("Organ Hymn.mid")
+
+        by_name = {p["name"]: str(p["index"]) for p in parts["parts"]}
+        assert "error" in _post(url + "set_parts", {"roles": {by_name["Pedal"]: "pedals"}})  # nothing for the hands
+        saved = _post(url + "set_parts", {"roles": {by_name["Upper"]: "both", by_name["Lower"]: "off",
+                                                    by_name["Pedal"]: "pedals", by_name["Choir Vocals"]: "off"}})
+        assert saved["confirmed"] and saved["roles"] == ["right", "left", "pedals"]
+        assert server.hub._score_payload["staves"] == ["right", "left", "pedals"]  # redrawn for the new parts
+    finally:
+        server.hub.shutdown()
+
+
+def test_song_lesson_vocals_are_not_a_hand(ref, tmp_path):
+    from fractions import Fraction as F
+
+    from midi_coach.notes import effective_roles, is_plain_piano
+    from midi_coach.transcribe import grand_staff
+
+    events = [("right", F(k), F(k + 1), 72) for k in range(8)] + [("left", F(k * 2), F(k * 2 + 2), 48) for k in range(4)]
+    tune = [(F(k), F(k + 1), 67, None) for k in range(8)]
+    path = tmp_path / "songs" / "Song (with vocals).musicxml"
+    path.write_text(grand_staff(events, "Song", melody=tune)["xml"], encoding="utf-8")
+    score = library.get_score(str(path))
+    # Every staff of a MusicXML file loads as piano; the one named Vocals is still the sung line.
+    ix = {p.name: p.index for p in score.parts if p.note_count}
+    assert effective_roles(score) == {ix["Vocals"]: "vocals", ix["Right Hand"]: "right", ix["Left Hand"]: "left"}
+    assert {n.part for n in select_notes(score, "both")[0]} == {ix["Right Hand"], ix["Left Hand"]}
+    two = tmp_path / "songs" / "Duet.musicxml"  # a vocal line over one piano staff isn't plain piano either
+    two.write_text(grand_staff([("right", F(k), F(k + 1), 72) for k in range(4)], "Duet", melody=tune[:4])["xml"], encoding="utf-8")
+    assert not is_plain_piano(library.get_score(str(two)))
+
+
+def test_accidentals_follow_the_sounding_octave_under_an_octave_mark():
+    """A note under 8va is drawn an octave below where it sounds: its accidental is decided
+    by the sounding pitch, so an A4 natural drawn where an earlier A3 natural sits keeps its
+    sign (B flat minor, left hand climbing to B flat 4 in the bass clef)."""
+    from fractions import Fraction as F
+
+    from midi_coach import engraving
+    from midi_coach.transcribe import grand_staff
+
+    lh = [46, 48, 49, 51, 53, 54, 57, 58, 60, 61, 63, 65, 66, 69, 70, 69, 66]  # B flat 2 .. B flat 4 (harmonic) and back
+    events = [("left", F(k, 4), F(k + 1, 4), p) for k, p in enumerate(lh)] + [("right", F(k, 4), F(k + 1, 4), p + 12) for k, p in enumerate(lh)]
+    out = grand_staff(events, "t", "4/4", legato_gap=F(0))
+    assert "<octave-shift" in out["xml"]  # the top of the left hand goes under 8va...
+    assert not engraving.lint(out["xml"])["findings"]  # ...and keeps its naturals
+
+
+def test_clefs_can_change_inside_a_bar():
+    """clef_every: a four-octave arpeggio inside a bar changes clef as it climbs, instead of
+    leaving notes eight ledger lines off the staff."""
+    from fractions import Fraction as F
+
+    from midi_coach import engraving
+    from midi_coach.transcribe import grand_staff
+
+    up = [35 + o for o in (0, 4, 7, 12, 16, 19, 24, 28, 31, 36, 40, 43, 48)]  # B major from B1 over four octaves
+    seq = up + up[-2::-1]
+    events = [("left", F(k, 4), F(k + 1, 4), p) for k, p in enumerate(seq)] + [("right", F(k, 4), F(k + 1, 4), p + 12) for k, p in enumerate(seq)]
+    per_bar = engraving.lint(grand_staff(events, "t", "4/4", legato_gap=F(0))["xml"])["counts"]
+    per_beat = grand_staff(events, "t", "4/4", legato_gap=F(0), clef_every=F(1))["xml"]
+    assert per_bar["ledger-lines"] > 0
+    assert not engraving.lint(per_beat)["findings"]
+    assert per_beat.count("<clef") > 4  # changes inside the bars
+
+
+def test_notes_of_the_key_signature_are_spelled_as_the_key_spells_them():
+    """In F minor (four flats) the note between G and A is A flat, not G sharp; the raised
+    leading note E natural stays as it is."""
+    from fractions import Fraction as F
+
+    from midi_coach import engraving
+    from midi_coach.transcribe import grand_staff
+
+    tune = [65, 67, 68, 70, 72, 68, 64, 65, 68, 67, 68, 65]  # F G Ab Bb C Ab E F ...
+    events = [("right", F(k), F(k + 1), p) for k, p in enumerate(tune)] + [("left", F(4 * b), F(4 * b + 4), 53) for b in range(3)]
+    xml = grand_staff(events, "t", "4/4")["xml"]
+    assert "<fifths>-4</fifths>" in xml
+    assert "<step>G</step>\n          <alter>1</alter>" not in xml and not engraving.lint(xml)["findings"]
+    # The rule itself: a G sharp written in that key is reported.
+    bad = xml.replace("<step>A</step>\n          <alter>-1</alter>", "<step>G</step>\n          <alter>1</alter>", 1)
+    assert bad != xml and engraving.lint(bad)["counts"]["wrong-enharmonic"] >= 1
+
+
+def test_a_tie_no_single_note_can_replace_is_not_needless():
+    """A quaver tied to a 32nd inside one beat can't be written as one note (music21 calls its
+    sum 'complex'): the tie is needed, so needless-tie must not report it."""
+    from music21 import note, stream, tie
+
+    from midi_coach import engraving
+
+    part = stream.Part()
+    part.partName = "Right Hand"
+    m = stream.Measure(number=1)
+    a, b = note.Note("C5", quarterLength=0.5), note.Note("C5", quarterLength=0.125)
+    a.tie, b.tie = tie.Tie("start"), tie.Tie("stop")
+    for el in (a, b, note.Note("D5", quarterLength=0.375), note.Note("E5", quarterLength=3)):
+        m.append(el)
+    part.append(m)
+    assert engraving.lint(stream.Score([part]))["counts"]["needless-tie"] == 0
+
+
+def test_an_upbeat_is_bar_zero_on_the_sheet_and_in_the_coach(tmp_path):
+    """Für Elise starts with two semiquavers before bar 1: the sheet writes them as a short
+    bar 0 (implicit), and loading it back the coach's bar 1 starts where the sheet's does."""
+    import re
+    from fractions import Fraction as F
+
+    from midi_coach import engraving
+    from midi_coach.transcribe import grand_staff
+
+    tune = [76, 75, 76, 75, 76, 71, 74, 72]
+    events = [("right", F(k, 4), F(k + 1, 4), p) for k, p in enumerate(tune)] + [("right", F(2), F(7, 2), 69),
+              ("left", F(3, 4), F(1), 45), ("left", F(1), F(5, 4), 52), ("left", F(5, 4), F(3, 2), 57)]
+    xml = grand_staff(events, "t", "3/8", legato_gap=F(0), pickup=F(1, 2))["xml"]
+    assert re.findall(r'<measure implicit="(\w+)" number="(\d+)"', xml)[:2] == [("yes", "0"), ("no", "1")]
+    assert not engraving.lint(xml)["findings"]
+    path = tmp_path / "upbeat.musicxml"
+    path.write_text(xml, encoding="utf-8")
+    score = load_score(path)
+    assert [(b.number, b.start_beat, b.end_beat) for b in score.bars[:3]] == [(0, 0.0, 0.5), (1, 0.5, 2.0), (2, 2.0, 3.5)]
+    third = sorted(score.notes, key=lambda n: (n.start, n.pitch))[2]  # E, the first note of bar 1
+    assert score.position(third.start) == (1, 1.0)
+    assert score.bar_range_times(1, 1) == (score.bars[1].start, score.bars[1].end)
+
+
+def test_an_upbeat_with_a_two_voice_left_hand_keeps_its_timing(tmp_path):
+    """The left hand rests through the upbeat and then has two voices (a held bass under
+    moving notes): its notes stay where they were, the empty upbeat holds one rest per voice."""
+    from fractions import Fraction as F
+
+    from midi_coach.transcribe import grand_staff
+
+    events = [("right", F(0), F(1, 2), 74)] + [("right", F(1, 2) + F(k, 2), F(1) + F(k, 2), 79 - k) for k in range(8)]
+    events += [("left", F(1, 2), F(9, 2), 43)] + [("left", F(1, 2) + F(k, 2), F(1) + F(k, 2), 55 + (k % 3)) for k in range(8)]
+    xml = grand_staff(events, "t", "2/4", legato_gap=F(0), pickup=F(1, 2))["xml"]
+    path = tmp_path / "voices.musicxml"
+    path.write_text(xml, encoding="utf-8")
+    got = sorted((round(n.beat, 3), n.pitch) for n in load_score(path).notes)
+    assert got == sorted((float(on), p) for _, on, _, p in events)
+
+
+def test_a_beat_mixing_triplet_values_is_one_bracket_and_the_next_note_stays_plain(tmp_path):
+    """A quarter and two 16ths, all triplets, then a plain eighth: the beat is one triplet
+    bracket, and the eighth isn't cut into a tied eighth-and-16th triplet to fill a group."""
+    from fractions import Fraction as F
+
+    from midi_coach.engraving import lint
+    from midi_coach.transcribe import grand_staff
+
+    events = [("right", F(0), F(2, 3), 76), ("right", F(2, 3), F(5, 6), 85), ("right", F(5, 6), F(1), 82),
+              ("right", F(1), F(3, 2), 71), ("right", F(3, 2), F(2), 67), ("left", F(0), F(2), 48)]
+    xml = grand_staff(events, "t", "2/4", legato_gap=F(0))["xml"]
+    assert "<tie " not in xml
+    assert not lint(xml)["counts"].get("needless-tie")
+    path = tmp_path / "triplets.musicxml"
+    path.write_text(xml, encoding="utf-8")
+    got = sorted((round(n.beat, 3), n.pitch) for n in load_score(path).notes)
+    assert got == sorted((round(float(on), 3), p) for _, on, _, p in events)
+
+
+def test_lint_flags_tuplets_no_one_writes_even_in_published_music():
+    from music21 import duration, note, stream
+
+    from midi_coach.engraving import lint
+
+    m = stream.Measure(number=1)
+    n = note.Note("C5")
+    d = duration.Duration("16th")
+    d.appendTuplet(duration.Tuplet(23, 16, "32nd"))
+    n.duration = d
+    m.append(n)
+    part = stream.Part([m])
+    part.partName = "Right Hand"
+    score = stream.Score([part])
+    assert lint(score, profile="published")["counts"].get("unwritable-tuplet")
+
+
+def test_lint_flags_triple_dots_even_in_published_music():
+    from music21 import duration, note, stream
+
+    from midi_coach.engraving import lint
+
+    m = stream.Measure(number=1)
+    n = note.Note("C5")
+    n.duration = duration.Duration(type="eighth", dots=3)
+    m.append(n)
+    part = stream.Part([m])
+    part.partName = "Right Hand"
+    found = lint(stream.Score([part]), profile="published")["counts"]
+    assert found.get("triple-dot") and not found.get("double-dot")
+
+
+def test_build_lesson_prints_a_repeated_accidental_once_per_bar(tmp_path):
+    """F sharp, G, F sharp in one bar: the second F sharp needs no sign (the bar's first one
+    covers it), F natural after it needs a natural, and the next bar starts afresh."""
+    from midi_coach.engraving import lint
+    from midi_coach import lessons
+
+    path, score = lessons.build_lesson("Sharps", "f#4 g f# a f#4 fn f# r", None, "4/4", "C", 72, out_dir=tmp_path,
+                                       filename="sharps")
+    assert path.endswith("sharps.musicxml") and str(tmp_path) in path
+    assert not lint(path)["findings"]
+    xml = pathlib.Path(path).read_text(encoding="utf-8")
+    assert xml.count("<accidental>sharp</accidental>") == 3 and xml.count("<accidental>natural</accidental>") == 1
+    assert [n.pitch for n in score.notes] == [66, 67, 66, 69, 66, 65, 66]

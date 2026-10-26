@@ -3,7 +3,8 @@
 A band arrangement drawn as-is is one staff per instrument, drums included. Instead this
 writes only the parts you play (your confirmed choice, else the suggestion), each hand on
 its own staff, from the same notes the coach grades - so the sheet, the hit/miss marks
-and the grading agree. Files whose beat grid was recovered (regrid.py) are written on that
+and the grading agree. A vocal line goes on a staff above the piano and a bass-pedal part
+on one below it (notes.ROLES). Files whose beat grid was recovered (regrid.py) are written on that
 grid, with tempo marks where the tempo moves.
 
 Results are cached in <home>/derived, keyed by the file and the part choice.
@@ -15,11 +16,11 @@ import pathlib
 from fractions import Fraction
 
 from . import analysis, library
-from .notes import MIDI_SUFFIXES, SPLIT_VERSION, Score, is_plain_piano, playable_parts, select_notes
+from .notes import MIDI_SUFFIXES, OTHER_ROLES, SPLIT_VERSION, Score, effective_roles, is_plain_piano, playable_parts, select_notes
 from .regrid import snap
 from .transcribe import grand_staff
 
-VERSION = 5  # bump when the output changes, so cached sheets are rewritten
+VERSION = 6  # bump when the output changes, so cached sheets are rewritten
 MIN_TEMPO_CHANGE = 2.0  # BPM: smaller drifts don't get a new tempo mark
 
 
@@ -29,7 +30,8 @@ def wanted(score: Score) -> bool:
     track (a straight conversion would put every note on one staff)."""
     if pathlib.Path(score.path).suffix.lower() not in MIDI_SUFFIXES:
         return False
-    return not is_plain_piano(score) or score.beat_map is not None or len(playable_parts(score)) == 1
+    return (not is_plain_piano(score) or score.beat_map is not None or len(playable_parts(score)) == 1
+            or any(r in OTHER_ROLES for r in score.roles.values()))
 
 
 TEMPO_SMOOTH_BARS = 5  # tempo marks follow the median over this many bars, not one bar's wobble
@@ -93,19 +95,41 @@ def _tempo_marks(score: Score) -> list[tuple[Fraction, float]]:
 
 
 def build(score: Score, split_note: int = 60) -> dict:
-    """{xml, bars, notes, key, parts} for the parts the user plays."""
+    """{xml, bars, notes, key, parts, staves} for the parts the user plays, plus the vocal
+    line and the bass pedals; staves is the role of each staff, top to bottom."""
     notes, info = select_notes(score, "both", split_note=split_note)
-    if not notes:
+    roles = set(effective_roles(score).values())
+    pedals = select_notes(score, "pedals")[0] if "pedals" in roles else []
+    sung = select_notes(score, "vocals")[0] if "vocals" in roles else []
+    if not notes and not pedals:
         raise ValueError("No notes in the chosen parts.")
     side = analysis.side_resolver(score, split_note)
-    grids = grids_for([n.beat for n in notes])
+    grids = grids_for([n.beat for n in notes + pedals])
     events = []
-    for n in notes:
-        on = _beat(n.beat, grids)
-        events.append((side(n), on, _end(score.beat_of(n.end), on, grids), n.pitch))
+    for group, staff in ((notes, None), (pedals, "pedals")):
+        for n in group:
+            on = _beat(n.beat, grids)
+            events.append((staff or side(n), on, _end(score.beat_of(n.end), on, grids), n.pitch))
+    tune_grids = grids_for([n.beat for n in sung])  # its own grid: a sung triplet over straight piano
+    tune = []
+    for n in sung:
+        on = _beat(n.beat, tune_grids)
+        tune.append((on, _end(score.beat_of(n.end), on, tune_grids), n.pitch, None))
     title = pathlib.Path(score.path).stem
-    out = grand_staff(events, title, time_signatures(score), _tempo_marks(score))
-    return {**out, "parts": info.get("method")}
+    out = grand_staff(events, title, time_signatures(score), _tempo_marks(score), melody=tune or None)
+    staves = ["vocals"] * bool(tune) + ["right", "left"] + ["pedals"] * bool(pedals)
+    return {**out, "parts": info.get("method"), "staves": staves}
+
+
+def staves(score: Score) -> list[str]:
+    """The role of each staff drawn for a score, top to bottom (a role from notes.ROLES, or
+    'other' for a part without one), so the page can show and hide them by role. Matches
+    build() for the sheets written here, and the file's parts in order otherwise."""
+    roles = effective_roles(score)
+    has = lambda role: any(r == role and score.parts[i].note_count for i, r in roles.items())  # noqa: E731
+    if wanted(score):
+        return ["vocals"] * has("vocals") + ["right", "left"] + ["pedals"] * has("pedals")
+    return [roles.get(p.index, "other") for p in score.parts if p.note_count]
 
 
 def time_signatures(score: Score) -> list[tuple[Fraction, str]]:
@@ -122,7 +146,7 @@ def piano_xml(score: Score, split_note: int = 60) -> str:
     """The piano sheet's MusicXML, from the cache when the file and part choice are unchanged."""
     from . import hand_model
 
-    choice = ",".join(f"{i}{h[0]}" for i, h in sorted(score.hands.items())) or "suggested"
+    choice = ",".join(f"{i}{h[0]}" for i, h in sorted(score.roles.items())) or "suggested"
     hands = f"{hand_model.splitter()}-v{SPLIT_VERSION}"  # a sheet split by the old search is rebuilt once the model is installed
     cache = library.derived_path(score.path, "musicxml", f"sheet-v{VERSION}|{choice}|{split_note}|{score.regrid is not None}|{hands}")
     try:
