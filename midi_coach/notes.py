@@ -11,6 +11,7 @@ import bisect
 import heapq
 import math
 import pathlib
+import re
 import tempfile
 from dataclasses import dataclass, field, replace
 
@@ -116,6 +117,7 @@ class Score:
     tempos: list[tuple[float, float]]  # (seconds, bpm)
     duration: float
     hands: dict[int, str] = field(default_factory=dict)  # confirmed part -> 'right' | 'left' | 'both'
+    roles: dict[int, str] = field(default_factory=dict)  # confirmed part -> any of ROLES (hands, pedals, vocals)
     _bar_starts: list[float] = field(default_factory=list, repr=False)
     _played_live: bool | None = field(default=None, repr=False)
     # Set when the beat grid was recovered (regrid.py): seconds <-> beats, and how well it fit.
@@ -160,10 +162,14 @@ class Score:
         beat = 1.0 + (self.beat_of(t) - bar.start_beat) / span * bar.numerator
         return bar.number, round(beat, 2)
 
+    def bar(self, number: int) -> Bar:
+        """The bar with this number (bar 0 is an upbeat, when the music starts with one)."""
+        first = self.bars[0].number
+        return self.bars[max(0, min(number - first, len(self.bars) - 1))]
+
     def bar_range_times(self, first: int, last: int) -> tuple[float, float]:
-        first = max(1, min(first, len(self.bars)))
-        last = max(first, min(last, len(self.bars)))
-        return self.bars[first - 1].start, self.bars[last - 1].end
+        start = self.bar(first)
+        return start.start, self.bar(max(first, last)).end
 
     def grid_fit(self) -> float:
         """Share of notes starting on a 16th or triplet-8th of the file's own beat. Files
@@ -235,12 +241,57 @@ def _load_musicxml(path: pathlib.Path) -> Score:
         grace.activeSite.remove(grace)
     for part in stream.parts:
         _join_ties(part)
+    pickup = _pickup_beats(stream)
     with tempfile.TemporaryDirectory() as tmp:
         midi_path = pathlib.Path(tmp) / "converted.mid"
         stream.write("midi", fp=str(midi_path))
         score = load_midi(midi_path)
     score.path = str(path)
+    if pickup:
+        _with_pickup(score, pickup)
     return score
+
+
+def _pickup_beats(stream) -> float:
+    """How long the upbeat is, when the first bar is shorter than its time signature (a bar 0
+    in the score), else 0."""
+    try:
+        measures = list(stream.parts[0].getElementsByClass("Measure"))
+        first = measures[0]
+        ts = first.timeSignature or first.getContextByClass("TimeSignature")
+        full, actual = ts.barDuration.quarterLength, first.duration.quarterLength
+    except (IndexError, AttributeError):
+        return 0.0
+    return float(actual) if len(measures) > 1 and 0 < actual < full - 1e-6 else 0.0
+
+
+def _with_pickup(score: Score, pickup: float) -> None:
+    """Re-cut a score's bars for an upbeat: bar 0 is the upbeat, bar 1 starts after it (a MIDI
+    file has no partial bars, so the bars read from it all start a beat or so early)."""
+    old = score.bars
+    if not old:
+        return
+    marks = [(b.start_beat, b.start) for b in old] + [(old[-1].end_beat, old[-1].end)]
+
+    def sec_at(beat: float) -> float:
+        i = max(0, min(bisect.bisect_right([m[0] for m in marks], beat) - 1, len(marks) - 2))
+        (b0, t0), (b1, t1) = marks[i], marks[i + 1]
+        return t0 + (beat - b0) * (t1 - t0) / max(b1 - b0, 1e-9)
+
+    def sig_at(beat: float) -> Bar:
+        return old[max(0, min(bisect.bisect_right([b.start_beat for b in old], beat + 1e-6) - 1, len(old) - 1))]
+
+    bars = [Bar(0, 0.0, sec_at(pickup), old[0].numerator, old[0].denominator, 0.0, pickup)]
+    cursor, k = pickup, 1
+    end = old[-1].end_beat
+    while cursor < end - 1e-6:
+        sig = sig_at(cursor)
+        length = sig.numerator * 4 / sig.denominator
+        bars.append(Bar(k, sec_at(cursor), sec_at(cursor + length), sig.numerator, sig.denominator, cursor, cursor + length))
+        cursor += length
+        k += 1
+    score.bars = bars
+    score._bar_starts = [b.start for b in bars]
 
 
 def _join_ties(part) -> None:
@@ -446,6 +497,14 @@ def _name_side(name: str) -> str | None:
     if any(w in tokens or (len(w) > 3 and w in lower) for w in _LEFT_WORDS):
         return "left"
     return None
+
+
+# What a part of a file is: played by a hand (or shared between them by register), played
+# with the feet on bass pedals, or the sung line (shown and heard, never graded).
+HAND_ROLES = ("right", "left", "both")
+OTHER_ROLES = ("pedals", "vocals")
+ROLES = HAND_ROLES + OTHER_ROLES
+_SUNG = re.compile(r"\b(vocal|voice|vox|sing)", re.I)  # a part named as the sung line
 
 
 def playable_parts(score: Score) -> list[Part]:
@@ -676,6 +735,9 @@ def select_notes(
     asked for by part number. Returns (notes, info) where info explains the selection.
     """
     hand = (hand or "both").lower()
+    base, plus, extra = hand.partition("+")
+    if not parts and (base in OTHER_ROLES or plus):
+        return _select_role(score, hand, base, extra, bars, split_note)
     info: dict = {"hand": hand}
     notes = score.notes
     playable = playable_parts(score)
@@ -723,6 +785,28 @@ def select_notes(
         notes = [n for n in notes if t0 - 1e-6 <= n.start < t1 - 1e-6]
         info["bars"] = f"{bars[0]}-{bars[1]}"
     notes = as_played(score, notes)
+    raised = sorted(octave_up_parts(score) & {n.part for n in notes})
+    if raised:
+        info["octave_up"] = raised
+    return notes, info
+
+
+def _select_role(score: Score, hand: str, base: str, extra: str, bars: tuple[int, int] | None, split_note: int) -> tuple[list[Note], dict]:
+    """select_notes for 'pedals' / 'vocals', or a hand plus the pedals ('right+pedals')."""
+    role = base if base in OTHER_ROLES else extra
+    if role not in OTHER_ROLES or (extra and base not in ("both", "right", "left")):
+        raise ValueError(f"hand must be 'both', 'right', 'left', 'pedals', 'vocals' or a hand plus '+pedals', not {hand!r}.")
+    own = sorted(i for i, r in effective_roles(score).items() if r == role)
+    notes = as_played(score, [n for n in score.notes if n.part in set(own)])
+    info: dict = {"hand": hand, "method": f"{role} parts {own}"}
+    if extra:
+        hands_notes, hands_info = select_notes(score, base, split_note=split_note)
+        notes = sorted(hands_notes + notes, key=lambda n: (n.start, n.pitch))
+        info["method"] = f"{hands_info['method']} + {role} parts {own}"
+    if bars:
+        t0, t1 = score.bar_range_times(*bars)
+        notes = [n for n in notes if t0 - 1e-6 <= n.start < t1 - 1e-6]
+        info["bars"] = f"{bars[0]}-{bars[1]}"
     raised = sorted(octave_up_parts(score) & {n.part for n in notes})
     if raised:
         info["octave_up"] = raised
@@ -860,7 +944,8 @@ def _hand_pair(score: Score, a: Part, b: Part, split_note: int = 60) -> bool:
 def is_plain_piano(score: Score) -> bool:
     """One or two piano parts and nothing else: no part choice to make."""
     playable = playable_parts(score)
-    return all(p.is_piano for p in playable) and len(playable) <= 2 and len(playable) == sum(1 for p in score.parts if p.note_count)
+    return (all(p.is_piano and not _is_pedals(p) and not _is_sung(p) for p in playable) and len(playable) <= 2
+            and len(playable) == sum(1 for p in score.parts if p.note_count))
 
 
 def effective_hands(score: Score) -> dict[int, str]:
@@ -873,6 +958,34 @@ def effective_hands(score: Score) -> dict[int, str]:
         return {}
     guess = suggest_hands(score)
     return {i: h for h in ("right", "left", "both") for i in guess[h]}
+
+
+def effective_roles(score: Score) -> dict[int, str]:
+    """Part -> role (ROLES) for every part that has one: the user's confirmed choice, else the
+    suggested hands plus any part named as a vocal line or as pedals. Parts left out play no
+    role (drums, doublings, other instruments)."""
+    if score.roles:
+        return score.roles
+    guess = suggest_hands(score)
+    roles = {i: h for h in HAND_ROLES for i in guess[h]}
+    for p in playable_parts(score):
+        if p.index in roles:
+            continue
+        if _is_pedals(p):
+            roles[p.index] = "pedals"
+        elif _is_sung(p) or "melody" in p.name.lower():
+            roles[p.index] = "vocals"
+    return roles
+
+
+def _is_pedals(p: Part) -> bool:
+    """A part named for the organ's pedalboard (played with the feet)."""
+    return "pedal" in p.name.lower()
+
+
+def _is_sung(p: Part) -> bool:
+    """A part named as the vocal line (a song lesson's Vocals staff loads as a piano part)."""
+    return bool(_SUNG.search(p.name))
 
 
 def suggest_hands(score: Score) -> dict:
@@ -891,10 +1004,14 @@ def suggest_hands(score: Score) -> dict:
 def _suggest_hands(score: Score) -> dict:
     out: dict = {"right": [], "left": [], "both": [], "reasons": []}
     playable = playable_parts(score)
+    feet = [p for p in playable if _is_pedals(p)]
+    if feet:
+        playable = [p for p in playable if p not in feet]
+        out["reasons"].append("Played with the feet, not the hands: " + ", ".join(f"part {p.index} '{p.name}'" for p in feet) + ".")
     if not playable:
         out["reasons"].append("No playable parts (only drums or no notes).")
         return out
-    keys = [p for p in playable if _is_keyboard(p)]
+    keys = [p for p in playable if _is_keyboard(p) and not _is_sung(p)]
     if keys:
         doubled = _doublings(score, keys)
         for i, j in doubled.items():

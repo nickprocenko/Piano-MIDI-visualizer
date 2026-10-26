@@ -28,6 +28,8 @@ from .notes import MUSICXML_SUFFIXES, Score
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATIC_FILES = {
     "/": (pathlib.Path(__file__).parent / "static" / "coach.html", "text/html; charset=utf-8"),
+    "/atlas.js": (pathlib.Path(__file__).parent / "static" / "atlas.js", "application/javascript; charset=utf-8"),
+    "/profiles.js": (pathlib.Path(__file__).parent / "static" / "profiles.js", "application/javascript; charset=utf-8"),
     "/notation.html": (REPO_ROOT / "docs" / "notation.html", "text/html; charset=utf-8"),
     "/opensheetmusicdisplay.min.js": (REPO_ROOT / "src" / "static" / "opensheetmusicdisplay.min.js", "application/javascript"),
 }
@@ -89,10 +91,13 @@ class DisplayHub:
         self._lesson_version = 0
         self._session: dict = {"type": "session", "active": False}
         self._practice: dict | None = None
+        self._atlas: dict | None = None
         # name -> callable(body: dict) -> dict, for the coach page's POST /cmd/<name>
         self.commands: dict = {}
         # callable(audio: bytes) -> dict, for POST /voice (push-to-talk recordings)
         self.voice_handler = None
+        # callable(audio: bytes) -> {heard}, for POST /voice/transcribe (an answer said aloud, no chat)
+        self.transcribe_handler = None
 
     # -- server ------------------------------------------------------------
 
@@ -132,11 +137,14 @@ class DisplayHub:
     # -- state -------------------------------------------------------------
 
     def load_score(self, score: Score) -> None:
-        key = (score.path, tuple(sorted(score.hands.items())))  # a new part choice redraws the sheet
+        key = (score.path, tuple(sorted(score.roles.items())))  # a new part choice redraws the sheet
         if key == self._score_key and self._score_payload:
             return
+        from . import sheet
+
         notice = sheet_problem(score)
         xml = None if notice else self.sheet_xml(score)
+        staves = sheet.staves(score) if xml else []
         first = score.bars[0] if score.bars else None
         # The metronome's Match score / Follow score need a real beat grid.
         tempo = None if score.played_live or not first else {
@@ -145,8 +153,8 @@ class DisplayHub:
             self._version += 1
             self.score_path = score.path
             self._score_key = key
-            self._score_payload = {"version": self._version, "title": pathlib.Path(score.path).stem, "xml": xml,
-                                   "notice": notice, "grid": not score.played_live, "tempo": tempo}
+            self._score_payload = {"version": self._version, "title": pathlib.Path(score.path).stem, "path": score.path, "xml": xml,
+                                   "notice": notice, "grid": not score.played_live, "tempo": tempo, "staves": staves}
             self._marks.clear()
             self._heat = None
             self._cursor = None
@@ -218,6 +226,14 @@ class DisplayHub:
             self._practice = msg
         self._broadcast(msg)
 
+    def atlas(self, state: dict) -> None:
+        """The Atlas's state for the coach page: the step being practised, the last verdict,
+        the active Path (replayed to pages that connect later)."""
+        msg = {"type": "atlas", **state}
+        with self._lock:
+            self._atlas = msg
+        self._broadcast(msg)
+
     def metronome(self, grid: dict | None) -> None:
         """Have the coach page's metronome click a run: {start_in, bars: [{t, len, beats, accent}]}
         for a score, or {start_in, bpm, beats, count_in_beats} for an open-ended recording.
@@ -244,6 +260,7 @@ class DisplayHub:
             # A page that connects late gets the latest lesson, but never auto-started.
             lesson = [{"type": "lesson", "version": self._lesson_version, "title": self._lesson.get("title"), "autostart": False}] if self._lesson else []
             practice = [self._practice] if self._practice else []
+            practice += [self._atlas] if self._atlas else []
             if not self._score_payload:
                 return lesson + practice + [{"type": "status", "text": "Pick a lesson, or ask Claude for one."}]
             out = [{"type": "score", "version": self._version, "title": self._score_payload["title"]}] + lesson + practice + [self._session]
@@ -317,10 +334,11 @@ def _make_handler(hub: DisplayHub):
 
         def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
-            if path == "/voice" and hub.voice_handler:
+            voice = {"/voice": hub.voice_handler, "/voice/transcribe": hub.transcribe_handler}.get(path)
+            if voice:
                 length = min(int(self.headers.get("Content-Length") or 0), 20_000_000)
                 try:
-                    result = hub.voice_handler(self.rfile.read(length))
+                    result = voice(self.rfile.read(length))
                 except Exception as exc:
                     result = {"error": str(exc)}
                 return self._send(400 if "error" in result else 200, json.dumps(result).encode(), "application/json")

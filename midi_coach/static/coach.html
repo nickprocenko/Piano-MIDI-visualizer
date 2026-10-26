@@ -45,7 +45,54 @@
   #m-dots i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.14); transition: background .05s; }
   #m-dots i.accent { box-shadow: inset 0 0 0 1px var(--accent); }
   #m-dots i.lit { background: var(--accent); }
-  #lesson { max-width: 240px; }
+  /* Songs / Lessons panel on the left */
+  #lib-toggle { padding: 4px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #lib-toggle[aria-expanded=true] { border-color: var(--accent); }
+  #workspace { flex: 1; display: flex; min-height: 0; position: relative; }
+  #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #library { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid rgba(255,255,255,.08); }
+  body.lib-closed #library { display: none; }
+  body.running #lib-list { opacity: .5; pointer-events: none; }
+  .tabs { display: flex; border-bottom: 1px solid rgba(255,255,255,.08); }
+  .tabs button { flex: 1; padding: 10px 0 8px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+  #lib-search { margin: 10px 12px 4px; padding: 6px 9px; background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 5px; font: inherit; }
+  #lib-list { flex: 1; overflow-y: auto; padding-bottom: 14px; }
+  .lib-group { padding: 12px 14px 4px; color: var(--muted); font: 700 11px 'Segoe UI', Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+  .lib-item { display: block; width: 100%; padding: 6px 14px 6px 11px; background: transparent; border: 0; border-left: 3px solid transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  .lib-item:hover { background: rgba(255,255,255,.04); }
+  .lib-item.current { border-left-color: var(--accent); background: rgba(0,180,180,.09); }
+  .lib-item .meta { display: block; color: var(--muted); font-size: 11.5px; }
+  .lib-item .meta b { color: var(--text); font-weight: 600; }
+  .lib-note { padding: 8px 14px; color: var(--muted); font-size: 12px; }
+  @media (max-width: 760px) {
+    #library { position: absolute; z-index: 25; top: 0; bottom: 0; left: 0; width: min(300px, 85vw); box-shadow: 10px 0 30px rgba(0,0,0,.5); }
+  }
+  /* Parts: what you play, what's shown, what sounds; and what each part of the file is */
+  #parts-wrap { position: relative; display: inline-flex; }
+  #parts-btn { padding: 4px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #parts-btn[aria-expanded=true] { border-color: var(--accent); }
+  #parts { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 440px; max-width: calc(100vw - 40px);
+           padding: 12px 14px; background: var(--panel); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+  #parts.open { display: block; }
+  #parts h2 { margin: 2px 0 6px; color: var(--muted); font: 700 11px 'Segoe UI', Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+  #parts h2:not(:first-child) { margin-top: 14px; }
+  #mix { width: 100%; border-collapse: collapse; }
+  #mix th, #mix td { padding: 4px 6px; text-align: center; font-weight: normal; }
+  #mix thead th { color: var(--muted); font-size: 11.5px; }
+  #mix tbody th { text-align: left; color: var(--text); }
+  #mix .na { color: var(--muted); }
+  .snd { width: 34px; padding: 2px 0; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .snd[aria-pressed=true] { border-color: var(--accent); background: rgba(0,180,180,.15); }
+  .snd:disabled { opacity: .3; cursor: default; }
+  #parts .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  #parts select { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 3px 5px; font: inherit; }
+  #part-roles { max-height: 240px; overflow-y: auto; }
+  .part-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.05); }
+  .part-row span { flex: 1; min-width: 0; }
+  .part-row small { display: block; color: var(--muted); font-size: 11.5px; }
+  #parts-save { margin-top: 8px; padding: 5px 14px; border: 0; border-radius: 5px; background: var(--accent); color: #031414; font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #parts-save:disabled { opacity: .4; cursor: default; }
   #port { max-width: 180px; }
   #voice-name { max-width: 170px; }
   #voice-vol { width: 80px; }
@@ -69,7 +116,8 @@
   #go.stop { background: var(--miss); }
   #go:disabled { opacity: .45; cursor: default; }
   #menu.running .setting, #metro.running .m-lock { opacity: .5; pointer-events: none; }
-  #menu.record .play-only, #menu:not(.record) .record-only { display: none; }
+  #menu.record .play-only, #menu.listen .not-listen { display: none; }
+  #mode-hint { color: var(--muted); font-size: 12px; max-width: 250px; line-height: 1.25; }
   #go.rec { background: var(--miss); }
   #last { padding: 6px 20px; color: var(--muted); font-size: 13px; min-height: 1.5em; }
   #last b { color: var(--text); font-weight: 600; }
@@ -98,27 +146,198 @@
   #npc.done #npc-text::after { content: ' ▼'; font-size: 11px; color: var(--muted); animation: blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   .heat { display: inline-block; width: 60px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; background: linear-gradient(90deg, hsl(120,85%,55%), hsl(60,85%,55%), hsl(0,85%,55%)); }
+  /* The Atlas: the skill tree (atlas.js) */
+  #atlas-view { position: absolute; inset: 0; z-index: 26; display: flex; flex-direction: column; background: var(--bg); }
+  #atlas-view[hidden] { display: none; }
+  #atlas-bar { position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid rgba(255,255,255,.08); flex-wrap: wrap; }
+  #atlas-bar button, #step-panel button, #atlas-detail button { padding: 5px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #atlas-search { width: min(360px, 60vw); padding: 6px 9px; background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 5px; font: inherit; }
+  #atlas-results { position: absolute; top: calc(100% + 4px); left: 14px; z-index: 5; width: min(460px, calc(100vw - 28px)); max-height: 380px; overflow-y: auto; padding: 4px 0; background: var(--panel); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+  #atlas-results[hidden] { display: none; }
+  #atlas-results button { display: block; width: 100%; padding: 6px 12px; border: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  #atlas-results button:hover { background: rgba(255,255,255,.06); }
+  #atlas-results p { padding: 6px 12px; }
+  #atlas-level { margin-left: auto; color: var(--muted); font-size: 12px; }
+  #atlas-body { flex: 1; display: flex; min-height: 0; }
+  #atlas-svg { flex: 1; min-width: 0; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
+  #atlas-side { width: 320px; flex: none; overflow-y: auto; padding: 14px 16px; background: var(--panel); border-left: 1px solid rgba(255,255,255,.08); }
+  @media (max-width: 760px) { #atlas-body { flex-direction: column; } #atlas-side { width: auto; max-height: 40%; border-left: 0; border-top: 1px solid rgba(255,255,255,.08); } }
+  #atlas-svg text { fill: var(--text); font-family: 'Segoe UI', Arial, sans-serif; }
+  #atlas-svg .a-muted { fill: var(--muted); }
+  .a-tier { fill: rgba(255,255,255,.015); stroke: rgba(255,255,255,.16); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .a-tier-title, .a-strand-title, .a-gate-title { font-weight: 700; }
+  .a-strand { fill: color-mix(in srgb, var(--tint) 6%, transparent); stroke: color-mix(in srgb, var(--tint) 30%, transparent); vector-effect: non-scaling-stroke; }
+  .a-family { fill: #161a24; stroke: rgba(255,255,255,.2); vector-effect: non-scaling-stroke; }  /* opaque: edges pass behind */
+  .a-family-frame { fill: rgba(14,17,24,.75); stroke: rgba(255,255,255,.08); vector-effect: non-scaling-stroke; }
+  #atlas-svg .a-family-title { fill: var(--muted); font-weight: 600; }
+  .a-req { stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .a-req-frame { fill: #11141c; stroke: rgba(255,255,255,.12); vector-effect: non-scaling-stroke; }
+  .a-req-title { color: var(--text); line-height: 1.25; text-align: center; overflow: hidden; }
+  .a-stage { stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .a-stage.a-final { stroke-width: 2.5; }
+  .a-review, .a-exam { stroke: #e3b341; stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .a-gold { stroke: #e3b341 !important; stroke-width: 3 !important; }
+  .a-edge { fill: none; stroke: rgba(255,255,255,.08); }
+  .a-edge.a-hot { stroke: var(--accent); }
+  /* A goal's temporary nodes (bridges, song capstones), in each grade's margin lane */
+  .a-temp { stroke-dasharray: 4 3; stroke: #e3b341 !important; vector-effect: non-scaling-stroke; }
+  .a-edge.a-temp-edge { stroke: rgba(227,179,65,.55); stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+  .a-writing { fill: #e3b341; font-style: italic; }
+  /* The Path panel: the active goal, families in order */
+  .p-goalbox { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 4px; }
+  .p-goalbox input { flex: 1; min-width: 140px; padding: 5px 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,.15); background: #0d1017; color: var(--text); font: inherit; }
+  .p-status { color: var(--muted); font-size: 12.5px; margin: 4px 0; }
+  .p-status.p-err { color: var(--miss); }
+  .p-reasons { font-size: 12.5px; color: var(--muted); margin: 6px 0; }
+  .p-reasons li { margin-left: 16px; }
+  .p-fam { margin: 6px 0; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; padding: 4px 8px; }
+  .p-fam summary { cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+  .p-fam .p-req { margin: 4px 0 2px 6px; font-size: 13px; }
+  .p-fam .p-stages { margin-left: 18px; font-size: 12.5px; }
+  .p-fam .p-stages a { color: var(--text); }
+  .p-fam .p-stages .p-none { color: var(--muted); font-style: italic; }
+  .p-fam .a-dot { display: inline-block; width: 8px; height: 8px; margin: 0 6px 0 0; vertical-align: middle; }
+  #path-next { border-color: var(--accent) !important; color: var(--accent) !important; font-weight: 600 !important; }
+  .a-funnel { stroke: rgba(227,179,65,.3); }
+  .a-selected { fill: none; stroke: #fff; }
+  .a-click { cursor: pointer; }
+  .a-click:hover { filter: brightness(1.4); }
+  #atlas-svg .a-star { fill: #e3b341; }
+  #atlas-detail h3 { margin: 4px 0 2px; font-size: 16px; }
+  #atlas-detail .a-trail { color: var(--muted); font-size: 12px; }
+  #atlas-detail a { color: var(--accent); text-decoration: none; }
+  #atlas-detail .a-state, #atlas-detail .a-muted, #step-panel .a-muted { color: var(--muted); font-size: 12.5px; margin-bottom: 8px; }
+  .a-stages { list-style: none; margin: 8px 0; }
+  .a-stages a { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; color: var(--text) !important; }
+  .a-dot { flex: none; width: 10px; height: 10px; margin-top: 5px; border-radius: 50%; border: 1.5px solid var(--accent); }
+  .a-practised { background: rgba(0,180,180,.28); }
+  .a-proficient { background: var(--accent); }
+  .a-mastered { background: var(--accent); border-color: #e3b341; }
+  #atlas-practise, #lib-atlas { border-color: var(--accent) !important; color: var(--accent) !important; font-weight: 600 !important; }
+  #lib-atlas { display: block; width: calc(100% - 24px); margin: 10px 12px 2px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 6px; background: transparent; font: inherit; cursor: pointer; text-align: left; }
+  /* Step panel: the stage being practised, above the sheet music */
+  #step-panel { margin: 8px 20px 0; padding: 10px 14px; background: var(--panel); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; }
+  #step-panel[hidden] { display: none; }
+  .sp-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; }
+  .sp-close { padding: 0 8px !important; }
+  .sp-row { display: flex; gap: 16px; align-items: flex-start; margin-top: 6px; flex-wrap: wrap; }
+  .sp-dots { display: flex; gap: 6px; }
+  .sp-dot { width: 28px; height: 28px; padding: 0 !important; border-radius: 50% !important; }
+  .sp-dot.on { border-color: var(--accent) !important; }
+  .sp-dot.ok { background: var(--hit) !important; border-color: var(--hit) !important; }
+  .sp-dot.no { border-color: var(--miss) !important; }
+  .sp-body { flex: 1; min-width: 240px; }
+  .sp-body p { margin-bottom: 6px; }
+  .sp-text { font-size: 15px; }
+  .sp-options { display: flex; gap: 8px; flex-wrap: wrap; }
+  #sp-verdict { margin-left: 10px; font-weight: 600; }
+  .sp-review { margin-left: auto; margin-right: 8px; color: #e3b341; }
+  .sp-review button { padding: 1px 8px !important; font-size: 12px !important; }
+  /* Exam card: a mock exam in progress, or its marks */
+  #exam-panel { margin: 8px 20px 0; padding: 10px 14px; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; }
+  #exam-panel[hidden] { display: none; }
+  #exam-panel button { padding: 5px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #exam-panel button.ex-go { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .ex-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .ex-head h3 { font-size: 15px; }
+  .ex-mock { color: var(--muted); font-size: 11.5px; }
+  .ex-sections { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+  .ex-sec { padding: 2px 9px; border-radius: 10px; border: 1px solid rgba(255,255,255,.15); font-size: 12px; color: var(--muted); }
+  .ex-sec.on { border-color: var(--accent); color: var(--text); }
+  .ex-sec.done { background: rgba(255,255,255,.08); color: var(--text); }
+  .ex-examiner { font-style: italic; margin: 6px 0; font-size: 15px; }
+  .ex-examiner::before { content: 'Examiner: '; font-style: normal; color: var(--muted); font-size: 12px; }
+  .ex-task { margin: 4px 0 8px; }
+  .ex-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .ex-clock { font-size: 20px; font-variant-numeric: tabular-nums; min-width: 3ch; }
+  .ex-marks { border-collapse: collapse; margin: 8px 0; font-size: 13.5px; }
+  .ex-marks td { padding: 2px 12px 2px 0; }
+  .ex-marks td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .ex-marks tr.ex-total td { border-top: 1px solid rgba(255,255,255,.2); font-weight: 700; padding-top: 5px; }
+  .ex-place { margin: 4px 0 6px; padding: 6px 10px; border-left: 3px solid var(--accent); background: rgba(255,255,255,.03); font-size: 13.5px; }
+  .ex-place ol { margin: 4px 0 0 18px; }
+  .ex-report { white-space: pre-wrap; font: 12.5px/1.45 ui-monospace, Consolas, monospace; color: var(--muted); max-height: 220px; overflow: auto; margin: 6px 0; }
+  /* Top dash bar: the essential tabs, the Atlas first, and the profile */
+  #dash { display: flex; align-items: center; gap: 4px; padding: 0 20px; background: #0d1018; border-bottom: 1px solid rgba(255,255,255,.1); flex-wrap: wrap; }
+  #dash .brand { padding: 9px 14px 9px 0; margin-right: 8px; background: transparent; border: 0; color: var(--text); font: 700 14px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #dash .brand b { color: var(--accent); }
+  #dash .dtab { padding: 10px 14px 8px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #dash .dtab:hover { color: var(--text); }
+  #dash .dtab[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+  #dash .dtab.atlas { color: var(--accent); }
+  #dash .dtab.atlas[aria-selected=true] { color: var(--text); }
+  #dash .spacer { flex: 1; }
+  #profile-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 5px; border: 1px solid rgba(255,255,255,.15); border-radius: 18px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #profile-chip:hover { border-color: var(--accent); }
+  .avatar { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #031414; font-weight: 700; font-size: 13px; }
+  /* Main menu: pick who is practicing */
+  #mainmenu { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 30%, #152032, var(--bg) 70%); }
+  #mainmenu[hidden] { display: none; }
+  #mainmenu .mm-box { width: min(560px, 92vw); text-align: center; }
+  #mainmenu h1 { font-size: 30px; font-weight: 700; margin-bottom: 4px; }
+  #mainmenu h1 b { color: var(--accent); }
+  #mainmenu .mm-sub { color: var(--muted); margin-bottom: 22px; }
+  #mm-list { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-bottom: 18px; }
+  .mm-card { position: relative; width: 120px; padding: 16px 8px 12px; background: var(--panel); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; color: var(--text); font: inherit; cursor: pointer; }
+  .mm-card:hover, .mm-card:focus-visible { border-color: var(--accent); outline: none; }
+  .mm-card.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .mm-card .avatar { width: 52px; height: 52px; font-size: 24px; margin-bottom: 8px; }
+  .mm-card .mm-name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mm-card .mm-tools { position: absolute; top: 3px; right: 3px; display: none; gap: 2px; }
+  #mainmenu.editing .mm-tools { display: flex; }
+  .mm-tools span { padding: 0 5px; border-radius: 4px; color: var(--muted); }
+  .mm-tools span:hover { background: rgba(255,255,255,.12); color: var(--text); }
+  #mm-new { display: flex; justify-content: center; gap: 8px; margin-bottom: 14px; }
+  #mm-new input { width: 200px; padding: 7px 10px; background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 6px; font: inherit; }
+  #mainmenu button.mm-btn { padding: 7px 14px; background: transparent; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; color: var(--text); font: inherit; cursor: pointer; }
+  #mainmenu button.mm-btn.primary { background: var(--accent); border-color: var(--accent); color: #031414; font-weight: 600; }
+  #mm-msg { min-height: 20px; margin-top: 12px; color: var(--miss); font-size: 13px; }
 </style>
 </head>
 <body>
-<header>
+<nav id="dash" aria-label="Main tabs">
+  <button class="brand" id="dash-brand" title="Main menu: choose who is practicing">Piano <b>Coach</b></button>
+  <button class="dtab atlas" role="tab" data-dash="atlas" title="The skill tree: every grade, strand and stage, with your progress">◈ Atlas</button>
+  <button class="dtab" role="tab" data-dash="songs" title="Your song library">♪ Songs</button>
+  <button class="dtab" role="tab" data-dash="lessons" title="Exercises and lessons you've saved">✎ Lessons</button>
+  <button class="dtab" role="tab" data-dash="path" title="Your goals and the active one's Path">➜ Path</button>
+  <button class="dtab" role="tab" data-dash="level" title="Mock exams from the grade you name, up or down until your level is found">✓ Find my level</button>
+  <span class="spacer"></span>
+  <button id="profile-chip" title="Switch profile"><span class="avatar" id="chip-avatar">?</span><span id="chip-name">Profile</span></button>
+</nav><header>
+  <button id="lib-toggle" aria-controls="library" aria-expanded="true" title="Show / hide songs and lessons">☰ Songs &amp; lessons</button>
   <h1>Piano Coach · <span id="title">no score yet</span></h1>
   <div id="status">Ask Claude to show a score or start a practice run.</div>
   <div id="conn" class="down">connecting…</div>
 </header>
 <div id="menu">
-  <label class="setting">Lesson <select id="lesson"><option value="">loading…</option></select></label>
-  <label class="setting">Input <select id="port"></select></label>
+  <label class="setting not-listen">Input <select id="port"></select></label>
   <span class="seg setting" id="mode">
+    <button data-mode="listen" title="Hear the piece on your keyboard while the cursor follows the score. Nothing to play, nothing graded">Listen</button>
     <button data-mode="learn" title="The cursor flows at tempo and waits on each chord for the right notes">Learn</button>
     <button data-mode="rehearse" title="The cursor moves at tempo; notes are graded as they pass">Rehearse</button>
     <button data-mode="record" title="Play over the metronome; what you play is written out as sheet music">Record</button>
   </span>
-  <label class="setting play-only">Hand <select id="hand"><option value="both">Both</option><option value="right">Right</option><option value="left">Left</option></select></label>
+  <span id="mode-hint" aria-live="polite"></span>
+  <span id="parts-wrap" class="setting play-only">
+    <button id="parts-btn" aria-haspopup="true" aria-expanded="false" aria-controls="parts" title="What you play, what's shown and what the keyboard plays along">Play: both hands ▾</button>
+    <div id="parts" role="dialog" aria-label="Parts">
+      <h2>This piece</h2>
+      <table id="mix">
+        <thead><tr><th></th><th title="You play it: graded, and Learn waits for it">You play</th><th title="Drawn on the sheet">Show</th><th title="Played on the MIDI output along with you (parts you don't play and can see)">Sound</th></tr></thead>
+        <tbody id="mix-rows"></tbody>
+      </table>
+      <label class="hint">Sound goes to <select id="out-port" title="MIDI output the parts you don't play are sent to"></select></label>
+      <h2>What each part is</h2>
+      <div id="part-roles"></div>
+      <div class="hint" id="roles-note"></div>
+      <button id="parts-save" disabled>Save parts</button>
+    </div>
+  </span>
   <label class="setting play-only">Bars <input type="number" id="from" min="1" placeholder="1"> – <input type="number" id="to" min="1" placeholder="end"></label>
   <label class="setting" id="tempo-wrap">Tempo <input type="range" id="tempo" min="30" max="150" step="5" value="100"> <span id="tempo-val">100%</span></label>
   <label class="setting play-only"><input type="checkbox" id="loop"> Loop</label>
-  <label class="setting play-only" title="With Loop on, the Maestro changes the bars, hand, tempo or mode between passes the way a teacher would, and says what it did. Say “no” or “undo” to put it back."><input type="checkbox" id="autopilot"> Maestro decides</label>
+  <label class="setting play-only not-listen" title="With Loop on, the Maestro changes the bars, hand, tempo or mode between passes the way a teacher would, and says what it did. Say “no” or “undo” to put it back."><input type="checkbox" id="autopilot"> Maestro decides</label>
   <span id="metro-wrap">
     <button id="m-go" title="Start / stop the metronome (M)">♩ Metronome</button>
     <button id="m-menu" aria-haspopup="true" aria-expanded="false" aria-controls="metro" title="Metronome settings">80 BPM ▾</button>
@@ -143,7 +362,6 @@
       <label title="How loud the in-between clicks are, compared to the beat">Sub vol <input type="range" id="m-subvol" min="0" max="100" step="5" value="50" style="width:70px"></label>
     </div>
   </span>
-  <span class="record-only" id="record-hint" style="color:var(--muted);font-size:12px">Records at the metronome's BPM and beats/bar, after a count-in</span>
   <label title="How the Maestro coaches you: Warm is encouraging, Strict is dry and demanding">Maestro <select id="style">
     <option value="warm">Warm</option><option value="strict">Strict</option></select></label>
   <label id="voice-wrap" title="Read Claude's comments and each pass summary aloud"><input type="checkbox" id="voice"> Voice <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
@@ -153,9 +371,41 @@
     <input id="ask" type="text" placeholder="…or type to the Maestro" disabled> <span id="ai-spend"></span></span>
   <button id="go">Start</button>
 </div>
-<div id="last"></div>
-<div id="heard"></div>
-<main><div id="strip"><iframe id="sheet" src="notation.html" title="Sheet music"></iframe><p id="sheet-notice" hidden></p></div></main>
+<div id="workspace">
+  <aside id="library" aria-label="Songs and lessons">
+    <div class="tabs" role="tablist">
+      <button role="tab" id="tab-songs" data-tab="songs" aria-selected="true" aria-controls="lib-list">Songs</button>
+      <button role="tab" id="tab-lessons" data-tab="lessons" aria-selected="false" aria-controls="lib-list">Lessons</button>
+    </div>
+    <input id="lib-search" type="search" placeholder="Search songs…" aria-label="Search">
+    <div id="lib-list" role="tabpanel"></div>
+  </aside>
+  <div id="stage">
+    <div id="exam-panel" hidden></div>
+    <div id="step-panel" hidden></div>
+    <div id="last"></div>
+    <div id="heard"></div>
+    <main><div id="strip"><iframe id="sheet" src="notation.html" title="Sheet music"></iframe><p id="sheet-notice" hidden></p></div></main>
+  </div>
+  <section id="atlas-view" aria-label="The Atlas" hidden>
+    <div id="atlas-bar">
+      <button id="atlas-close" title="Back to practice (Esc)">← Practice</button>
+      <input id="atlas-search" type="search" placeholder="Search the Atlas, e.g. E flat major" aria-label="Search the Atlas">
+      <button id="atlas-home" title="See the whole Atlas (Home)">Whole Atlas</button>
+      <button id="atlas-place" title="Mock exams from the grade you name, up or down until your level is found">Find my level</button>
+      <button id="atlas-path" title="Your goals and the active one's Path">Path</button>
+      <div id="atlas-results" hidden></div>
+      <span id="atlas-level"></span>
+    </div>
+    <div id="atlas-body">
+      <svg id="atlas-svg" aria-label="Skill tree"><g id="atlas-world"></g></svg>
+      <aside id="atlas-side">
+        <div id="atlas-detail"><p class="a-muted">Scroll to zoom, drag to move. Click a grade, strand or family to zoom in; click a stage to see its lesson.</p></div>
+        <div id="atlas-path"></div>
+      </aside>
+    </div>
+  </section>
+</div>
 <div id="npc" role="status" aria-live="polite" title="Click to skip / close">
   <div id="npc-face" aria-hidden="true">𝄞</div>
   <div><div id="npc-name">Maestro</div><div id="npc-text"></div></div>
@@ -219,12 +469,13 @@ async function loadScore(version) {
     const payload = await res.json();
     if (payload.version !== version) return;  // a newer score arrived meanwhile
     readScoreTempo(payload);
+    loadMix(payload.path);
     // A live recording or a huge file comes without sheet music, with the reason instead.
     sheetShown = !!payload.xml;
     $('sheet-notice').textContent = payload.notice || '';
     $('sheet-notice').hidden = sheetShown;
     frame.hidden = !sheetShown;
-    if (sheetShown) frame.contentWindow.postMessage({type: 'loadScore', xml: payload.xml}, '*');
+    if (sheetShown) frame.contentWindow.postMessage({type: 'loadScore', xml: payload.xml, staves: payload.staves, hidden: hiddenRoles()}, '*');
   } catch (err) {
     statusEl.textContent = 'Could not load score: ' + err;
   }
@@ -239,23 +490,24 @@ function connect() {
     if (msg.type === 'score') {
       titleEl.textContent = msg.title;
       document.title = 'Piano Coach · ' + msg.title;
-      if (msg.version !== scoreVersion) { scoreVersion = msg.version; loadScore(msg.version); loadLessons(); }
+      if (msg.version !== scoreVersion) { scoreVersion = msg.version; loadScore(msg.version); loadParts(); loadLessons(); }
       return;
     }
     if (msg.type === 'status') { statusEl.textContent = msg.text; return; }  // shown in the header
     if (msg.type === 'practice') { showPractice(msg); return; }
+    if (msg.type === 'atlas') { atlasEvent(msg); return; }
     if (msg.type === 'say') { showNpc(msg.text, msg.speaker); speak(msg.text, msg.interrupt); return; }
     if (msg.type === 'metronome') { metroFollow(msg); return; }
     if (msg.type === 'lesson') return;  // the visualizer's Learn Mode push; this page uses its own menu
     forward(msg);
   };
-  es.addEventListener('open', () => { loadPorts(); loadLessons(); loadVoices(); loadVoiceStatus(); loadStyle(); });
+  es.addEventListener('open', () => { loadPorts(); loadLessons(); loadParts(); loadVoices(); loadVoiceStatus(); loadStyle(); });
 }
 
 // -- practice menu -----------------------------------------------------------
 
 const $ = id => document.getElementById(id);
-const menu = $('menu'), go = $('go'), lessonSel = $('lesson'), portSel = $('port');
+const menu = $('menu'), go = $('go'), portSel = $('port'), outSel = $('out-port');
 const store = {
   get(k, d) { try { const v = localStorage.getItem('coach.' + k); return v === null ? d : v; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('coach.' + k, v); } catch (e) {} },
@@ -269,57 +521,326 @@ async function cmd(name, body) {
   return out;
 }
 
+// What each mode does, next to the buttons: the names alone don't say.
+const MODE_HINTS = {
+  listen: 'Your keyboard plays it and the cursor follows. Just listen and watch.',
+  learn: 'Play it yourself: the cursor waits on each chord until you get the notes.',
+  rehearse: 'Play it in time: the cursor keeps going and grades notes as they pass.',
+  record: 'Play anything over the metronome (after a count-in); it’s written out as sheet music.',
+};
+
 function setMode(m) {
+  if (!MODE_HINTS[m]) m = 'learn';
   mode = m;
   document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
   $('tempo-wrap').style.display = m === 'record' ? 'none' : '';  // Learn flows at it too
+  $('mode-hint').textContent = MODE_HINTS[m];
   menu.classList.toggle('record', m === 'record');
+  menu.classList.toggle('listen', m === 'listen');
+  drawMixer();
   if (!running) showGo();
   store.set('mode', m);
 }
 
 function showGo() {
-  go.textContent = running ? 'Stop' : mode === 'record' ? '● Record' : 'Start';
+  go.textContent = running ? 'Stop' : mode === 'record' ? '● Record' : mode === 'listen' ? '▶ Listen' : 'Start';
   go.classList.toggle('stop', running);
   go.classList.toggle('rec', !running && mode === 'record');
 }
 
 async function loadPorts() {
   try {
-    const {inputs, default: dflt} = await cmd('ports');
+    const {inputs, default: dflt, outputs, default_output: dfltOut} = await cmd('ports');
     const saved = store.get('port', '');
     portSel.innerHTML = '';
     for (const name of inputs) portSel.add(new Option(name, name));
     portSel.value = inputs.includes(saved) ? saved : (dflt || inputs[0] || '');
+    const savedOut = store.get('output', '');
+    outSel.innerHTML = '';
+    for (const name of outputs) outSel.add(new Option(name, name));
+    outSel.value = outputs.includes(savedOut) ? savedOut : (dfltOut || outputs[0] || '');
   } catch (err) { statusEl.textContent = 'Could not list MIDI inputs: ' + err.message; }
 }
+
+// -- songs & lessons panel ------------------------------------------------------
+// Songs: the pieces you play (your saved song lessons, and the whole reference library by
+// search). Lessons: teaching material (exercises), with how your practice of each went.
+
+const lib = {tab: store.get('tab', 'songs') === 'lessons' ? 'lessons' : 'songs', items: [], categories: [], current: '',
+             songs: [], matches: 0, total: 0, query: '', timer: null};
 
 async function loadLessons() {
   try {
     const {lessons, categories, current} = await cmd('lessons');
-    lessonSel.innerHTML = '';
-    if (!lessons.some(l => l.path === current)) lessonSel.add(new Option(current ? titleEl.textContent : '— pick a lesson —', current || ''));
-    for (const category of categories) {  // one group per lesson folder, newest first inside
-      const group = document.createElement('optgroup');
-      group.label = category;
-      for (const l of lessons) {
-        if (l.category !== category) continue;
-        // Where it came from: a tag in the menu for MIDI conversions, the whole note on hover.
-        const opt = new Option(l.title + (l.source && l.source.includes('from MIDI') ? '  · from MIDI' : ''), l.path);
-        if (l.source) opt.title = l.source;
-        group.appendChild(opt);
-      }
-      lessonSel.appendChild(group);
-    }
-    lessonSel.value = current || '';
+    Object.assign(lib, {items: lessons, categories, current: current || ''});
+    renderLibrary();
   } catch (err) { statusEl.textContent = 'Could not list lessons: ' + err.message; }
 }
+
+async function searchSongs() {
+  const query = lib.query;
+  try {
+    const out = await cmd('songs', {query});
+    if (query !== lib.query) return;  // typed on meanwhile
+    Object.assign(lib, {songs: out.songs, matches: out.matches, total: out.total});
+    renderLibrary();
+  } catch (err) { statusEl.textContent = 'Could not search the library: ' + err.message; }
+}
+
+function setTab(tab) {
+  lib.tab = tab;
+  store.set('tab', tab);
+  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab));
+  $('lib-search').placeholder = tab === 'songs' ? 'Search songs…' : 'Search lessons…';
+  renderLibrary();
+}
+
+// '2026-10-22 23:19:55' -> 'today' / 'yesterday' / '3 days ago' / 'Oct 22'
+function ago(when) {
+  const t = new Date(String(when).replace(' ', 'T'));
+  if (isNaN(t)) return '';
+  const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(t).setHours(0, 0, 0, 0)) / 864e5);
+  return days <= 0 ? 'today' : days === 1 ? 'yesterday' : days < 7 ? `${days} days ago`
+    : t.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+}
+
+function historyLine(h) {
+  if (!h) return 'Not practised yet';
+  const bits = [`${h.runs} run${h.runs === 1 ? '' : 's'}`];
+  if (h.best !== null) bits.push(`best <b>${h.best}%</b>`);
+  if (h.last) bits.push(ago(h.last));
+  return bits.join(' · ');
+}
+
+function libItem(item, sub) {
+  const b = document.createElement('button');
+  b.className = 'lib-item' + (item.path === lib.current ? ' current' : '');
+  b.innerHTML = `${esc(item.title)}<span class="meta">${sub}</span>`;
+  if (item.source) b.title = item.source;  // where a lesson came from (e.g. converted from MIDI)
+  b.addEventListener('click', () => loadPiece(item.path));
+  return b;
+}
+
+function libText(list, className, text) {
+  const el = document.createElement('div');
+  el.className = className;
+  el.textContent = text;
+  list.appendChild(el);
+}
+
+function renderLibrary() {
+  const list = $('lib-list');
+  list.innerHTML = '';
+  const words = lib.query.toLowerCase().split(/\s+/).filter(Boolean);
+  const kind = lib.tab === 'songs' ? 'song' : 'lesson';
+  const mine = lib.items.filter(l => l.kind === kind && words.every(w => l.title.toLowerCase().includes(w)));
+  if (kind === 'lesson') {  // the Atlas first; saved exercise files below it
+    const open = document.createElement('button');
+    open.id = 'lib-atlas';
+    open.textContent = '◈ Open the Atlas';
+    open.title = 'The skill tree: every grade, strand and stage, with your progress';
+    open.addEventListener('click', () => atlasShow(true));
+    list.appendChild(open);
+    if (mine.length) libText(list, 'lib-group', 'Other lessons');
+  }
+  // Lessons: most recently practised first, so the list reads as your history.
+  if (kind === 'lesson') mine.sort((a, b) => (b.history?.last || '').localeCompare(a.history?.last || ''));
+  for (const category of lib.categories) {
+    const items = mine.filter(l => l.category === category);
+    if (!items.length) continue;
+    libText(list, 'lib-group', category);
+    for (const l of items) {
+      const tag = l.source && l.source.includes('from MIDI') ? 'from MIDI · ' : '';
+      list.appendChild(libItem(l, tag + historyLine(l.history)));
+    }
+  }
+  if (kind === 'lesson') {
+    if (!mine.length) libText(list, 'lib-note', words.length ? 'No lesson matches.' : 'No lessons yet. Ask Claude or the Maestro for an exercise.');
+    return;
+  }
+  libText(list, 'lib-group', words.length ? 'Library' : 'Library · recently practised');
+  for (const song of lib.songs) list.appendChild(libItem(song, `${esc(song.folder)} · ${historyLine(song.history)}`));
+  if (!words.length) libText(list, 'lib-note', `Type to search all ${lib.total.toLocaleString()} songs in your library.`);
+  else if (!lib.matches) libText(list, 'lib-note', 'No song in the library matches.');
+  else if (lib.matches > lib.songs.length) libText(list, 'lib-note', `Showing ${lib.songs.length} of ${lib.matches}. Type more to narrow it down.`);
+}
+
+async function loadPiece(path) {
+  try {
+    await cmd('load', {lesson: path});
+    $('from').value = ''; $('to').value = '';
+    if (matchMedia('(max-width: 760px)').matches) showLibrary(false);
+  } catch (err) { statusEl.textContent = err.message; }
+}
+
+function showLibrary(open) {
+  document.body.classList.toggle('lib-closed', !open);
+  $('lib-toggle').setAttribute('aria-expanded', open);
+  store.set('library', open ? '' : 'closed');
+}
+
+document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+$('lib-search').addEventListener('input', e => {
+  lib.query = e.target.value.trim();
+  renderLibrary();
+  clearTimeout(lib.timer);
+  lib.timer = setTimeout(searchSongs, 200);
+});
+$('lib-toggle').addEventListener('click', () => showLibrary(document.body.classList.contains('lib-closed')));
+
+// -- parts: what you play, what's shown, what sounds ------------------------------
+// Per piece (remembered in this browser): You play (graded; Learn waits for it), Show (drawn
+// on the sheet) and Sound (a part you don't play but can see, sent to the MIDI output along
+// with you; muted until you turn it on). What each part of the file is (a hand, both hands,
+// pedals, vocals) is saved on the server, like the part choice Claude makes.
+
+const ROLES = ['right', 'left', 'pedals', 'vocals'];
+const ROLE_LABELS = {right: 'Right hand', left: 'Left hand', pedals: 'Pedals (feet)', vocals: 'Vocals'};
+const ROLE_CHOICES = [['right', 'Right hand'], ['left', 'Left hand'], ['both', 'Both hands (split)'],
+                      ['pedals', 'Pedals (feet)'], ['vocals', 'Vocals'], ['off', 'Off']];
+const parts = {roles: ['right', 'left'], list: [], confirmed: false};
+let mix = null, mixPath;
+
+function loadMix(path) {
+  if (mix && path === mixPath) return;
+  mixPath = path || null;
+  let saved = {};
+  try { saved = JSON.parse(store.get('mix.' + path, '{}')) || {}; } catch (e) {}
+  mix = {play: {right: true, left: true, pedals: false, ...saved.play}, show: {...saved.show}, sound: {...saved.sound}};
+  drawMixer();
+}
+
+function saveMix() { if (mixPath) store.set('mix.' + mixPath, JSON.stringify(mix)); }
+const played = r => r !== 'vocals' && !!mix.play[r];
+const shown = r => mix.show[r] !== false;
+const sounding = r => !played(r) && shown(r) && mix.sound[r] === true;
+const hiddenRoles = () => ROLES.filter(r => !shown(r));
+
+// The hand the server grades: 'both' / 'right' / 'left', plus '+pedals' when you play the pedals.
+function handValue() {
+  const r = played('right'), l = played('left'), feet = played('pedals') && parts.roles.includes('pedals');
+  const base = r && l ? 'both' : r ? 'right' : l ? 'left' : '';
+  return feet ? (base ? base + '+pedals' : 'pedals') : base || 'both';
+}
+
+// A run's hand, as the Maestro or Claude set it.
+function setHand(hand) {
+  const [base, extra] = String(hand || 'both').split('+');
+  mix.play.right = base === 'both' || base === 'right';
+  mix.play.left = base === 'both' || base === 'left';
+  mix.play.pedals = base === 'pedals' || extra === 'pedals';
+  saveMix();
+  drawMixer();
+}
+
+function drawMixer() {
+  if (!mix) return;
+  const rows = $('mix-rows');
+  rows.innerHTML = '';
+  for (const r of parts.roles) {
+    const name = ROLE_LABELS[r], lower = name.toLowerCase();
+    const mutable = !played(r) && shown(r), on = sounding(r);
+    const play = r === 'vocals' ? '<span class="na" title="Vocals are shown and heard, never graded">–</span>'
+      : `<input type="checkbox" data-k="play" data-r="${r}" ${played(r) ? 'checked' : ''} aria-label="You play the ${lower}">`;
+    const tip = !mutable ? (played(r) ? 'You play this part' : 'Show it to be able to hear it')
+      : on ? 'Plays along on the MIDI output: click to mute' : 'Muted: click to have the keyboard play it along with you';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<th scope="row">${name}</th><td>${play}</td>` +
+      `<td><input type="checkbox" data-k="show" data-r="${r}" ${shown(r) ? 'checked' : ''} aria-label="Show the ${lower}"></td>` +
+      `<td><button class="snd" data-r="${r}" aria-pressed="${on}" ${mutable ? '' : 'disabled'} aria-label="Sound the ${lower}" title="${tip}">${on ? '🔊' : '🔇'}</button></td>`;
+    rows.appendChild(tr);
+  }
+  const listen = mode === 'listen';
+  const mine = listen ? listenRoles() : ['right', 'left', 'pedals'].filter(r => played(r) && parts.roles.includes(r));
+  const label = mine.join(' + ') === 'right + left' ? 'both hands'
+    : mine.length === 1 && ['right', 'left'].includes(mine[0]) ? mine[0] + ' hand' : mine.join(' + ').replace('right + left', 'both hands');
+  $('parts-btn').textContent = listen ? `Hear: ${label || 'nothing'} ▾`
+    : `Play: ${label || 'both hands'}${parts.roles.some(sounding) ? ' · 🔊' : ''} ▾`;
+}
+
+// Listen sounds every part that's shown; vocals only with their Sound on, as when you play.
+const listenRoles = () => parts.roles.filter(r => r === 'vocals' ? sounding(r) : shown(r));
+
+function drawRoles() {
+  const box = $('part-roles');
+  box.innerHTML = '';
+  for (const p of parts.list) {
+    const row = document.createElement('label');
+    row.className = 'part-row';
+    row.innerHTML = `<span>${esc(p.name || 'Part ' + p.index)}<small>${esc(p.instrument)} · ${p.notes.toLocaleString()} notes · ${esc(p.range)}</small></span>`;
+    const sel = document.createElement('select');
+    sel.dataset.index = p.index;
+    for (const [value, text] of ROLE_CHOICES) sel.add(new Option(text, value));
+    sel.value = p.role;
+    sel.addEventListener('change', () => { $('parts-save').disabled = false; });
+    row.appendChild(sel);
+    box.appendChild(row);
+  }
+  $('roles-note').textContent = !parts.list.length ? 'Pick a song or lesson first.'
+    : parts.confirmed ? 'Your choice for this file.' : 'Suggested: check it and save.';
+  $('parts-save').disabled = parts.confirmed || !parts.list.length;
+}
+
+function showParts(out) {
+  Object.assign(parts, {roles: out.roles, list: out.parts, confirmed: out.confirmed});
+  loadMix(out.path);
+  drawMixer();
+  drawRoles();
+}
+
+async function loadParts() {
+  try { showParts(await cmd('parts')); } catch (err) { statusEl.textContent = 'Could not read the parts: ' + err.message; }
+}
+
+$('mix-rows').addEventListener('change', e => {
+  const {k, r} = e.target.dataset;
+  if (!k) return;
+  if (k === 'play' && !e.target.checked && !['right', 'left', 'pedals'].some(x => x !== r && played(x) && parts.roles.includes(x))) {
+    e.target.checked = true;  // something has to be yours to play
+    statusEl.textContent = 'Play at least one part.';
+    return;
+  }
+  mix[k][r] = e.target.checked;
+  saveMix();
+  drawMixer();
+  if (k === 'show') forward({type: 'visibility', hidden: hiddenRoles()});
+});
+$('mix-rows').addEventListener('click', e => {
+  const b = e.target.closest('.snd');
+  if (!b || b.disabled) return;
+  mix.sound[b.dataset.r] = !sounding(b.dataset.r);
+  saveMix();
+  drawMixer();
+});
+outSel.addEventListener('change', () => store.set('output', outSel.value));
+$('parts-save').addEventListener('click', async () => {
+  const roles = {};
+  document.querySelectorAll('#part-roles select').forEach(sel => { roles[sel.dataset.index] = sel.value; });
+  $('parts-save').disabled = true;
+  try { showParts(await cmd('set_parts', {roles})); }
+  catch (err) { $('parts-save').disabled = false; $('roles-note').textContent = err.message; }
+});
+
+function partsMenu(open) {
+  const panel = $('parts');
+  panel.classList.toggle('open', open);
+  $('parts-btn').setAttribute('aria-expanded', open);
+  if (!open) return;
+  panel.style.left = '0px';  // keep it on screen when the menu bar has wrapped it near the right edge
+  const over = panel.getBoundingClientRect().right - (window.innerWidth - 16);
+  if (over > 0) panel.style.left = `${-over}px`;
+}
+$('parts-btn').addEventListener('click', () => partsMenu(!$('parts').classList.contains('open')));
+// The path as clicked: a Sound button is redrawn while its click is still on its way up.
+document.addEventListener('click', e => { if (!e.composedPath().includes($('parts-wrap'))) partsMenu(false); });
+window.addEventListener('blur', () => partsMenu(false));  // a click on the sheet goes to its iframe
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('parts').classList.contains('open')) { partsMenu(false); $('parts-btn').focus(); } });
 
 // The run's settings, as the Maestro (autopilot, voice) or Claude last set them: the menu
 // shows where things stand, and Start picks up from there.
 function showRunSettings(s) {
-  setMode(s.mode === 'wait' ? 'learn' : 'rehearse');
-  $('hand').value = s.hand || 'both';
+  setMode({wait: 'learn', rehearsal: 'rehearse', listen: 'listen'}[s.mode]);
+  if (mix && s.mode !== 'listen') setHand(s.hand);
   const [from, to] = (s.bars || '').split('-');
   $('from').value = from || '';
   $('to').value = s.bars ? (to || from) : '';
@@ -327,7 +848,7 @@ function showRunSettings(s) {
   $('tempo-val').textContent = $('tempo').value + '%';
   $('loop').checked = !!s.loop;
   $('autopilot').checked = !!s.autopilot;
-  store.set('hand', $('hand').value); store.set('tempo', $('tempo').value);
+  store.set('tempo', $('tempo').value);
   store.set('loop', s.loop ? '1' : ''); store.set('autopilot', s.autopilot ? '1' : '');
 }
 
@@ -337,14 +858,16 @@ async function loadStyle() {
 
 function showPractice(p) {
   if (p.style) $('style').value = p.style;  // also changed by voice ("be gentler")
+  if (running && !p.running) loadLessons();  // the run's result shows in the history
   running = !!p.running;
   menu.classList.toggle('running', running);
+  document.body.classList.toggle('running', running);
   const s = p.settings || {};
-  if (s.mode === 'wait' || s.mode === 'rehearsal') showRunSettings(s);
+  if (['wait', 'rehearsal', 'listen'].includes(s.mode)) showRunSettings(s);
   // A recording's grid is fixed when it starts, so its tempo can't change mid-take.
   $('metro').classList.toggle('running', running && s.mode === 'record');
   showGo();
-  const where = p.port ? ` · listening on <b>${esc(p.port)}</b>` : '';
+  const where = p.port ? ` · ${s.mode === 'listen' ? 'playing on' : 'listening on'} <b>${esc(p.port)}</b>` : '';
   const pass = running && s.loop ? ` · pass ${p.pass}` : '';
   $('last').innerHTML = (p.last ? esc(p.last) : '') + (running ? (p.last ? ' · ' : '') + 'running' + pass + where : '');
 }
@@ -999,18 +1522,12 @@ portSel.addEventListener('change', () => store.set('port', portSel.value));
 $('style').addEventListener('change', async e => {
   try { await cmd('maestro', {style: e.target.value}); } catch (err) { statusEl.textContent = err.message; loadStyle(); }
 });
-$('hand').addEventListener('change', e => store.set('hand', e.target.value));
 $('loop').addEventListener('change', e => store.set('loop', e.target.checked ? '1' : ''));
 $('autopilot').addEventListener('change', e => {
   store.set('autopilot', e.target.checked ? '1' : '');
   if (e.target.checked) $('loop').checked = true, store.set('loop', '1');  // it acts between loop passes
 });
 portSel.addEventListener('focus', loadPorts);
-lessonSel.addEventListener('change', async () => {
-  if (!lessonSel.value) return;
-  try { await cmd('load', {lesson: lessonSel.value}); $('from').value = ''; $('to').value = ''; }
-  catch (err) { statusEl.textContent = err.message; loadLessons(); }
-});
 
 go.addEventListener('click', async () => {
   go.disabled = true;
@@ -1024,8 +1541,13 @@ go.addEventListener('click', async () => {
     }
     const from = $('from').value, to = $('to').value;
     const bars = from || to ? `${from || 1}-${to || from || 9999}` : '';
-    await cmd('start', {mode, hand: $('hand').value, bars, tempo: +$('tempo').value, loop: $('loop').checked,
+    if (mode === 'listen') {
+      await cmd('start', {mode, roles: listenRoles(), bars, tempo: +$('tempo').value, loop: $('loop').checked, output: outSel.value});
+      return;
+    }
+    await cmd('start', {mode, hand: handValue(), bars, tempo: +$('tempo').value, loop: $('loop').checked,
                         autopilot: $('autopilot').checked, port: portSel.value,
+                        backing: parts.roles.filter(sounding), output: outSel.value,
                         count_in: mode === 'rehearse' && $('m-follow').checked && !$('m-follow').disabled});
   } catch (err) {
     statusEl.textContent = err.message;
@@ -1035,12 +1557,33 @@ go.addEventListener('click', async () => {
 });
 
 setMode(mode);
-$('hand').value = store.get('hand', 'both');
+loadMix(null);
+setTab(lib.tab);
+showLibrary(store.get('library', '') !== 'closed' && !matchMedia('(max-width: 760px)').matches);
+searchSongs();
 $('tempo').value = store.get('tempo', '100');
 $('tempo-val').textContent = $('tempo').value + '%';
 $('loop').checked = !!store.get('loop', '');
 $('autopilot').checked = !!store.get('autopilot', '');
 connect();
 </script>
+<script src="atlas.js"></script>
+<div id="mainmenu" role="dialog" aria-modal="true" aria-label="Choose a profile">
+  <div class="mm-box">
+    <h1>Piano <b>Coach</b></h1>
+    <p class="mm-sub">Who is practicing?</p>
+    <div id="mm-list"></div>
+    <form id="mm-new">
+      <input id="mm-name" type="text" maxlength="30" placeholder="New profile name" aria-label="New profile name" autocomplete="off">
+      <button class="mm-btn primary" type="submit">Add profile</button>
+    </form>
+    <div>
+      <button class="mm-btn" id="mm-edit">Edit</button>
+      <button class="mm-btn" id="mm-continue">Continue</button>
+    </div>
+    <p id="mm-msg" role="alert"></p>
+  </div>
+</div>
+<script src="profiles.js"></script>
 </body>
 </html>

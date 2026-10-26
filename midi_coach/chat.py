@@ -54,7 +54,8 @@ history. Only quote scores and numbers that appear there; never invent them.
 
 Use your tools when the pianist asks you to do something (start, loop, change tempo or hand, \
 stop, play a passage for them, switch or write a lesson, check progress), then confirm \
-briefly what you did. Learn mode waits for the right notes; Rehearse mode moves at the tempo. \
+briefly what you did. Listen mode plays it for them while the cursor follows; Learn mode waits \
+for the right notes; Rehearse mode moves at the tempo. \
 If they ask for something outside piano practice, answer briefly and steer back to the piano.
 
 Anything that needs real teaching, more than your three sentences, goes to hand_off: a spoken \
@@ -63,7 +64,13 @@ theory, a practice plan. So does "ask Desktop", "go deeper", or "next section" d
 lesson. Then just say you'll think it over; the answer comes in your voice shortly.
 
 The context may include your notebook on the pianist. When they tell you something worth \
-keeping (a goal, a piece they're learning, how they like to be taught), use remember.\
+keeping (a goal, a piece they're learning, how they like to be taught), use remember.
+
+The pianist works through the Atlas, a skill tree following a graded piano syllabus. When \
+they state a goal (a song to play, a skill, a grade), ask at most two short follow-up \
+questions, and only if you need them (which song or file, by when), then call set_goal; the \
+plan takes a minute or two and you'll announce it. next_stop opens what's next on their \
+path; start_exam starts a mock exam; atlas_summary tells you where they stand.\
 """
 
 TOOLS = [
@@ -74,11 +81,12 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "mode": {"type": "string", "enum": ["learn", "rehearse"],
-                         "description": "learn: the cursor waits for the right notes. rehearse: moves at tempo."},
+                "mode": {"type": "string", "enum": ["listen", "learn", "rehearse"],
+                         "description": "listen: the keyboard plays it and the cursor follows, nothing to play. "
+                                        "learn: the cursor waits for the right notes. rehearse: moves at tempo."},
                 "hand": {"type": "string", "enum": ["both", "right", "left"]},
                 "bars": {"type": "string", "description": "Bar range like '5-8', or empty for the whole lesson."},
-                "tempo_percent": {"type": "integer", "description": "Rehearse speed, 30-150. Default 100."},
+                "tempo_percent": {"type": "integer", "description": "Listen / Rehearse speed, 30-150. Default 100."},
                 "loop": {"type": "boolean", "description": "Restart automatically after each completed pass."},
             },
             "required": ["mode"],
@@ -161,6 +169,42 @@ TOOLS = [
             "required": ["note"],
             "additionalProperties": False,
         },
+    },
+    {
+        "name": "set_goal",
+        "description": "Plan a new goal on the Atlas (a song, a skill or a grade) and make it the active one. "
+                       "Planning runs in the background on the pianist's subscription and takes a minute or "
+                       "two (a song longer: its facts are looked up first); you announce the Path when it's ready.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "The goal in the pianist's words, with anything they added."},
+                "song": {"type": "string", "description": "For a song goal: the song file's name from their library, if they named one."},
+                "artist": {"type": "string"},
+            },
+            "required": ["goal"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "next_stop",
+        "description": "Open the next step on the active goal's Path on the page, and say what it is.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "start_exam",
+        "description": "Start (or resume) a mock exam for a grade on the page: pieces, scales, sight-reading, aural, out of 150.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"grade": {"type": "string", "enum": ["initial", "g1", "g2", "g3", "g4", "g5", "g6", "g7", "g8"]}},
+            "required": ["grade"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "atlas_summary",
+        "description": "Where the pianist stands on the Atlas: each grade's progress, mock exam results, the active goal.",
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "name": "set_style",

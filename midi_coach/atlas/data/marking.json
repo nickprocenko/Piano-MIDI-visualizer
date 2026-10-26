@@ -1,0 +1,28 @@
+{
+ "version": 1,
+ "about": "The coach's own marking for mock exams, shaped like a graded piano exam (150 marks: three pieces of 30, scales 21, sight-reading 21, aural 18). Not an exam board's scheme. 'map' turns a 0-100 quality (0-1 for aural) into marks by straight lines between the points; pass marks sit at 20/30, 14/21 and 12/18, so the sections at pass add up to 100.",
+ "total": 150,
+ "bands": [["Distinction", 130], ["Merit", 120], ["Pass", 100], ["Below pass", 0]],
+ "piece": {
+  "of": 30,
+  "weights": {"pitch": 0.30, "time": 0.30, "tone": 0.10, "shape": 0.15, "performance": 0.15},
+  "map": [[0, 10], [40, 16], [60, 20], [75, 24], [88, 27], [100, 30]],
+  "caps": {"pitch_below": [75, 19], "restarts_over": [2, 22], "tempo_below_pct": [70, 23]},
+  "restart_pause_ms": 1500
+ },
+ "scales": {
+  "of": 21,
+  "weights": {"notes": 0.5, "timing": 0.3, "tempo": 0.2},
+  "wrong_notes_below": 40,
+  "map": [[0, 7], [50, 12], [65, 14], [80, 17], [92, 19], [100, 21]]
+ },
+ "sight": {
+  "of": 21,
+  "weights": {"notes": 0.40, "time": 0.35, "tempo": 0.10, "shape": 0.15},
+  "map": [[0, 7], [45, 12], [60, 14], [75, 17], [90, 19], [100, 21]]
+ },
+ "aural": {
+  "of": 18,
+  "map": [[0, 6], [0.5, 10], [0.67, 12], [0.85, 15], [1, 18]]
+ }
+}

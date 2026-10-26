@@ -1,0 +1,56 @@
+{
+ "playing": {
+  "intercept": 5.051282051282051,
+  "coef": {
+   "peak_npb": 0.0767046852568124,
+   "fast_hand_npb": 0.18671360094625314,
+   "slow_hand_npb": 0.5591917389045101,
+   "shortest_beats_inv": -0.061159078666409405,
+   "rhythm_variety": 0.4061547119018929,
+   "max_chord": 0.28474999989264305,
+   "max_span": 0.2687218019368782,
+   "leap_rate": 0.2846454487627079,
+   "key_accidentals": 0.3153239786377498,
+   "chromatic_share": 0.5744728232527921,
+   "hand_poly": 0.2473277007734255
+  },
+  "mean": {
+   "peak_npb": 3.4871794871794872,
+   "fast_hand_npb": 1.986948717948718,
+   "slow_hand_npb": 1.478076923076923,
+   "shortest_beats_inv": 5.178717948717948,
+   "rhythm_variety": 7.923076923076923,
+   "max_chord": 3.1538461538461537,
+   "max_span": 11.051282051282051,
+   "leap_rate": 0.11035897435897436,
+   "key_accidentals": 1.8205128205128205,
+   "chromatic_share": 0.11171794871794873,
+   "hand_poly": 3.230769230769231
+  },
+  "sd": {
+   "peak_npb": 1.3563108877372505,
+   "fast_hand_npb": 0.7986049679322367,
+   "slow_hand_npb": 0.6866497403172247,
+   "shortest_beats_inv": 4.006757228052336,
+   "rhythm_variety": 4.0343691108137305,
+   "max_chord": 1.2097565243164563,
+   "max_span": 6.464691945181,
+   "leap_rate": 0.06712425797879981,
+   "key_accidentals": 1.2582404252702868,
+   "chromatic_share": 0.06551646836148506,
+   "hand_poly": 1.2498520622516862
+  }
+ },
+ "length": {
+  "coef": 0.933385991915291,
+  "mean": 4.9378717948717945,
+  "cap": 1.0
+ },
+ "within_one_grade": 0.615,
+ "mean_error": 1.05,
+ "playing_within_one_grade": 0.564,
+ "playing_mean_error": 1.19,
+ "pieces": 39,
+ "ridge": 8.0,
+ "fitted_on": "exam boards"
+}

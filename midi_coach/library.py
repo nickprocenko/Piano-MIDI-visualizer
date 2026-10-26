@@ -11,7 +11,7 @@ import time
 
 import mido
 
-from .notes import MIDI_SUFFIXES, MUSICXML_SUFFIXES, Note, Score, load_score
+from .notes import HAND_ROLES, MIDI_SUFFIXES, MUSICXML_SUFFIXES, Note, Score, load_score
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 REF_SUFFIXES = MIDI_SUFFIXES | MUSICXML_SUFFIXES
@@ -24,6 +24,13 @@ def home() -> pathlib.Path:
     (path / "takes").mkdir(parents=True, exist_ok=True)
     (path / "references").mkdir(exist_ok=True)
     return path
+
+
+def profile_home() -> pathlib.Path:
+    """The active profile's own data folder (see profiles.py): <home> itself for the Default profile."""
+    from . import profiles
+
+    return profiles.data_dir()
 
 
 def derived_path(source: pathlib.Path | str, kind: str, extra: str = "") -> pathlib.Path:
@@ -53,7 +60,7 @@ def reference_folders() -> list[pathlib.Path]:
     extra = os.environ.get("MIDI_COACH_REFERENCE_DIRS", "")
     folders += [pathlib.Path(p) for p in extra.split(os.pathsep) if p.strip()]
     folders.append(home() / "references")
-    folders.append(home() / "lessons")
+    folders.append(profile_home() / "lessons")
     seen, out = set(), []
     for f in folders:
         key = str(f).lower()
@@ -127,7 +134,8 @@ def get_score(ref: str) -> Score:
         if path.suffix.lower() in MIDI_SUFFIXES and score.played_live:
             score = _regridded(score, path)
         _score_cache[str(path)] = (mtime, score)
-    score.hands = load_hands(score)
+    score.roles = load_roles(score)
+    score.hands = {i: r for i, r in score.roles.items() if r in HAND_ROLES}
     return score
 
 
@@ -156,7 +164,7 @@ def _regridded(score: Score, path: pathlib.Path) -> Score:
 
 
 def _choices_path() -> pathlib.Path:
-    return home() / "part_choices.json"
+    return profile_home() / "part_choices.json"
 
 
 def _load_choices() -> dict:
@@ -167,7 +175,13 @@ def _load_choices() -> dict:
 
 
 def load_hands(score: Score) -> dict[int, str]:
-    """The saved part -> hand choice for a score; empty if none, or if the file's parts changed."""
+    """The saved part -> hand choice for a score (the parts the hands play)."""
+    return {i: r for i, r in load_roles(score).items() if r in HAND_ROLES}
+
+
+def load_roles(score: Score) -> dict[int, str]:
+    """The saved part -> role choice for a score (a hand, 'pedals' or 'vocals'); empty if
+    none, or if the file's parts changed."""
     saved = _load_choices().get(score.path)
     if not saved:
         return {}
@@ -181,7 +195,8 @@ def load_hands(score: Score) -> dict[int, str]:
 
 
 def save_hands(score: Score, hands: dict[int, str]) -> None:
-    """Save (or with an empty dict, forget) the part -> hand choice for a score."""
+    """Save (or with an empty dict, forget) the part -> role choice for a score: the hands
+    ('right' / 'left' / 'both'), and the parts played with the feet ('pedals') or sung ('vocals')."""
     choices = _load_choices()
     if hands:
         names = {p.index: p.name for p in score.parts}
@@ -192,7 +207,8 @@ def save_hands(score: Score, hands: dict[int, str]) -> None:
     else:
         choices.pop(score.path, None)
     _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
-    score.hands = dict(hands)
+    score.roles = dict(hands)
+    score.hands = {i: r for i, r in hands.items() if r in HAND_ROLES}
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +219,7 @@ def save_hands(score: Score, hands: dict[int, str]) -> None:
 def save_take(events: list[tuple[float, list[int]]], meta: dict) -> dict:
     """Write a recorded take to <home>/takes/<id>.mid plus <id>.json."""
     take_id = time.strftime("%Y%m%d-%H%M%S")
-    folder = home() / "takes"
+    folder = profile_home() / "takes"
     while (folder / f"{take_id}.mid").exists():
         take_id += "b"
     t0 = events[0][0] if events else 0.0
@@ -229,7 +245,7 @@ def save_take(events: list[tuple[float, list[int]]], meta: dict) -> dict:
 
 def list_takes() -> list[dict]:
     out = []
-    for f in sorted((home() / "takes").glob("*.json")):
+    for f in sorted((profile_home() / "takes").glob("*.json")):
         try:
             out.append(json.loads(f.read_text(encoding="utf-8")))
         except (OSError, ValueError):
@@ -255,7 +271,7 @@ def get_take(take: str | None) -> dict:
 def update_take(meta: dict) -> None:
     if meta.get("external"):
         return
-    path = home() / "takes" / f"{meta['id']}.json"
+    path = profile_home() / "takes" / f"{meta['id']}.json"
     path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 

@@ -20,13 +20,14 @@ import json
 import logging
 import os
 import pathlib
-import shutil
 import socket
 import subprocess
 import threading
 import time
 
-from .library import home
+from .atlas import claude_run
+from .atlas.claude_run import STRIPPED_ENV, find_claude  # noqa: F401  (deep.find_claude: what tests replace)
+from .library import home, profile_home
 
 log = logging.getLogger("midi-coach")
 
@@ -35,9 +36,6 @@ MCP_PORT = 8780
 RUN_TIMEOUT_SEC = 6 * 60
 RESUME_WITHIN_SEC = 2 * 60 * 60  # a follow-up within this continues the same lesson
 NOTES_CONTEXT_CHARS = 2500
-# Kept out of the run's environment: an API key would bill the API instead of the subscription,
-# and CLAUDECODE makes a nested run refuse to start when the coach was launched from Claude Code.
-STRIPPED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
 
 TEACHER_PROMPT = """\
 You are the Maestro, the piano teacher in the pianist's practice app, taking over a question \
@@ -72,24 +70,13 @@ how they like to be taught, where a lesson left off), one short line each.\
 """
 
 
-def find_claude() -> str | None:
-    explicit = os.environ.get("MIDI_COACH_CLAUDE")
-    if explicit:
-        return explicit if pathlib.Path(explicit).exists() else None
-    found = shutil.which("claude")
-    if found:
-        return found
-    local = pathlib.Path.home() / ".local" / "bin" / ("claude.exe" if os.name == "nt" else "claude")
-    return str(local) if local.exists() else None
-
-
 # ---------------------------------------------------------------------------
 # Notebook and inbox
 # ---------------------------------------------------------------------------
 
 
 def notes_path() -> pathlib.Path:
-    return home() / "maestro_notes.md"
+    return profile_home() / "maestro_notes.md"
 
 
 def read_notes(limit: int | None = None) -> str:
@@ -113,7 +100,7 @@ def remember(note: str) -> dict:
 
 
 def inbox_path() -> pathlib.Path:
-    return home() / "maestro_inbox.json"
+    return profile_home() / "maestro_inbox.json"
 
 
 def _load_inbox() -> list:
@@ -248,33 +235,25 @@ class DeepTeacher:
         finally:
             self.busy = False
 
-    def command(self, resume: str | None) -> list[str]:
+    def _mcp_args(self) -> list[str]:
         mcp = {"mcpServers": {"midi-coach": {"type": "http", "url": self.endpoint.start()}}}
-        args = [find_claude() or "claude", "-p", "--output-format", "json",
-                "--model", os.environ.get("MIDI_COACH_DEEP_MODEL") or DEFAULT_MODEL,
-                "--mcp-config", json.dumps(mcp), "--strict-mcp-config",
-                "--tools", "WebSearch", "--allowedTools", "mcp__midi-coach,WebSearch", "--permission-mode", "dontAsk",
-                "--append-system-prompt", TEACHER_PROMPT]
-        return args + (["--resume", resume] if resume else [])
+        return ["--mcp-config", json.dumps(mcp), "--strict-mcp-config", "--allowedTools", "mcp__midi-coach,WebSearch"]
+
+    def command(self, resume: str | None) -> list[str]:
+        return claude_run.command(self.model(), system=TEACHER_PROMPT, tools="WebSearch", resume=resume, extra=self._mcp_args())
+
+    @staticmethod
+    def model() -> str:
+        return os.environ.get("MIDI_COACH_DEEP_MODEL") or DEFAULT_MODEL
 
     def _claude(self, question: str, context: str, resume: str | None) -> dict:
         notes = read_notes(NOTES_CONTEXT_CHARS)
         prompt = (f"[Practice context]\n{context}\n\n"
                   + (f"[Your notebook on the pianist]\n{notes}\n\n" if notes and not resume else "")
                   + f"[The pianist asked]\n{question}")
-        env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
-        cwd = home() / "maestro"  # its own folder, so no project's CLAUDE.md is loaded
-        cwd.mkdir(exist_ok=True)
-        try:
-            done = self._run(self.command(resume), input=prompt, capture_output=True, text=True, encoding="utf-8",
-                             errors="replace", timeout=RUN_TIMEOUT_SEC, cwd=str(cwd), env=env,
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except subprocess.TimeoutExpired:
-            return {"error": f"Claude Code took longer than {RUN_TIMEOUT_SEC // 60} minutes."}
-        try:
-            out = json.loads(done.stdout.strip().splitlines()[-1])
-        except (ValueError, IndexError):
-            return {"error": (done.stderr or done.stdout or f"claude exited with {done.returncode}").strip()[-300:]}
-        if out.get("is_error") or done.returncode:
-            return {"error": str(out.get("result") or out.get("subtype") or f"claude exited with {done.returncode}")[:300]}
+        out = claude_run.run(prompt, self.model(), system=TEACHER_PROMPT, tools="WebSearch", resume=resume,
+                             timeout=RUN_TIMEOUT_SEC, runner=self._run, extra=self._mcp_args(),
+                             cwd=home() / "maestro")  # its own folder, so no project's CLAUDE.md is loaded
+        if out.get("error"):
+            return {"error": out["error"]}
         return {"result": out.get("result") or "", "session_id": out.get("session_id")}

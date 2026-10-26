@@ -21,14 +21,15 @@ asking Claude to start each run:
 
 | Control | What it does |
 |---------|--------------|
-| Lesson | Any lesson in `%USERPROFILE%\MidiCoach\lessons`, grouped by category (newest first in each), or the score Claude just showed. See [Lesson categories](#lesson-categories) |
-| Input | MIDI input to listen on (remembered). If the keyboard is busy — e.g. the visualizer has it open — the `Coach` loopMIDI port is used instead |
-| Learn / Rehearse / Record | Learn = the cursor waits on each chord for the right notes, then flows on at the tempo slider's speed (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`); Record = play over the metronome and get it back as sheet music (below) |
-| Hand, Bars | Practice one hand (the other is ignored) or a bar range |
+| Songs / Lessons (left panel) | **☰ Songs & lessons** shows or hides it. **Songs**: your song lessons by category, then the whole reference library — type to search it (every word must be in the file name); with nothing typed it lists the library songs you practised last. **Lessons**: teaching material (the *Exercises* and *AI exercises* categories), most recently practised first. Every entry shows its history from your saved takes: runs, best score, when you last played it. Click one to load it. See [Lesson categories](#lesson-categories) |
+| Input | MIDI input to listen on (remembered; hidden in Listen, which doesn't use it). If the keyboard is busy — e.g. the visualizer has it open — the `Coach` loopMIDI port is used instead |
+| Listen / Learn / Rehearse / Record | A line next to the buttons says what the selected mode does. **Listen** = you don't play: the keyboard plays the piece (with its sustain pedal) on the output under *Sound goes to*, at the tempo slider's speed, and the cursor follows; Bars and Loop apply, nothing is graded or saved. It plays every part that's shown (vocals only with their Sound on), so hide a hand under **Hear ▾** to hear the other alone. Learn = the cursor waits on each chord for the right notes, then flows on at the tempo slider's speed (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`); Record = play over the metronome and get it back as sheet music (below) |
+| Play ▾ / Hear ▾ (Parts) | Per piece, remembered in the browser. For the right hand, left hand, pedals (feet) and vocals: **You play** (graded; Learn waits for it), **Show** (drawn on the sheet, or hidden) and **Sound** — a part you don't play but can see is muted until you turn it on, then the keyboard plays it along with you on the MIDI output chosen under *Sound goes to*: in time in Rehearse, and in Learn the stretch up to the next chord each time you play one (so it waits for you too). Only notes are sent — no sustain pedal or all-notes-off that would catch the notes you hold. **What each part is**: each part of the file as Right hand, Left hand, Both hands (split by register), Pedals (a bass line played with your feet), Vocals (shown and heard, never graded) or Off; **Save parts** remembers it for the file, like `set_parts` |
+| Bars | Practice a bar range |
 | Loop | Restart at the end of the range; each pass is saved and graded as its own take |
 | Maestro decides | With Loop on, the Maestro changes the practice between passes the way a teacher would, says what it did, and the menu follows: the same problem bar in two passes → loop it with a bar either side (back to your section after three clean passes); a rough pass in Rehearse → 10% slower (not below 50%); two rough passes with both hands → right hand alone, then left, then both (two clean passes each); three clean passes in Learn → Rehearse at 70%; three clean in Rehearse → 5% faster (up to 100%). Say or type *"no"* / *"undo"* to put the last change back (handled on your PC, no API call) |
 | Maestro: Warm / Strict | How the Maestro coaches, remembered between sessions (also by voice: *"be a bit gentler"*). **Warm** (default) is encouraging and says what went well before what to fix; **Strict** is dry and demanding. Either way it names the exact bar and note |
-| Start / Stop | One session at a time, shared with Claude |
+| Start / ▶ Listen / Stop | One session at a time, shared with Claude |
 | Metronome | In the menu bar: **♩ Metronome** starts it, the **BPM ▾** button next to it opens its settings — BPM (type it, **Tap** it, or **Match score**), beats per bar, subdivision (quarters to sextuplets), six sounds, accent on beat 1, volume and a separate volume for the subdivisions. **M** starts/stops it. **Follow score**: Rehearse runs start with a count-in and the clicks follow the score — its tempo changes, time signatures and pickup bars, at your Tempo % — instead of waiting for your first note. Runs in the browser: no lag, no cost |
 | Voice | The **Maestro**, a teacher NPC, talks to you in a dialogue box (click to skip, click again to close). When you press Start it greets you with what it knows: the piece, its key signature, your best score on it, how long you've been away. When a looped run ends it sums up: passes, your best one, your weak bar. After a pass it says at most two sentences, and only when there's something new: how it went or how it compares with the last pass, then the one thing to know. The first time a slip shows up it's named ("Bar 3: that's F sharp, not F"); the second time comes how to fix it ("Bar 3 again; take it on its own, slowly"); after that just a word ("Same spot."). Clean passes in a row stay quiet except at three and five. Wording never repeats the last half of its choices, even across sessions (`%USERPROFILE%\MidiCoach\maestro.json`). Claude's own comments (`say`) are spoken too, at the volume you set. The *Natural (Kokoro)* voices sound human; the Windows voices are the fallback. Your choice is remembered. Browsers only let a page speak after you've clicked it once |
 
@@ -69,6 +70,77 @@ that"* and it picks up the pass with `wait_for_recording` / `compare_take`.
 Without Claude Desktop: `.venv\Scripts\python -m midi_coach.practice` opens the page with
 your newest lesson. Every pass is still saved, so Claude can review them later (`progress`).
 Don't run it while Claude Desktop's midi-coach is running — they'd compete for the keyboard.
+
+### Mock exams
+
+Each grade of the Atlas ends in a mock exam, shaped like a graded piano exam and marked out
+of 150 by the coach. It is a mock: the marking is the coach's own, not an exam board's. Open
+it from the grade's exam node (**Take the mock exam**), or ask Claude (`start_exam`). An
+exam card above the sheet music shows the sections, the examiner's request (spoken as
+*Examiner*), and a button for the next thing to do:
+
+| Section | What happens | Marks |
+|---------|--------------|-------|
+| Pieces | One from each list (A, B, C) of the grade's public-domain pieces, the ones you've worked on most first. **Begin**, play it through; it ends a few seconds after you stop | 3 × 30: pitch, time (steady, at tempo, no hesitations; less weight on steadiness in lyrical List B pieces), tone (estimated from your touch, low weight), shape (dynamics, note lengths, pedal), performance (keeping going, the whole piece). Fewer than 75% right notes caps it at 19, more than two stops of 1.5 s at 22, under 70% of the tempo at 23 |
+| Scales and arpeggios | 4–8 drawn from the grade's list, asked for by name (*"B flat major, two octaves, hands together"*), played from memory with the music hidden | 21, from right notes, evenness and speed; the wrong scale scores nothing |
+| Sight-reading | A piece you haven't seen: **Look at the music** gives 30 seconds, then **Play it now** | 21 |
+| Aural | Each test opens its questions in the step panel; the first answer to each counts | 18 |
+
+Pass is 100, merit 120, distinction 130. **Skip** scores a task 0, **Stop exam** abandons it
+unmarked. An exam is saved after every task (`%USERPROFILE%\MidiCoach\atlas\exams`), so
+reloading the page or restarting the coach picks it up where it stopped. When it's done, the
+card shows the marks table and a written report, and the grade's exam node becomes Proficient
+at a pass and Mastered at merit. The marking numbers are in `midi_coach/atlas/data/marking.json`.
+
+**Find my level** (in the Atlas bar, or Claude's `start_placement`) runs full mock exams from
+the grade you pick. Each pass moves up a grade until one isn't passed; if the first isn't, it
+steps down a grade at a time until one is. Then every grade up to the highest one passed is
+credited (its stages count as Proficient), and the first grade not passed becomes your active
+goal, with that exam's weakest items first on its Path. Between exams the card offers the next
+one or **Later**; stopping an exam pauses placement, and Continue sits that grade afresh. Its
+progress is kept in `%USERPROFILE%\MidiCoach\atlas\placement.json`.
+
+**Goals and Paths.** Tell the Maestro a goal (*"I want to play Piano Man"*, *"sight-read
+hymns"*, *"get through Grade 3"*) or type it in the Atlas's **Path** panel (with a song file
+from your library, if it's a song). It asks at most two follow-up questions, then Claude Code
+plans it on your subscription in the background (a minute or two):
+
+- **Song research** first, for a song: Hooktheory's TheoryTab (key, BPM, metre, sections,
+  the chords of each section), then Wikipedia, publisher pages and lessons, every fact with
+  its source. A fact two sources share, or one source and your file, is *confirmed*; a
+  single source's is *reported*; where a source disagrees with your file it's a *conflict*,
+  shown as such ("TheoryTab says 6/8; the file is written in 3/4"). Your file stays the
+  truth for the notes. Facts are cached for 90 days in `<home>\derived\song_facts`.
+- **The plan:** the requirements, families or exams the goal needs, which to bring forward,
+  at most five **bridges** for skills the syllabus doesn't name (a walking bass in C, say),
+  and its reasons with their sources. Unknown ids go back to be fixed before anything changes.
+- **The Path:** every requirement the goal needs that you don't know yet, prerequisites first,
+  grouped into families; for a song, the song itself is the last stop (learnt section by
+  section like a piece). Bridges sit dashed in the margin lane at the right of their grade,
+  saying *writing…* until their lessons are written (in the background, checked like the
+  theory lessons below).
+
+The **Path** panel lists the active goal's families in order with their rings; open one for
+its requirements and stages. **Next** (or *"what's next?"* to the Maestro) opens the next
+unfinished stage. Several goals can be open, one active; **Archive** puts one away and its
+bridges leave the Atlas. Claude Desktop can do the same with `plan_goal`, or plan a goal
+itself and save it with `save_goal`.
+
+**Lessons written by Claude.** The theory lessons are written in batches by Claude Code on
+your subscription, checked automatically before they're saved (step shapes, quiz answers, a
+named note matching the note written, every music example built, linted with all the
+engraving rules and read back note for note; problems go back for up to two repair rounds):
+
+```bat
+.venv\Scripts\python -m midi_coach.atlas.generate --tiers initial,g1,g2 --dry-run
+.venv\Scripts\python -m midi_coach.atlas.generate --tiers initial,g1,g2
+```
+
+It skips stages that already have a lesson and stops cleanly at the usage limit, so run it
+again later to carry on (`--node <id> --force` rewrites one). Each run is logged in
+`<content>\manifest.json`. These lessons show **Needs review** in the step panel until you
+press **Looks right**; **Something's wrong** asks what, and notes it in
+`%USERPROFILE%\MidiCoach\atlas\feedback.jsonl` for rewriting.
 
 ## Talk to the Maestro (voice chat, optional)
 
@@ -148,7 +220,8 @@ grading, heat maps and `progress` all work on them.
 
 ### Lesson categories
 
-Each folder in `%USERPROFILE%\MidiCoach\lessons` is a heading in the page's Lesson menu:
+Each folder in `%USERPROFILE%\MidiCoach\lessons` is a heading in the page's left panel:
+*Exercises* and *AI exercises* under **Lessons**, every other category under **Songs**.
 
 | Category | What goes there |
 |----------|-----------------|
@@ -164,12 +237,12 @@ show under *Unsorted*. Ask Claude to file something (*"put the Rousseau Piano Ma
 piano"*, *"Let It Be is checked — move it to Vocals & accompaniment"*) and `organize_lesson`
 moves it — from the lessons or from the reference library — and updates your takes and saved
 part choice so progress history stays with it. Moving files yourself in Explorer works for the
-menu, but takes would still point at the old path.
+panel, but takes would still point at the old path.
 
 **Where a lesson came from** is kept in the file (MusicXML `<identification><source>`): the
 source file, whether the notes were converted from MIDI (lengths and rests read from how long
 keys were held — the part most worth checking) or taken from a MusicXML score, and what was
-changed. The Lesson menu marks MIDI conversions *· from MIDI* and shows the whole note when you
+changed. The panel marks MIDI conversions *from MIDI* and shows the whole note when you
 hover over a lesson; the status line repeats the tag when you load one. Categories say what you
 practise; the source note says how far to trust the notes.
 
@@ -302,9 +375,9 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 |------|--------------|
 | `list_midi_ports` | Show MIDI inputs/outputs |
 | `find_reference` | Fuzzy search the reference library by title |
-| `inspect_reference` | Parts (track + channel) with their instrument, which hand each is, bars, tempo, pedal, long rests; suggests which parts to play |
-| `set_parts` | Save which parts you play with which hand (remembered per file) |
-| `start_recording` | Record from the input; optional reference / hand / bars; `mode` = free / wait / rehearsal |
+| `inspect_reference` | Parts (track + channel) with their instrument, what each is (a hand, pedals, vocals), bars, tempo, pedal, long rests; suggests which parts to play |
+| `set_parts` | Save what each part is — `right` / `left` / `both` hands, `pedals` (feet), `vocals` (shown, never graded) — remembered per file |
+| `start_recording` | Record from the input; optional reference / hand (`both` / `right` / `left`, `+pedals` to add the feet, or `pedals`) / bars; `mode` = free / wait / rehearsal; `backing` = parts you don't play to sound on the MIDI output along with you |
 | `wait_for_recording` | Block until the take ends; returns the comparison (or standalone analysis) |
 | `stop_recording` | End the take now |
 | `status` | Recording + playback status |
@@ -320,7 +393,17 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `transcribe_take` | Write a take out as sheet music (a two-staff lesson): Record-mode takes use their metronome grid, others get an estimated tempo or the `bpm` you give |
 | `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and show it on the coach page (`to_visualizer` also pushes it into Learn Mode) |
 | `send_lesson` | Show an existing lesson or reference on the coach page (`to_visualizer`: Learn Mode too) |
-| `organize_lesson` | Move a lesson or reference into a Lesson menu category (optionally renaming it); takes and part choices follow |
+| `organize_lesson` | Move a lesson or reference into a category of the page's Songs / Lessons panel (optionally renaming it); takes and part choices follow |
+| `start_exam` | Start (or resume) a mock exam for a grade (`initial`, `g1`..`g8`) on the coach page; see [Mock exams](#mock-exams) |
+| `exam_report` | Marks and written report of a finished mock exam (the latest, or of a grade or id), and the exam in progress |
+| `atlas_overview` | Each grade's progress on the Atlas, mock exam bests, the active goal and its next stop |
+| `atlas_node` / `open_node` | One Atlas node with its state, stages and lesson / open a stage's lesson on the page |
+| `list_goals` | The goals, the active one's Path (families in order, requirements and stages), the planner's status, reasons and sources |
+| `plan_goal` | Plan a goal (a song, skill or grade) with Claude Code on the subscription, in the background; a song is researched first |
+| `save_goal` | Save a goal you planned yourself (targets, up to 5 bridges, order, reasons); checked like the planner's |
+| `piece_grade` | Estimate a piece's (or passage's) grade from its measured features |
+| `rebuild_progress` | Recompute the Atlas progress from the takes and the event log |
+| `start_placement` | Find your level with mock exams from a grade (up until one fails, or down until one passes); credits the grades passed and sets the first grade failed as the goal. `resume=True` continues one under way |
 | `make_song_lesson` | A band file as its vocal line (with karaoke lyrics) over your piano part, key and time signature changes included; saved in *Needs review* with a note on where it came from |
 | `search_chord_charts` | Search Ultimate Guitar (chords, tabs, bass, ukulele, drums, Guitar Pro), plus sheet-music search links |
 | `get_chord_chart` | A chart's key, capo, chords, per-section progression and text; transpose; with `reference`, suggests the transpose that matches the score |
@@ -344,6 +427,11 @@ shows you the parts and asks before going on, for example:
 > 1 Track 3 — Acoustic Bass (low, E1–A2) · 4 Track 6 — Voice Oohs (melody) · 9 Drums …
 > There's no piano part. I'd use the vocal melody in your right hand and the bass in your
 > left. Sound right?
+
+A part named for the pedals (*Pedal*, *Pedals*) is suggested for your feet rather than a hand,
+and one named as the vocal line (*Vocals*, *Lead Vocal*, *Voice*, *Singer*) as vocals when
+there's a keyboard part for the hands — the sung line of a song lesson is never graded as
+piano. The piano sheet puts the vocals on a staff above the piano and the pedals on one below.
 
 Your answer is saved with `set_parts` (in `<home>/part_choices.json`), and recording,
 comparison, playback, the score and Learn Mode all use those parts from then on. Drums are
@@ -428,6 +516,8 @@ Takes are saved as `.mid` plus `.json` in `%USERPROFILE%\MidiCoach\takes` (overr
 | `MIDI_COACH_DAILY_CAP` | `0.50` | Daily voice-chat spending limit in dollars |
 | `MIDI_COACH_CLAUDE` | `claude` on PATH, else `~/.local/bin/claude.exe` | Claude Code, for the Maestro's deep questions |
 | `MIDI_COACH_DEEP_MODEL` | `sonnet` | Model Claude Code uses for deep questions |
+| `MIDI_COACH_GENERATOR_MODEL` | `sonnet` | Model Claude Code uses to write the Atlas's lessons (`python -m midi_coach.atlas.generate`) |
+| `MIDI_COACH_ATLAS_CONTENT` | `<home>/atlas/content` | Where the Atlas's syllabus, built tree and lessons live (kept out of git: the syllabus is the exam board's copyright) |
 | `MIDI_COACH_MCP_PORT` | `8780` | Local MCP endpoint those runs connect to (next free port if taken) |
 | `MIDI_COACH_HAND_MODEL` | `<home>/models/pm2s_hand_part.onnx` | The hand model to split parts with; `off` uses the search instead |
 

@@ -25,22 +25,25 @@ import re
 import time
 
 from .engraving import tidy_heading
-from .library import _choices_path, _load_choices, home
+from .library import _choices_path, _load_choices, profile_home
 from .notes import MIDI_SUFFIXES, MUSICXML_SUFFIXES, Score, load_score, select_notes
 
 _KEY_RE = re.compile(r"^([A-Ga-g])([#b-]?)(m|min|minor)?$")
 
-# Lesson menu groups, in menu order. Any other folder under lessons/ is a category too.
+# Groups in the coach page's Songs / Lessons panel, in order. Any other folder under lessons/ is a category too.
 # Needs review: lessons made from a file (e.g. songs converted from MIDI) nobody has checked yet.
 # Exercises: cut from real pieces. AI exercises: composed entirely by Claude or the Maestro.
 CATEGORIES = ("Needs review", "Solo piano", "Vocals & accompaniment", "Exercises", "AI exercises", "Recordings")
 NEEDS_REVIEW, EXERCISES, AI_EXERCISES, RECORDINGS = "Needs review", "Exercises", "AI exercises", "Recordings"
+# Categories holding lessons (teaching material) rather than songs; the coach page lists the
+# two apart.
+LESSON_CATEGORIES = (EXERCISES, AI_EXERCISES)
 UNSORTED = "Unsorted"
 LESSON_SUFFIXES = MUSICXML_SUFFIXES | MIDI_SUFFIXES
 
 
 def lessons_dir(category: str | None = None) -> pathlib.Path:
-    path = home() / "lessons"
+    path = profile_home() / "lessons"
     if category and category != UNSORTED:
         path = path / _category_folder(category)
     path.mkdir(parents=True, exist_ok=True)
@@ -133,7 +136,7 @@ def _repoint(old: str, new: str) -> None:
             return {k: swap(v) for k, v in value.items()}
         return value
 
-    for f in (home() / "takes").glob("*.json"):
+    for f in (profile_home() / "takes").glob("*.json"):
         text = f.read_text(encoding="utf-8")
         if json.dumps(old)[1:-1] not in text:
             continue
@@ -240,12 +243,18 @@ def build_lesson(
     tempo_bpm: float = 80,
     musicxml: str | None = None,
     category: str = AI_EXERCISES,
+    out_dir: str | pathlib.Path | None = None,
+    filename: str | None = None,
 ) -> tuple[str, Score]:
-    """Create and save a lesson. Returns (path, parsed score)."""
+    """Create and save a lesson. Returns (path, parsed score). out_dir: write it there (e.g.
+    the Atlas's lesson folder) instead of a category of the page's lesson panel; filename: its
+    name there (without .musicxml) when the title isn't one."""
     from music21 import converter, metadata, meter, stream
     from music21.musicxml.m21ToXml import GeneralObjectExporter
 
-    path = lessons_dir(category) / f"{_slug(title)}.musicxml"
+    folder = pathlib.Path(out_dir) if out_dir else lessons_dir(category)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{filename or _slug(title)}.musicxml"
     if musicxml:
         converter.parseData(musicxml)  # raises if it isn't valid MusicXML
         path.write_text(musicxml, encoding="utf-8")
@@ -264,9 +273,12 @@ def build_lesson(
             score.insert(0, _part("Right Hand", rh, "treble", time_signature, key, tempo_bpm, total))
         if lh:
             score.insert(0, _part("Left Hand", lh, "bass", time_signature, key, tempo_bpm if not rh else None, total))
+        from .transcribe import _print_accidentals
+
         for part in score.parts:
             part.makeMeasures(inPlace=True)
             part.makeNotation(inPlace=True)
+            _print_accidentals(part)  # music21 prints a sharp again on a repeat in the bar; the standard rule doesn't
         xml = tidy_heading(GeneralObjectExporter(score).parse().decode("utf-8"))
         path.write_text(xml, encoding="utf-8")
     return str(path), load_score(path)
