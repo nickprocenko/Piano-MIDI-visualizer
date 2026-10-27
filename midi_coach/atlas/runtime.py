@@ -27,6 +27,7 @@ import threading
 import time
 
 from .. import library
+from ..notes import parse_bars
 from . import content_dir, drills, load_atlas, steps, store, temporary, user_dir
 from .exam import ExamSession
 from .placement import Placement
@@ -338,30 +339,45 @@ class AtlasCoach:
         if meta.get("id"):
             library.update_take(meta)
         self._exam_step(ctx["node"], ctx["step"], verdict["score"])
-        made = self._drills(ctx, step, report, live)
-        self.publish(verdict={"node": ctx["node"], "step": ctx["step"], **verdict}, **({"drills": made} if made else {}))
+        made, retired = self._drills(ctx, step, report, live)
+        self.publish(verdict={"node": ctx["node"], "step": ctx["step"], **verdict},
+                     **({"drills": made} if made else {}), **({"refresh": True} if made or retired else {}))
         return verdict
 
-    def _drills(self, ctx: dict, step: dict, report: dict | None, live: dict | None) -> list[str]:
+    def _drills(self, ctx: dict, step: dict, report: dict | None, live: dict | None) -> tuple[list[dict], list[str]]:
         """Remedial drills: log this pass's slips and make a drill for any bar that keeps
-        slipping; a drill that is now Proficient retires. Returns the drills made."""
+        slipping; a drill that is now Proficient retires. Returns ([{id, title}] made, ids retired)."""
         node = ctx["node"]
         try:
             if node.startswith("drill."):
-                drills.retire_proficient(self.states(rebuild=True))
-                return []
-            if step.get("type") != "play" or step.get("pool") or ctx.get("grade") in ("taps", "echo"):
-                return []
-            drills.record_pass(node, ctx["step"], report, live)
-            bars = drills.repeated(node, ctx["step"])
-            if not bars:
-                return []
+                return [], drills.retire_proficient(self.states(rebuild=True))
+            if (step.get("type") != "play" or not step.get("graded", True) or step.get("pool")
+                    or ctx.get("grade") in ("taps", "echo")):
+                return [], []
+            drills.record_pass(node, ctx["step"], report, live, played=self._bars_played(step, report))
+            made = []
             tree, file = self.tree(), str(self.file(step))
-            made = [d["id"] for bar in bars if (d := drills.add_drill(tree, node, ctx["step"], bar, file, step.get("hand", "both")))]
-            return made
+            for bar in drills.repeated(node, ctx["step"]):
+                d = drills.add_drill(tree, node, ctx["step"], bar, file, step.get("hand", "both"))
+                if d:
+                    made.append({"id": d["id"], "title": d["title"], "bar": bar, "bars": d["source"]["bars"]})
+                if len(made) >= drills.MAX_NEW:
+                    break
+            return made, []
         except Exception as exc:
             log.warning("drills failed: %s", exc)
-            return []
+            return [], []
+
+    @staticmethod
+    def _bars_played(step: dict, report: dict | None) -> int | None:
+        """How many bars a pass covered: the comparison's bars, else the step's range."""
+        if (report or {}).get("bars"):
+            return len(report["bars"])
+        try:
+            first, last = parse_bars(step.get("bars")) or (None, None)
+        except ValueError:
+            return None
+        return last - first + 1 if first is not None else None
 
     def _grade_keys(self, meta: dict, step: dict, grade: str) -> dict:
         """Taps (any key) or a played-back line, from the take's notes."""
@@ -574,7 +590,7 @@ class AtlasCoach:
                     node = tree["by_id"].get(r["id"], {})
                     reqs.append({"id": r["id"], "title": node.get("title", r["id"]), "recheck": r["recheck"],
                                  "level": (states.get(r["id"]) or {}).get("level", "not_started"),
-                                 "temporary": bool(node.get("temporary")),
+                                 "temporary": bool(node.get("temporary")), "kind": node.get("kind"),
                                  "stages": [{"id": sid, "title": tree["by_id"][sid]["title"],
                                              "level": (states.get(sid) or {}).get("level", "not_started"),
                                              "lesson": self.lesson(sid) is not None} for sid in node.get("stages", [])]})
@@ -701,7 +717,7 @@ class AtlasCoach:
         return nxt
 
     def context_lines(self) -> list[str]:
-        """What the Maestro knows about the Atlas: the goal and its next stop, exams, placement."""
+        """What the Maestro knows about the Atlas: the goal and its next stop, drills, exams, placement."""
         lines = []
         try:
             state = self.goal_state()
@@ -712,6 +728,11 @@ class AtlasCoach:
             left = sum(len(f["requirements"]) for f in state["path"])
             lines.append(f"Active goal: {state['goal']['title']} ({left} requirements to go)"
                          + (f"; next stop: {nxt['requirement_title']}, {nxt['title']}" if nxt else "") + ".")
+        made = drills.active()
+        if made:
+            lines.append("Drills for bars that keep slipping: "
+                         + "; ".join(d["title"] for d in made[:4])
+                         + (f"; and {len(made) - 4} more" if len(made) > 4 else "") + ".")
         if self.planning and not self.planning.get("done"):
             lines.append(f"Planning a goal now: {self.planning['text']}" + (f" (failed: {self.planning['error']})" if self.planning.get("error") else "") + ".")
         done = ExamSession.history()

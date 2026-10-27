@@ -646,7 +646,7 @@ function pathRender() {
     html += st.path.map((f, k) => {
       const ring = f.total ? ` <span class="a-muted">${f.done}/${f.total}</span>` : '';
       const reqs = f.requirements.map(r => `<div class="p-req"><i class="a-dot a-${r.level}"></i><a href="#" data-go="${r.id}">${esc(r.title)}</a>` +
-        `${r.recheck ? ' <span class="a-muted">(recheck)</span>' : ''}${r.temporary ? ' <span class="a-muted">· bridge</span>' : ''}` +
+        `${r.recheck ? ' <span class="a-muted">(recheck)</span>' : ''}${r.temporary ? ` <span class="a-muted">· ${r.kind === 'drill' || r.kind === 'song' ? r.kind : 'bridge'}</span>` : ''}` +
         `<div class="p-stages">${r.stages.map(sg => sg.lesson
           ? `<div><i class="a-dot a-${sg.level}"></i><a href="#" data-stage="${sg.id}">${esc(sg.title)}</a></div>`
           : `<div class="p-none"><i class="a-dot a-${sg.level}"></i>${esc(sg.title)} · ${r.temporary ? 'writing…' : 'no lesson yet'}</div>`).join('')}</div></div>`).join('');
@@ -702,6 +702,12 @@ function atlasEvent(msg) {
     stepRender();
     const el = $('sp-verdict');
     if (el) el.textContent = `${v.passed ? '✓ Passed' : '✗ Not yet'}${v.detail ? ' · ' + v.detail : ''}`;
+  }
+  if (msg.drills) {  // a bar that keeps slipping got a drill, ahead of this on the Path
+    const bars = msg.drills.map(d => d.bar).join(' and ');
+    const note = msg.drills.length > 1 ? `Bars ${bars} keep slipping: drills for them are on the Atlas.` : `Bar ${bars} keeps slipping: a drill for it is on the Atlas.`;
+    const el = $('sp-verdict');
+    if (el) el.textContent += ' · ' + note; else statusEl.textContent = note;
   }
   if (v) atlasRefreshStates();
 }

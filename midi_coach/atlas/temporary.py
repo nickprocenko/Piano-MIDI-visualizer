@@ -4,6 +4,8 @@
            in C, say): a requirement with a 'Learn it' and an 'At the keyboard' stage, whose
            lessons the generator writes in the background (the node says 'writing...' till then)
   song     a song goal's capstone: the song file itself, learnt section by section like a piece
+  drill    a bar that keeps slipping (drills.py), under the pseudo-goal 'drills': it leads
+           into the requirement it came from on every goal's Path
 
 They live in <home>/atlas/nodes.json, never in the built tree, and are drawn in the margin
 lane at the right of the tier of their first prerequisite (layout.py keeps it free), so the
@@ -172,10 +174,13 @@ def merged(base: dict) -> dict:
     lanes = {lane["tier"]: lane for lane in base.get("geometry", {}).get("lanes", [])}
     tiers = {t["id"]: t for t in base["tiers"]}
     extra: dict[str, dict[str, list[str]]] = {}  # goal -> node -> its prerequisites with the goal's bridges
+    temp = {r["id"]: r for r in reqs}  # a drill can lead into a song goal's capstone
     edges = []
     for tier in sorted({r["tier"] for r in reqs}, key=lambda t: tiers[t]["order"]):
         lx, ly, lw, lh = lanes.get(tier, {}).get("box", [0, 0, 220, 400])
-        fam = {"id": f"{tier}.goals", "level": "family", "parent": tier, "tier": tier, "title": "Goal bridges",
+        drilled = {r["kind"] == "drill" for r in reqs if r["tier"] == tier}
+        title = "Goal bridges and drills" if len(drilled) == 2 else "Drills" if True in drilled else "Goal bridges"
+        fam = {"id": f"{tier}.goals", "level": "family", "parent": tier, "tier": tier, "title": title,
                "kind": "temporary", "temporary": True, "prereqs": []}
         y = ly + layout.FAM_HEAD
         for req in (r for r in reqs if r["tier"] == tier):
@@ -192,8 +197,8 @@ def merged(base: dict) -> dict:
             nodes += [req] + kids
             edges += [[p, req["id"]] for p in req["prereqs"]] + [[req["id"], b] for b in req.get("before", [])]
             mine = extra.setdefault(req["goal"], {})
-            for b in (r for target in req.get("before", []) for r in _requirements(base, target)):
-                mine.setdefault(b, list(base["by_id"][b].get("prereqs", []))).append(req["id"])
+            for b in (r for target in req.get("before", []) for r in ([target] if target in temp else _requirements(base, target))):
+                mine.setdefault(b, list((temp.get(b) or base["by_id"][b]).get("prereqs", []))).append(req["id"])
         fam["box"] = [lx, ly, lw, max(y - ly + 6, 60)]
         nodes.append(fam)
     out["nodes"] = nodes

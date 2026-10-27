@@ -126,6 +126,15 @@ unfinished stage. Several goals can be open, one active; **Archive** puts one aw
 bridges leave the Atlas. Claude Desktop can do the same with `plan_goal`, or plan a goal
 itself and save it with `save_goal`.
 
+**Drills.** When the same bar trips you up (some of the same notes wrong or missed) in 2 of
+a stage's last 3 graded passes, a short **drill** joins the margin lane: that bar with one
+either side, from the same file and hand: listen at 70% and learn it, learn it again, then
+rehearse it at 80%. On any Path that has the requirement it came from, the drill comes first,
+so **Next** goes there. It retires once Proficient; if the bar starts slipping again
+afterwards, it takes two fresh slips to bring a new one back. A one-off slip makes nothing,
+and so does a pass that slips in more than half its bars (the stage itself works on that).
+At most two drills come from one pass. The Maestro knows which drills are waiting.
+
 **Lessons written by Claude.** The theory lessons are written in batches by Claude Code on
 your subscription, checked automatically before they're saved (step shapes, quiz answers, a
 named note matching the note written, every music example built, linted with all the

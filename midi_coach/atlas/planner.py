@@ -22,7 +22,7 @@ import re
 import time
 
 from .. import library
-from . import claude_run, load_atlas, mastery, store, temporary
+from . import claude_run, drills, load_atlas, mastery, store, temporary
 from .templates import slug
 
 REPAIRS = 2
@@ -188,8 +188,12 @@ def temporary_before(node_id: str) -> list[str]:
 
 
 def path(goal: dict, states: dict | None = None) -> list[dict]:
-    """The goal's Path now: families in order, each with the requirements still to do."""
+    """The goal's Path now: families in order, each with the requirements still to do. Active
+    drills belong to every Path, ahead of the requirement they came from."""
     atlas = temporary.merged(load_atlas())
     states = states if states is not None else store.progress(atlas)
-    return mastery.path_families(atlas, states, goal["targets"], extra_prereqs=(atlas.get("extra_prereqs") or {}).get(goal["id"]),
-                                 first=goal.get("first"))
+    extra = atlas.get("extra_prereqs") or {}
+    links = {k: list(v) for k, v in (extra.get(goal["id"]) or {}).items()}
+    for rid, prereqs in (extra.get(drills.GOAL) or {}).items():
+        links[rid] = list(dict.fromkeys(links.get(rid, []) + prereqs))
+    return mastery.path_families(atlas, states, goal["targets"], extra_prereqs=links, first=goal.get("first"))
