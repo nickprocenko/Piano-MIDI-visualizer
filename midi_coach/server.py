@@ -1533,7 +1533,14 @@ def _voice_start_exam(grade: str) -> dict:
 
 _bug_log_lines = bugs.LogRing()
 log.addHandler(_bug_log_lines)
-_bugs = bugs.BugLog(bugs.ScreenRing(active=lambda: hub.clients > 0), logs=_bug_log_lines)
+_page_errors = bugs.PageErrors()
+_bugs = bugs.BugLog(bugs.ScreenRing(active=lambda: hub.clients > 0), logs=_bug_log_lines, page=_page_errors)
+
+
+def _cmd_page_error(body: dict) -> dict:
+    """An uncaught error on the coach page: kept for the next bug report."""
+    _page_errors.add(str(body.get("message") or ""), str(body.get("where") or ""), str(body.get("stack") or ""))
+    return {"ok": True}
 
 
 def _voice_bug(description: str, add_to_last: bool = False, kind: str = "bug") -> dict:
@@ -1746,7 +1753,7 @@ PAGE_COMMANDS = {"ports": _cmd_ports, "mic_note": _cmd_mic_note, "lessons": _cmd
                  "seek": _cmd_seek, "mix": _cmd_mix, "synced": _cmd_synced, "synced_cursor": _cmd_synced_cursor,
                  "youtube": _cmd_youtube,
                  "record": _cmd_record, "maestro": _cmd_maestro, "stop_playback": lambda _body: _quiet(),
-                 "voice_status": _cmd_voice_status, "talk": _cmd_talk, "chat": lambda body: _voice_reply(body.get("text", ""))}
+                 "voice_status": _cmd_voice_status, "talk": _cmd_talk, "page_error": _cmd_page_error,"chat": lambda body: _voice_reply(body.get("text", ""))}
 def _atlas_show(path: str) -> dict:
     """A lesson's music on the sheet. Opening a lesson means leaving whatever was running
     (a Freeplay Listen or Learn run): stop it, as Stop would, so the lesson can load."""

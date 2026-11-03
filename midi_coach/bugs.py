@@ -1,5 +1,5 @@
 """Bug reports by voice: "Maestro, bug: the cursor jumped to bar five" saves what was said,
-screenshots, the practice context and the coach's recent log to
+screenshots, the practice context, the coach page's console errors and the coach's recent log to
 ~/MidiCoach/bug_reports/open/<when>/, to be fixed later in Claude Code ("fix the bug reports").
 Requests for the app ("Idea: a bigger metronome button") are saved the same way to
 ~/MidiCoach/requests/open/<when>/ ("do the requests").
@@ -34,6 +34,7 @@ RING_MAX_AGE_SEC = 60    # an unchanged screen leaves old frames; past this they
 ADD_TO_LAST_WITHIN_SEC = 10 * 60
 MAX_WIDTH = 1600
 LOG_LINES = 40
+PAGE_ERRORS = 20
 
 # Said to the Maestro, handled on the PC without an API call.
 REPORT_RE = re.compile(r"^(?:maestro\s+)?(?:bug report|report (?:a )?bug|(?:that's |that is |thats )?a bug|bug)\b\s*(.*)$")
@@ -193,11 +194,30 @@ class LogRing(logging.Handler):
             pass
 
 
+class PageErrors:
+    """The coach page's last console errors (uncaught exceptions and rejected promises), posted by
+    the page as they happen, so a report carries the stack trace and not just a screenshot of it."""
+
+    def __init__(self, keep: int = PAGE_ERRORS) -> None:
+        self.lines: collections.deque = collections.deque(maxlen=keep)
+
+    def add(self, message: str, where: str = "", stack: str = "") -> None:
+        text = (message or "").strip()[:500] or "(no message)"
+        if where:
+            text += f"  [{where.strip()[:200]}]"
+        stack = "\n".join(line.rstrip() for line in (stack or "").strip().splitlines()[:8])
+        entry = f"{time.strftime('%H:%M:%S')} {text}" + (f"\n{stack}" if stack else "")
+        if self.lines and self.lines[-1].split(" ", 1)[1] == entry.split(" ", 1)[1]:
+            return  # the same error again (a render loop): once is enough
+        self.lines.append(entry)
+
+
 class BugLog:
-    def __init__(self, ring: ScreenRing, grab=grab, logs: LogRing | None = None) -> None:
+    def __init__(self, ring: ScreenRing, grab=grab, logs: LogRing | None = None, page: PageErrors | None = None) -> None:
         self.ring = ring
         self.grab = grab
         self.logs = logs
+        self.page = page
 
     def report(self, said: str, context: str = "", kind: str = "bug") -> dict:
         """A new report ('bug' or 'request'): what was said, a screenshot now and the frames before it."""
@@ -216,6 +236,8 @@ class BugLog:
         lines += [f"- {name}" for name in shots] or ["- none (screen capture unavailable)"]
         if context:
             lines += ["", "## Practice context", "", context.strip()]
+        if self.page is not None and self.page.lines:
+            lines += ["", "## Coach page console errors", "", "```", *self.page.lines, "```"]
         if self.logs is not None and self.logs.lines:
             lines += ["", "## Coach log before the report", "", "```", *self.logs.lines, "```"]
         (folder / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

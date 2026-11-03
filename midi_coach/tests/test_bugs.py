@@ -70,6 +70,27 @@ def test_report_without_screen_capture_still_saves(home):
     assert "screen capture unavailable" in (home / "bug_reports" / "open" / out["saved"] / "report.md").read_text(encoding="utf-8")
 
 
+def test_report_carries_the_coach_pages_console_errors(home):
+    page = bugs.PageErrors()
+    stack = "TypeError: Cannot set properties of null\n    at renderChip (profiles.js:19:33)\n    at load (profiles.js:79:5)"
+    page.add("Uncaught TypeError: Cannot set properties of null (setting 'textContent')", "profiles.js:19:33", stack)
+    page.add("Uncaught TypeError: Cannot set properties of null (setting 'textContent')", "profiles.js:19:33", stack)
+    assert len(page.lines) == 1  # the same error twice in a row is kept once
+    log = bugs.BugLog(bugs.ScreenRing(active=lambda: True, grab=lambda: None), grab=lambda: None, page=page)
+    out = log.report("check the console")
+    text = (home / "bug_reports" / "open" / out["saved"] / "report.md").read_text(encoding="utf-8")
+    assert "## Coach page console errors" in text and "[profiles.js:19:33]" in text and "at renderChip" in text
+
+
+def test_the_page_posts_its_errors_to_the_coach(monkeypatch):
+    from midi_coach import server
+
+    page = bugs.PageErrors()
+    monkeypatch.setattr(server, "_page_errors", page)
+    assert server.PAGE_COMMANDS["page_error"]({"message": "boom", "where": "atlas.js:5:1"}) == {"ok": True}
+    assert page.lines[-1].endswith("boom  [atlas.js:5:1]")
+
+
 def test_saying_bug_to_the_maestro_saves_a_report_without_the_api(home, monkeypatch):
     from midi_coach import display, server
 

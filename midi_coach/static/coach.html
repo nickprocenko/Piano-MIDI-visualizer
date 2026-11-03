@@ -1233,6 +1233,33 @@
     <span title="Bar heat map: clean → most problems"><i class="heat"></i>Trouble bars</span>
   </footer>
 </div>
+<script>
+// Uncaught errors here and in the sheet's frame go to the coach, so a bug report ("Maestro, bug…")
+// carries the console's stack trace. First, before any other script, so none of theirs is missed.
+(function () {
+  let sent = 0;
+  function send(message, where, stack) {
+    if (++sent > 30) return;  // an error in a render loop: the first few say it all
+    fetch('cmd/page_error', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                             body: JSON.stringify({message, where, stack})}).catch(() => {});
+  }
+  function watch(win, prefix) {
+    win.addEventListener('error', e => {
+      const at = e.filename ? `${e.filename.split('/').pop()}:${e.lineno}:${e.colno}` : '';
+      send(String(e.message || e.error || 'error'), prefix + at, e.error && e.error.stack);
+    });
+    win.addEventListener('unhandledrejection', e => {
+      const r = e.reason;
+      send('Unhandled promise rejection: ' + (r && r.message || String(r)), prefix, r && r.stack);
+    });
+  }
+  watch(window, '');
+  document.addEventListener('DOMContentLoaded', () => {
+    const sheet = document.getElementById('sheet');
+    if (sheet) sheet.addEventListener('load', () => { try { watch(sheet.contentWindow, 'sheet: '); } catch (e) {} });
+  });
+})();
+</script>
 <script src="roll.js"></script>
 <script>
 "use strict";
