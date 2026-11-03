@@ -147,7 +147,7 @@
 
   // -- the dash bar ----------------------------------------------------------------------
 
-  // The bar has Home and the name of the mode you're in, nothing else: to change modes you go
+  // The bar has Home, Ask Maestro and the name of the mode you're in: to change modes you go
   // back to Home, and leaving a mode stops whatever it was running.
   const tabs = [...document.querySelectorAll('#dash .dtab')];
   const WHERE = {practice: 'Session', explore: 'Explore', record: 'Record a new idea', progress: 'Roadmap', youtube: 'YouTube'};
@@ -258,6 +258,12 @@
   $('home-youtube').addEventListener('click', () => go('youtube'));
   $('home-ask').addEventListener('click', () => {
     go('practice');
+    if (!$('ask').disabled) $('ask').focus();
+  });
+  // The bar's Ask Maestro: where the ask box is on screen (a Session, Record, a lesson) it just
+  // focuses it, so nothing running stops; elsewhere it opens the Session first, as Home's does.
+  $('dash-ask').addEventListener('click', () => {
+    if (!$('ask').offsetParent) go('practice');
     if (!$('ask').disabled) $('ask').focus();
   });
 

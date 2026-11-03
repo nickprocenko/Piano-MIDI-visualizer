@@ -436,6 +436,10 @@
   #dash-where { padding: 10px 14px 8px; border-bottom: 2px solid var(--accent); color: var(--text); font: 600 13px 'Segoe UI', Arial, sans-serif; }
   #dash-where:empty { display: none; }
   #dash .spacer { flex: 1; }
+  #dash-ask { display: flex; align-items: center; gap: 7px; padding: 6px 14px 4px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--accent); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #dash-ask:hover:not(:disabled) { color: var(--text); }
+  #dash-ask:disabled { opacity: .45; cursor: default; }
+  #dash-ask .maestro-avatar { width: 22px; height: 22px; font-size: 14px; }
   #profile-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 5px; border: 1px solid rgba(255,255,255,.15); border-radius: 18px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   #profile-chip:hover { border-color: var(--accent); }
   /* File menu (beside Home) and its dialogs */
@@ -579,11 +583,22 @@
   .home-card-detail { color: var(--muted); font-size: 13px; }
   .home-card-action { display: flex; gap: 8px; align-items: center; margin-top: auto; color: var(--accent); font-size: 13px; font-weight: 600; }
   /* Today (today.js): the one-button session, at the top of Home and beside a lesson */
-  .today-card, .home-grid, .home-coach { width: 100%; max-width: 860px; }  /* one column, centred */
-  .today-card { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; border: 1px solid rgba(0,180,180,.55); border-radius: 12px; background: linear-gradient(135deg, rgba(0,180,180,.13), var(--panel) 65%); }
+  /* Home: Today as a sidebar that folds to a strip, the activity cards beside it */
+  .home-main, .home-coach { width: 100%; }
+  .home-main { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .home-main.td-folded { grid-template-columns: 44px minmax(0, 1fr); }
+  .today-card { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 18px; border: 1px solid rgba(0,180,180,.55); border-radius: 12px; background: linear-gradient(135deg, rgba(0,180,180,.13), var(--panel) 65%); }
   .today-card.td-all { border-color: rgba(227,179,65,.6); background: linear-gradient(135deg, rgba(227,179,65,.12), var(--panel) 65%); }
-  .today-head { display: flex; align-items: flex-start; gap: 16px; }
-  .today-head > div { flex: 1; min-width: 0; }
+  .today-fold { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; padding: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 6px; background: transparent; color: var(--muted); font: 700 15px/1 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  .today-fold:hover, .today-fold:focus-visible { border-color: var(--accent); color: var(--text); outline: none; }
+  .today-spine { display: none; color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .14em; writing-mode: vertical-rl; }
+  .td-folded .today-card { align-items: center; padding: 10px 0 16px; cursor: pointer; }
+  .td-folded .today-card > :not(.today-fold):not(.today-spine) { display: none; }
+  .td-folded .today-fold { position: static; }
+  .td-folded .today-spine { display: block; }
+  .today-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; }
+  .today-head > div { flex: 1 1 100%; min-width: 0; padding-right: 28px; }
+  .today-head .today-go { flex: 1 1 100%; }
   .today-head h2 { margin: 5px 0 3px; font-size: 20px; }
   .today-sub { color: var(--muted); font-size: 13px; }
   .today-go { flex: none; padding: 10px 20px; border: 0; border-radius: 8px; background: var(--accent); color: #031414; font: 700 15px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
@@ -770,6 +785,9 @@
   #mainmenu button.mm-btn.primary { flex: 0 0 auto; }
   @media (max-width: 760px) {
     #home-view { padding: 28px 18px; gap: 22px; }
+    .home-main, .home-main.td-folded { grid-template-columns: 1fr; }  /* Today on top; folded, a bar */
+    .td-folded .today-card { flex-direction: row; justify-content: space-between; padding: 10px 14px; }
+    .td-folded .today-spine { order: -1; writing-mode: horizontal-tb; }
     #mode-picker { width: 100%; flex-wrap: wrap; }
     #mode { flex: 1 1 180px; width: auto; min-width: 0; }
     #mode button { flex: 1 1 0; min-width: 0; padding: 8px 4px; }
@@ -783,6 +801,7 @@
     #dash { gap: 0; padding: 0 8px; }
     #dash .brand { display: none; }
     #dash .dtab { padding: 9px 8px 7px; font-size: 12px; }
+    #dash-ask { padding: 5px 8px 3px; font-size: 12px; }
     #profile-chip { margin-left: auto; padding-right: 6px; }
     #chip-name { display: none; }
     .home-grid { grid-template-columns: 1fr; gap: 10px; }
@@ -810,6 +829,7 @@
   <button id="prefs-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="prefs-dlg" title="Connections, microphone and speakers, the Maestro's voice, the sheet, song folders and shortcuts (Ctrl+,)">Preferences</button>
   <input type="file" id="file-pick" accept=".mid,.midi,.musicxml,.xml,.mxl" hidden>
   <button class="dtab" data-dash="home">Home</button>
+  <button id="dash-ask" disabled title="Ask the Maestro (needs an Anthropic API key)"><span class="maestro-avatar" aria-hidden="true">𝄞</span>Ask Maestro</button>
   <span id="dash-where" title="The mode you're in. To change modes, go back to Home: that stops what's running"></span>
   <span class="spacer"></span>
   <button id="profile-chip" title="Switch profile"><span class="avatar" id="chip-avatar">?</span><span id="chip-name">Profile</span></button>
@@ -821,7 +841,10 @@
     <p>Choose a starting point. Your Maestro can help you decide what comes next.</p>
     <div class="home-inst" id="home-inst" role="group" aria-label="Instrument you're learning"></div>
   </section>
+  <div class="home-main" id="home-main">
   <section class="today-card" id="today-card" aria-label="Today's practice">
+    <button class="today-fold" id="today-fold" aria-expanded="true" aria-controls="today-card" title="Hide Today"><span aria-hidden="true">‹</span></button>
+    <span class="today-spine" aria-hidden="true">TODAY</span>
     <div class="today-head">
       <div>
         <p class="eyebrow">TODAY</p>
@@ -866,6 +889,7 @@
       <span class="home-card-action">Open YouTube play-along <b aria-hidden="true">→</b></span>
     </button>
   </section>
+  </div>
   <aside class="home-coach">
     <span class="home-coach-icon" aria-hidden="true">𝄞</span>
     <div>
@@ -2421,8 +2445,8 @@ async function loadVoiceStatus() {
     voiceReady = s.available;
     voiceCap = s.cap;
     talkBtn.disabled = $('ask').disabled = !s.available;
-    $('home-ask').disabled = !s.available;
-    $('home-ask').title = s.available ? 'Ask the Maestro for help' : 'Maestro chat needs an Anthropic API key';
+    $('home-ask').disabled = $('dash-ask').disabled = !s.available;
+    $('home-ask').title = $('dash-ask').title = s.available ? 'Ask the Maestro for help' : 'Maestro chat needs an Anthropic API key';
     $('home-ask-label').textContent = s.available ? 'Ask Maestro' : 'Chat unavailable';
     $('home-coach-copy').textContent = s.available
       ? 'Not sure where to start? Ask for a piece, a practice plan, or help with a tricky passage.'
@@ -2436,8 +2460,8 @@ async function loadVoiceStatus() {
   } catch (err) {
     voiceReady = false;
     talkBtn.disabled = $('ask').disabled = true;
-    $('home-ask').disabled = true;
-    $('home-ask').title = 'Maestro chat is unavailable';
+    $('home-ask').disabled = $('dash-ask').disabled = true;
+    $('home-ask').title = $('dash-ask').title = 'Maestro chat is unavailable';
     $('home-ask-label').textContent = 'Chat unavailable';
     $('home-coach-copy').textContent = 'Practice coaching still works. Maestro chat is unavailable right now.';
     $('ask').placeholder = 'Practice feedback works; Maestro chat is unavailable right now';

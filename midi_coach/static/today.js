@@ -136,6 +136,18 @@ async function todayAct(act) {
 
 $('today-go').addEventListener('click', () => todayAct($('today-go').dataset.act || 'next'));
 $('today-replan').addEventListener('click', () => todayAct('replan'));
+// On Home, Today folds to a strip beside the cards; the strip opens it again. Remembered.
+function todayFold(folded) {
+  $('home-main').classList.toggle('td-folded', folded);
+  const b = $('today-fold');
+  b.setAttribute('aria-expanded', String(!folded));
+  b.title = folded ? 'Show Today' : 'Hide Today';
+  b.firstElementChild.textContent = folded ? '›' : '‹';
+  store.set('todayFolded', folded ? '1' : '');
+}
+$('today-fold').addEventListener('click', e => { e.stopPropagation(); todayFold(!$('home-main').classList.contains('td-folded')); });
+$('today-card').addEventListener('click', () => { if ($('home-main').classList.contains('td-folded')) todayFold(false); });
+todayFold(store.get('todayFolded', '') === '1');
 // Back on Home (a take for fun may have finished there), or another lesson open: fresh ticks.
 window.addEventListener('coach:viewchange', () => {
   const v = document.body.dataset.view;
