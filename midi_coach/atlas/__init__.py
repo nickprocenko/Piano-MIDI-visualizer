@@ -15,7 +15,9 @@ holds only the engine, the templates and made-up sample data for the tests.
 
 A flute profile gets Pan instead: the same kind of tree for the flute (a First notes tier,
 then ABRSM Flute Grades 1-2), built by atlas.pan into <home>/atlas/pan with the same
-engine, page and progress store.
+engine, page and progress store. An alto saxophone profile gets atlas.sax (First notes, then
+ABRSM Saxophone Grades 1-2, in written pitch) in <home>/atlas/sax, and a singer atlas.voice
+(the coach's own vocal course) in <home>/atlas/voice-high or voice-low.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import json
 import os
 import pathlib
 
-from .. import profiles
+from .. import instruments, profiles
 from ..library import home, profile_home
 
 PACKAGE = pathlib.Path(__file__).parent
@@ -38,12 +40,11 @@ STRANDS = [
     {"id": "theory", "title": "Theory", "glyph": "♭"},
 ]
 LEVELS = ("tier", "strand", "family", "requirement", "stage")  # far to near; plus "review" and "exam"
-TREES = {"piano": {"name": "Roadmap", "folder": "content"}, "flute": {"name": "Roadmap", "folder": "pan"}}
 
 
 def tree_name() -> str:
     """What the active profile's tree is called in the UI: 'Roadmap' for every instrument."""
-    return TREES[profiles.instrument()]["name"]
+    return "Roadmap"
 
 
 def shared_dir() -> pathlib.Path:
@@ -64,7 +65,7 @@ def user_dir() -> pathlib.Path:
 def content_dir() -> pathlib.Path:
     """The syllabus facts, built tree and lessons of the active profile's instrument
     (MIDI_COACH_ATLAS_CONTENT overrides)."""
-    path = pathlib.Path(os.environ.get("MIDI_COACH_ATLAS_CONTENT") or shared_dir() / TREES[profiles.instrument()]["folder"])
+    path = pathlib.Path(os.environ.get("MIDI_COACH_ATLAS_CONTENT") or shared_dir() / instruments.folder())
     path.mkdir(parents=True, exist_ok=True)
     return path
 

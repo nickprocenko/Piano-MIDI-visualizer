@@ -14,12 +14,17 @@ and never put in git, like the Atlas's. This module holds the engine, the First 
 tier, the theory (the coach's own) and, in data/pan_tunes.json, public-domain tunes for
 the pieces.
 
+The engine also builds the alto saxophone's tree (atlas.sax) and the voice's (atlas.voice):
+what differs per instrument is a Course (its notes, tone steps, theory, tunes, folder, how its
+scales are practised and how its scores are written); the flute's is FLUTE.
+
     python -m midi_coach.atlas.pan [syllabus.json]   build <home>/atlas/pan: atlas.json, lessons, music
 """
 
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
 import pathlib
@@ -49,8 +54,8 @@ def rehearse_pass(tempo: int) -> dict:
     return {"metric": "overall", "min": 70, "tempo_min_pct": max(50, tempo - 10)}
 
 
-def content_dir() -> pathlib.Path:
-    path = shared_dir() / FOLDER
+def content_dir(course: "Course | None" = None) -> pathlib.Path:
+    path = shared_dir() / (course or FLUTE).folder
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -128,31 +133,32 @@ def fill_bar(notes: list[tuple[int, F]], beats: F) -> list[tuple[int | None, F]]
 
 # -- scales and arpeggios ------------------------------------------------------------------
 
-SPAN = {"octave": 7, "twelfth": 11}  # scale degrees above the tonic
+SPAN = {"fifth": 4, "octave": 7, "twelfth": 11}  # scale degrees above the tonic
 
 
-def scale_pitches(tonic: str, quality: str, span: str, start_octave: int | None = None) -> list[int]:
-    """Up and down from the lowest tonic the flute has (or the given octave's)."""
+def scale_pitches(tonic: str, quality: str, span: str, start_octave: int | None = None, lowest: int = LOWEST) -> list[int]:
+    """Up and down from the lowest tonic the instrument has (or the given octave's)."""
     pc, steps = key_tonic(tonic + ("m" if quality == "minor" else ""))
-    base = (start_octave + 1) * 12 + pc if start_octave else LOWEST + (pc - LOWEST) % 12
+    base = (start_octave + 1) * 12 + pc if start_octave else lowest + (pc - lowest) % 12
     top = SPAN[span]
     up = [base + 12 * (d // 7) + steps[d % 7] for d in range(top + 1)]
     return up + up[-2::-1]
 
 
-def arpeggio_pitches(tonic: str, quality: str, span: str, start_octave: int | None = None) -> list[int]:
+def arpeggio_pitches(tonic: str, quality: str, span: str, start_octave: int | None = None, lowest: int = LOWEST) -> list[int]:
     pc, steps = key_tonic(tonic + ("m" if quality == "minor" else ""))
-    base = (start_octave + 1) * 12 + pc if start_octave else LOWEST + (pc - LOWEST) % 12
+    base = (start_octave + 1) * 12 + pc if start_octave else lowest + (pc - lowest) % 12
     degrees = [d for d in (0, 2, 4, 7, 9, 11) if d <= SPAN[span]]
     up = [base + 12 * (d // 7) + steps[d % 7] for d in degrees]
     return up + up[-2::-1]
 
 
-def technique_music(spec: dict) -> dict:
+def technique_music(spec: dict, lowest: int = LOWEST) -> dict:
     """{tiny, key, bpm}: scales in quavers at the syllabus's crotchet speed, arpeggios in
     crotchets at its quaver speed (the same notes per minute, easier to read)."""
     scale = spec["type"] == "scale"
-    pitches = (scale_pitches if scale else arpeggio_pitches)(spec["tonic"], spec["quality"], spec["range"], spec.get("start_octave"))
+    pitches = (scale_pitches if scale else arpeggio_pitches)(spec["tonic"], spec["quality"], spec["range"], spec.get("start_octave"),
+                                                             lowest)
     key = spec["tonic"] + ("m" if spec["quality"] == "minor" else "")
     value = F(1, 2) if scale else F(1)
     return {"tiny": tiny(fill_bar([(p, value) for p in pitches], F(4)), key), "key": key,
@@ -162,24 +168,30 @@ def technique_music(spec: dict) -> dict:
 def technique_title(spec: dict) -> str:
     q = "major" if spec["quality"] == "major" else "minor"
     kind = "" if spec["type"] == "scale" else " arpeggio"
-    span = {"octave": "1 oct", "twelfth": "a 12th"}[spec["range"]]
+    span = {"fifth": "5 notes", "octave": "1 oct", "twelfth": "a 12th"}[spec["range"]]
     start = " · from the upper tonic" if spec.get("start_octave") else ""
     return f"{templates.pretty_key(spec['tonic'])} {q}{kind} · {span}{start}"
 
 
-def technique_stages() -> list[dict]:
-    st = templates.stage
-    return [st("notes", "Learn the notes", "both", "learn", 70),
-            st("tongued", "Tongued, steadily", "both", "rehearse", 70),
-            st("slurred", "Slurred, steadily", "both", "rehearse", 70),
-            st("speed", "Tongued and slurred at exam speed, from memory", "both", "rehearse", 100, final=True)]
+TECHNIQUE_STAGES = [("notes", "Learn the notes", "learn", 70), ("tongued", "Tongued, steadily", "rehearse", 70),
+                    ("slurred", "Slurred, steadily", "rehearse", 70),
+                    ("speed", "Tongued and slurred at exam speed, from memory", "rehearse", 100)]
+TECHNIQUE_HOW = {"notes": "Learn the notes and fingerings slowly, tongued.", "tongued": "Every note tongued with 'too', evenly.",
+                 "slurred": "Slurred: tongue the first note only, the air carries the rest; breathe at the top if you need to.",
+                 "speed": "As in the exam, from memory: once tongued, once slurred."}
 
 
-def expand_technique(item: dict, speeds: dict, grade: str) -> list[dict]:
+def technique_stages(course: "Course | None" = None) -> list[dict]:
+    rows = (course or FLUTE).technique_stages
+    return [templates.stage(key, title, "both", mode, tempo, final=k == len(rows) - 1)
+            for k, (key, title, mode, tempo) in enumerate(rows)]
+
+
+def expand_technique(item: dict, speeds: dict, grade: str, artic: str = "tongued/slurred") -> list[dict]:
     out = []
     for tonic in item["keys"]:
         spec = {"type": item["type"], "tonic": tonic, "quality": item.get("quality", "major"), "range": item.get("range", "octave"),
-                "hands": "single", "artic": "tongued/slurred", "form": "choice" if item.get("choice") else None,
+                "hands": "single", "artic": artic, "form": "choice" if item.get("choice") else None,
                 "speed_bpm": speeds.get(item["type"], {}).get(grade)}
         if item.get("start_octave"):
             spec["start_octave"] = item["start_octave"]
@@ -333,16 +345,60 @@ THEORY = {
 }
 
 
-def theory_lesson(stage_id: str, req_id: str, text: str, quizzes: list) -> dict:
+@dataclasses.dataclass(frozen=True)
+class Course:
+    """What one instrument's tree is made of. note_steps teach the first notes in order (each
+    one's 'new' pitches); tone_steps come after the notes step named in 'after'; g2_notes are
+    Grade 2's new notes; first_sound is the very first lesson (id, title, text, quizzes)."""
+    instrument: str
+    folder: str
+    part: str  # the score's part name
+    made: str  # the lessons' "made" prefix
+    lowest: int  # the lowest written note: scales start on the lowest tonic above it
+    highest: int
+    note_steps: list
+    tone_steps: list
+    g2_notes: dict
+    first_sound: tuple
+    theory: dict
+    tunes: str  # in atlas/data
+    sight_first: dict
+    sight_after: str  # the notes step the first sight-reading needs
+    sight_look: str  # what to do in the look-over time
+    technique_stages: list = dataclasses.field(default_factory=lambda: TECHNIQUE_STAGES)  # (key, title, mode, tempo %)
+    technique_how: dict = dataclasses.field(default_factory=lambda: TECHNIQUE_HOW)
+    final_plays: tuple | None = ("play-tongued", "play-slurred")  # the last technique stage's play steps
+    artic: str = "tongued/slurred"
+    minor_note: str = " The coach uses the natural minor; the exam lets you choose natural, harmonic or melodic."
+    strands: list = dataclasses.field(default_factory=lambda: STRANDS)
+    lists: dict = dataclasses.field(default_factory=lambda: LISTS)
+    tone_title: str = "Tone & tonguing"
+    learn_pass: dict = dataclasses.field(default_factory=lambda: LEARN_PASS)
+    clef: str = "treble"
+    octave: int = 0  # semitones every score is moved (a low voice: -12)
+    written_above: int = 0  # a transposing instrument's (an alto saxophone: 9)
+    first_notes_title: str = "First notes"
+    syllabus_hint: str = "drafted locally from your copy of the ABRSM woodwind syllabus (see 'The Roadmap' in midi_coach/README.md)"
+
+    @property
+    def first_sound_id(self) -> str:
+        return f"initial.technique.sound.{self.first_sound[0]}"
+
+
+def theory_lesson(stage_id: str, req_id: str, text: str, quizzes: list, made: str = "atlas.pan") -> dict:
     steps = [{"id": "read", "type": "read", "text": text}]
     steps += [_quiz(f"quiz-{k}", *q) for k, q in enumerate(quizzes, 1)]
-    return {"id": stage_id, "version": 1, "made": "atlas.pan (the coach's own theory)", "checked": True, "requirement": req_id,
+    return {"id": stage_id, "version": 1, "made": f"{made} (the coach's own theory)", "checked": True, "requirement": req_id,
             "steps": steps}
 
 
 # -- sight-reading: one line within the grade's range -------------------------------------------
 
 SIGHT_FIRST = {"bars": 4, "times": ["4/4"], "keys": ["G"], "range": [67, 74], "rhythms": 0, "tempo": 60}
+
+FLUTE = Course(instrument="flute", folder=FOLDER, part=PART, made="atlas.pan", lowest=LOWEST, highest=HIGHEST,
+               note_steps=NOTE_STEPS, tone_steps=TONE_STEPS, g2_notes=G2_NOTES, first_sound=FIRST_SOUND, theory=THEORY,
+               tunes="pan_tunes.json", sight_first=SIGHT_FIRST, sight_after="c-d", sight_look="finger it silently")
 RHYTHMS = {  # bar patterns (quarter notes) by level, cumulative
     0: [(F(4),), (F(2), F(2)), (F(2), F(1), F(1)), (F(1), F(1), F(2)), (F(1),) * 4],
     1: [(F(3),), (F(2), F(1)), (F(1), F(1), F(1)), (F(1), F(1, 2), F(1, 2), F(1), F(1)), (F(1, 2), F(1, 2), F(1), F(2))],
@@ -363,9 +419,9 @@ def _pitch_of(name: str) -> int:
     return (int(name[-1]) + 1) * 12 + pc
 
 
-def sight_params(syllabus: dict, tier: str) -> dict:
+def sight_params(syllabus: dict, tier: str, first: dict | None = None, first_title: str = "First notes") -> dict:
     if tier == "initial":
-        return dict(SIGHT_FIRST, title="First notes")
+        return dict(first or SIGHT_FIRST, title=first_title)
     keys, times, level, out = [], [], 0, {}
     for k, g in enumerate(sorted(syllabus["grades"], key=lambda g: g["order"])):
         s = g.get("sight", {})
@@ -412,11 +468,12 @@ def sight_piece(p: dict, seed: int) -> dict:
     return {"tiny": tiny(notes, key), "key": key, "time": time, "bpm": p["tempo"], "pitches": [n for n, _ in notes]}
 
 
-def sight_lesson(stage: dict, req: dict) -> dict:
+def sight_lesson(stage: dict, req: dict, course: "Course | None" = None) -> dict:
+    course = course or FLUTE
     st = stage["stage"]
     spec = req.get("spec", {})
     if "standard" in spec:
-        what = "Read a tune you haven't seen: 30 seconds to look it over and finger it silently, then play it through without stopping."
+        what = f"Read a tune you haven't seen: 30 seconds to look it over and {course.sight_look}, then play it through without stopping."
     elif "key" in spec:
         what = f"{req['title']}: check the key signature and which notes it changes before you play."
     elif "time" in spec:
@@ -425,8 +482,8 @@ def sight_lesson(stage: dict, req: dict) -> dict:
         what = f"New here: {req['title'].lower()}. Spot it in the tune before you play."
     prepared = st["key"] in ("learn", "prepared")
     text = what + (" Take your time with this one." if prepared else " Keep going whatever happens: the pulse matters more than every note.")
-    rule = LEARN_PASS if st["mode"] == "learn" else {"metric": "overall", "min": 65 if not prepared else 70}
-    return {"id": stage["id"], "version": 1, "made": "atlas.pan", "checked": True, "requirement": req["id"],
+    rule = course.learn_pass if st["mode"] == "learn" else {"metric": "overall", "min": 65 if not prepared else 70}
+    return {"id": stage["id"], "version": 1, "made": course.made, "checked": True, "requirement": req["id"],
             "steps": [{"id": "read", "type": "read", "text": text},
                       {"id": "play", "type": "play", "pool": f"sight/{req['tier']}-", "hand": "both", "mode": st["mode"],
                        "tempo_percent": st["tempo_percent"], "graded": True, "pass": rule}]}
@@ -434,8 +491,8 @@ def sight_lesson(stage: dict, req: dict) -> dict:
 
 # -- pieces --------------------------------------------------------------------------------------
 
-def load_tunes(path: str | pathlib.Path | None = None) -> list[dict]:
-    p = pathlib.Path(path) if path else PACKAGE / "data" / "pan_tunes.json"
+def load_tunes(path: str | pathlib.Path | None = None, course: "Course | None" = None) -> list[dict]:
+    p = pathlib.Path(path) if path else PACKAGE / "data" / (course or FLUTE).tunes
     return json.loads(p.read_text(encoding="utf-8"))["tunes"]
 
 
@@ -468,7 +525,8 @@ def piece_stages(bars: int) -> list[dict]:
                   st("whole", "Whole tune at tempo", "both", "rehearse", 100, final=True)]
 
 
-def _play_lesson(stage: dict, req: dict, file: str, text: str, made: str, checked: bool = True, plays: list[str] | None = None) -> dict:
+def _play_lesson(stage: dict, req: dict, file: str, text: str, made: str, checked: bool = True, plays: list[str] | None = None,
+                 learn_pass: dict | None = None) -> dict:
     st = stage["stage"]
     learn = st["mode"] == "learn"
     bars = st.get("bars")
@@ -476,7 +534,7 @@ def _play_lesson(stage: dict, req: dict, file: str, text: str, made: str, checke
     steps = [{"id": "read", "type": "read", "text": text + (" Learn mode waits for each note." if learn else " Rehearse keeps the beat.")}, listen]
     for name in plays or ["play"]:
         play = {"id": name, "type": "play", "file": file, "hand": "both", "mode": st["mode"], "tempo_percent": st["tempo_percent"],
-                "graded": True, "pass": LEARN_PASS if learn else rehearse_pass(st["tempo_percent"])}
+                "graded": True, "pass": (learn_pass or LEARN_PASS) if learn else rehearse_pass(st["tempo_percent"])}
         if name != "play":
             play["title"] = name.split("-", 1)[1].capitalize()
         steps.append(play)
@@ -488,11 +546,12 @@ def _play_lesson(stage: dict, req: dict, file: str, text: str, made: str, checke
 
 # -- the tree ------------------------------------------------------------------------------------
 
-def build(syllabus: dict, tunes: list[dict]) -> tuple[dict, dict]:
+def build(syllabus: dict, tunes: list[dict], course: "Course | None" = None) -> tuple[dict, dict]:
     """(atlas, plan): the tree in the Atlas's shape, and what to write for each stage
     ({stage id: (kind, data)}) so write() makes the lessons and music."""
+    course = course or FLUTE
     tree = Tree()
-    first = {"id": "initial", "title": "First notes", "order": 0, "aural": syllabus.get("first_notes_aural", [])}
+    first = {"id": "initial", "title": course.first_notes_title, "order": 0, "aural": syllabus.get("first_notes_aural", [])}
     grades = [first] + sorted(syllabus["grades"], key=lambda g: g["order"])
     order = {g["id"]: g["order"] for g in grades}
     speeds = syllabus.get("speeds", {})
@@ -512,14 +571,14 @@ def build(syllabus: dict, tunes: list[dict]) -> tuple[dict, dict]:
     for g in grades:
         gid = g["id"]
         tree.add({"id": gid, "level": "tier", "title": g["title"], "order": g["order"], "tier": gid})
-        for s in STRANDS:
+        for s in course.strands:
             tree.add({"id": f"{gid}.{s['id']}", "level": "strand", "parent": gid, "tier": gid, "strand": s["id"],
                       "title": f"{g['title']} · {s['title']}"})
 
         # Notes and tone (First notes), new notes (Grade 2), then scales and arpeggios.
-        note_steps = NOTE_STEPS if gid == "initial" else [G2_NOTES] if gid == "g2" else []
+        note_steps = course.note_steps if gid == "initial" else [course.g2_notes] if gid == "g2" else []
         if gid == "initial":
-            theory_req(tree.family(gid, "technique", "sound", "Your first sound"), *FIRST_SOUND)
+            theory_req(tree.family(gid, "technique", "sound", "Your first sound"), *course.first_sound)
         if note_steps:
             fam = tree.family(gid, "technique", "notes", "New notes")
             for ns in note_steps:
@@ -532,8 +591,8 @@ def build(syllabus: dict, tunes: list[dict]) -> tuple[dict, dict]:
                     teaches[p] = req["id"]
                 stages_plan(req, "exercise", ns)
         if gid == "initial":
-            fam = tree.family(gid, "technique", "tone", "Tone & tonguing")
-            for ts in TONE_STEPS:
+            fam = tree.family(gid, "technique", "tone", course.tone_title)
+            for ts in course.tone_steps:
                 req = tree.requirement(fam, ts["key"], ts["title"], "notes", [
                     templates.stage("learn", "Slowly", "both", "learn", 80),
                     templates.stage("tempo", "In time", "both", "rehearse", 100, final=True)], spec={"tone": ts["key"]})
@@ -542,16 +601,16 @@ def build(syllabus: dict, tunes: list[dict]) -> tuple[dict, dict]:
         for item in g.get("technique", []):
             fkey = "scales" if item["type"] == "scale" else "arpeggios"
             fam = tree.family(gid, "technique", fkey, "Scales" if fkey == "scales" else "Arpeggios")
-            for spec in expand_technique(item, speeds, gid):
+            for spec in expand_technique(item, speeds, gid, course.artic):
                 rid = templates.slug(f"{spec['type']}-{spec['tonic']}-{spec['quality']}-{spec['range']}")
-                req = tree.requirement(fam, rid, technique_title(spec), "technique", technique_stages(), spec=spec,
+                req = tree.requirement(fam, rid, technique_title(spec), "technique", technique_stages(course), spec=spec,
                                        covers=[f"type:{spec['type']}", f"key:{spec['tonic']}{'m' if spec['quality'] == 'minor' else ''}"])
-                pitches_of[req["id"]] = set(technique_music(spec)["pitches"])
+                pitches_of[req["id"]] = set(technique_music(spec, course.lowest)["pitches"])
                 stages_plan(req, "technique", {"spec": spec, "title": req["title"]})
 
         # Pieces: public-domain tunes, one family per list.
         for lst in (["first"] if gid == "initial" else ["A", "B", "C"]):
-            fam = tree.family(gid, "pieces", "first-tunes" if lst == "first" else f"list-{lst.lower()}", LISTS[lst])
+            fam = tree.family(gid, "pieces", "first-tunes" if lst == "first" else f"list-{lst.lower()}", course.lists[lst])
             for t in tunes:
                 if t["tier"] == gid and t["list"] == lst:
                     req = tree.requirement(fam, t["id"], f"{t['title']} ({t['composer'].split()[-1]})", "piece",
@@ -560,7 +619,7 @@ def build(syllabus: dict, tunes: list[dict]) -> tuple[dict, dict]:
                     stages_plan(req, "piece", {"tune": t})
 
         # Sight-reading.
-        sight = SIGHT_FIRST if gid == "initial" else g.get("sight", {})
+        sight = course.sight_first if gid == "initial" else g.get("sight", {})
         if gid != "initial":
             fam = tree.family(gid, "sight", "keys-times", "New keys & times")
             for key in sight.get("keys", []):
@@ -593,7 +652,7 @@ def build(syllabus: dict, tunes: list[dict]) -> tuple[dict, dict]:
 
         # Theory.
         fam = tree.family(gid, "theory", "topics", "Theory")
-        for tid, title, text, quizzes in THEORY.get(gid, []):
+        for tid, title, text, quizzes in course.theory.get(gid, []):
             theory_req(fam, tid, title, text, quizzes)
 
         tree.add({"id": f"{gid}.review", "level": "review", "parent": gid, "tier": gid, "title": f"{g['title']} review"})
@@ -601,17 +660,17 @@ def build(syllabus: dict, tunes: list[dict]) -> tuple[dict, dict]:
             tree.add({"id": f"{gid}.exam", "level": "exam", "parent": gid, "tier": gid, "title": f"{g['title']} mock exam",
                       "prereqs": [f"{gid}.review"]})
 
-    for ns in NOTE_STEPS + TONE_STEPS + [G2_NOTES]:
+    for ns in course.note_steps + course.tone_steps + [course.g2_notes]:
         for n in tree.nodes:
             if n["level"] == "requirement" and n["kind"] == "notes" and n["id"].endswith(f".{ns['key']}"):
                 pitches_of[n["id"]] = set(_exercise_pitches(ns["tiny"]))
-    _link(tree, order, teaches, pitches_of)
+    _link(tree, order, teaches, pitches_of, course)
     for n in tree.nodes:  # first stages follow the requirement's own prerequisites
         if n["level"] == "requirement" and n.get("stages"):
             first = tree.by_id[n["stages"][0]]
             first["prereqs"] = [tree.by_id[i]["stages"][-1] for i in n["prereqs"] if tree.by_id.get(i, {}).get("stages")]
-    atlas = {"version": VERSION, "name": "Roadmap", "instrument": "flute", "source": syllabus.get("source"),
-             "syllabus_version": syllabus.get("version"), "strands": STRANDS,
+    atlas = {"version": VERSION, "name": "Roadmap", "instrument": course.instrument, "source": syllabus.get("source"),
+             "syllabus_version": syllabus.get("version"), "strands": course.strands,
              "tiers": [{"id": g["id"], "title": g["title"], "order": g["order"]} for g in grades], "nodes": tree.nodes}
     layout(atlas)
     return atlas, plan
@@ -623,11 +682,12 @@ def _exercise_pitches(text: str) -> list[int]:
     return [n.pitch.midi for n in _tiny(text, "4/4") if n.isNote]
 
 
-def _link(tree: Tree, order: dict, teaches: dict[int, str], pitches_of: dict[str, set[int]]) -> None:
+def _link(tree: Tree, order: dict, teaches: dict[int, str], pitches_of: dict[str, set[int]], course: "Course | None" = None) -> None:
     """Prerequisites: the notes a requirement plays (each needs the requirement that teaches
     it), the scale before its arpeggio and the same scale a grade earlier, a key's scale
     before reading in it, the grade's sight-reading before its standard, the same aural test
     a grade earlier, and the theory topics in order, Making a sound before the first notes."""
+    course = course or FLUTE
     reqs = [n for n in tree.nodes if n["level"] == "requirement"]
     g = lambda n: order[n["tier"]]  # noqa: E731
     tech = [r for r in reqs if r["kind"] == "technique"]
@@ -643,7 +703,7 @@ def _link(tree: Tree, order: dict, teaches: dict[int, str], pitches_of: dict[str
             if k > 0:
                 pre.add(notes[k - 1]["id"])
             elif r["tier"] == "initial":  # the very first notes come after learning to make a sound
-                pre.add(FIRST_SOUND_ID)
+                pre.add(course.first_sound_id)
         elif r["kind"] == "technique":
             s = r["spec"]
             same = [x for x in tech if x is not r and x["spec"]["tonic"] == s["tonic"] and x["spec"]["quality"] == s["quality"]]
@@ -670,7 +730,7 @@ def _link(tree: Tree, order: dict, teaches: dict[int, str], pitches_of: dict[str
                 pre.update(x["id"] for x in reqs if x["kind"] == "sight" and x["tier"] == r["tier"] and x is not r)
                 pre.update(x["id"] for x in reqs if x["kind"] == "sight" and "standard" in x.get("spec", {}) and g(x) == g(r) - 1)
             if r["tier"] == "initial":
-                pre.add("initial.technique.notes.c-d")
+                pre.add(f"initial.technique.notes.{course.sight_after}")
         elif r["kind"] == "aural":
             pre.update(x["id"] for x in reqs if x["kind"] == "aural" and x["spec"]["id"] == r["spec"]["id"] and g(x) == g(r) - 1)
         elif r["kind"] == "theory":
@@ -684,26 +744,29 @@ def _link(tree: Tree, order: dict, teaches: dict[int, str], pitches_of: dict[str
 # -- writing it all --------------------------------------------------------------------------------
 
 def write(syllabus: dict, out: pathlib.Path | None = None, tunes: list[dict] | None = None, sight_count: int = 8,
-          lint: bool = True) -> dict:
-    """Build Pan into out (default <home>/atlas/pan): atlas.json, the lessons and their music.
-    Every score is linted with the engraving rules and read back note for note."""
+          lint: bool = True, course: "Course | None" = None) -> dict:
+    """Build the course's tree (default the flute's) into out (default <home>/atlas/<its folder>):
+    atlas.json, the lessons and their music. Every score is linted with the engraving rules
+    and read back note for note."""
     from .. import engraving
     from ..lessons import build_lesson
 
-    out = pathlib.Path(out) if out else content_dir()
+    course = course or FLUTE
+    out = pathlib.Path(out) if out else content_dir(course)
     lessons = out / "lessons"
     for sub in ("technique", "first", "pieces", "sight"):
         (lessons / sub).mkdir(parents=True, exist_ok=True)
-    tunes = tunes if tunes is not None else load_tunes()
-    atlas, plan = build(syllabus, tunes)
+    tunes = tunes if tunes is not None else load_tunes(course=course)
+    atlas, plan = build(syllabus, tunes, course)
+    look = dict(part_name=course.part, clef=course.clef, octave=course.octave, written_above=course.written_above)
     if not (out / "syllabus.json").exists():  # the Atlas's writers read it from the content folder
         (out / "syllabus.json").write_text(json.dumps(syllabus, indent=1, ensure_ascii=False), encoding="utf-8")
     (out / "atlas.json").write_text(json.dumps(atlas, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
     report = {"nodes": len(atlas["nodes"]), "lessons": 0, "scores": 0, "problems": []}
 
     def score(folder: str, name: str, title: str, text: str, key: str, time: str, bpm: int) -> str:
-        path, parsed = build_lesson(title, text, None, time, key, bpm, out_dir=lessons / folder, filename=name, part_name=PART)
-        want = sorted(_tiny_midis(text, time))
+        path, parsed = build_lesson(title, text, None, time, key, bpm, out_dir=lessons / folder, filename=name, **look)
+        want = sorted(p + course.octave for p in _tiny_midis(text, time))
         got = sorted(n.pitch for n in parsed.notes)
         if got != want:
             report["problems"].append(f"{folder}/{name}: read back {len(got)} notes, wrote {len(want)}")
@@ -720,34 +783,33 @@ def write(syllabus: dict, out: pathlib.Path | None = None, tunes: list[dict] | N
     for sid, (kind, data) in plan.items():
         stage, req = by_id[sid], by_id[data["req"]]
         if kind == "theory":
-            lesson = theory_lesson(sid, req["id"], data["text"], data["quizzes"])
+            lesson = theory_lesson(sid, req["id"], data["text"], data["quizzes"], course.made)
         elif kind == "sight":
-            lesson = sight_lesson(stage, req)
+            lesson = sight_lesson(stage, req, course)
         elif kind == "exercise":
             if req["id"] not in files:
                 files[req["id"]] = score("first", templates.slug(req["id"]), data["title"], data["tiny"], "C", "4/4", data["tempo"])
-            lesson = _play_lesson(stage, req, files[req["id"]], f"{data['title']}. {data['text']}", "atlas.pan (First notes)")
+            lesson = _play_lesson(stage, req, files[req["id"]], f"{data['title']}. {data['text']}", f"{course.made} (First notes)",
+                                  learn_pass=course.learn_pass)
         elif kind == "technique":
             spec = data["spec"]
             if req["id"] not in files:
-                m = technique_music(spec)
+                m = technique_music(spec, course.lowest)
                 files[req["id"]] = score("technique", templates.slug(req["id"]), f"{tier_title[req['tier']]} · {data['title']}",
                                          m["tiny"], m["key"], "4/4", m["bpm"])
             st = stage["stage"]
-            how = {"notes": "Learn the notes and fingerings slowly, tongued.", "tongued": "Every note tongued with 'too', evenly.",
-                   "slurred": "Slurred: tongue the first note only, the air carries the rest; breathe at the top if you need to.",
-                   "speed": "As in the exam, from memory: once tongued, once slurred."}[st["key"]]
-            minor = " The coach uses the natural minor; the exam lets you choose natural, harmonic or melodic." if spec.get("form") == "choice" else ""
-            plays = ["play-tongued", "play-slurred"] if st["key"] == "speed" else None
-            lesson = _play_lesson(stage, req, files[req["id"]], f"{data['title'].replace(' · ', ', ')}. {how}{minor}", "atlas.pan (from the syllabus spec)",
-                                  plays=plays)
+            how = course.technique_how[st["key"]]
+            minor = course.minor_note if spec.get("form") == "choice" else ""
+            plays = list(course.final_plays) if stage.get("final") and course.final_plays else None
+            lesson = _play_lesson(stage, req, files[req["id"]], f"{data['title'].replace(' · ', ', ')}. {how}{minor}",
+                                  f"{course.made} (from the syllabus spec)", plays=plays, learn_pass=course.learn_pass)
         elif kind == "piece":
             t = data["tune"]
             if req["id"] not in files:
                 files[req["id"]] = score("pieces", t["id"], t["title"], t["tiny"], t["key"], t["time"], t["tempo"])
             st = stage["stage"]
             text = f"{t['title']}, {t['composer']}. {st['title']}."
-            lesson = _play_lesson(stage, req, files[req["id"]], text, "atlas.pan (public-domain tune)")
+            lesson = _play_lesson(stage, req, files[req["id"]], text, f"{course.made} (public-domain tune)", learn_pass=course.learn_pass)
             lesson["piece"] = t["id"]
         else:
             continue
@@ -756,13 +818,13 @@ def write(syllabus: dict, out: pathlib.Path | None = None, tunes: list[dict] | N
 
     # Sight-reading pools: fresh tunes for each tier, checked like the rest.
     for tier in [t["id"] for t in atlas["tiers"]]:
-        params = sight_params(syllabus, tier)
+        params = sight_params(syllabus, tier, course.sight_first, course.first_notes_title)
         n, seed = 0, 0
         while n < sight_count and seed < sight_count * 20:
             seed += 1
             piece = sight_piece(params, seed * 7919 + len(tier))
             path, parsed = build_lesson(f"Sight-reading · {params['title']}", piece["tiny"], None, piece["time"], piece["key"],
-                                        piece["bpm"], out_dir=lessons / "sight", filename=f"{tier}-{n + 1}", part_name=PART)
+                                        piece["bpm"], out_dir=lessons / "sight", filename=f"{tier}-{n + 1}", **look)
             if lint and engraving.lint(pathlib.Path(path).read_text(encoding="utf-8"))["findings"]:
                 continue
             n += 1
@@ -785,19 +847,20 @@ def _tiny_midis(text: str, time: str) -> list[int]:
     return [n.pitch.midi for n in _tiny(text, time) if n.isNote]
 
 
-def load_syllabus(path: str | pathlib.Path | None = None) -> dict:
-    p = pathlib.Path(path) if path else content_dir() / "syllabus.json"
+def load_syllabus(path: str | pathlib.Path | None = None, course: "Course | None" = None) -> dict:
+    course = course or FLUTE
+    p = pathlib.Path(path) if path else content_dir(course) / "syllabus.json"
     if not p.is_file():
-        raise FileNotFoundError(f"No flute syllabus at {p}. It is drafted locally from your copy of the ABRSM woodwind "
-                                "syllabus (see 'The Roadmap' in midi_coach/README.md).")
+        raise FileNotFoundError(f"No {course.instrument} syllabus at {p}. It is {course.syllabus_hint}.")
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, course: "Course | None" = None) -> None:
+    course = course or FLUTE
     args = list(sys.argv[1:] if argv is None else argv)
-    syllabus = load_syllabus(args[0] if args else None)
-    report = write(syllabus)
-    print(f"{content_dir()}: {report['nodes']} nodes, {report['lessons']} lessons, {report['scores']} scores")
+    syllabus = load_syllabus(args[0] if args else None, course)
+    report = write(syllabus, course=course)
+    print(f"{content_dir(course)}: {report['nodes']} nodes, {report['lessons']} lessons, {report['scores']} scores")
     for p in report["problems"]:
         print("  problem:", p)
 

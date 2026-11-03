@@ -7,9 +7,10 @@ The profile list is <home>/profiles.json. The Default profile keeps its data dir
 pieces, derived caches, the speech models and the API key. Deleting a profile only removes
 it from the list; its folder is left on disk.
 
-A profile learns one or more instruments, like courses: piano (the keyboard, over MIDI) or
-flute (the microphone, pitch-tracked on the coach page), and plays one of them at a time (picked
-on Home). The current instrument picks the Roadmap, the default input, the music the coach
+A profile learns one or more instruments, like courses: piano (the keyboard, over MIDI), or
+flute, alto saxophone or voice (the microphone, pitch-tracked on the coach page; see
+instruments.py), and plays one of them at a time (picked on Home). A singer has a high or a
+low voice (voice), which picks the vocal Roadmap's octave. The current instrument picks the Roadmap, the default input, the music the coach
 writes and how the Maestro teaches. Each instrument keeps its own Roadmap progress: the first
 one a profile learnt in <profile>/atlas (where it always was), any added later in
 <profile>/atlas-<instrument>. Takes, lessons and the Maestro's notes are the person's, shared.
@@ -29,7 +30,8 @@ from . import library
 
 DEFAULT_ID = "default"
 MAX_NAME = 30
-INSTRUMENTS = ("piano", "flute")
+INSTRUMENTS = ("piano", "flute", "sax", "voice")  # instruments.INSTRUMENTS says what each one changes
+VOICES = ("high", "low")
 
 
 def _path():
@@ -37,7 +39,7 @@ def _path():
 
 
 def load() -> dict:
-    """{'active': id, 'profiles': [{id, name, created, instrument, instruments, young}]} - always with
+    """{'active': id, 'profiles': [{id, name, created, instrument, instruments, young, voice}]} - always with
     the Default profile first. instrument is the current one, instruments every one learnt, first first."""
     try:
         data = json.loads(_path().read_text(encoding="utf-8"))
@@ -52,6 +54,7 @@ def load() -> dict:
         learnt = [i for i in p.get("instruments") or [] if i in INSTRUMENTS]
         p["instruments"] = list(dict.fromkeys(learnt + [p["instrument"]]))
         p["young"] = bool(p.get("young"))
+        p["voice"] = p.get("voice") if p.get("voice") in VOICES else "high"
     active = data.get("active") if any(p["id"] == data.get("active") for p in profiles) else DEFAULT_ID
     return {"active": active, "profiles": profiles}
 
@@ -66,7 +69,7 @@ def active() -> dict:
 
 
 def instrument() -> str:
-    """The active profile's instrument: 'piano' or 'flute'."""
+    """The active profile's instrument: 'piano', 'flute', 'sax' or 'voice'."""
     return active()["instrument"]
 
 
@@ -97,10 +100,12 @@ def _clean(name: str) -> str:
     return re.sub(r"\s+", " ", str(name or "")).strip()[:MAX_NAME]
 
 
-def create(name: str, select: bool = True, instrument: str = "piano", young: bool = False) -> dict:
+def create(name: str, select: bool = True, instrument: str = "piano", young: bool = False, voice: str = "high") -> dict:
     name = _clean(name)
     if instrument not in INSTRUMENTS:
         raise ValueError(f"The instrument must be one of {', '.join(INSTRUMENTS)}.")
+    if voice not in VOICES:
+        raise ValueError("The voice must be high or low.")
     if not name:
         raise ValueError("Give the profile a name.")
     data = load()
@@ -113,7 +118,7 @@ def create(name: str, select: bool = True, instrument: str = "piano", young: boo
         k += 1
         pid = f"{stem}-{k}"
     profile = {"id": pid, "name": name, "created": time.strftime("%Y-%m-%d"), "instrument": instrument,
-               "instruments": [instrument], "young": bool(young)}
+               "instruments": [instrument], "young": bool(young), "voice": voice}
     data["profiles"].append(profile)
     if select:
         data["active"] = pid
@@ -165,6 +170,19 @@ def set_young(pid: str, young: bool) -> dict:
     for p in data["profiles"]:
         if p["id"] == pid:
             p["young"] = bool(young)
+            _save(data)
+            return p
+    raise ValueError("No such profile.")
+
+
+def set_voice(pid: str, voice: str) -> dict:
+    """A singer's high or low voice: which octave the vocal Roadmap is written in."""
+    if voice not in VOICES:
+        raise ValueError("The voice must be high or low.")
+    data = load()
+    for p in data["profiles"]:
+        if p["id"] == pid:
+            p["voice"] = voice
             _save(data)
             return p
     raise ValueError("No such profile.")

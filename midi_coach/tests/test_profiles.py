@@ -18,7 +18,7 @@ def root(tmp_path, monkeypatch):
 def test_default_profile_keeps_the_existing_folders(root):
     assert profiles.load() == {"active": "default",
                                "profiles": [{"id": "default", "name": "Default", "created": None, "instrument": "piano",
-                                             "instruments": ["piano"], "young": False}]}
+                                             "instruments": ["piano"], "young": False, "voice": "high"}]}
     assert library.profile_home() == root and atlas.user_dir() == root / "atlas"
 
 

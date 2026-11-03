@@ -311,12 +311,24 @@ def _key(key: str | int | None):
     return m21key.Key(tonic.lower() if m.group(3) else tonic)
 
 
-def _part(name: str, items, clef_name: str, time_signature: str, key: str | int | None, tempo_bpm: float | None, total_ql: float):
-    from music21 import clef, meter, note, stream, tempo
+CLEFS = {"treble": "TrebleClef", "bass": "BassClef", "treble8vb": "Treble8vbClef"}  # treble8vb: a low voice's, sounding an octave down
+
+
+def _part(name: str, items, clef_name: str, time_signature: str, key: str | int | None, tempo_bpm: float | None, total_ql: float,
+          written_above: int = 0):
+    """written_above: semitones a transposing instrument's music is written above how it sounds
+    (9 for an alto saxophone); the notes are written pitch and the file says how they sound."""
+    from music21 import clef, instrument, interval, meter, note, stream, tempo
 
     part = stream.Part()
     part.partName = name
-    part.insert(0, clef.TrebleClef() if clef_name == "treble" else clef.BassClef())
+    if written_above:
+        inst = instrument.Instrument()
+        inst.partName = name
+        inst.transposition = interval.Interval(-written_above)
+        part.insert(0, inst)
+        part.atSoundingPitch = False
+    part.insert(0, getattr(clef, CLEFS[clef_name])())
     part.insert(0, meter.TimeSignature(time_signature))
     key_obj = _key(key)
     if key_obj is not None:
@@ -344,11 +356,16 @@ def build_lesson(
     out_dir: str | pathlib.Path | None = None,
     filename: str | None = None,
     part_name: str | None = None,
+    clef: str = "treble",
+    octave: int = 0,
+    written_above: int = 0,
 ) -> tuple[str, Score]:
     """Create and save a lesson. Returns (path, parsed score). out_dir: write it there (e.g.
     the Atlas's lesson folder) instead of a category of the page's lesson panel; filename: its
     name there (without .musicxml) when the title isn't one. part_name: the treble part's
-    name when it isn't a right hand (a flute line is 'Flute')."""
+    name when it isn't a right hand (a flute line is 'Flute'). For the treble part: clef
+    (a low voice's 'treble8vb'), octave (semitones to move its notes: -12 for a low voice) and
+    written_above (a transposing instrument's, see _part)."""
     from music21 import converter, metadata, meter, stream
     from music21.musicxml.m21ToXml import GeneralObjectExporter
 
@@ -362,6 +379,10 @@ def build_lesson(
         if not right and not left:
             raise ValueError("Give at least one hand (right/left) or musicxml.")
         rh = _tiny(right, time_signature) if right else []
+        if octave:
+            for n in rh:
+                if n.isNote:
+                    n.pitch.octave += octave // 12  # keeps the spelling
         lh = _tiny(left, time_signature) if left else []
         bar_ql = meter.TimeSignature(time_signature).barDuration.quarterLength
         total = max(sum(n.quarterLength for n in rh), sum(n.quarterLength for n in lh))
@@ -370,7 +391,7 @@ def build_lesson(
         score = stream.Score()
         score.metadata = metadata.Metadata(title=title)
         if rh:
-            score.insert(0, _part(part_name or "Right Hand", rh, "treble", time_signature, key, tempo_bpm, total))
+            score.insert(0, _part(part_name or "Right Hand", rh, clef, time_signature, key, tempo_bpm, total, written_above))
         if lh:
             score.insert(0, _part("Left Hand", lh, "bass", time_signature, key, tempo_bpm if not rh else None, total))
         from .transcribe import _print_accidentals
