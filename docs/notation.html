@@ -58,6 +58,9 @@
       transition: opacity .2s;
     }
     #key-header.show { opacity: 1; }
+    /* Two rows: the score is drawn as systems the width of the strip and scrolls down */
+    body.rows #osmd-div { display: block; padding: 4px 0 8px; }
+    body.rows #fade-left, body.rows #key-header { display: none; }
     #key-header svg { display: block; }
     /* midi-coach overlays: bar heat map (scrolls with the score), wrong-key flash, HUD */
     #heat-layer {
@@ -79,6 +82,49 @@
       color: #222;
       white-space: nowrap;
     }
+    /* Labels (midi-coach): a letter on each notehead, filled or hollow like the note, and the
+       count of each beat under the bar */
+    #aid-layer {
+      position: absolute;
+      top: 0; left: 0;
+      pointer-events: none;
+      z-index: 6;
+      font-family: 'Segoe UI', Arial, sans-serif;
+    }
+    .aid-name {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: #1b1f2a;
+      color: #fff;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .aid-name.hollow { background: #fff; color: #1b1f2a; border: 1.5px solid currentColor; }
+    .aid-name i {
+      position: absolute;
+      left: 95%; top: -45%;
+      font-style: normal;
+      font-size: 125%;
+      color: #1b1f2a;
+      text-shadow: 0 0 2px #fff, 0 0 2px #fff;
+    }
+    .aid-count {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      padding: 0 .15em;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, .85);
+      color: #6b3fa0;
+      font-weight: 700;
+      line-height: 1.1;
+      white-space: nowrap;
+    }
+    .aid-count.sub { font-weight: 400; font-size: 85%; }
+    .aid-count.held { font-weight: 400; color: #b3a1cf; }
     #flash {
       position: absolute;
       top: 8px;
@@ -93,6 +139,29 @@
       pointer-events: none;
       z-index: 110;
     }
+    /* Where a range of bars starts and ends (the coach's Bars, Learn Mode's A–B loop), labelled:
+       the start's tag at the top, the end's at the bottom, each on the inside of the range */
+    .range-mark {
+      position: absolute;
+      top: 0; height: 100%;
+      width: 0;
+      border-left: 2px solid;
+      pointer-events: none;
+      z-index: 92;
+      display: none;
+    }
+    .range-mark span {
+      position: absolute;
+      padding: 1px 6px;
+      border-radius: 4px;
+      color: #fff;
+      font: 600 11px/1.4 'Segoe UI', Arial, sans-serif;
+      white-space: nowrap;
+    }
+    #range-start { border-color: rgba(0, 160, 95, .9); }
+    #range-start span { top: 4px; left: 2px; background: rgba(0, 145, 85, .95); }
+    #range-end { border-color: rgba(205, 55, 55, .9); }
+    #range-end span { bottom: 4px; right: 2px; background: rgba(195, 45, 45, .95); }
     #hud {
       position: absolute;
       top: 6px; left: 70px;
@@ -125,8 +194,11 @@
   <div id="score-track">
     <div id="osmd-div"></div>
     <div id="heat-layer"></div>
+    <div id="aid-layer"></div>
   </div>
   <div id="key-header"></div>
+  <div id="range-start" class="range-mark"><span>Start</span></div>
+  <div id="range-end" class="range-mark"><span>End</span></div>
   <div id="flash"></div>
   <div id="hud"></div>
   <div id="playhead"></div>
@@ -150,6 +222,7 @@ const statusEl   = document.getElementById('status');
 
 let osmd         = null;
 let rendered     = false;
+let drawnHidden  = false;  // drawn while the strip was hidden: draw again when it shows
 let currentMs    = 0;
 let timestampMap = [];
 let pxPerMs      = 0.18;
@@ -174,6 +247,49 @@ const MARK_COLORS = { hit: '#159a3c', missed: '#d42020', pending: '#00a6b8' };
 let staffRoles   = null;
 let hiddenRoles  = new Set();
 let heatBars     = [];
+// Dynamics (p, mf, hairpins...) are drawn unless the page turns them off; the score as sent
+// is kept so turning them back on doesn't need it sent again.
+let showDynamics = true;
+// Sheet details the coach writes in (midi_coach/details.py): chord letters, Roman numerals
+// (ids 'details-roman-…'), lyrics and section names ('details-section-…'), each shown unless
+// the page turns it off. Chords and Lyrics also cover the file's own.
+let showDetails  = {chords: true, roman: true, lyrics: true, sections: true};
+let scoreXml     = null;
+// Labels (midi-coach): note names on the noteheads and counting under the bars. The page picks the
+// level ('all': every bar, 'coach': the bars the coach sends, 'off') and which kinds; the coach
+// sends its bars as {start, end, kinds} in beats, or off: none at all (a mock exam).
+let aidLevel     = 'off';
+let aidKinds     = {names: true, counts: true};
+let aidBars      = [];
+let aidsOff      = false;
+let heads        = [];  // [{q, pitch, el, fund, hollow, tied, x, y, h}] every notehead drawn, in track px
+let aidMeasures  = [];  // [{q0, q1, num, den, lead, y, row}] each bar and where its counts go
+// 'line': one long line scrolling sideways under a fixed playhead. 'rows': ordinary systems
+// scrolling down, the row being played at the top and the next one under it.
+let layout       = 'line';
+
+function filteredXml(xml) {
+  const hide = [];
+  if (!showDetails.chords) hide.push('harmony:not([id^="details-roman"])');
+  if (!showDetails.roman) hide.push('harmony[id^="details-roman"]');
+  if (!showDetails.lyrics) hide.push('lyric');
+  if (!showDetails.sections) hide.push('direction[id^="details-section"]');
+  if (showDynamics && !hide.length) return xml;
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  if (doc.querySelector('parsererror')) return xml;
+  if (hide.length) doc.querySelectorAll(hide.join(', ')).forEach(el => el.remove());
+  if (!showDynamics) {
+    for (const type of doc.querySelectorAll('direction > direction-type')) {
+      if (type.querySelector('dynamics, wedge')) type.remove();
+    }
+    for (const dir of doc.querySelectorAll('direction')) {
+      if (!dir.querySelector('direction-type')) dir.remove();
+    }
+    doc.querySelectorAll('notations > dynamics').forEach(el => el.remove());
+  }
+  return new XMLSerializer().serializeToString(doc);
+}
+const sheetXml = () => filteredXml(scoreXml);
 
 function positionPlayhead() {
   playheadEl.style.left = (window.innerWidth * PLAYHEAD_FRAC) + 'px';
@@ -187,10 +303,41 @@ window.addEventListener('message', async e => {
   if (e.data.type === 'loadScore') {
     staffRoles = Array.isArray(e.data.staves) ? e.data.staves : null;
     hiddenRoles = new Set(e.data.hidden || []);
+    if (typeof e.data.dynamics === 'boolean') showDynamics = e.data.dynamics;
+    if (e.data.details) showDetails = {...showDetails, ...e.data.details};
+    if (e.data.layout) setLayout(e.data.layout);
+    if (e.data.zoom) setZoom(e.data.zoom);
+    if (e.data.aids) setAidSettings(e.data.aids);
     await loadScore(e.data.xml);
   } else if (e.data.type === 'visibility') {
     hiddenRoles = new Set(e.data.hidden || []);
     if (rendered) await drawScore();
+  } else if (e.data.type === 'dynamics') {
+    showDynamics = !!e.data.show;
+    if (rendered && scoreXml) await reloadScore();
+  } else if (e.data.type === 'details') {
+    showDetails = {...showDetails, ...(e.data.show || {})};
+    if (rendered && scoreXml) await reloadScore();
+  } else if (e.data.type === 'aids') {
+    aidBars = Array.isArray(e.data.bars) ? e.data.bars : [];
+    aidsOff = !!e.data.off;
+    drawAids();
+  } else if (e.data.type === 'aidSettings') {
+    const reserved = aidsReserved();
+    setAidSettings(e.data);
+    if (rendered && reserved !== aidsReserved()) await drawScore();  // room for the counts, or not
+    else drawAids();
+  } else if (e.data.type === 'layout') {
+    if (setLayout(e.data.mode) && rendered) { applyRules(); await drawScore(); }
+  } else if (e.data.type === 'zoom') {
+    // The line just scales; rows are drawn again (once the slider settles) to fill the width.
+    if (setZoom(e.data.zoom) && rendered) {
+      postHeight();
+      if (rowsOn()) {
+        clearTimeout(rowsResize);
+        rowsResize = setTimeout(() => { if (rowsOn() && rendered) { rowsZoom = fitScale(); drawScore(); } }, 250);
+      }
+    }
   } else if (e.data.type === 'updatePosition') {
     updatePosition(e.data.ms);
   } else if (e.data.type === 'clear') {
@@ -210,6 +357,22 @@ window.addEventListener('message', async e => {
     beatOffset = drawn === null ? 0 : drawn - cursorBase(now);
     if (Math.abs(beatOffset) > (steady ? REHEARSE_SNAP_BEATS : LEARN_SNAP_BEATS)) beatOffset = 0;
     beatShown = cursorBeatAt(now);
+  } else if (e.data.type === 'updateBeat') {
+    // The visualizer's Learn Mode: where it is, in beats, every frame (no clock of our own)
+    beatMode = true;
+    panPx = 0;
+    document.body.classList.remove('pannable');
+    beatTarget = beatShown = e.data.beat;
+    beatBps = 0; beatUntil = null; beatOffset = 0; beatAt = performance.now();
+  } else if (e.data.type === 'range') {
+    setRange(e.data);
+  } else if (e.data.type === 'session' && !e.data.active && beatMode) {
+    const now = performance.now();
+    beatTarget = beatShown = cursorBeatAt(now);
+    beatAt = now;
+    beatBps = 0;
+    beatUntil = null;
+    beatOffset = 0;
   } else if (e.data.type === 'marks') {
     applyMarks(e.data.marks || [], !!e.data.reset);
   } else if (e.data.type === 'heat') {
@@ -228,9 +391,12 @@ function clearScore() {
   rendered = false;
   timestampMap = [];
   beatMap = []; noteEntries = []; measureMap = []; beatMode = false; panPx = 0;
+  heads = []; aidMeasures = [];
   fit = {top: 0, h: 0};
+  rows = [];
   document.body.classList.remove('pannable');
   document.getElementById('heat-layer').innerHTML = '';
+  document.getElementById('aid-layer').innerHTML = '';
   clearHeaders();
   scoreTrack.style.transform = 'translateX(0px)';
   document.getElementById('osmd-div').innerHTML = '';
@@ -242,9 +408,11 @@ async function loadScore(musicXml) {
   rendered     = false;
   timestampMap = [];
   beatMap = []; noteEntries = []; measureMap = []; beatMode = false; panPx = 0;
+  heads = []; aidMeasures = [];
   fit = {top: 0, h: 0};
   document.body.classList.remove('pannable');
   document.getElementById('heat-layer').innerHTML = '';
+  document.getElementById('aid-layer').innerHTML = '';
   clearHeaders();
   statusEl.style.display = 'flex';
   statusEl.textContent   = 'Rendering score…';
@@ -273,28 +441,9 @@ async function loadScore(musicXml) {
       document.getElementById('osmd-div').innerHTML = '';
     }
 
-    await osmd.load(musicXml);
-
-    const er = osmd.EngravingRules;
-    er.PageTopMargin    = 15;
-    er.PageBottomMargin = 20;
-    er.PageLeftMargin   = 5;
-    er.PageRightMargin  = 5;
-    er.RenderSingleHorizontalStaffline = true;
-    // OSMD caps the single line at 32767 px (a canvas limit; we draw SVG) and wraps the rest onto a
-    // second row, which the strip shows stacked under the first (e.g. bar 251 under bar 1 in a long
-    // song with lyrics). Allow ~1000 px per bar; OSMD trims the page to the drawn width afterwards.
-    er.SheetMaximumWidth = Math.max(32767, 1000 * osmd.Sheet.SourceMeasures.length);
-    er.RenderArpeggios      = true;
-    er.RenderPedals         = true;
-    er.RenderFermatas       = true;
-    er.RenderTempos         = true;
-    er.RenderTuplets        = true;
-    er.RenderMeasureNumbers = true;
-    er.MeasureNumberInterval = 1;
-    er.RenderSlurs          = true;
-    er.RenderTies           = true;
-
+    scoreXml = musicXml;
+    await osmd.load(sheetXml());
+    applyRules();
     heatBars = [];
     await drawScore();
   } catch (err) {
@@ -304,28 +453,80 @@ async function loadScore(musicXml) {
   }
 }
 
+// The same score with dynamics or details shown or hidden: the cursor keeps its place (positions are
+// in beats) and the heat map is redrawn, as when staves are shown or hidden.
+async function reloadScore() {
+  try {
+    document.getElementById('osmd-div').innerHTML = '';
+    await osmd.load(sheetXml());
+    applyRules();
+    await drawScore();
+  } catch (err) {
+    statusEl.style.display = 'flex';
+    statusEl.textContent = 'Error rendering score:\n' + (err.message || err);
+    console.error('[OSMD]', err);
+  }
+}
+
+function applyRules() {
+  const er = osmd.EngravingRules;
+  er.PageTopMargin    = 15;
+  er.PageBottomMargin = 20;
+  er.PageLeftMargin   = 5;
+  er.PageRightMargin  = 5;
+  er.RenderSingleHorizontalStaffline = layout === 'line';
+  // OSMD caps the single line at 32767 px (a canvas limit; we draw SVG) and wraps the rest onto a
+  // second row, which the strip shows stacked under the first (e.g. bar 251 under bar 1 in a long
+  // song with lyrics). Allow ~1000 px per bar; OSMD trims the page to the drawn width afterwards.
+  er.SheetMaximumWidth = layout === 'line' ? Math.max(32767, 1000 * osmd.Sheet.SourceMeasures.length) : 32767;
+  er.RenderArpeggios      = true;
+  er.RenderPedals         = true;
+  er.RenderFermatas       = true;
+  er.RenderTempos         = true;
+  er.RenderTuplets        = true;
+  // A score that asks for no bar numbers (MusicXML <measure-numbering>none</measure-numbering>:
+  // the coach's first lessons, whose finger numbers they'd be mistaken for) gets none.
+  er.RenderMeasureNumbers = !/<measure-numbering>\s*none\s*<\/measure-numbering>/.test(scoreXml || '');
+  er.MeasureNumberInterval = 1;
+  er.RenderSlurs          = true;
+  er.RenderTies           = true;
+}
+
 // Render the loaded score with the chosen staves, and map it. Also used to show or hide
 // staves later: the cursor keeps its place (positions are in beats), marks are drawn afresh.
-async function drawScore() {
+async function drawScore(again = false) {
   try {
     rendered = false;
-    timestampMap = []; beatMap = []; noteEntries = []; measureMap = [];
+    timestampMap = []; beatMap = []; noteEntries = []; measureMap = []; rangeAt = null;
+    heads = []; aidMeasures = [];
     fit = {top: 0, h: 0};
     document.getElementById('heat-layer').innerHTML = '';
+    document.getElementById('aid-layer').innerHTML = '';
     clearHeaders();
+    rows = []; rowScroll = null;
+    scoreTrack.style.transform = 'none';  // measure the drawing unscaled
+    // Rows are drawn wide enough to fill the strip once scaled to fit two of them in its height.
+    document.getElementById('osmd-div').style.width = layout === 'rows' ? Math.floor(window.innerWidth / rowsZoom) + 'px' : '';
     applyVisibility();
     await osmd.render();
 
     statusEl.style.display = 'none';
     rendered = true;
 
-    // Let parent resize the notation strip to fit the drawn score (margins trimmed, unscaled)
     measureScore();
-    if (fit.h) window.parent.postMessage({type: 'height', h: Math.ceil(fit.h + 2 * FIT_PAD)}, '*');
-
+    drawnHidden = !window.innerHeight;
     buildTimestampMap();
-    try { buildHeaders(); } catch (err) { console.error('[OSMD] key header failed:', err); clearHeaders(); }
+    try { buildAids(); } catch (err) { console.error('[OSMD] labels failed:', err); heads = []; aidMeasures = []; }
+    if (rowsOn() && !again && Math.abs(fitScale() - rowsZoom) > 0.03) {
+      rowsZoom = fitScale();
+      return drawScore(true);
+    }
+    postHeight();
+    if (!rowsOn()) {  // each row draws its own clef, key and time
+      try { buildHeaders(); } catch (err) { console.error('[OSMD] key header failed:', err); clearHeaders(); }
+    }
     if (heatBars.length) drawHeat(heatBars);
+    drawAids();
     window.parent.postMessage({type:'ready'}, '*');
   } catch (err) {
     statusEl.textContent = 'Error rendering score:\n' + (err.message || err);
@@ -383,10 +584,10 @@ function colorNote(el, color) {
 }
 
 function applyMarks(marks, reset) {
-  if (reset) noteEntries.forEach(n => colorNote(n.el, ''));
+  if (reset) noteEntries.forEach(n => { colorNote(n.el, ''); markAid(n.head, ''); });
   for (const m of marks) {
     const n = findNote(m.beat, m.pitch);
-    if (n) colorNote(n.el, MARK_COLORS[m.status] || '');
+    if (n) { colorNote(n.el, MARK_COLORS[m.status] || ''); markAid(n.head, MARK_COLORS[m.status] || ''); }
   }
 }
 
@@ -453,7 +654,14 @@ function drawHeat(bars) {
   layer.innerHTML = '';
   if (!rendered) return;
   for (const b of bars) {
-    const x0 = getBarlineX(b.start, false), x1 = getBarlineX(b.end, true);
+    let x0, x1, row = null;
+    if (rowsOn()) {  // the bar's own box on its row
+      const m = measureMap.find(m => m && Math.abs(m.q - b.start) < 0.02);
+      if (!m || !rows[m.row]) continue;
+      x0 = m.x0; x1 = m.x1; row = rows[m.row];
+    } else {
+      x0 = getBarlineX(b.start, false); x1 = getBarlineX(b.end, true);
+    }
     const div = document.createElement('div');
     div.className = 'heat-bar';
     const v = Math.max(0, Math.min(1, b.value));
@@ -461,6 +669,7 @@ function drawHeat(bars) {
     div.style.background = `hsla(${Math.round(120 * (1 - v))}, 85%, 55%, ${0.18 + 0.32 * v})`;
     div.style.left = x0 + 'px';
     div.style.width = Math.max(4, x1 - x0) + 'px';
+    if (row) { div.style.top = row.bandTop + 'px'; div.style.height = (row.bandBottom - row.bandTop) + 'px'; }
     div.title = `Bar ${b.bar}: ${b.label}`;
     const label = document.createElement('span');
     label.textContent = v > 0 ? `${b.bar}: ${b.label}` : '';
@@ -469,14 +678,254 @@ function drawHeat(bars) {
   }
 }
 
+// ── Range flags ───────────────────────────────────────────────────────────────
+// range: {start, end} in beats (either may be left out), loop: true when it repeats.
+let range = null;
+let rangeAt = null;  // {start, end}: where each is drawn, worked out once per drawing
+const rangeEls = {start: document.getElementById('range-start'), end: document.getElementById('range-end')};
+
+function setRange(r) {
+  range = r && (Number.isFinite(r.start) || Number.isFinite(r.end)) ? r : null;
+  rangeAt = null;
+  for (const k of ['start', 'end']) {
+    rangeEls[k].querySelector('span').textContent = range && range.loop ? `Loop ${k}` : k === 'start' ? 'Start' : 'End';
+  }
+}
+
+// {x, row} in unscaled track px (row: in two rows only): on the barline when the range starts or
+// ends on one (an end on the bar it closes), else at the beat.
+function rangeEdge(q, isEnd) {
+  const ms = measureMap.filter(m => m && (!rowsOn() || rows[m.row]));
+  const last = ms[ms.length - 1];
+  const pastEnd = isEnd && last && beatMap.length && q > beatMap[beatMap.length - 1].q;  // after the last note: the final barline
+  if (!rowsOn()) return {x: pastEnd ? last.x1 : getBarlineX(q, false)};
+  const at = ms.findIndex(m => Math.abs(m.q - q) < 0.02);
+  if (pastEnd) return {x: last.x1, row: rows[last.row]};
+  if (at > 0 && isEnd) return {x: ms[at - 1].x1, row: rows[ms[at - 1].row]};
+  if (at >= 0) return {x: ms[at].x0, row: rows[ms[at].row]};
+  const p = rowPoint(getXForBeat(q));
+  return {x: p.x, row: rows[p.row]};
+}
+
+// tx, ty, s: where the track is drawn this frame.
+function placeRange(tx, ty, s) {
+  if (!rangeAt && range && rendered && measureMap.length) {
+    rangeAt = {};
+    for (const k of ['start', 'end']) rangeAt[k] = Number.isFinite(range[k]) ? rangeEdge(range[k], k === 'end') : null;
+  }
+  for (const k of ['start', 'end']) {
+    const el = rangeEls[k], at = range && rendered && rangeAt ? rangeAt[k] : null;
+    if (!at) { el.style.display = 'none'; continue; }
+    el.style.display = 'block';
+    el.style.left = (tx + at.x * s - 1).toFixed(1) + 'px';
+    el.style.top = at.row ? (ty + at.row.bandTop * s).toFixed(1) + 'px' : '0px';
+    el.style.height = at.row ? ((at.row.bandBottom - at.row.bandTop) * s).toFixed(1) + 'px' : '100%';
+  }
+}
+
 let flashTimer = null;
 function showFlash(text) {
   const el = document.getElementById('flash');
   el.textContent = '✗ ' + text;
-  el.style.left = (window.innerWidth * PLAYHEAD_FRAC) + 'px';
+  el.style.left = rowsOn() ? playheadEl.style.left : (window.innerWidth * PLAYHEAD_FRAC) + 'px';
   el.style.opacity = '1';
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { el.style.opacity = '0'; }, 700);
+}
+
+// ── Labels: note names and counting (midi-coach) ──────────────────────────────
+// Drawn over the score, not into it, so they come and go without the score being laid out again
+// (the coach adds them mid-pass). Where each notehead and each bar's count line are is measured
+// once after drawing, in unscaled track px like the heat map.
+const LETTERS = {0: 'C', 2: 'D', 4: 'E', 5: 'F', 7: 'G', 9: 'A', 11: 'B'};
+const SPELLED = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];  // a note OSMD can't spell
+const SUBDIVISIONS = [[0.5, '&'], [0.25, 'e'], [0.75, 'a'], [1 / 3, 'trip'], [2 / 3, 'let']];
+const COUNT_ROOM = 9;  // px below a count's middle it needs on the strip
+
+function setAidSettings(s) {
+  if (['all', 'coach', 'off'].includes(s.level)) aidLevel = s.level;
+  for (const k of ['names', 'counts']) if (typeof s[k] === 'boolean') aidKinds[k] = s[k];
+}
+// Counts under a single staff hang below the music, so the strip keeps room for them whenever they can show.
+const aidsReserved = () => aidLevel !== 'off' && aidKinds.counts;
+
+function headName(h) {
+  const letter = LETTERS[h.fund];
+  if (letter === undefined) { const n = SPELLED[((h.pitch % 12) + 12) % 12]; return [n[0], n.slice(1)]; }
+  const alter = (((h.pitch - h.fund) % 12) + 18) % 12 - 6;
+  return [letter, alter > 0 ? '♯'.repeat(alter) : '♭'.repeat(-alter)];
+}
+
+function buildAids() {
+  aidMeasures = [];
+  const trackRect = scoreTrack.getBoundingClientRect();
+  // VexFlow draws a chord's noteheads in one group: pair them with its notes, highest pitch highest.
+  const byEl = new Map();
+  for (const h of heads) { if (!byEl.has(h.el)) byEl.set(h.el, []); byEl.get(h.el).push(h); }
+  for (const [el, hs] of byEl) {
+    const boxes = [...el.querySelectorAll('.vf-notehead')].map(e => e.getBoundingClientRect()).filter(r => r.height > 0);
+    if (boxes.length !== hs.length) continue;  // can't tell which is which: no names here
+    hs.sort((a, b) => a.pitch - b.pitch);
+    boxes.sort((a, b) => (b.top + b.bottom) - (a.top + a.bottom));
+    hs.forEach((h, k) => {
+      const r = boxes[k];
+      h.x = r.left - trackRect.left + r.width / 2;
+      h.y = r.top - trackRect.top + r.height / 2;
+      h.h = r.height;
+    });
+  }
+
+  // Each bar's count line: between the bottom two staves (right and left hand), clear of what
+  // hangs between them, or under a single staff.
+  const svgEl = document.querySelector('#osmd-div svg');
+  if (!svgEl) return;
+  const oy = svgEl.getBoundingClientRect().top - trackRect.top;
+  const unit = 10 * osmd.zoom;
+  const sms = osmd.Sheet.SourceMeasures;
+  sms.forEach((sm, mi) => {
+    const gms = (osmd.GraphicSheet.MeasureList[mi] || []).filter(gm => gm && gm.PositionAndShape && (!gm.ParentStaff || gm.ParentStaff.isVisible()));
+    if (!gms.length) return;
+    const top = gm => oy + gm.PositionAndShape.AbsolutePosition.y * unit;
+    const range = gm => { const x0 = gm.PositionAndShape.RelativePosition.x; return [x0, x0 + gm.PositionAndShape.Size.width]; };
+    const line = gm => gm.ParentStaffLine;
+    let y;
+    if (gms.length >= 2) {
+      const a = gms[gms.length - 2], b = gms[gms.length - 1];
+      let lo = top(a) + 4 * unit, hi = top(b);
+      try {
+        lo = Math.max(lo, oy + (line(a).PositionAndShape.AbsolutePosition.y + line(a).SkyBottomLineCalculator.getBottomLineMaxInRange(...range(a))) * unit);
+        hi = Math.min(hi, oy + (line(b).PositionAndShape.AbsolutePosition.y + line(b).SkyBottomLineCalculator.getSkyLineMinInRange(...range(b))) * unit);
+      } catch (_) {}
+      y = hi - lo > 1.2 * unit ? (lo + hi) / 2 : (top(a) + 4 * unit + top(b)) / 2;
+    } else {
+      const a = gms[0];
+      let lo = top(a) + 4 * unit;
+      try { lo = Math.max(lo, oy + (line(a).PositionAndShape.AbsolutePosition.y + line(a).SkyBottomLineCalculator.getBottomLineMaxInRange(...range(a))) * unit); } catch (_) {}
+      y = lo + 1.2 * unit;
+    }
+    const q0 = sm.AbsoluteTimestamp.RealValue * 4;
+    const q1 = mi + 1 < sms.length ? sms[mi + 1].AbsoluteTimestamp.RealValue * 4 : q0 + sm.Duration.RealValue * 4;
+    const ts = sm.ActiveTimeSignature;
+    const num = ts ? ts.Numerator : 4, den = ts ? ts.Denominator : 4;
+    const full = num * 4 / den;
+    // A pickup counts up to the downbeat: one beat before a bar of 4 is "4".
+    const lead = mi === 0 && q1 - q0 < full - 0.01 ? full - (q1 - q0) : 0;
+    const mm = measureMap[mi];
+    aidMeasures.push({q0, q1, num, den, lead, y, below: gms.length < 2, row: mm ? mm.row : undefined,
+                      start: mm ? mm.x0 : undefined, end: mm ? mm.x1 : undefined});
+  });
+  // Under a single staff, one line of counts along each row, under its lowest note.
+  const lowest = new Map();
+  for (const m of aidMeasures) if (m.below) lowest.set(m.row, Math.max(lowest.get(m.row) || 0, m.y));
+  for (const m of aidMeasures) if (m.below) m.y = lowest.get(m.row);
+
+  if (!aidsReserved()) return;
+  const bottom = Math.max(...aidMeasures.map(m => m.y + COUNT_ROOM));
+  if (fit.h && bottom > fit.top + fit.h) fit.h = bottom - fit.top;
+  for (const m of aidMeasures) {
+    if (rows[m.row]) rows[m.row].bandBottom = Math.max(rows[m.row].bandBottom, m.y + COUNT_ROOM);
+  }
+}
+
+// Which beats get which label at the page's level.
+function aidWanted(kind, q) {
+  if (aidsOff || !aidKinds[kind] || aidLevel === 'off') return false;
+  if (aidLevel === 'all') return true;
+  return aidBars.some(b => (b.kinds || []).includes(kind) && q >= b.start - 0.01 && q < b.end - 0.01);
+}
+
+function drawAids() {
+  const layer = document.getElementById('aid-layer');
+  layer.innerHTML = '';
+  heads.forEach(h => { h.aid = null; });
+  if (!rendered || !osmd) return;
+  layer.style.fontSize = (1.3 * 10 * osmd.zoom).toFixed(1) + 'px';
+  const frag = document.createDocumentFragment();
+  for (const h of heads) {
+    if (h.tied || h.x === undefined || !aidWanted('names', h.q)) continue;
+    const [letter, acc] = headName(h);
+    const el = document.createElement('div');
+    el.className = 'aid-name' + (h.hollow ? ' hollow' : '');
+    const d = 1.2 * h.h;
+    el.style.cssText = `left:${h.x.toFixed(1)}px;top:${h.y.toFixed(1)}px;width:${d.toFixed(1)}px;height:${d.toFixed(1)}px;font-size:${(0.95 * h.h).toFixed(1)}px`;
+    el.textContent = letter;
+    if (acc) { const i = document.createElement('i'); i.textContent = acc; el.appendChild(i); }
+    h.aid = el;
+    paintAid(h);
+    frag.appendChild(el);
+  }
+  for (const m of aidMeasures) {
+    if (aidWanted('counts', m.q0 + 0.02)) drawCounts(m, frag);
+  }
+  layer.appendChild(frag);
+}
+
+// A bar's counts: every beat's number (faint when nothing starts on it), and "&", "e", "a",
+// "trip", "let" where a note starts between beats. On the noteheads; a beat between them (or
+// after the last, up to the barline) in proportion; before the first, on the cursor's curve.
+function drawCounts(m, frag) {
+  const beat = 4 / m.den;  // one beat of the time signature, in quarters
+  const inBar = heads.filter(h => !h.tied && h.x !== undefined && h.q >= m.q0 - 0.01 && h.q < m.q1 - 0.01);
+  const onsets = [...new Set(inBar.map(h => Math.round(h.q * 1000) / 1000))].sort((a, b) => a - b);
+  const curve = q => {
+    const u = getXForBeat(q);
+    const r = rowsOn() && rows[m.row];
+    return r ? r.xFirst + u - r.u0 : u;
+  };
+  const headX = o => { const at = inBar.filter(h => Math.abs(h.q - o) < 0.02); return at.reduce((s, h) => s + h.x, 0) / at.length; };
+  const nudge = onsets.length ? onsets.reduce((s, o) => s + headX(o) - curve(o), 0) / onsets.length : 0;
+  const known = onsets.map(o => [o, headX(o)]);
+  if (m.end !== undefined && known.length) known.push([m.q1, m.end]);
+  const x = q => {
+    const k = known.findIndex(([kq]) => kq >= q - 0.02);
+    if (k < 0 || (k === 0 && known[0][0] > q + 0.02)) return curve(q) + nudge;
+    if (Math.abs(known[k][0] - q) <= 0.02) return known[k][1];
+    const [qa, xa] = known[k - 1], [qb, xb] = known[k];
+    return xa + (q - qa) / (qb - qa) * (xb - xa);
+  };
+  const items = [];
+  for (let k = 0; k < m.num; k++) {
+    const q = m.q0 + k * beat - m.lead;
+    if (q < m.q0 - 0.01 || q >= m.q1 - 0.01) continue;
+    const struck = onsets.some(o => Math.abs(o - q) < 0.02);
+    items.push({x: x(q), text: String(k + 1), cls: struck ? '' : 'held'});
+    for (const o of onsets) {
+      if (o <= q + 0.02 || o >= q + beat - 0.02) continue;
+      const sub = SUBDIVISIONS.find(([v]) => Math.abs((o - q) / beat - v) < 0.03);
+      if (sub) items.push({x: x(o), text: sub[1], cls: 'sub'});
+    }
+  }
+  // A narrow bar (a whole note's) can't fit its counts where they belong: keep them apart and
+  // inside the bar, the crowd pushed back from the barline.
+  const gap = 1.3 * 13 * osmd.zoom;
+  for (let i = 1; i < items.length; i++) items[i].x = Math.max(items[i].x, items[i - 1].x + gap);
+  if (m.end !== undefined && items.length) {
+    items[items.length - 1].x = Math.min(items[items.length - 1].x, m.end - gap / 2);
+    for (let i = items.length - 2; i >= 0; i--) items[i].x = Math.min(items[i].x, items[i + 1].x - gap);
+  }
+  if (m.start !== undefined && items.length && items[0].x < m.start + gap / 2) {
+    const from = m.start + gap / 2, to = m.end !== undefined ? m.end - gap / 2 : from + gap * items.length;
+    items.forEach((it, i) => { it.x = items.length > 1 ? from + i * Math.min(gap, (to - from) / (items.length - 1)) : from; });
+  }
+  for (const it of items) {
+    const el = document.createElement('div');
+    el.className = 'aid-count' + (it.cls ? ' ' + it.cls : '');
+    el.style.left = it.x.toFixed(1) + 'px';
+    el.style.top = m.y.toFixed(1) + 'px';
+    el.textContent = it.text;
+    frag.appendChild(el);
+  }
+}
+
+// A name badge takes its note's mark colour (pending, hit, missed) as the notehead under it would.
+function paintAid(h) {
+  const c = h.color || '';
+  if (h.hollow) { h.aid.style.borderColor = c; h.aid.style.color = c; } else h.aid.style.background = c;
+}
+function markAid(h, color) {
+  if (!h) return;
+  h.color = color;
+  if (h.aid) paintAid(h);
 }
 
 // ── Timestamp map ─────────────────────────────────────────────────────────────
@@ -490,6 +939,8 @@ function buildTimestampMap() {
   } catch (_) {}
 
   const map = [];
+  const steps = [];  // [{q, timeMs, x, top, h}] one per cursor position, in track px
+  const headShift = [];  // per position: from the middle of the cursor's box to the middle of its noteheads
 
   // Strategy A: walk cursor
   try {
@@ -505,10 +956,8 @@ function buildTimestampMap() {
         const r   = curEl.getBoundingClientRect();
         const xPx = r.left - trackRect.left + r.width * 0.5;
         const q   = ts.RealValue * 4.0;
-        // Inside a multi-bar rest OSMD's cursor can step back left; skip those points so the
-        // score never scrolls backwards.
-        const last = beatMap[beatMap.length - 1];
-        if (!last || (q > last.q && xPx >= last.xPx)) beatMap.push({q, xPx});
+        const top = r.top - trackRect.top;
+        steps.push({q, timeMs, x: xPx, top, h: r.height});
         try {
           const mi = osmd.cursor.iterator.CurrentMeasureIndex;
           if (!measureMap[mi]) {
@@ -517,28 +966,56 @@ function buildTimestampMap() {
             const ox = svgEl.getBoundingClientRect().left - trackRect.left;
             const unit = 10 * osmd.zoom;  // OSMD units -> px
             const x0 = ox + gm.PositionAndShape.AbsolutePosition.x * unit;
-            measureMap[mi] = {q, x0, x1: x0 + gm.PositionAndShape.Size.width * unit};
+            measureMap[mi] = {q, x0, x1: x0 + gm.PositionAndShape.Size.width * unit, top};
           }
         } catch (_) {}
+        const centers = [];  // the noteheads' middles: the cursor's box is wider than they are
         try {
           for (const gn of osmd.cursor.GNotesUnderCursor()) {
             const sn = gn.sourceNote;
             if (!sn || sn.isRest()) continue;
-            if (sn.NoteTie && sn.NoteTie.StartNote !== sn) continue;  // tie continuation: not a new key press
-            noteEntries.push({q, pitch: sn.halfTone + 12, el: gn.getSVGGElement()});
+            const el = gn.getSVGGElement();
+            const tied = !!(sn.NoteTie && sn.NoteTie.StartNote !== sn);
+            const head = {q, pitch: sn.halfTone + 12, el, tied, fund: sn.Pitch ? sn.Pitch.FundamentalNote : null,
+                          hollow: !!(sn.Length && sn.Length.RealValue >= 0.5)};
+            if (el) {
+              heads.push(head);
+              for (const nh of el.querySelectorAll('.vf-notehead')) {
+                const b = nh.getBoundingClientRect();
+                if (b.width > 0) centers.push(b.left - trackRect.left + b.width / 2);
+              }
+            }
+            if (tied) continue;  // tie continuation: not a new key press
+            noteEntries.push({q, pitch: sn.halfTone + 12, el, head});
           }
         } catch (_) {}
-        if (map.length === 0 || xPx - map[map.length - 1].xPx > 1) {
-          map.push({timeMs, xPx});
-        } else if (timeMs < map[map.length - 1].timeMs) {
-          map[map.length - 1].timeMs = timeMs;
-        }
+        if (centers.length) headShift.push(centers.sort((a, b) => a - b)[centers.length >> 1] - xPx);
       }
       osmd.cursor.next();
     }
     osmd.cursor.hide();
   } catch (err) {
     console.error('[OSMD] cursor walk failed:', err);
+  }
+
+  // The cursor's box is wider than the noteheads: move every position by the usual difference, so
+  // the playhead crosses notes where they are struck and keeps the box's even spacing (one
+  // shifted notehead, by an accidental or a second, doesn't jerk the scroll).
+  if (headShift.length) {
+    const shift = headShift.sort((a, b) => a - b)[headShift.length >> 1];
+    for (const st of steps) st.x += shift;
+  }
+  try { buildRows(steps); } catch (err) { console.error('[OSMD] rows failed:', err); rows = []; }
+  for (const {q, timeMs, x: xPx} of steps) {
+    // Inside a multi-bar rest OSMD's cursor can step back left; skip those points so the
+    // score never scrolls backwards.
+    const last = beatMap[beatMap.length - 1];
+    if (!last || (q > last.q && xPx >= last.xPx)) beatMap.push({q, xPx});
+    if (map.length === 0 || xPx - map[map.length - 1].xPx > 1) {
+      map.push({timeMs, xPx});
+    } else if (timeMs < map[map.length - 1].timeMs) {
+      map[map.length - 1].timeMs = timeMs;
+    }
   }
 
   // Strategy B: graphic model fallback
@@ -616,6 +1093,9 @@ function getXForTime(ms) {
 // Positions (beatMap etc.) stay in unscaled track pixels; trackTransform scales them.
 const FIT_PAD = 8;
 let fit = {top: 0, h: 0};  // drawn score's top and height within the track at scale 1
+// The embedding page can also let a short score grow to fill a tall strip: ?grow=2.5 scales it
+// up to 2.5x (the coach page, where the sheet is the main thing on screen). Default: never up.
+const MAX_SCALE = Math.max(1, Number(new URLSearchParams(location.search).get('grow')) || 1);
 
 function measureScore() {
   const svg = document.querySelector('#osmd-div svg');
@@ -632,14 +1112,170 @@ function measureScore() {
   }
 }
 
+// The reader's zoom (the coach's Sheet ▸ Zoom) on top of the fit: smaller shows more of the score
+// (more bars along the line, more rows), larger asks the page for a taller strip and, once it
+// can't grow, crops the top and bottom of the line or shows less of the next row.
+let zoom = 1;
+
 function fitScale() {
-  return fit.h ? Math.min(1, Math.max(0.35, (window.innerHeight - 2 * FIT_PAD) / fit.h)) : 1;
+  const h = rowsOn() ? twoRowsHeight() : fit.h;
+  return h ? zoom * Math.min(MAX_SCALE, Math.max(0.35, (window.innerHeight - 2 * FIT_PAD) / h)) : 1;
 }
 
-function trackTransform(x, s) {
-  const ty = fit.h ? (window.innerHeight - fit.h * s) / 2 - fit.top * s : 0;
-  return `translate(${x.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${s.toFixed(4)})`;
+// Let parent resize the notation strip to fit the drawn score (margins trimmed, at the largest
+// scale allowed, zoomed in): in two rows, the tallest pair of rows
+function postHeight() {
+  const h = rowsOn() ? twoRowsHeight() : fit.h;
+  if (h) window.parent.postMessage({type: 'height', h: Math.ceil(h * MAX_SCALE * Math.max(1, zoom) + 2 * FIT_PAD)}, '*');
 }
+
+function setZoom(z) {
+  z = Math.max(0.5, Math.min(2, Number(z) || 1));
+  if (Math.abs(z - zoom) < 0.001) return false;
+  zoom = z;
+  panPx = 0;
+  return true;
+}
+
+// The track's y on one line: the drawn score centred in the strip.
+const trackY = s => fit.h ? (window.innerHeight - fit.h * s) / 2 - fit.top * s : 0;
+
+function trackTransform(x, s) {
+  return `translate(${x.toFixed(1)}px, ${trackY(s).toFixed(1)}px) scale(${s.toFixed(4)})`;
+}
+
+// ── Two rows ──────────────────────────────────────────────────────────────────
+// Positions along the score (beatMap, timestampMap) are measured along the rows laid end to
+// end, so the cursor's smooth curve runs on from the end of one row into the start of the next.
+let rows = [];         // [{top, bottom, bandTop, bandBottom, xFirst, xEnd, u0}] unscaled track px
+let rowScroll = null;  // track y as drawn, eased toward the current row
+let rowAt = 0;         // performance.now() of the last frame drawn
+const ROW_LEAD = 30;   // px before a row's first note where the cursor enters it
+let rowsZoom = 1;      // the scale the rows were drawn to be shown at
+const rowsOn = () => layout === 'rows' && rows.length > 0;
+
+function setLayout(mode) {
+  const next = mode === 'rows' ? 'rows' : 'line';
+  if (next === layout) return false;
+  layout = next;
+  document.body.classList.toggle('rows', layout === 'rows');
+  panPx = 0;
+  playheadEl.style.top = playheadEl.style.height = playheadEl.style.bottom = '';
+  positionPlayhead();
+  return true;
+}
+
+// Group the cursor positions into rows (by the cursor's height on the page) and turn each x
+// into its distance along the rows. A row runs from its first note to its closing barline;
+// the next row starts ROW_LEAD before its first note.
+function buildRows(steps) {
+  rows = [];
+  if (layout !== 'rows' || !steps.length) return;
+  for (const st of steps) {
+    let row = rows[rows.length - 1];
+    if (!row || Math.abs(st.top - row.top) > 2) {
+      row = {top: st.top, bottom: st.top + st.h, xFirst: st.x, xEnd: st.x};
+      rows.push(row);
+    }
+    st.row = rows.length - 1;
+    row.xEnd = Math.max(row.xEnd, st.x);
+  }
+  for (const m of measureMap) {
+    if (!m) continue;
+    m.row = rows.findIndex(r => Math.abs(r.top - m.top) <= 2);
+    if (m.row >= 0) rows[m.row].xEnd = Math.max(rows[m.row].xEnd, m.x1);
+  }
+  let u = 0;
+  rows.forEach((r, k) => { r.u0 = u + (k ? ROW_LEAD : 0); u = r.u0 + r.xEnd - r.xFirst; });
+  for (const st of steps) st.x = rows[st.row].u0 + st.x - rows[st.row].xFirst;
+
+  // What each row shows: everything drawn above and below its staves (OSMD's sky and bottom
+  // lines), else halfway to the next row.
+  let ink = null;
+  try {
+    const systems = osmd.GraphicSheet.MusicPages[0].MusicSystems;
+    const svgEl = document.querySelector('#osmd-div svg');
+    const oy = svgEl.getBoundingClientRect().top - scoreTrack.getBoundingClientRect().top;
+    const unit = 10 * osmd.zoom;
+    if (systems.length === rows.length) {
+      ink = systems.map(sys => {
+        const lines = sys.StaffLines, first = lines[0], last = lines[lines.length - 1];
+        return {
+          top: oy + (first.PositionAndShape.AbsolutePosition.y + first.SkyBottomLineCalculator.getSkyLineMin()) * unit,
+          bottom: oy + (last.PositionAndShape.AbsolutePosition.y + last.SkyBottomLineCalculator.getBottomLineMax()) * unit,
+        };
+      });
+      if (ink.some(i => !isFinite(i.top) || !isFinite(i.bottom))) ink = null;
+    }
+  } catch (_) { ink = null; }
+  rows.forEach((r, k) => {
+    const prev = rows[k - 1], next = rows[k + 1];
+    r.bandTop = Math.min(r.top, ink ? ink[k].top - 4 : prev ? (prev.bottom + r.top) / 2 : fit.top);
+    r.bandBottom = Math.max(r.bottom, ink ? ink[k].bottom + 4 : next ? (r.bottom + next.top) / 2 : fit.top + fit.h);
+  });
+}
+
+// Height that shows any row with the one under it.
+function twoRowsHeight() {
+  let h = 0;
+  rows.forEach((r, k) => { h = Math.max(h, (rows[k + 1] || r).bandBottom - r.bandTop); });
+  return h;
+}
+
+// Distance along the rows -> which row, and the x on it.
+function rowPoint(u) {
+  let k = 0;
+  while (k < rows.length - 1 && u >= rows[k + 1].u0 - ROW_LEAD) k++;
+  const r = rows[k];
+  return {row: k, x: Math.max(r.xFirst - ROW_LEAD, Math.min(r.xEnd, r.xFirst + u - r.u0))};
+}
+
+// The track's y with row k at the top of the strip.
+const rowY = (k, s) => FIT_PAD - rows[k].bandTop * s;
+
+// How far the track can scroll: from the score's top at the top to its end at the bottom.
+function rowYRange(s) {
+  const hi = rowY(0, s);
+  return [Math.min(hi, window.innerHeight - FIT_PAD - rows[rows.length - 1].bandBottom * s), hi];
+}
+
+function drawRows(u, s) {
+  const now = performance.now();
+  const p = rowPoint(u), r = rows[p.row];
+  const [lo, hi] = rowYRange(s);
+  const target = Math.max(lo, Math.min(hi, rowY(p.row, s) + panPx));
+  // Glide to the next row instead of jumping, so the eye can follow it.
+  if (rowScroll === null || now - rowAt > 500) rowScroll = target;
+  else rowScroll += (target - rowScroll) * (1 - Math.exp(-(now - rowAt) / 120));
+  rowAt = now;
+  const tx = Math.max(0, (window.innerWidth - document.getElementById('osmd-div').offsetWidth * s) / 2);
+  scoreTrack.style.transform = `translate(${tx.toFixed(1)}px, ${rowScroll.toFixed(1)}px) scale(${s.toFixed(4)})`;
+  playheadEl.style.left = (tx + p.x * s - 1).toFixed(1) + 'px';
+  playheadEl.style.top = (rowScroll + (r.top - 6) * s).toFixed(1) + 'px';
+  playheadEl.style.bottom = 'auto';
+  playheadEl.style.height = ((r.bottom - r.top + 12) * s).toFixed(1) + 'px';
+  placeRange(tx, rowScroll, s);
+}
+
+// A score drawn while the page kept the strip hidden (the coach opens on its Home page) can't
+// be measured, so it would never be fitted to the strip: draw it again the first time it shows.
+window.addEventListener('resize', () => {
+  if (drawnHidden && rendered && window.innerHeight) { drawnHidden = false; drawScore(); }
+});
+
+// Rows fill the strip's width, so draw them again when the width changes, or the height
+// enough to change their scale.
+let rowsWidth = window.innerWidth, rowsResize = null;
+window.addEventListener('resize', () => {
+  const widthChanged = window.innerWidth !== rowsWidth;
+  rowsWidth = window.innerWidth;
+  if (!rowsOn() || !rendered) return;
+  if (!widthChanged && Math.abs(fitScale() - rowsZoom) <= 0.03) return;
+  clearTimeout(rowsResize);
+  rowsResize = setTimeout(() => {
+    if (rowsOn() && rendered) { rowsZoom = fitScale(); drawScore(); }
+  }, 250);
+});
 
 // ── Pinned clef / key / time signature ────────────────────────────────────────
 // The single-line score only draws them at bar 1 and where they change, so they scroll out of
@@ -747,6 +1383,11 @@ let panPx = 0;
 function panBy(dx) {
   if (!rendered || !beatMode || gliding() || !beatMap.length) return;
   const s = fitScale();
+  if (rowsOn()) {  // up and down, keeping some of the score in view
+    const [lo, hi] = rowYRange(s), base = rowY(rowPoint(getXForBeat(beatShown)).row, s);
+    panPx = Math.max(lo - base, Math.min(hi - base, panPx + dx));
+    return;
+  }
   const width = document.getElementById('osmd-div').offsetWidth * s;
   const x = getXForBeat(beatShown) * s;
   // Keep some part of the score under the playhead: 0 <= x - panPx <= width.
@@ -761,20 +1402,34 @@ viewportEl.addEventListener('wheel', e => {
 }, {passive: false});
 
 let dragX = null;
+const dragPos = e => rowsOn() ? e.clientY : e.clientX;
 viewportEl.addEventListener('pointerdown', e => {
   if (!document.body.classList.contains('pannable')) return;
-  dragX = e.clientX;
+  dragX = dragPos(e);
   viewportEl.setPointerCapture(e.pointerId);
   document.body.classList.add('dragging');
 });
 viewportEl.addEventListener('pointermove', e => {
   if (dragX === null) return;
-  panBy(e.clientX - dragX);
-  dragX = e.clientX;
+  panBy(dragPos(e) - dragX);
+  dragX = dragPos(e);
 });
 const endDrag = () => { dragX = null; document.body.classList.remove('dragging'); };
 viewportEl.addEventListener('pointerup', endDrag);
 viewportEl.addEventListener('pointercancel', endDrag);
+
+// A double-click on a bar tells the page where that bar starts (the coach jumps there).
+viewportEl.addEventListener('dblclick', e => {
+  if (!rendered || !measureMap.length) return;
+  const r = scoreTrack.getBoundingClientRect(), s = fitScale();  // the track scales from its top left
+  const x = (e.clientX - r.left) / s, y = (e.clientY - r.top) / s;
+  const hit = measureMap.find(m => m && x >= m.x0 && x < m.x1 &&
+    (!rowsOn() || (rows[m.row] && y >= rows[m.row].bandTop && y < rows[m.row].bandBottom)));
+  if (!hit) return;
+  e.preventDefault();
+  window.getSelection()?.removeAllRanges();
+  window.parent.postMessage({type: 'barClick', beat: hit.q}, '*');
+});
 
 // ── Animation loop ────────────────────────────────────────────────────────────
 function tick() {
@@ -785,14 +1440,18 @@ function tick() {
   if (beatMode && beatMap.length) {
     beatShown = cursorBeatAt(performance.now());
     if (gliding()) panPx = 0;
+    if (rowsOn()) { drawRows(getXForBeat(beatShown), s); return; }
     const x = phX - getXForBeat(beatShown) * s + panPx;
     scoreTrack.style.transform = trackTransform(x, s);
     updateHeader(x, s, phX);
+    placeRange(x, trackY(s), s);
     return;
   }
+  if (rowsOn()) { drawRows(getXForTime(currentMs), s); return; }
   const noteX = getXForTime(currentMs);
   scoreTrack.style.transform = trackTransform(phX - noteX * s, s);
   updateHeader(phX - noteX * s, s, phX);
+  placeRange(phX - noteX * s, trackY(s), s);
 }
 tick();
 </script>

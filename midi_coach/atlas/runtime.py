@@ -28,7 +28,7 @@ import time
 
 from .. import library
 from ..notes import parse_bars
-from . import content_dir, drills, load_atlas, steps, store, temporary, user_dir
+from . import content_dir, drills, load_atlas, steps, store, temporary, today, user_dir, welcome
 from .exam import ExamSession
 from .placement import Placement
 
@@ -50,16 +50,18 @@ def _norm(text: str) -> str:
 
 
 class AtlasCoach:
-    def __init__(self, hub=None, show=None, begin=None, play=None, compare=None, say=None) -> None:
+    def __init__(self, hub=None, show=None, begin=None, play=None, compare=None, say=None, listen=None) -> None:
         self.hub = hub
         self.show = show      # show(path): load a file on the coach page
         self.begin = begin    # begin(path, hand=, bars=, mode=, tempo_percent=, atlas=) -> dict (server._begin)
         self.play = play      # play(path, hand=, bars=, tempo_percent=) -> dict (MIDI output)
+        self.listen = listen  # listen(path, hand=, bars=, tempo_percent=) -> dict: a Listen run (cursor, Stop); else play
         self.compare = compare  # compare(take meta) -> analysis report (server._compare), for exam takes
         self.say = say        # say(text): the examiner speaks
         self._exam: ExamSession | None = None
         self._placement_done: dict | None = None  # a placement just settled, for the page
         self.current: dict | None = None  # {node, step} being practised
+        self._freeplay: str | None = None  # the sheet Freeplay had before a lesson opened ('' for none)
         self._last_pool: dict[str, str] = {}  # pool -> the piece it gave last
         self._played_at: dict[tuple, float] = {}  # (node, step) -> when its example started (perf_counter)
         self.planning: dict | None = None  # the goal being planned: {text, started, error?}
@@ -73,6 +75,7 @@ class AtlasCoach:
         self._exam = None
         self._placement_done = None
         self.current = None
+        self._freeplay = None
         self.planning = None
         self._played_at.clear()
 
@@ -130,14 +133,16 @@ class AtlasCoach:
         return {"atlas": self.cmd_atlas, "node": self.cmd_node, "search": self.cmd_search,
                 "step_start": self.cmd_step_start, "step_done": self.cmd_step_done,
                 "quiz_answer": self.cmd_quiz_answer, "progress_rebuild": self.cmd_progress_rebuild,
-                "stage_open": self.cmd_stage_open, "step_play": self.cmd_step_play, "step_show": self.cmd_step_show, "sing_result": self.cmd_sing_result,
+                "stage_open": self.cmd_stage_open, "stage_close": self.cmd_stage_close, "step_play": self.cmd_step_play, "step_show": self.cmd_step_show, "sing_result": self.cmd_sing_result,
                 "exam_start": self.cmd_exam_start, "exam_state": self.cmd_exam_state, "exam_next": self.cmd_exam_next,
                 "exam_skip": self.cmd_exam_skip, "exam_abort": self.cmd_exam_abort, "exam_report": self.cmd_exam_report,
                 "placement_start": self.cmd_placement_start, "placement_continue": self.cmd_placement_continue,
                 "placement_pause": self.cmd_placement_pause, "placement_state": self.cmd_placement_state,
+                "welcome": self.cmd_welcome, "welcome_finish": self.cmd_welcome_finish,
                 "lesson_feedback": self.cmd_lesson_feedback,
-                "goals": self.cmd_goals, "goal_plan": self.cmd_goal_plan, "goal_activate": self.cmd_goal_activate,
-                "goal_archive": self.cmd_goal_archive, "path_next": self.cmd_path_next}
+                "goals": self.cmd_goals, "route": self.cmd_route, "goal_quick": self.cmd_goal_quick, "goal_plan": self.cmd_goal_plan, "goal_activate": self.cmd_goal_activate,
+                "goal_archive": self.cmd_goal_archive, "path_next": self.cmd_path_next,
+                "today": self.cmd_today, "today_more": self.cmd_today_more}
 
     def cmd_atlas(self, _body: dict) -> dict:
         """The whole tree for the Atlas view: slim nodes, layout, bundled edges, and states."""
@@ -147,7 +152,8 @@ class AtlasCoach:
         return {"version": tree["version"], "tiers": tree["tiers"], "strands": tree["strands"],
                 "geometry": tree["geometry"], "bundles": tree["bundles"],
                 "nodes": [{k: n[k] for k in SLIM_FIELDS if k in n} for n in tree["nodes"]],
-                "temp_edges": tree.get("temp_edges", []), "states": slim, "current": self.current}
+                "temp_edges": tree.get("temp_edges", []), "states": slim, "current": self.current,
+                "name": tree.get("name", "Roadmap")}
 
     def cmd_node(self, body: dict) -> dict:
         tree = self.tree()
@@ -195,6 +201,8 @@ class AtlasCoach:
         if not lesson:
             return {"error": f"No lesson for {node_id} yet."}
         self.current = {"node": node_id, "step": None}
+        if self._freeplay is None:  # the first lesson since Freeplay: keep its sheet for stage_close
+            self._freeplay = getattr(self.hub, "score_path", None) or ""
         # The lesson's music on the sheet (aural examples are for hearing, never shown).
         first = next((s for s in lesson["steps"] if s["type"] in ("listen", "play") and (s.get("file") or s.get("pool"))), None)
         shown = None
@@ -203,6 +211,20 @@ class AtlasCoach:
             self.show(shown)
         self.publish()
         return {"node": node_id, "steps": len(lesson["steps"]), "shown": shown}
+
+    def cmd_stage_close(self, _body: dict) -> dict:
+        """Out of the lesson view: Freeplay gets back the sheet it had before the lesson opened."""
+        path, self._freeplay = self._freeplay, None
+        self.current = None
+        self.publish()
+        exam = self.exam()
+        if not path or not self.show or path == getattr(self.hub, "score_path", None) or (exam and not exam.done):
+            return {"restored": None}
+        try:
+            self.show(path)
+        except Exception as exc:  # the file went away: the lesson's sheet stays
+            return {"restored": None, "error": str(exc)}
+        return {"restored": path}
 
     def cmd_step_start(self, body: dict) -> dict:
         node_id, step_id = body.get("node", ""), body.get("step", "")
@@ -219,9 +241,11 @@ class AtlasCoach:
                                   input_port=body.get("port") or None,
                                   atlas={"node": node_id, "step": step_id, "lesson_version": lesson.get("version", 1)}))
         elif kind == "listen":
-            if self.play:
-                out.update(self.play(str(self.file(step)), hand=step.get("hand", "both"), bars=step.get("bars"),
-                                     tempo_percent=float(step.get("tempo_percent", 100))))
+            # A Listen run: the cursor follows and Stop ends it, like Freeplay's Listen.
+            run = self.listen or self.play
+            if run:
+                out.update(run(str(self.file(step)), hand=step.get("hand", "both"), bars=step.get("bars"),
+                               tempo_percent=float(step.get("tempo_percent", 100))))
             store.append_event("touch", node=node_id, step=step_id)
         elif kind == "read":
             store.append_event("touch", node=node_id, step=step_id)
@@ -326,6 +350,7 @@ class AtlasCoach:
         if not ctx or not ctx.get("node") or not ctx.get("step"):
             return None
         if meta.get("mode") in ("wait", "rehearsal") and reason not in FINISHED:
+            self.ungraded(ctx, "Stopped before the end, so not graded. Play through to the last note to get a result.")
             return None  # a pass you stopped halfway isn't graded
         try:
             _, step = self.step(ctx["node"], ctx["step"])
@@ -343,6 +368,11 @@ class AtlasCoach:
         self.publish(verdict={"node": ctx["node"], "step": ctx["step"], **verdict},
                      **({"drills": made} if made else {}), **({"refresh": True} if made or retired else {}))
         return verdict
+
+    def ungraded(self, ctx: dict | None, why: str) -> None:
+        """A step's run ended without a grade: say why on the page, so the end is never silent."""
+        if ctx and ctx.get("node") and ctx.get("step") and not ctx.get("exam"):
+            self.publish(verdict={"node": ctx["node"], "step": ctx["step"], "passed": None, "score": None, "detail": why})
 
     def _drills(self, ctx: dict, step: dict, report: dict | None, live: dict | None) -> tuple[list[dict], list[str]]:
         """Remedial drills: log this pass's slips and make a drill for any bar that keeps
@@ -569,6 +599,22 @@ class AtlasCoach:
         placement = Placement.current()
         return {"placement": placement.state() if placement else self._placement_done}
 
+    # -- getting to know you (welcome.py) --------------------------------------------------
+
+    def cmd_welcome(self, _body: dict) -> dict:
+        """The questions, and where the last time you answered them placed you."""
+        last = welcome.load()
+        return {"questions": welcome.questions(), "last": last["result"] if last else None}
+
+    def cmd_welcome_finish(self, body: dict) -> dict:
+        """{answers: {question id: option index, or a list for 'why'}}:
+        credit the tiers below where you start and make that tier the goal."""
+        answers = {k: v for k, v in (body.get("answers") or {}).items() if isinstance(v, (int, list))}
+        out = welcome.finish(answers)
+        self.publish(refresh=True)
+        self.publish_goals()
+        return out
+
     # -- goals and Paths ---------------------------------------------------------------------
 
     def goal_state(self) -> dict:
@@ -580,28 +626,33 @@ class AtlasCoach:
         tree = self.tree()
         states = store.progress(tree)
         active = next((g for g in data["goals"] if g["id"] == data.get("active") and g["status"] == "active"), None)
-        families = []
-        if active:
-            for fam in planner.path(active, states):
-                fnode = tree["by_id"].get(fam["family"], {})
-                fst = states.get(fam["family"]) or {}
-                reqs = []
-                for r in fam["requirements"]:
-                    node = tree["by_id"].get(r["id"], {})
-                    reqs.append({"id": r["id"], "title": node.get("title", r["id"]), "recheck": r["recheck"],
-                                 "level": (states.get(r["id"]) or {}).get("level", "not_started"),
-                                 "temporary": bool(node.get("temporary")), "kind": node.get("kind"),
-                                 "stages": [{"id": sid, "title": tree["by_id"][sid]["title"],
-                                             "level": (states.get(sid) or {}).get("level", "not_started"),
-                                             "lesson": self.lesson(sid) is not None} for sid in node.get("stages", [])]})
-                tier_title = next((t["title"] for t in tree["tiers"] if t["id"] == fnode.get("tier")), "")
-                families.append({"family": fam["family"], "title": f"{tier_title} · {fnode.get('title', fam['family'])}".lstrip(" ·"),
-                                 "tier": fnode.get("tier"),
-                                 "ring": fst.get("ring"), "done": fst.get("done"), "total": fst.get("total"),
-                                 "requirements": reqs})
+        families = self._path_view(planner.path(active, states), tree, states) if active else []
         return {"active": active["id"] if active else None,
                 "goals": [{k: g.get(k) for k in ("id", "title", "kind", "status", "created", "song")} for g in data["goals"]],
                 "goal": active, "path": families, "planning": self.planning}
+
+    def _path_view(self, path: list[dict], tree: dict, states: dict) -> list[dict]:
+        """A Path (mastery.path_families) as the page shows it: families in order, each
+        requirement with its stages and whether their lessons exist."""
+        families = []
+        for fam in path:
+            fnode = tree["by_id"].get(fam["family"], {})
+            fst = states.get(fam["family"]) or {}
+            reqs = []
+            for r in fam["requirements"]:
+                node = tree["by_id"].get(r["id"], {})
+                reqs.append({"id": r["id"], "title": node.get("title", r["id"]), "recheck": r["recheck"],
+                             "level": (states.get(r["id"]) or {}).get("level", "not_started"),
+                             "temporary": bool(node.get("temporary")), "kind": node.get("kind"),
+                             "stages": [{"id": sid, "title": tree["by_id"][sid]["title"],
+                                         "level": (states.get(sid) or {}).get("level", "not_started"),
+                                         "lesson": self.lesson(sid) is not None} for sid in node.get("stages", [])]})
+            tier_title = next((t["title"] for t in tree["tiers"] if t["id"] == fnode.get("tier")), "")
+            families.append({"family": fam["family"], "title": f"{tier_title} · {fnode.get('title', fam['family'])}".lstrip(" ·"),
+                             "tier": fnode.get("tier"),
+                             "ring": fst.get("ring"), "done": fst.get("done"), "total": fst.get("total"),
+                             "requirements": reqs})
+        return families
 
     def publish_goals(self) -> dict:
         state = self.goal_state()
@@ -611,6 +662,45 @@ class AtlasCoach:
 
     def cmd_goals(self, _body: dict) -> dict:
         return self.goal_state()
+
+    def _route_target(self, tree: dict, node_id: str) -> dict | None:
+        """The node a route leads to: a stage's route is its lesson's (requirement's)."""
+        node = tree["by_id"].get(node_id or "")
+        if node and node["level"] == "stage":
+            node = tree["by_id"].get(node["parent"])
+        return node
+
+    def cmd_route(self, body: dict) -> dict:
+        """The route to one node, saving nothing: what it needs that isn't known yet,
+        prerequisites first, as the Route panel shows a goal's Path. {id}"""
+        from . import mastery
+
+        tree = self.tree()
+        node = self._route_target(tree, body.get("id"))
+        if node is None:
+            return {"error": f"No node {body.get('id')!r}."}
+        states = store.progress(tree)
+        path = mastery.path_families(tree, states, [node["id"]])
+        if node["level"] == "requirement" and not any(r["id"] == node["id"] for f in path for r in f["requirements"]):
+            path.append({"family": node["parent"], "requirements": [{"id": node["id"], "recheck": False}]})  # known already: still there to play
+        return {"target": node["id"], "title": node["title"], "path": self._path_view(path, tree, states)}
+
+    def cmd_goal_quick(self, body: dict) -> dict:
+        """Save the route to one node as the active goal, no planning: {id}. An open goal
+        that already leads there (and nowhere else) is made active instead of saved twice."""
+        from . import planner
+
+        tree = self.tree()
+        node = self._route_target(tree, body.get("id"))
+        if node is None:
+            return {"error": f"No node {body.get('id')!r}."}
+        data = store.load_goals()
+        same = next((g for g in data["goals"] if g["status"] == "active" and g.get("targets") == [node["id"]]), None)
+        if same:
+            return self.cmd_goal_activate({"id": same["id"]})
+        planner.build_goal({"title": node["title"], "kind": "skill", "targets": [node["id"]], "reasons": ["Saved from the map."]},
+                           node["title"], tree, store.progress(tree))
+        return self.publish_goals()
 
     def cmd_goal_plan(self, body: dict) -> dict:
         """Plan a goal in the background (Claude Code on the subscription, a minute or two;
@@ -695,16 +785,34 @@ class AtlasCoach:
         store.save_goals(data)
         return self.publish_goals()
 
-    def next_stop(self) -> dict | None:
+    def next_stop(self, skip: set[str] = frozenset()) -> dict | None:
         """Where the active goal's Path goes next: the first family with work left, its first
-        unfinished requirement, and that requirement's first unfinished stage that has a lesson."""
+        unfinished requirement whose prerequisites on the Path are done (the Path is grouped by
+        family, so a family can come up before a skill it needs from another strand), and that
+        requirement's first unfinished stage that has a lesson. skip: requirements to pass over
+        (already in today's plan)."""
         state = self.goal_state()
-        for fam in state["path"]:
-            for req in fam["requirements"]:
-                for st in req["stages"]:
-                    if st["level"] in ("not_started", "practised") and st["lesson"]:
-                        return {"stage": st["id"], "title": st["title"], "requirement": req["id"],
-                                "requirement_title": req["title"], "family": fam["title"], "goal": state["goal"]["title"]}
+        if not state["goal"]:
+            return None
+        by_id = self.tree()["by_id"]
+        unfinished = {r["id"] for f in state["path"] for r in f["requirements"] if r["level"] not in ("proficient", "mastered")}
+
+        def ready(rid: str) -> bool:
+            for p in by_id.get(rid, {}).get("prereqs", []):
+                node = by_id.get(p, {})
+                if (node.get("requirement") if node.get("level") == "stage" else p) in unfinished - {rid}:
+                    return False
+            return True
+
+        for strict in (True, False):  # if nothing is ready (a cycle, a missing lesson), the first with a lesson
+            for fam in state["path"]:
+                for req in fam["requirements"]:
+                    if req["id"] in skip or (strict and not ready(req["id"])):
+                        continue
+                    for st in req["stages"]:
+                        if st["level"] in ("not_started", "practised") and st["lesson"]:
+                            return {"stage": st["id"], "title": st["title"], "requirement": req["id"],
+                                    "requirement_title": req["title"], "family": fam["title"], "goal": state["goal"]["title"]}
         return None
 
     def cmd_path_next(self, _body: dict) -> dict:
@@ -715,6 +823,37 @@ class AtlasCoach:
                 return {"error": "No goal yet: set one first."}
             return {"error": "Nothing left on this Path with a lesson ready." if state["path"] else "This goal's Path is done."}
         return nxt
+
+    # -- today's session (today.py) -------------------------------------------------------------
+
+    def today_state(self, fresh: bool = False) -> dict:
+        """Today's plan (made now if there's none for today, or {fresh}), with what's done."""
+        plan = today.load()
+        if fresh or not plan or plan.get("day") != today.day():
+            tree = self.tree()
+            plan = today.make(tree, self.states(), self.next_stop, lambda sid: self.lesson(sid) is not None,
+                              library.list_takes(), minutes=today.minutes_wanted(), songs_first=today.loves_songs())
+            today.save(plan)
+        out = today.state(plan, store.graded_steps(self.tree()))
+        goal = self.goal_state()["goal"]
+        out["goal"] = goal["title"] if goal else None
+        return out
+
+    def cmd_today(self, body: dict) -> dict:
+        return self.today_state(fresh=bool(body.get("fresh")))
+
+    def cmd_today_more(self, _body: dict) -> dict:
+        """Keep going: one more new stop from the Path, after everything already planned."""
+        plan = today.load()
+        if not plan or plan.get("day") != today.day():
+            return self.today_state()
+        tree = self.tree()
+        nxt = self.next_stop({p["requirement"] for p in plan["parts"] if p.get("requirement")})
+        if not nxt:
+            return {**self.today_state(), "error": "Nothing more on your Path with a lesson ready."}
+        plan["parts"].append(today.stage_part("new", tree, tree["by_id"][nxt["requirement"]], nxt["stage"]))
+        today.save(plan)
+        return self.today_state()
 
     def context_lines(self) -> list[str]:
         """What the Maestro knows about the Atlas: the goal and its next stop, drills, exams, placement."""
@@ -728,6 +867,11 @@ class AtlasCoach:
             left = sum(len(f["requirements"]) for f in state["path"])
             lines.append(f"Active goal: {state['goal']['title']} ({left} requirements to go)"
                          + (f"; next stop: {nxt['requirement_title']}, {nxt['title']}" if nxt else "") + ".")
+        plan = today.load()
+        if plan and plan.get("day") == today.day():
+            t = today.state(plan, store.graded_steps(self.tree()))
+            lines.append(f"Today's session ({t['minutes']} min planned, {t['practiced_min']:g} practiced so far): "
+                         + "; ".join(f"{p['label']}: {p['title']}{' (done)' if p['done'] else ''}" for p in t["parts"]) + ".")
         made = drills.active()
         if made:
             lines.append("Drills for bars that keep slipping: "

@@ -71,7 +71,7 @@ def test_placement_climbs_then_sets_the_first_failed_grade_as_the_goal(exam_cont
     assert coach.cmd_placement_continue({"seed": 2})["exam"]["tier"] == "g1"
     _sit(coach, good=False)
     done = coach.cmd_placement_state({})["placement"]
-    assert done["status"] == "done" and done["credited"] == ["initial"] and done["goal_tier"] == "g1"
+    assert done["status"] == "done" and done["credited"] == ["first", "ready", "initial"] and done["goal_tier"] == "g1"
     assert done["summary"].startswith("Placed at Grade 1.") and done["summary"] in said[-1]
     assert done["weak"]  # the failed exam's weakest items
 
@@ -94,7 +94,7 @@ def test_placement_steps_down_when_the_first_exam_fails(exam_content):  # noqa: 
     coach.cmd_placement_continue({})
     _sit(coach, good=True)
     done = coach.cmd_placement_state({})["placement"]
-    assert done["status"] == "done" and done["credited"] == ["initial"] and done["goal_tier"] == "g1"
+    assert done["status"] == "done" and done["credited"] == ["first", "ready", "initial"] and done["goal_tier"] == "g1"
     assert [e["tier"] for e in done["exams"]] == ["g1", "initial"]
 
 

@@ -29,7 +29,7 @@ import re
 import sys
 import time
 
-from . import claude_run, content_dir, load_atlas
+from . import claude_run, content_dir, first_steps, load_atlas
 
 GENERATED_KINDS = ("theory",)
 DEFAULT_MODEL = "sonnet"
@@ -52,7 +52,7 @@ STEP = {"type": "object", "additionalProperties": False,
 LESSON_SCHEMA = {"type": "object", "additionalProperties": False,
                  "properties": {"steps": {"type": "array", "items": STEP}}, "required": ["steps"]}
 
-SYSTEM = """You write short lessons for a piano coach's skill tree, which follows a graded piano syllabus (ABRSM-style, British terms: crotchet, quaver, minim, semibreve, stave, bar). The learner is an adult on an 88-key digital piano; the coach hears what they play over MIDI and grades it, shows music on a scrolling sheet, and can play examples.
+SYSTEM = """You write short lessons for a piano coach's skill tree, which follows a graded piano syllabus (ABRSM-style, British terms: crotchet, quaver, minim, semibreve, stave, bar) with American spelling (practice, practiced, color). The learner is an adult on an 88-key digital piano; the coach hears what they play over MIDI and grades it, shows music on a scrolling sheet, and can play examples.
 
 Every fact must be right: note names, key signatures, intervals, note values, terms. Keep to the stated topic and grade; don't use ideas from later grades. Plain, warm, exact language; short sentences.
 
@@ -92,7 +92,7 @@ def targets(atlas: dict, tiers: list[str], node: str | None = None, force: bool 
     folder = content_dir() / "lessons"
     out = []
     for n in atlas["nodes"]:
-        if n["level"] != "stage" or n["kind"] not in GENERATED_KINDS:
+        if n["level"] != "stage" or n["kind"] not in GENERATED_KINDS or n["tier"] in first_steps.OURS:  # written by first_steps
             continue
         if node and node not in (n["id"], n["requirement"]):
             continue

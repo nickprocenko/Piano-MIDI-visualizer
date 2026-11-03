@@ -15,6 +15,8 @@ MODEL = "base.en"
 # Words Whisper should expect, so "Rehearse" and "F sharp" come out right.
 HINT = ("Piano practice with the Maestro: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, "
         "left hand, right hand, hands together, F sharp, B flat, D major scale, arpeggio, metronome.")
+FLUTE_HINT = ("Maestro, flute practice: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, long tones, "
+              "tonguing, slurred, F sharp, B flat, G major scale, E minor, arpeggio, a twelfth, metronome, Roadmap, write me.")
 
 _lock = threading.Lock()
 _model = None
@@ -65,6 +67,12 @@ def decode(audio: bytes):
     return np.concatenate(chunks).astype(np.float32) / 32768.0
 
 
+def _hint() -> str:
+    from . import profiles
+
+    return FLUTE_HINT if profiles.instrument() == "flute" else HINT
+
+
 def transcribe(audio: bytes) -> str:
     if not audio:
         return ""
@@ -72,5 +80,5 @@ def transcribe(audio: bytes) -> str:
     if samples.size < 16000 * 0.3:  # under a third of a second: nothing said
         return ""
     with _lock:
-        segments, _ = _load().transcribe(samples, language="en", beam_size=1, vad_filter=True, initial_prompt=HINT)
+        segments, _ = _load().transcribe(samples, language="en", beam_size=1, vad_filter=True, initial_prompt=_hint())
         return " ".join(s.text.strip() for s in segments).strip()

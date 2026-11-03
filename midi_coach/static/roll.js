@@ -1,0 +1,271 @@
+// Falling notes: the web visualizer's view of a piece, on the coach page as an option to the
+// sheet (View: Sheet / Falling notes / Both). The score's notes fall onto a keyboard as the
+// coach's cursor moves, in the visualizer's hand colours; hits turn green and misses red as the
+// run grades them, and the keys you hold light up (green if the piece wants them, red if not).
+// It reads the same event stream as the sheet: the notes come with GET score
+// ([beat, length in beats, pitch, role]); cursorBeat, marks, heat, flash, session and keys
+// arrive through coachRoll.event().
+"use strict";
+window.coachRoll = (() => {
+  const canvas = document.getElementById('roll');
+  const ctx = canvas.getContext('2d');
+  // Right / left as the visualizer draws them (its Learn Mode channel colours)
+  const COLORS = {right: [0, 230, 230], left: [180, 80, 255], pedals: [255, 170, 60], vocals: [240, 120, 200]};
+  const OTHER = [150, 160, 180];
+  const HIT = [21, 154, 60], MISS = [212, 32, 32];
+  const EASE_MS = {steady: 300, learn: 150}, SNAP_BEATS = {steady: 0.5, learn: 8};  // as in notation.html
+  const BLACK = new Set([1, 3, 6, 8, 10]);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('coach.roll.' + k); return v === null ? d : v; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('coach.roll.' + k, v); } catch (e) {} },
+  };
+
+  let notes = [], bars = [], heat = [], maxLen = 4, lo = 48, hi = 84;
+  let byPitch = new Map();
+  let hidden = new Set(), played = new Set(['right', 'left', 'pedals', 'vocals']);
+  let held = new Set();
+  let flash = null;
+  let span = Math.max(2, Math.min(32, Number(store.get('beats', '8')) || 8));  // beats between the top and the keys
+  // The cursor, moving the way the sheet's does: at bps from target, parking at until (Learn),
+  // with a short ease from where it was drawn so a correction never jolts.
+  const cur = {target: 0, bps: 0, at: 0, until: null, ease: EASE_MS.learn, offset: 0, seen: false};
+  let shown = false, raf = 0, width = 0, height = 0;
+
+  function cursorBase(now) {
+    if (!(cur.bps > 0)) return cur.target;
+    const at = cur.target + cur.bps * (now - cur.at) / 1000;
+    return cur.until === null ? at : Math.min(at, cur.until);
+  }
+  function cursorAt(now) {
+    const t = (now - cur.at) / cur.ease;
+    return cursorBase(now) + cur.offset * (t >= 1 ? 0 : 0.5 * (1 + Math.cos(Math.PI * t)));
+  }
+
+  function score(payload) {
+    notes = (payload.notes || []).map(([b, d, p, role]) => ({b, d, p, role, mark: ''}))
+      .sort((x, y) => x.b - y.b || x.p - y.p);
+    bars = payload.bars || [];
+    heat = [];
+    byPitch = new Map();
+    for (const n of notes) {
+      if (!byPitch.has(n.p)) byPitch.set(n.p, []);
+      byPitch.get(n.p).push(n);
+    }
+    maxLen = notes.reduce((m, n) => Math.max(m, n.d), 1);
+    // The keyboard spans the piece in whole octaves, three at least, within the 88 keys.
+    const pitches = notes.map(n => n.p);
+    lo = pitches.length ? Math.min(...pitches) : 48;
+    hi = pitches.length ? Math.max(...pitches) : 84;
+    lo = Math.max(21, lo - lo % 12);
+    hi = Math.min(108, hi + 11 - hi % 12);
+    while (hi - lo < 35) {
+      if (hi < 108) hi = Math.min(108, hi + 12);
+      else if (lo > 21) lo = Math.max(21, lo - 12);
+      else break;
+    }
+    if (!cur.seen && notes.length) cur.target = notes[0].b;
+  }
+
+  function findNote(beat, pitch) {
+    let best = null;
+    for (const n of byPitch.get(pitch) || []) {
+      const off = Math.abs(n.b - beat);
+      if (off < 0.02 && (!best || off < Math.abs(best.b - beat))) best = n;
+    }
+    return best;
+  }
+
+  function event(m) {
+    const now = performance.now();
+    if (m.type === 'cursorBeat') {
+      const drawn = cur.seen ? cursorAt(now) : null;
+      cur.seen = true;
+      cur.target = m.beat; cur.bps = m.bps || 0; cur.at = now;
+      cur.until = typeof m.until === 'number' ? m.until : null;
+      const steady = cur.bps > 0 && cur.until === null;  // Rehearse / Listen: moving at tempo
+      cur.ease = steady ? EASE_MS.steady : EASE_MS.learn;
+      cur.offset = drawn === null ? 0 : drawn - cursorBase(now);
+      if (Math.abs(cur.offset) > (steady ? SNAP_BEATS.steady : SNAP_BEATS.learn)) cur.offset = 0;
+    } else if (m.type === 'session' && !m.active) {
+      cur.target = cursorAt(now); cur.at = now; cur.bps = 0; cur.until = null; cur.offset = 0;
+    } else if (m.type === 'marks') {
+      if (m.reset) notes.forEach(n => { n.mark = ''; });
+      for (const k of m.marks || []) {
+        const n = findNote(k.beat, k.pitch);
+        if (n) n.mark = k.status;
+      }
+    } else if (m.type === 'heat') {
+      heat = m.bars || [];
+    } else if (m.type === 'flash') {
+      flash = {text: '✗ ' + m.text, until: now + 700};
+    } else if (m.type === 'keys') {
+      held = new Set(m.on || []);
+    }
+  }
+
+  // What's shown (the Parts menu's Show boxes) and what you play (the rest is drawn faint).
+  function parts(hiddenRoles, playedRoles) {
+    hidden = new Set(hiddenRoles || []);
+    played = new Set(playedRoles || []);
+  }
+
+  function show(on) {
+    shown = !!on;
+    if (shown && !raf) raf = requestAnimationFrame(frame);
+  }
+
+  // -- drawing ---------------------------------------------------------------
+
+  function keyboard(keyH) {
+    let whites = 0;
+    for (let p = lo; p <= hi; p++) if (!BLACK.has(p % 12)) whites++;
+    const ww = width / whites, bw = ww * 0.6;
+    const keys = new Map();
+    let i = 0;
+    for (let p = lo; p <= hi; p++) {
+      if (BLACK.has(p % 12)) keys.set(p, {x: i * ww - bw / 2, w: bw, black: true, h: keyH * 0.62});
+      else keys.set(p, {x: i++ * ww, w: ww, black: false, h: keyH});
+    }
+    return keys;
+  }
+
+  const rgb = (c, a = 1) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+  const lighter = (c, k) => c.map(v => Math.min(255, v + k));
+  const roleColor = role => COLORS[role] || OTHER;
+
+  function noteColor(n) {
+    return n.mark === 'hit' ? HIT : n.mark === 'missed' ? MISS : roleColor(n.role);
+  }
+
+  function draw(now) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    }
+    width = w; height = h;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#0f0f14';
+    ctx.fillRect(0, 0, w, h);
+    if (!notes.length) {
+      ctx.fillStyle = '#8d93a8';
+      ctx.font = '15px "Segoe UI", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Pick a song or lesson to see its notes fall onto the keys.', w / 2, h / 2);
+      return;
+    }
+    let whites = 0;
+    for (let p = lo; p <= hi; p++) if (!BLACK.has(p % 12)) whites++;
+    const keyH = Math.max(50, Math.min(h * 0.26, (w / whites) * 5.2));
+    const floor = h - keyH;
+    const ppb = floor / span;  // pixels per beat
+    const beat = cursorAt(now);
+    const keys = keyboard(keyH);
+    const yOf = b => floor - (b - beat) * ppb;
+
+    // Bars that went badly (the heat map), then bar lines with their numbers
+    for (const b of heat) {
+      const top = Math.max(0, yOf(b.end)), bottom = Math.min(floor, yOf(b.start));
+      if (bottom > top && b.value > 0) { ctx.fillStyle = `rgba(212,32,32,${0.06 + 0.16 * b.value})`; ctx.fillRect(0, top, w, bottom - top); }
+    }
+    ctx.font = '11px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'left';
+    for (const bar of bars) {
+      const y = yOf(bar.start_beat);
+      if (y > floor || y < 0) continue;
+      ctx.fillStyle = 'rgba(255,255,255,.09)';
+      ctx.fillRect(0, Math.round(y), w, 1);
+      ctx.fillStyle = 'rgba(141,147,168,.75)';
+      ctx.fillText(String(bar.number), 6, y - 4);
+    }
+
+    // The notes in view: white keys' first, so the black keys' notes sit on top
+    const guide = new Map();  // pitch -> colour of the note due now, lit on its key
+    const first = lowerBound(beat - maxLen);
+    for (const blackPass of [false, true]) {
+      for (let i = first; i < notes.length; i++) {
+        const n = notes[i];
+        if (n.b > beat + span) break;
+        if (n.b + n.d < beat || hidden.has(n.role)) continue;
+        const k = keys.get(n.p);
+        if (!k || k.black !== blackPass) continue;
+        const mine = played.has(n.role);
+        const bottom = Math.min(floor, yOf(n.b)), top = Math.max(0, yOf(n.b + n.d));
+        if (mine && n.b <= beat + 0.05 && n.mark !== 'missed' && !guide.has(n.p)) guide.set(n.p, noteColor(n));
+        if (bottom - top < 1) continue;
+        const c = noteColor(n);
+        const due = n.mark === 'pending';
+        ctx.globalAlpha = !mine ? 0.22 : due ? 0.95 : n.mark ? 0.8 : 0.6;
+        ctx.fillStyle = rgb(c);
+        ctx.beginPath(); ctx.roundRect(k.x + 1, top, k.w - 2, bottom - top, 3); ctx.fill();
+        if (due) {
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = rgb(lighter(c, 90));
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // The keys: held ones green when the piece wants them now, red when it doesn't; the
+    // notes due now tinted in their hand's colour, so you can see what to play.
+    const wanted = p => (byPitch.get(p) || []).some(n => !hidden.has(n.role) && n.b - 0.25 <= beat && beat <= n.b + n.d);
+    const keyFill = (p, k) => {
+      if (held.has(p)) return rgb(wanted(p) ? HIT : MISS);
+      const g = guide.get(p);
+      if (g) return rgb(k.black ? g : lighter(g, 70));
+      return k.black ? '#1a1b22' : '#e9eaf0';
+    };
+    for (const [p, k] of keys) {
+      if (k.black) continue;
+      ctx.fillStyle = keyFill(p, k);
+      ctx.fillRect(k.x + 0.5, floor, k.w - 1, k.h);
+      if (p % 12 === 0) {  // C, with its octave, for finding your place
+        ctx.fillStyle = 'rgba(20,22,30,.55)';
+        ctx.font = `${Math.max(9, Math.min(12, k.w * 0.45))}px "Segoe UI", Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('C' + (p / 12 - 1), k.x + k.w / 2, floor + k.h - 6);
+      }
+    }
+    for (const [p, k] of keys) {
+      if (!k.black) continue;
+      ctx.fillStyle = keyFill(p, k);
+      ctx.beginPath(); ctx.roundRect(k.x, floor, k.w, k.h, [0, 0, 3, 3]); ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(0,180,180,.85)';  // the line the notes are played on
+    ctx.fillRect(0, floor - 1, w, 2);
+
+    if (flash && now < flash.until) {
+      ctx.globalAlpha = Math.min(1, (flash.until - now) / 200);
+      ctx.fillStyle = '#d42020';
+      ctx.font = '600 22px "Segoe UI", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(flash.text, w / 2, floor - 14);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function lowerBound(beat) {
+    let a = 0, b = notes.length;
+    while (a < b) { const m = (a + b) >> 1; if (notes[m].b < beat) a = m + 1; else b = m; }
+    return a;
+  }
+
+  function frame(now) {
+    raf = 0;
+    if (!shown) return;
+    draw(now);
+    raf = requestAnimationFrame(frame);
+  }
+
+  // Scroll to change how much music is in view (how fast the notes fall).
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    span = Math.max(2, Math.min(32, span * (e.deltaY > 0 ? 1.15 : 1 / 1.15)));
+    store.set('beats', span.toFixed(2));
+  }, {passive: false});
+
+  return {score, event, parts, show};
+})();

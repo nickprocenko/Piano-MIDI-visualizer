@@ -111,8 +111,10 @@ def _fit(points: list[tuple[float, float]], previous: float, low: float, high: f
     return mb - slope * mt, slope
 
 
-def track(notes: list[Note], file_bpm: float) -> tuple[BeatMap, dict] | None:
-    """Follow the beat through the notes. Returns (map, quality) or None if it doesn't lock."""
+def track(notes: list[Note], file_bpm: float, force: bool = False) -> tuple[BeatMap, dict] | None:
+    """Follow the beat through the notes. Returns (map, quality) or None if it doesn't lock.
+    With force (the user asked for an auto clean), a map that follows the playing but fails
+    the quality checks is returned anyway; None then only means too few notes to follow."""
     points = onsets(notes)
     if len(points) < 16:
         return None
@@ -153,10 +155,82 @@ def track(notes: list[Note], file_bpm: float) -> tuple[BeatMap, dict] | None:
     steady = sum(c < 0.03 for c in changes) / len(changes) if changes else 0.0
     quality = {"median_ms": round(statistics.median(errors_ms), 1), "within_35ms": round(good, 3), "onsets": len(points),
                "tempo_wobble_pct": round(100 * statistics.median(changes), 1) if changes else None, "steady": round(steady, 2)}
-    if quality["median_ms"] > GOOD_MEDIAN_MS or good < GOOD_SHARE or not changes \
-            or statistics.median(changes) > MAX_WOBBLE or steady < MIN_STEADY:
+    if not force and (quality["median_ms"] > GOOD_MEDIAN_MS or good < GOOD_SHARE or not changes
+                      or statistics.median(changes) > MAX_WOBBLE or steady < MIN_STEADY):
         return None
     return beat_map, quality
+
+
+SWEEP_BPM = (50.0, 200.0)  # starting tempos tried by Auto clean, 4% apart
+SWEEP_STEP = 1.04
+CLOSE_FIT = 0.05  # maps fitting this close to the best are all offered, to be told apart by their sheets
+FREE_CHOICES = 3
+DOUBLED = 1.8  # a map this much faster or slower is the same beat doubled or halved, not another reading
+
+
+def track_free(notes: list[Note], file_bpm: float) -> list[tuple[BeatMap, dict]]:
+    """Auto clean: follow the beat of playing whose file tempo says nothing about it (a live
+    recording saved at a default 120 BPM, say). The tracker only bends its tempo a little
+    per chord, so started at the wrong one it reads eighths as dotted eighths for good; so
+    every starting tempo is tried and the maps that fit the notes best on the steadiest
+    beat come first, the one nearest the file's tempo on a tie (a beat twice as fast fits
+    as well). Returns up to FREE_CHOICES different maps that fit about as well as the best,
+    best first, so the caller can keep the one whose sheet reads best; empty if none locks."""
+    import math
+
+    found_all: list[tuple[tuple, tuple[BeatMap, dict]]] = []
+    bpm = SWEEP_BPM[0]
+    while bpm <= SWEEP_BPM[1]:
+        found = track(notes, bpm, force=True)
+        if found:
+            q = found[1]
+            wobble = q["tempo_wobble_pct"] if q["tempo_wobble_pct"] is not None else 100.0
+            found_all.append(((round(q["within_35ms"] - wobble / 100, 2), -abs(math.log(bpm / file_bpm))), found))
+        bpm *= SWEEP_STEP
+    found_all.sort(key=lambda f: f[0], reverse=True)
+    if not found_all:
+        return []
+
+    def speed(m: BeatMap) -> float:
+        return (m.beats[-1] - m.beats[0]) / max(m.secs[-1] - m.secs[0], 1e-6)
+
+    points = onsets(notes)
+    best_fit, best_speed = found_all[0][0][0], speed(found_all[0][1][0])
+    out, seen = [], set()
+    for key, (beat_map, quality) in found_all:
+        ratio = speed(beat_map) / best_speed
+        if key[0] < best_fit - CLOSE_FIT or not 1 / DOUBLED < ratio < DOUBLED:
+            continue
+        written = tuple(round(snap(beat_map.beat_at(t)), 3) for t, _ in points)  # many starts end on one map
+        if written not in seen:
+            seen.add(written)
+            out.append((beat_map, quality))
+        if len(out) == FREE_CHOICES:
+            break
+    return out
+
+
+def rhythm_cost(beats: list[float]) -> float:
+    """How fussy the rhythms written on a grid are: per onset, 0 on a beat, 1 on an off-beat
+    eighth, 2 on a sixteenth or triplet. Read at a wrong tempo, plain eighths come out as
+    dotted eighths and sixteenths tied across the beat: no one note breaks an engraving
+    rule, but the bar is much harder to read. Only meaningful between readings of the same
+    playing (real syncopation costs too)."""
+    def cost(b: float) -> int:
+        f = b % 1
+        return 0 if min(f, 1 - f) < 1e-6 else 1 if abs(f - 0.5) < 1e-6 else 2
+
+    starts = sorted({round(b, 4) for b in beats})
+    return sum(map(cost, starts)) / len(starts) if starts else 0.0
+
+
+def file_grid_share(score: Score) -> float:
+    """Share of onsets within 35 ms of the file's own grid: what a forced map must beat."""
+    points = onsets(score.notes)
+    if not points:
+        return 1.0
+    errors_ms = [abs(b - snap(b)) * 60 / score.bpm_at(t) * 1000 for t, b in points]
+    return sum(e <= 35 for e in errors_ms) / len(errors_ms)
 
 
 def _weight(n: Note, beat_map: BeatMap) -> float:

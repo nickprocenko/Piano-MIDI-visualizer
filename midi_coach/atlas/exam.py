@@ -224,7 +224,7 @@ class ExamSession:
         lead = ""
         if k == 0:
             lead = (f"Hello. This is a mock {self.data['title'].replace(' mock exam', '')} exam, marked the way an "
-                    "examiner would, though not by an exam board. We'll start with your pieces. ")
+                    "examiner would. We'll start with your pieces. ")
         elif first_of_section and task["section"] == "scales":
             lead = "Thank you. Now some scales and arpeggios, from memory. "
         elif first_of_section and task["section"] == "aural":

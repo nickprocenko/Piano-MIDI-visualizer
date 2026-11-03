@@ -130,6 +130,7 @@ def grand_staff(
     composer: str | None = None,
     clef_every: Fraction | None = None,
     pickup: Fraction | None = None,
+    dynamics: list[tuple[Fraction, str]] | None = None,
 ) -> dict:
     """Write (hand, onset beat, end beat, pitch) events as a two-staff piano score; events
     whose hand is 'pedals' (a bass line played with the feet) get a third staff below.
@@ -151,11 +152,13 @@ def grand_staff(
     beats instead of per bar (a scale running four octaves inside one bar changes clef as it
     climbs). pickup: the music starts with an upbeat this many beats long - written as a
     short bar 0 (implicit in MusicXML), bars numbered from 1 after it, as printed music does.
+    dynamics: [(beat, "mf"), ...] marks for the piano, written once under the right hand
+    (between the staves, where piano music puts them).
     Returns {xml, bars, notes, key, keys: [(bar, key signature sharps)]}.
     """
     import bisect
 
-    from music21 import chord, clef, key as m21key, metadata, meter, note, stream, tempo, tie
+    from music21 import chord, clef, dynamics as m21dynamics, key as m21key, metadata, meter, note, stream, tempo, tie
     from music21.musicxml.m21ToXml import GeneralObjectExporter
 
     if not events and not melody:
@@ -168,6 +171,7 @@ def grand_staff(
         events = [(h, on + shift, end + shift, p) for h, on, end, p in events]
         tune = [(on + shift, end + shift, p, lyric) for on, end, p, lyric in tune]
         tempo_marks = [(at + shift if at else at, bpm) for at, bpm in tempo_marks or []]
+        dynamics = [(at + shift, mark) for at, mark in dynamics or []]
         if not isinstance(time_signature, str):
             time_signature = [(at + shift if at else at, sig) for at, sig in sorted(time_signature)]
     last = max([e[2] for e in events] + [m[1] for m in tune])
@@ -255,13 +259,16 @@ def grand_staff(
             spans = [Fraction(k) * clef_every for k in range(int(total / clef_every) + 1)]
             clef_at = _clefs(hand, hand_events, lambda at: min(int(at // clef_every), len(spans) - 1), spans)
         else:
-            clef_at = _clefs(hand, hand_events, bar_of, bar_starts)
+            clef_at = _clefs(hand, hand_events, bar_of, bar_starts, CLEF_MIN_BARS)
         for at, name in clef_at:
             part.insert(at, clef.TrebleClef() if name == "treble" else clef.BassClef())
         meters_and_keys(part)
         if hand == "right" and not tune:
             for at, bpm in tempo_marks or []:
                 part.insert(at, tempo.MetronomeMark(number=round(bpm)))
+        if hand == "right":
+            for at, mark in dynamics or []:
+                part.insert(at, m21dynamics.Dynamic(mark))
         voices = _voices(hand_events)
         for k, notes_in_voice in enumerate(voices):
             target = part if len(voices) == 1 else stream.Voice(id=str(k + 1))
@@ -364,6 +371,7 @@ PLAIN_TYPES = ("whole", "half", "quarter", "eighth", "16th")  # note values a pi
 HELD_BEATS = 2  # a note still sounding this long after the hand's next chord gets a voice of its own
 LEDGER_LIMIT = 3  # ledger lines a note may have before its bar should be in the other clef
 CLEF_CHANGE_COST = 4.0  # ledger lines a clef change must save to be worth writing
+CLEF_MIN_BARS = 8  # a clef kept for fewer bars is written only if the notes can't be read without it
 _STAFF = {"treble": (31, 38), "bass": (19, 26)}  # diatonic numbers of the bottom and top lines (E4-F5, G2-A3)
 
 
@@ -375,23 +383,39 @@ def _ledger_lines(midi: int, clef_name: str) -> int:
     return (low - d) // 2 if d < low else (d - high) // 2 if d > high else 0  # a note in a space needs no extra line
 
 
-def _clefs(hand: str, events: list[tuple[Fraction, Fraction, int]], bar_of, bar_starts: list[Fraction]) -> list[tuple[Fraction, str]]:
+def _readable(notes: list[tuple[Fraction, int]], clef_name: str) -> bool:
+    """Whether (onset, pitch) notes read in this clef by the engraving lint's ledger-lines
+    rule: none on five or more ledger lines, never three chords in a row on four."""
+    worst: dict[Fraction, int] = {}
+    for on, p in notes:
+        worst[on] = max(worst.get(on, 0), _ledger_lines(p, clef_name))
+    row = 0
+    for on in sorted(worst):
+        row = row + 1 if worst[on] == 4 else 0
+        if worst[on] > 4 or row == 3:
+            return False
+    return True
+
+
+def _clefs(hand: str, events: list[tuple[Fraction, Fraction, int]], bar_of, bar_starts: list[Fraction],
+           min_run: int = 0) -> list[tuple[Fraction, str]]:
     """(offset, 'treble' | 'bass') for a hand's staff, bar by bar: the clef that keeps its
     notes nearest the staff. A bar scores each clef by its notes' ledger lines - a note more
     than LEDGER_LIMIT lines off costs ten more - and the clef only changes where that saves
-    more than CLEF_CHANGE_COST (Viterbi over the bars), so one low note in a high bar, or a
-    hand dropping low for two bars, gets the bass clef without the staff flickering. Ties go
-    to the hand's own clef."""
+    more than CLEF_CHANGE_COST (Viterbi over the bars), so one low note in a high bar gets the
+    bass clef without the staff flickering. Ties go to the hand's own clef. min_run: a clef
+    kept for fewer bars goes back to the one around it when its notes read there (engraving's
+    brief-clef-change), so a hand dipping low for a few bars is read on ledger lines."""
     home = "treble" if hand == "right" else "bass"
-    by_bar: dict[int, list[int]] = {}
+    by_bar: dict[int, list[tuple[Fraction, int]]] = {}
     for on, _, p in events:
-        by_bar.setdefault(bar_of(on), []).append(p)
+        by_bar.setdefault(bar_of(on), []).append((on, p))
     kinds = ("treble", "bass")
     rows = []
     for b in range(len(bar_starts)):
         row = {}
         for k in kinds:
-            lines = [_ledger_lines(p, k) for p in by_bar.get(b, [])]
+            lines = [_ledger_lines(p, k) for _, p in by_bar.get(b, [])]
             row[k] = sum(n + (10 if n > LEDGER_LIMIT else 0) for n in lines) + (0 if k == home else 0.1 * len(lines))
         rows.append(row)
     cost = {k: rows[0][k] + (0 if k == home else 0.5) for k in kinds}
@@ -411,6 +435,24 @@ def _clefs(hand: str, events: list[tuple[Fraction, Fraction, int]], bar_of, bar_
         k = step[k]
         path.append(k)
     path.reverse()
+    changed = True
+    while min_run and changed:  # shortest brief clef first: undoing it can merge its neighbours
+        changed = False
+        runs, b = [], 0
+        while b < len(path):
+            e = b
+            while e < len(path) and path[e] == path[b]:
+                e += 1
+            runs.append((b, e))
+            b = e
+        for b, e in sorted(runs, key=lambda r: r[1] - r[0]) if len(runs) > 1 else ():
+            if e - b >= min_run:
+                break
+            around = path[b - 1] if b else path[e]
+            if _readable([n for x in range(b, e) for n in by_bar.get(x, [])], around):
+                path[b:e] = [around] * (e - b)
+                changed = True
+                break
     return [(bar_starts[b] if b else Fraction(0), k) for b, k in enumerate(path) if b == 0 or k != path[b - 1]]
 
 
@@ -597,9 +639,10 @@ def _correlation(xs: list[float], ys: list[float]) -> float:
 
 def _ottavas(part) -> int:
     """Write runs of notes more than LEDGER_LIMIT ledger lines off the staff an octave nearer,
-    under 8vb (low) or 8va (high), as printed music does: F1 drawn as F2 with '8vb'. The file
-    keeps the true pitch (MusicXML <octave-shift>), so the coach still grades F1. Returns how
-    many notes moved."""
+    under 8vb (low) or 8va (high), as printed music does: F1 drawn as F2 with '8vb'; two
+    octaves (15mb / 15ma) for a long note one octave doesn't bring back, like a held C0. The file keeps
+    the true pitch (MusicXML <octave-shift>), so the coach still grades F1. Returns how many
+    notes moved."""
     from music21 import spanner
 
     def staff_of(el) -> tuple[str, int]:
@@ -620,15 +663,15 @@ def _ottavas(part) -> int:
                 worst, side = n, ("low" if d < low else "high")
         return worst, side
 
-    def fits_moved(el, side) -> bool:
-        """Still readable drawn an octave nearer: on the staff's side of its middle line
+    def fits_moved(el, side, octaves=1) -> bool:
+        """Still readable drawn `octaves` nearer: on the staff's side of its middle line
         before, and within LEDGER_LIMIT lines of the other side after."""
         kind, shift = staff_of(el)
         low, high = _STAFF[kind]
         middle = (low + high) / 2
         for p in el.pitches:
             drawn = p.diatonicNoteNum + shift
-            d = drawn + (7 if side == "low" else -7)
+            d = drawn + (7 if side == "low" else -7) * octaves
             if (side == "low" and drawn > middle) or (side == "high" and drawn < middle):
                 return False
             if (d - high) // 2 > LEDGER_LIMIT or (low - d) // 2 > LEDGER_LIMIT:
@@ -639,7 +682,7 @@ def _ottavas(part) -> int:
         """Runs of notes needing an octave mark, merged across notes between them that read
         fine moved too, when the gap is within a bar: one 8vb over a low passage, not one per
         note."""
-        found: list[list] = []  # [first index, last index, side, notes beyond the limit, most lines]
+        found: list[list] = []  # [first index, last index, side, notes beyond the limit, most lines, octaves]
         for i, el in enumerate(seq):
             if el.isRest:
                 continue
@@ -648,35 +691,52 @@ def _ottavas(part) -> int:
                 continue
             kind, shift = staff_of(el)
             low, high = _STAFF[kind]
-            moved = [p.diatonicNoteNum + shift + (7 if s == "low" else -7) for p in el.pitches]
-            if any((low - d) // 2 > LEDGER_LIMIT + 1 or (d - high) // 2 > LEDGER_LIMIT + 1 for d in moved):
+            middle = (low + high) / 2
+            if any((p.diatonicNoteNum + shift > middle) if s == "low" else (p.diatonicNoteNum + shift < middle) for p in el.pitches):
+                continue  # a chord reaching across the staff (B2 under D5): the mark would push its other notes off it
+            # Two octaves only for a long note out there on its own (a held C0); in a fast run
+            # it would pile up on the run's own 8va / 8vb marks.
+            held = el.duration.quarterLength >= 2 or el.tie is not None
+            for octaves in (1, 2) if held else (1,):
+                moved = [p.diatonicNoteNum + shift + (7 if s == "low" else -7) * octaves for p in el.pitches]
+                if not any((low - d) // 2 > LEDGER_LIMIT + 1 or (d - high) // 2 > LEDGER_LIMIT + 1 for d in moved):
+                    break
+            else:
                 continue  # a chord spanning both ways (D2 under A4): an octave mark would only move the problem
-            if found and found[-1][2] == s:
+            new_note = int(el.tie is None or el.tie.type == "start")  # a held note counts once
+            if found and found[-1][2] == s and found[-1][5] == octaves:
                 a, b = found[-1][:2]
                 between = [x for x in seq[b + 1:i] if not x.isRest]
                 near = el.getOffsetInHierarchy(part) - seq[b].getOffsetInHierarchy(part) <= 4
-                if near and all(fits_moved(x, s) for x in between):
-                    found[-1][1], found[-1][3], found[-1][4] = i, found[-1][3] + 1, max(found[-1][4], n)
+                if near and all(fits_moved(x, s, octaves) for x in between):
+                    found[-1][1], found[-1][3], found[-1][4] = i, found[-1][3] + new_note, max(found[-1][4], n)
                     continue
-            found.append([i, i, s, 1, n])
-        for a, b, s, count, most in found:
+            found.append([i, i, s, new_note, n, octaves])
+        for a, b, s, count, most, octaves in found:
             # A lone note on four ledger lines reads fine (an F1 in the bass); an octave mark is
             # for a note further out, or a passage down there.
             if most > LEDGER_LIMIT + 1 or count >= 3:
-                yield [x for x in seq[a:b + 1] if not x.isRest], s
+                yield [x for x in seq[a:b + 1] if not x.isRest], s, octaves
 
     voices: dict[str, list] = {}
     for m in part.getElementsByClass("Measure"):
         for v in (m.voices or [m]):
             key = str(v.id) if v is not m else "1"
             voices.setdefault(key, []).extend(x for x in v.notesAndRests if not x.duration.isGrace)
+    onsets = {key: [float(x.getOffsetInHierarchy(part)) for x in seq if not x.isRest] for key, seq in voices.items()}
     moved = 0
-    for seq in voices.values():
-        for run, side in runs(seq):
+    for key, seq in voices.items():
+        for run, side, octaves in runs(seq):
+            start = float(run[0].getOffsetInHierarchy(part))
+            end = float(run[-1].getOffsetInHierarchy(part)) + run[-1].duration.quarterLength
+            if any(start <= at < end for other, ats in onsets.items() if other != key for at in ats):
+                continue  # an octave mark covers the whole staff: it would move the other voice's notes too
+            interval = "P8" if octaves == 1 else "P15"
             for el in run:
-                el.transpose("P8" if side == "low" else "-P8", inPlace=True)  # where it is drawn
+                el.transpose(interval if side == "low" else "-" + interval, inPlace=True)  # where it is drawn
                 moved += len(el.pitches)
-            part.insert(0, spanner.Ottava(run, type="8vb" if side == "low" else "8va", transposing=True))
+            mark = ("8v" if octaves == 1 else "15m") + ("b" if side == "low" else "a")
+            part.insert(0, spanner.Ottava(run, type=mark, transposing=True))
     return moved
 
 
@@ -696,7 +756,8 @@ def _print_accidentals(part) -> None:
         its own (an A4 natural drawn where an earlier A3 natural sits still shows it)."""
         for sp in el.getSpannerSites():
             if type(sp).__name__ == "Ottava":
-                return 1 if str(sp.type).startswith(("8va", "15ma")) else -1
+                octaves = 2 if str(sp.type).startswith("15") else 1
+                return octaves if str(sp.type).startswith(("8va", "15ma")) else -octaves
         return 0
 
     key_alter: dict[str, float] = {}

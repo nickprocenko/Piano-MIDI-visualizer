@@ -1,11 +1,6 @@
 @echo off
+title Music Coach
 cd /d "%~dp0"
-
-rem ── Already running? Just show the page (a second copy would fight it for the keyboard) ──
-curl.exe -s -o nul --max-time 2 http://127.0.0.1:8765/ && (
-    start "" http://127.0.0.1:8765/
-    exit /b 0
-)
 
 rem ── First-run setup: create venv if it doesn't exist ──────────────────────
 if not exist ".venv\Scripts\python.exe" (
@@ -26,7 +21,8 @@ if not exist ".venv\Scripts\python.exe" (
     echo [Setup] Done!
 )
 
-rem ── Launch the practice page (close this window to quit) ────────────────────
-rem Don't run it while Claude Desktop's midi-coach is open: both want the keyboard.
-".venv\Scripts\python.exe" -m midi_coach.practice %*
+rem ── Open the practice page (close this window to quit) ──────────────────────
+rem Already running and up to date: it just shows the page. Running but older than the code:
+rem a practice copy is restarted; Claude Desktop's midi-coach gets a message instead.
+".venv\Scripts\python.exe" -m midi_coach.launch %*
 if errorlevel 1 pause

@@ -156,6 +156,12 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .lhud-lmarker::before{content:'';position:absolute;top:-4px;left:-4px;right:-4px;bottom:-4px}
 #lhud-lm-start{background:rgba(0,220,130,.95);box-shadow:0 0 6px rgba(0,220,130,.6)}
 #lhud-lm-end{background:rgba(230,80,80,.95);box-shadow:0 0 6px rgba(230,80,80,.6)}
+/* "Loop start" / "Loop end" tags over the markers (drag them too); the row makes room for them */
+.lhud-ltag{position:absolute;bottom:calc(100% + 9px);left:0;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;line-height:14px;white-space:nowrap;cursor:ew-resize;display:none;touch-action:none;user-select:none}
+#lhud-timeline:has(.lhud-lmarker.visible) .lhud-ltag{display:block}
+#lhud-timeline-row:has(.lhud-lmarker.visible){padding-top:30px}
+#lhud-lt-start{background:rgba(0,220,130,.95);color:#04140c}
+#lhud-lt-end{background:rgba(230,80,80,.95);color:#fff}
 /* Timeline hover tooltip */
 #lhud-timeline-tip{position:absolute;bottom:calc(100% + 10px);background:rgba(10,12,18,.92);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;pointer-events:none;opacity:0;transition:opacity .1s;white-space:nowrap;transform:translateX(-50%)}
 #lhud-timeline-row:hover #lhud-timeline-tip{opacity:1}
@@ -193,6 +199,27 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .track-route input[type=range]{width:70px;accent-color:var(--accent)}
 .snd-out{font-size:12px;color:var(--on-color);margin-bottom:4px}
 .snd-out.none{color:var(--muted)}
+.inst-seg{display:flex;gap:8px;margin-bottom:4px}
+.inst-seg button{flex:1;padding:12px 8px;border:1px solid var(--border);border-radius:6px;background:var(--btn-bg);color:var(--muted);cursor:pointer;font:600 12px inherit;font-family:inherit;display:flex;flex-direction:column;gap:3px;align-items:center}
+.inst-seg button small{font-weight:400;font-size:10px;opacity:.8}
+.inst-seg button.active,.inst-card.active{border-color:var(--accent);color:var(--accent);background:rgba(0,180,180,.08)}
+.inst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
+.inst-card{padding:8px 4px;border:1px solid var(--border);border-radius:6px;background:var(--btn-bg);color:var(--text);cursor:pointer;font-size:11px;font-family:inherit;display:flex;flex-direction:column;align-items:center;gap:2px}
+.inst-card span{font-size:20px;line-height:1.1}
+.inst-meter{display:flex;align-items:center;gap:14px;margin-top:10px}
+.inst-note{font-size:30px;font-weight:700;min-width:84px;font-variant-numeric:tabular-nums}
+.inst-bars{flex:1;display:flex;flex-direction:column;gap:6px}
+.inst-cents{position:relative;height:8px;background:var(--btn-bg);border:1px solid var(--border);border-radius:4px}
+.inst-cents::after{content:'';position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--muted)}
+.inst-cents i{position:absolute;top:-2px;width:4px;height:12px;margin-left:-2px;border-radius:2px;background:var(--accent);left:50%}
+.inst-level{height:5px;background:var(--btn-bg);border-radius:3px;overflow:hidden}
+.inst-level i{display:block;height:100%;width:0;background:#4ade80}
+.inst-ptable{width:100%;border-collapse:collapse;font-size:12px}
+.inst-ptable th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-align:left;padding:4px 6px 4px 0}
+.inst-ptable td{padding:5px 6px 5px 0;border-top:1px solid var(--border)}
+.inst-week{display:flex;align-items:flex-end;gap:6px;height:56px;margin:10px 0 2px}
+.inst-week div{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;font-size:9px;color:var(--muted);gap:2px}
+.inst-week i{display:block;width:100%;background:var(--accent);border-radius:2px 2px 0 0;min-height:1px;opacity:.8}
 .snd-hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.45}
 /* Scenes sidebar tab */
 .scene-item{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border)}
@@ -260,8 +287,10 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
       <div id="lhud-loop-region"></div>
       <div id="lhud-fill"></div>
       <div id="lhud-thumb"></div>
-      <div id="lhud-lm-start" class="lhud-lmarker"></div>
-      <div id="lhud-lm-end" class="lhud-lmarker"></div>
+      <div id="lhud-lm-start" class="lhud-lmarker" title="Loop start: drag to move"></div>
+      <div id="lhud-lm-end" class="lhud-lmarker" title="Loop end: drag to move"></div>
+      <div id="lhud-lt-start" class="lhud-ltag" title="Where the loop starts: drag to move">Loop start</div>
+      <div id="lhud-lt-end" class="lhud-ltag" title="Where the loop ends: drag to move">Loop end</div>
     </div>
     <div id="lhud-timeline-tip">0:00</div>
   </div>
@@ -367,6 +396,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
     <button class="snav-btn" data-stab="keyboard">Keyboard</button>
     <button class="snav-btn" data-stab="display">Display</button>
     <div class="snav-title">Hardware</div>
+    <button class="snav-btn" data-stab="instrument">Instrument Input</button>
     <button class="snav-btn" data-stab="hardware">Hardware</button>
     <button class="snav-btn" data-stab="sound">Sound</button>
     <button class="snav-btn" data-stab="led">LED Output</button>
@@ -422,6 +452,8 @@ const Config = {
     kick_chat:{enabled:0, channel_slug:'', chatroom_id:'', transition_ms:600},
     coach:{enabled:0, url:'http://127.0.0.1:8765/'},
     hardware:{sustain_enabled:1,midi_cc_mappings:[]},
+    // source: 'midi' | 'mic'; sensitivity 0-100; octave_shift moves detected notes (guitar reads an octave up)
+    instrument:{source:'midi', instrument:'voice', device_id:'', sensitivity:50, octave_shift:0},
     // dest: 'off' | 'synth' | 'out:<MIDI output name>'; live_ch 0 keeps the keyboard's channel
     audio:{synth_volume:70, reverb:20, default_dest:'synth', live_dest:'off', live_ch:0, live_inst:'piano', learn_sound:'others'},
     profiles:[],
@@ -929,6 +961,192 @@ class MidiHandler{
 }
 
 // ═══════════════════════════════════════════════════════
+// INSTRUMENT INPUT — monophonic pitch detection (YIN) tuned per instrument
+// ═══════════════════════════════════════════════════════
+// fmin/fmax: sounding range in Hz. thr: YIN threshold (lower = stricter). stableMs: how long a
+// pitch must hold before it counts. releaseMs: silence before the note ends. hyst: extra
+// semitones of slack before moving to a neighbouring note (vibrato / bends). pluck: re-trigger
+// on a fresh attack even when the pitch repeats. gateDb: base noise gate.
+const PITCH_INSTRUMENTS={
+  voice:   {name:'Voice',     icon:'🎤',fmin:65,  fmax:1100,thr:.15,stableMs:80, releaseMs:180,hyst:.25,pluck:false,gateDb:-46,hint:'Sing or hum one note at a time. Vibrato and slides are smoothed, so hold each note steady for a moment.'},
+  guitar:  {name:'Guitar',    icon:'🎸',fmin:80,  fmax:1320,thr:.12,stableMs:55, releaseMs:300,hyst:.15,pluck:true, gateDb:-44,hint:'Pluck single strings, one at a time. Mute the others. Re-plucking the same note counts again.'},
+  bass:    {name:'Bass',      icon:'🎸',fmin:38,  fmax:400, thr:.12,stableMs:90, releaseMs:350,hyst:.15,pluck:true, gateDb:-44,hint:'Single notes on any string. Low notes need a moment to be recognised.'},
+  ukulele: {name:'Ukulele',   icon:'🪕',fmin:255, fmax:1500,thr:.12,stableMs:50, releaseMs:250,hyst:.15,pluck:true, gateDb:-44,hint:'Pluck single strings. Strummed chords are not detected.'},
+  violin:  {name:'Violin',    icon:'🎻',fmin:190, fmax:2400,thr:.13,stableMs:60, releaseMs:150,hyst:.3, pluck:false,gateDb:-46,hint:'Bowed notes with vibrato are tracked. Avoid double stops.'},
+  cello:   {name:'Cello',     icon:'🎻',fmin:62,  fmax:900, thr:.13,stableMs:75, releaseMs:180,hyst:.3, pluck:false,gateDb:-46,hint:'Bowed single notes. Low strings need a steady bow.'},
+  flute:   {name:'Flute',     icon:'🪈',fmin:250, fmax:2200,thr:.10,stableMs:50, releaseMs:120,hyst:.2, pluck:false,gateDb:-48,hint:'Tongue each note for a clean attack; breathy tone is filtered out.'},
+  clarinet:{name:'Clarinet',  icon:'🎷',fmin:140, fmax:1600,thr:.12,stableMs:55, releaseMs:130,hyst:.15,pluck:false,gateDb:-46,hint:'Sounding pitch is shown (a B♭ clarinet sounds a tone below written). Use octave shift to adjust.'},
+  sax:     {name:'Saxophone', icon:'🎷',fmin:100, fmax:1350,thr:.13,stableMs:55, releaseMs:140,hyst:.2, pluck:false,gateDb:-44,hint:'Sounding pitch is shown. Alto and tenor sound lower than written; use octave shift to adjust.'},
+  trumpet: {name:'Trumpet',   icon:'🎺',fmin:150, fmax:1200,thr:.12,stableMs:55, releaseMs:130,hyst:.2, pluck:false,gateDb:-42,hint:'Sounding pitch is shown (a B♭ trumpet sounds a tone below written). Lip slurs register as note changes.'},
+  whistle: {name:'Whistle',   icon:'😗',fmin:450, fmax:3000,thr:.10,stableMs:60, releaseMs:140,hyst:.2, pluck:false,gateDb:-50,hint:'Whistle or play a recorder or tin whistle; high pure tones track well.'},
+};
+const noteLabel=noteName;
+
+class InstrumentInput{
+  constructor(app){
+    this.app=app;this.running=false;this.ctx=null;this.stream=null;this.an=null;this.buf=null;
+    this.timer=null;this.cur=null;this.onFrame=null;this.onState=null;this.starting=false;this._startId=0;
+    this._cand=null;this._candSince=0;this._lastVoiced=0;this._onAt=0;this._prevRms=0;this._emitted=null;
+  }
+  get cfg(){return Config.data.instrument;}
+  get spec(){return PITCH_INSTRUMENTS[this.cfg.instrument]||PITCH_INSTRUMENTS.voice;}
+  async listDevices(){
+    if(!navigator.mediaDevices?.enumerateDevices)return[];
+    return(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
+  }
+  _configure(){
+    if(!this.an)return;
+    const need=2*1.2*this.ctx.sampleRate/this.spec.fmin;
+    let n=1024;while(n<need&&n<32768)n*=2;
+    this.an.fftSize=n;this.buf=new Float32Array(n);
+  }
+  async start(){
+    if(this.running||this.starting)return;
+    if(!navigator.mediaDevices?.getUserMedia)throw new Error('Audio input is not available in this browser (needs https or localhost)');
+    const startId=++this._startId;
+    let stream=null,ctx=null,committed=false;
+    this.starting=true;this.onState?.();
+    try{
+      const id=this.cfg.device_id;
+      stream=await navigator.mediaDevices.getUserMedia({audio:{
+        deviceId:id?{exact:id}:undefined,echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+      if(startId!==this._startId)return;
+      const AudioContextType=window.AudioContext||window.webkitAudioContext;
+      if(!AudioContextType)throw new Error('Audio input is not available in this browser');
+      ctx=new AudioContextType();
+      await ctx.resume();
+      if(startId!==this._startId)return;
+      this.ctx=ctx;this.stream=stream;this.an=ctx.createAnalyser();
+      ctx.createMediaStreamSource(stream).connect(this.an);  // never routed to the speakers
+      this._configure();
+      this.running=true;
+      this.timer=setInterval(()=>this._tick(performance.now()),25);
+      committed=true;
+    }finally{
+      if(!committed){
+        stream?.getTracks().forEach(t=>t.stop());
+        this.stream=this.ctx=this.an=this.buf=null;
+        if(ctx&&ctx.state!=='closed'){
+          try{await ctx.close();}
+          catch(err){console.warn('Could not close audio context after input startup failed:',err);}
+        }
+      }
+      if(startId===this._startId)this.starting=false;
+      this.onState?.();
+    }
+  }
+  stop(){
+    this._startId++;this.starting=false;
+    clearInterval(this.timer);this.timer=null;
+    this._off();
+    this.stream?.getTracks().forEach(t=>t.stop());
+    const ctx=this.ctx;
+    this.stream=this.ctx=this.an=this.buf=null;
+    this.running=false;this._cand=null;
+    if(ctx&&ctx.state!=='closed')ctx.close().catch(err=>console.warn('Could not close audio context:',err));
+    this.onFrame?.({idle:true});this.onState?.();
+  }
+  // Called when the instrument changes while listening
+  retune(){this._off();this._cand=null;this._configure();}
+  _yin(sp){
+    const x=this.buf,half=x.length>>1,sr=this.ctx.sampleRate;
+    const tmin=Math.max(2,Math.floor(sr/sp.fmax)),tmax=Math.min(half-1,Math.ceil(sr/sp.fmin));
+    if(tmax<=tmin+2)return 0;
+    const d=new Float32Array(tmax+2);
+    for(let t=tmin-1;t<=tmax+1&&t<half;t++){let s=0;for(let i=0;i<half;i++){const v=x[i]-x[i+t];s+=v*v;}d[t]=s;}
+    // cumulative mean normalised difference, accumulated from tmin-1 (the lower lags are out of range)
+    let run=0;const cm=new Float32Array(tmax+2);
+    for(let t=tmin;t<=tmax+1;t++){run+=d[t];cm[t]=run>0?d[t]*(t-tmin+1)/run:1;}
+    let tau=-1;
+    for(let t=tmin+1;t<=tmax;t++){
+      if(cm[t]<sp.thr){while(t+1<=tmax&&cm[t+1]<cm[t])t++;tau=t;break;}
+    }
+    if(tau<0)return 0;
+    const a=cm[tau-1],b=cm[tau],c=cm[tau+1],den=a-2*b+c;
+    const shift=den?0.5*(a-c)/den:0;
+    return sr/(tau+Math.max(-1,Math.min(1,shift)));
+  }
+  _tick(now){
+    if(!this.an)return;
+    const sp=this.spec,cfg=this.cfg;
+    this.an.getFloatTimeDomainData(this.buf);
+    let sum=0;for(let i=0;i<this.buf.length;i++)sum+=this.buf[i]*this.buf[i];
+    const rms=Math.sqrt(sum/this.buf.length),db=20*Math.log10(rms||1e-9);
+    const gate=sp.gateDb+(50-cfg.sensitivity)*0.3;
+    const f=db>=gate?this._yin(sp):0;
+    const rise=rms>this._prevRms*1.9&&db>gate+6;
+    this._prevRms=this._prevRms*0.6+rms*0.4;
+    let midi=null;
+    if(f>0){
+      midi=69+12*Math.log2(f/440);
+      this._lastVoiced=now;
+      let cand=Math.round(midi);
+      if(this.cur!=null&&Math.abs(midi-this.cur)<0.5+sp.hyst)cand=this.cur;
+      if(cand!==this._cand){this._cand=cand;this._candSince=now;}
+      if(this.cur==null){if(now-this._candSince>=sp.stableMs)this._on(cand,rms,now);}
+      else if(cand!==this.cur){if(now-this._candSince>=sp.stableMs){this._off();this._on(cand,rms,now);}}
+      else if(sp.pluck&&rise&&now-this._onAt>150){this._off();this._on(cand,rms,now);}
+    }else{
+      this._cand=null;
+      if(this.cur!=null&&now-this._lastVoiced>=sp.releaseMs)this._off();
+    }
+    this.onFrame?.({db,gate,f,midi,note:this.cur,cents:midi==null?0:(midi-Math.round(midi))*100});
+  }
+  _shifted(n){return Math.max(21,Math.min(108,n+12*(this.cfg.octave_shift||0)));}
+  _on(n,rms,now){
+    this.cur=n;this._onAt=now;
+    const note=this._shifted(n),vel=Math.max(40,Math.min(120,Math.round(60+(20*Math.log10(rms||1e-9)+40)*2)));
+    this._emitted=note;
+    const m=this.app.midi;
+    m.activeNotes.add(note);m.noteVelocity.set(note,vel);m.noteChannel.set(note,0);
+    this.app._liveMidi([0x90,note,vel],true,'mic');
+    if(this.app._learn?.active)this.app._onLearnNoteOn(note,0,'mic');
+  }
+  _off(){
+    if(this._emitted==null){this.cur=null;return;}
+    const note=this._emitted,m=this.app.midi;
+    m.activeNotes.delete(note);m.noteVelocity.delete(note);m.noteChannel.delete(note);
+    this.app._liveMidi([0x80,note,0],true,'mic');
+    this._emitted=null;this.cur=null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// PROFILE PROGRESS — practice stats per profile and input
+// ═══════════════════════════════════════════════════════
+const Progress={
+  _last:0,_timer:null,
+  currentId(){const c=Config.data.instrument;return c.source==='mic'?c.instrument:'midi';},
+  _stat(){
+    let p=SceneManager.getActiveProfile();
+    if(!p)p=SceneManager.createProfile('Default');
+    const pr=p.progress||(p.progress={});
+    const instruments=pr.instruments||(pr.instruments={});
+    const id=this.currentId();
+    const s=instruments[id]||(instruments[id]={notes:0,hits:0,misses:0,streak:0,best:0,ms:0,sessions:0,last:0,days:{}});
+    if(!s.days)s.days={};
+    return s;
+  },
+  _save(){clearTimeout(this._timer);this._timer=setTimeout(()=>Config.save(),1000);},
+  noteOn(){
+    const s=this._stat(),now=Date.now(),gap=now-(s.last||0);
+    if(gap>5*60000)s.sessions++;
+    if(this._last&&gap<=5000){
+      const add=now-Math.max(this._last,s.last||0);
+      if(add>0&&add<=5000){s.ms+=add;const k=new Date().toISOString().slice(0,10);s.days[k]=(s.days[k]||0)+add;}
+    }
+    s.notes++;s.last=this._last=now;this._save();
+  },
+  learn(hit){
+    const s=this._stat();
+    if(hit){s.hits++;s.streak++;if(s.streak>s.best)s.best=s.streak;}
+    else{s.misses++;s.streak=0;}
+    this._save();
+  },
+  reset(){const p=SceneManager.getActiveProfile();if(p){p.progress={instruments:{}};Config.save();}},
+};
+
+// ═══════════════════════════════════════════════════════
 // SCENE IMAGE DB
 // ═══════════════════════════════════════════════════════
 const SceneImageDB={
@@ -1008,7 +1226,13 @@ const SceneManager={
     const id=Config.data.active_profile_id;
     return this.getProfiles().find(p=>p.id===id)||this.getProfiles()[0]||null;
   },
-  setActiveProfile(id){Config.data.active_profile_id=id;Config.save();},
+  setActiveProfile(id){
+    Config.data.active_profile_id=id;
+    // each profile remembers its own input source and instrument
+    const inst=this.getActiveProfile()?.instrument;
+    if(inst)Object.assign(Config.data.instrument,inst);
+    Config.save();
+  },
   createProfile(name){
     if(!Config.data.profiles)Config.data.profiles=[];
     const p={id:crypto.randomUUID(),name,created:new Date().toLocaleDateString(),scenes:[]};
@@ -1049,6 +1273,7 @@ const SceneManager={
     delete snap.profiles;delete snap.active_profile_id;
     // Strip MIDI CC mappings — hardware config, not per-scene
     if(snap.hardware)delete snap.hardware.midi_cc_mappings;
+    delete snap.instrument;
     // Sanitise script-result objects that can't round-trip
     if(typeof snap.note_style?.note_colors==='object'&&snap.note_style?.note_colors!==null)
       snap.note_style.note_colors=null;
@@ -1075,6 +1300,7 @@ const SceneManager={
     // Preserve MIDI CC mappings (hardware config, not per-scene)
     if(!merged.hardware)merged.hardware={};
     merged.hardware.midi_cc_mappings=Config.data.hardware?.midi_cc_mappings||[];
+    merged.instrument=Config.data.instrument;
     Config.data=merged;Config.save();
     // Restore background images from IndexedDB
     app.clearBgImages();
@@ -2485,6 +2711,25 @@ ${slider('Reverb','reverb')}
 <p class="snd-hint">For a VST: create a virtual port with loopMIDI, choose it as the MIDI input in your plugin host (or DAW), then pick it here. Give each track its own channel to drive a multi-timbral instrument. Needs Chrome or Edge.</p>
 </div>`;
     })(),
+    instrument:`<div class="section"><h2>Input Source</h2>
+<div class="inst-seg" id="inst-source">
+<button data-src="midi" class="${Config.data.instrument.source==='midi'?'active':''}">🎹 MIDI keyboard<small>USB / Bluetooth / on-screen keys</small></button>
+<button data-src="mic" class="${Config.data.instrument.source==='mic'?'active':''}">🎤 Instrument via audio<small>Microphone or audio interface</small></button>
+</div></div>
+<div id="inst-mic" style="display:${Config.data.instrument.source==='mic'?'block':'none'}">
+<div class="section"><h2>Instrument</h2>
+<div class="inst-grid" id="inst-grid">${Object.entries(PITCH_INSTRUMENTS).map(([k,v])=>`<button class="inst-card${Config.data.instrument.instrument===k?' active':''}" data-inst="${k}" title="${Math.round(v.fmin)}–${Math.round(v.fmax)} Hz"><span>${v.icon}</span>${v.name}</button>`).join('')}</div>
+<p class="snd-hint" id="inst-hint"></p></div>
+<div class="section"><h2>Listening</h2>
+<div class="row"><label>Audio input</label><select id="inst-device" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px"><option value="">Default input</option></select></div>
+<div class="row"><label>Sensitivity</label><input type="range" id="inst-sens" min="0" max="100" step="1" value="${Config.data.instrument.sensitivity}"><span class="val" id="v-inst-sens">${Config.data.instrument.sensitivity}</span></div>
+<div class="row"><label>Octave shift</label><select id="inst-oct" style="background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px;font-size:12px">${[-2,-1,0,1,2].map(o=>`<option value="${o}"${(Config.data.instrument.octave_shift||0)===o?' selected':''}>${o>0?'+'+o:o}</option>`).join('')}</select></div>
+<div class="row"><label></label><button class="action-btn" id="inst-toggle">Start listening</button><span id="inst-status" style="font-size:12px;color:var(--muted)"></span></div>
+<div class="inst-meter"><div class="inst-note" id="inst-note">—</div>
+<div class="inst-bars"><div class="inst-cents"><i id="inst-needle"></i></div><div class="inst-level"><i id="inst-level"></i></div></div></div>
+<p class="snd-hint">Notes you play are sent to the keyboard, Learn Mode and the sound output like MIDI notes. Use headphones if you route live sound out, to avoid feedback.</p>
+</div></div>
+<div class="section"><h2>Progress</h2><div id="inst-progress"></div></div>`,
     hardware:`<div class="section"><h2>Sustain Pedal (CC 64)</h2>
 <div class="row"><label>Enable Piano Sustain</label>
 <div class="toggle-btn${hw.sustain_enabled?' on':''}" id="btn-hw-sustain">${hw.sustain_enabled?'On':'Off'}</div></div>
@@ -3044,6 +3289,7 @@ function wireScenes(root,app){
   const fpProfileSel=root.querySelector('#fp-profile-sel');
   if(fpProfileSel)fpProfileSel.addEventListener('change',()=>{
     SceneManager.setActiveProfile(fpProfileSel.value);
+    app._onProfileChange?.();
     renderFpSceneList();renderScSceneList();
   });
   const fpProfileNew=root.querySelector('#fp-profile-new');
@@ -3174,6 +3420,120 @@ function wireMidiCCMappings(root,app){
   });
 
   renderRows();
+}
+
+function wireInstrument(root,app){
+  const panel=root.querySelector('#inst-source');
+  if(!panel)return;
+  const inst=app.instrument,cfg=()=>Config.data.instrument;
+  const $=s=>root.querySelector(s);
+  const persist=()=>{
+    const p=SceneManager.getActiveProfile();
+    if(p)p.instrument={source:cfg().source,instrument:cfg().instrument,octave_shift:cfg().octave_shift};
+    Config.save();
+  };
+  const fmtTime=ms=>ms<60000?Math.round(ms/1000)+'s':ms<3600000?Math.round(ms/60000)+' min':(ms/3600000).toFixed(1)+' h';
+  const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function renderProgress(){
+    const box=$('#inst-progress');if(!box)return;
+    const p=SceneManager.getActiveProfile(),st=p?.progress?.instruments||{};
+    const rows=Object.entries(st).filter(([,s])=>s.notes||s.hits||s.misses).sort((a,b)=>b[1].last-a[1].last);
+    const days=[];
+    for(let i=6;i>=0;i--){
+      const dt=new Date(Date.now()-i*864e5),k=dt.toISOString().slice(0,10);
+      days.push({l:'SMTWTFS'[dt.getDay()],ms:Object.values(st).reduce((a,s)=>a+(s.days?.[k]||0),0)});
+    }
+    const mx=Math.max(1,...days.map(d=>d.ms));
+    const name=id=>id==='midi'?'🎹 MIDI':(PITCH_INSTRUMENTS[id]?PITCH_INSTRUMENTS[id].icon+' '+PITCH_INSTRUMENTS[id].name:esc(id));
+    box.innerHTML=`<div class="row"><label>Profile</label><span style="flex:1;font-size:13px">${esc(p?.name||'—')}</span><button class="action-btn" id="inst-preset" style="padding:3px 10px;font-size:11px">Switch…</button></div>`+
+    (rows.length?`<table class="inst-ptable"><thead><tr><th>Input</th><th>Time</th><th>Notes</th><th>Accuracy</th><th>Best streak</th><th>Last</th></tr></thead><tbody>${rows.map(([id,s])=>{
+      const t=s.hits+s.misses;
+      return`<tr><td>${name(id)}</td><td>${fmtTime(s.ms)}</td><td>${s.notes}</td><td>${t?Math.round(100*s.hits/t)+'%':'—'}</td><td>${s.best||'—'}</td><td>${s.last?new Date(s.last).toLocaleDateString():'—'}</td></tr>`;}).join('')}</tbody></table>
+<div class="inst-week">${days.map(d=>`<div><i style="height:${Math.round(40*d.ms/mx)}px" title="${fmtTime(d.ms)}"></i>${d.l}</div>`).join('')}</div>
+<p class="snd-hint" style="margin-top:2px">Practice time over the last 7 days. Accuracy counts notes played in Learn Mode (Wait).</p>
+<button class="action-btn" id="inst-reset" style="margin-top:8px;font-size:11px;padding:4px 10px;color:#dc8c8c;border-color:#7a3a3a">Reset progress</button>`
+    :`<p class="snd-hint">No practice recorded yet for this profile. Play something and it will show up here.</p>`);
+    $('#inst-preset')?.addEventListener('click',()=>{
+      document.querySelector('.snav-btn[data-stab="profiles"]')?.click();
+    });
+    $('#inst-reset')?.addEventListener('click',()=>{
+      if(confirm('Reset all practice progress for this profile?')){Progress.reset();renderProgress();}
+    });
+  }
+  function syncUI(){
+    const c=cfg();
+    panel.querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.src===c.source));
+    $('#inst-mic').style.display=c.source==='mic'?'block':'none';
+    root.querySelectorAll('.inst-card').forEach(b=>b.classList.toggle('active',b.dataset.inst===c.instrument));
+    $('#inst-hint').textContent=inst.spec.hint;
+    const on=inst.running;
+    $('#inst-toggle').textContent=on?'Stop listening':'Start listening';
+    $('#inst-toggle').disabled=inst.starting;
+    $('#inst-status').textContent=inst.starting?' Waiting for audio permission…':on?' Listening…':'';
+  }
+  async function fillDevices(){
+    const sel=$('#inst-device');
+    const list=await inst.listDevices();
+    sel.innerHTML='<option value="">Default input</option>'+list.filter(d=>d.deviceId&&d.deviceId!=='default').map(d=>`<option value="${esc(d.deviceId)}">${esc(d.label||'Audio input')}</option>`).join('');
+    sel.value=cfg().device_id||'';
+  }
+  panel.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+    if(b.dataset.src==='midi'&&(inst.running||inst.starting))inst.stop();
+    cfg().source=b.dataset.src;
+    persist();syncUI();renderProgress();
+  }));
+  root.querySelectorAll('.inst-card').forEach(b=>b.addEventListener('click',()=>{
+    cfg().instrument=b.dataset.inst;
+    if(inst.running)inst.retune();
+    persist();syncUI();renderProgress();
+  }));
+  $('#inst-sens').addEventListener('input',e=>{cfg().sensitivity=+e.target.value;$('#v-inst-sens').textContent=e.target.value;schedSave();});
+  $('#inst-oct').addEventListener('change',e=>{cfg().octave_shift=+e.target.value;persist();});
+  $('#inst-device').addEventListener('change',async e=>{
+    cfg().device_id=e.target.value;Config.save();
+    if(inst.running||inst.starting){
+      inst.stop();
+      try{await inst.start();await fillDevices();}
+      catch(err){app._showToast('Could not open audio input: '+err.message);}
+    }
+  });
+  $('#inst-toggle').addEventListener('click',async()=>{
+    try{
+      if(inst.running)inst.stop();
+      else{
+        await inst.start();
+        try{await fillDevices();}
+        catch(err){app._showToast('Could not list audio inputs: '+err.message);}
+      }
+    }catch(err){
+      app._showToast(err.name==='NotAllowedError'?'Microphone permission was denied':'Could not open audio input: '+err.message);
+    }
+    syncUI();
+  });
+  let lastProg=0;
+  inst.onState=syncUI;
+  inst.onFrame=f=>{
+    const note=$('#inst-note');if(!note)return;
+    if(f.idle||f.f<=0||f.midi==null){
+      note.textContent=f.note!=null?noteLabel(f.note):'—';
+      $('#inst-level').style.width=f.idle?'0':Math.max(0,Math.min(100,(f.db+70)*100/60))+'%';
+      if(f.idle||f.note==null)$('#inst-needle').style.left='50%';
+    }else{
+      note.textContent=noteLabel(Math.round(f.midi));
+      $('#inst-needle').style.left=(50+Math.max(-50,Math.min(50,f.cents)))+'%';
+      $('#inst-level').style.width=Math.max(0,Math.min(100,(f.db+70)*100/60))+'%';
+    }
+    const now=performance.now();
+    if(now-lastProg>2000){lastProg=now;renderProgress();}
+  };
+  syncUI();renderProgress();
+  app._onProfileChange=()=>{
+    if(cfg().source==='midi'&&(inst.running||inst.starting))inst.stop();
+    else if(inst.running)inst.retune();
+    const sens=$('#inst-oct');if(sens)sens.value=cfg().octave_shift||0;
+    syncUI();renderProgress();
+  };
+  if(inst.running)fillDevices();
 }
 
 function wireProfiles(root){
@@ -3439,6 +3799,7 @@ function wireSettings(root, app){
   });
   // MIDI CC mappings
   wireMidiCCMappings(root,app);
+  wireInstrument(root,app);
   // Scenes & Profiles
   wireScenes(root,app);
   // LED fade sliders
@@ -3650,8 +4011,9 @@ function wireSettings(root, app){
       if(tip){tip.textContent=fmt(pct*total);tip.style.left=Math.max(20,Math.min(r.width-20,x-r.left))+'px';}
       if(thumb){thumb.style.left=(pct*100)+'%';}
     };
+    const onLoopMarker=e=>!!e.target.closest?.('.lhud-lmarker,.lhud-ltag');
     tlRow?.addEventListener('mousedown',e=>{
-      if(e.target.classList.contains('lhud-lmarker'))return;
+      if(onLoopMarker(e))return;
       tlDragging=true;tl.classList.add('dragging');
       tlSeekAt(e.clientX);tlUpdateTip(e.clientX,e);e.preventDefault();
     });
@@ -3664,12 +4026,12 @@ function wireSettings(root, app){
       tlDragging=false;tl.classList.remove('dragging');
     });
     tlRow?.addEventListener('mousemove',e=>{
-      if(tlDragging||e.target.classList.contains('lhud-lmarker'))return;
+      if(tlDragging||onLoopMarker(e))return;
       tlUpdateTip(e.clientX,e);
     });
     // Touch support for timeline
     tlRow?.addEventListener('touchstart',e=>{
-      if(e.target.classList.contains('lhud-lmarker'))return;
+      if(onLoopMarker(e))return;
       tlDragging=true;tl.classList.add('dragging');
       tlSeekAt(e.touches[0].clientX);e.preventDefault();
     },{passive:false});
@@ -3710,6 +4072,8 @@ function wireSettings(root, app){
     };
     wireMarker(document.getElementById('lhud-lm-start'),true);
     wireMarker(document.getElementById('lhud-lm-end'),false);
+    wireMarker(document.getElementById('lhud-lt-start'),true);
+    wireMarker(document.getElementById('lhud-lt-end'),false);
   }
 }
 
@@ -4192,36 +4556,55 @@ function _parseMusicXmlDoc(doc){
     keySig:{sharps:fifths,mode:0}
   };
   const barDurationMs=beats*(microsPerBeat/1000);
+  // Each measure's chords where they start: rests, a second voice (<backup>) and <forward> move
+  // the position as they do in the score, so the notes sound where they are written. A chord:
+  // {notes, durationMs, ms, beat} with ms and beat (quarter notes) from the start of the piece.
   const parsePart=(part,staffFilter=null)=>{
     const measures=[];
     let divs=globalDivs;
     let usBeat=microsPerBeat;
+    let barLen=beats*4/beatType;  // quarter notes in a full bar
+    let barMs=0,barBeat=0;
+    const len=el=>parseInt(el.querySelector(':scope > duration')?.textContent||'0')||0;
     Array.from(part.querySelectorAll('measure')).forEach(measure=>{
-      const mDiv=measure.querySelector('attributes divisions');
-      if(mDiv)divs=parseInt(mDiv.textContent);
-      const mTempo=measure.querySelector('direction sound[tempo],sound[tempo]');
-      if(mTempo)usBeat=Math.round(60000000/parseFloat(mTempo.getAttribute('tempo')));
-      const chords=[];
-      Array.from(measure.querySelectorAll('note')).forEach(noteEl=>{
-        const isChord=!!noteEl.querySelector('chord');
-        const isRest=!!noteEl.querySelector('rest');
-        if(staffFilter!==null){
-          const sf=noteEl.querySelector('staff');
-          if(sf&&sf.textContent!==String(staffFilter))return;
+      let pos=0,end=0,onset=0;  // divisions from the start of the measure
+      const at=new Map();
+      for(const el of measure.children){
+        if(el.tagName==='attributes'){
+          const d=el.querySelector('divisions');if(d)divs=parseInt(d.textContent)||divs;
+          const t=el.querySelector('time');
+          if(t){const b=parseInt(t.querySelector('beats')?.textContent),bt=parseInt(t.querySelector('beat-type')?.textContent);if(b&&bt)barLen=b*4/bt;}
+        }else if(el.tagName==='direction'||el.tagName==='sound'){
+          const s=el.tagName==='sound'?el:el.querySelector('sound[tempo]');
+          const bpm=parseFloat(s?.getAttribute('tempo'));
+          if(bpm>0)usBeat=Math.round(60000000/bpm);
+        }else if(el.tagName==='backup'){pos=Math.max(0,pos-len(el));}
+        else if(el.tagName==='forward'){pos+=len(el);end=Math.max(end,pos);}
+        else if(el.tagName==='note'){
+          if(el.querySelector('grace'))continue;
+          const d=len(el);
+          if(!el.querySelector('chord')){onset=pos;pos+=d;end=Math.max(end,pos);}
+          if(staffFilter!==null){
+            const sf=el.querySelector('staff');
+            if(sf&&sf.textContent!==String(staffFilter))continue;
+          }
+          const pitchEl=el.querySelector('pitch');
+          if(el.querySelector('rest')||!pitchEl)continue;
+          if(el.querySelector('tie[type="stop"]'))continue;  // held on from a tied note, not struck again
+          const step=pitchEl.querySelector('step')?.textContent||'C';
+          const alter=Math.round(parseFloat(pitchEl.querySelector('alter')?.textContent||'0'));
+          const octave=parseInt(pitchEl.querySelector('octave')?.textContent||'4');
+          const midi=Math.max(21,Math.min(108,(octave+1)*12+(STEP_SEMI[step]||0)+alter));
+          const durationMs=Math.max(50,d/divs*(usBeat/1000));
+          const c=at.get(onset)||{notes:[],durationMs:0,ms:barMs+onset/divs*(usBeat/1000),beat:barBeat+onset/divs};
+          if(!c.notes.includes(midi))c.notes.push(midi);
+          c.durationMs=Math.max(c.durationMs,durationMs);
+          at.set(onset,c);
         }
-        if(isRest)return;
-        const pitchEl=noteEl.querySelector('pitch');
-        if(!pitchEl)return;
-        const step=pitchEl.querySelector('step')?.textContent||'C';
-        const alter=Math.round(parseFloat(pitchEl.querySelector('alter')?.textContent||'0'));
-        const octave=parseInt(pitchEl.querySelector('octave')?.textContent||'4');
-        const midi=Math.max(21,Math.min(108,(octave+1)*12+(STEP_SEMI[step]||0)+alter));
-        const dur=parseInt(noteEl.querySelector('duration')?.textContent||'0');
-        const durationMs=Math.max(50,dur/divs*(usBeat/1000));
-        if(isChord&&chords.length>0){chords[chords.length-1].notes.push(midi);}
-        else{chords.push({notes:[midi],durationMs});}
-      });
-      measures.push(chords);
+      }
+      measures.push([...at.values()].sort((a,b)=>a.beat-b.beat));
+      const q=end?end/divs:barLen;  // a pickup is as long as what is in it
+      barMs+=q*usBeat/1000;barBeat+=q;
     });
     return measures;
   };
@@ -4250,8 +4633,9 @@ function _parseMusicXmlDoc(doc){
   const numBars=Math.min(400,Math.max(trebleMeasures.length,bassMeasures.length));
   const bars=[];
   for(let b=0;b<numBars;b++){
+    const first=trebleMeasures[b]?.[0]||bassMeasures[b]?.[0];
     bars.push({
-      startMs:b*barDurationMs,
+      startMs:first?first.ms:b*barDurationMs,
       treble:trebleMeasures[b]?.length?trebleMeasures[b]:null,
       bass:bassMeasures[b]?.length?bassMeasures[b]:null
     });
@@ -4291,17 +4675,41 @@ function _quantizeDuration(durationMs,microsPerBeat){
   }
   return {dur:best[1],dotted:best[2]};
 }
+// Note values a bar is filled with, in quarter notes, longest first: [beats, vexDur, dotted]
+const _VEX_STEPS=[[4,'w',false],[3,'h',true],[2,'h',false],[1.5,'q',true],[1,'q',false],[0.75,'8',true],[0.5,'8',false],[0.25,'16',false]];
+// The longest note value that fits in `beats` (at least a 16th)
+function _vexStep(beats){return _VEX_STEPS.find(s=>s[0]<=beats+1e-6)||_VEX_STEPS[_VEX_STEPS.length-1];}
+function _vexDuration(beats){const s=_vexStep(beats);return{dur:s[1],dotted:s[2]};}
+
+// The Learn timeline's "Loop start" / "Loop end" tags: each centred over its marker, pushed apart
+// when the loop is too short for both, and kept on the timeline.
+const _loopTagW={};
+function _placeLoopTags(sPct,ePct){
+  const tl=document.getElementById('lhud-timeline'),a=document.getElementById('lhud-lt-start'),b=document.getElementById('lhud-lt-end');
+  if(!tl||!a||!b)return;
+  const W=tl.clientWidth,gap=6;
+  const wa=_loopTagW.a||(_loopTagW.a=a.offsetWidth),wb=_loopTagW.b||(_loopTagW.b=b.offsetWidth);
+  if(!W||!wa||!wb)return;
+  let xa=sPct/100*W-wa/2,xb=ePct/100*W-wb/2;
+  const over=xa+wa+gap-xb;
+  if(over>0){xa-=over/2;xb+=over/2;}
+  xa=Math.max(0,xa);xb=Math.max(xb,xa+wa+gap);
+  xb=Math.min(xb,W-wb);xa=Math.max(0,Math.min(xa,xb-wa-gap));
+  a.style.left=xa.toFixed(1)+'px';b.style.left=xb.toFixed(1)+'px';
+}
 
 class NotationRenderer{
   constructor(){
     this._wrap=null;
     this._totalMs=0;
     this._pxPerMs=0;
+    this._anchors=[];  // [{ms,x}] where each drawn note and rest is, for scrolling (VexFlow path)
     this._ready=false;
     this._svgEl=null;
     this._iframe=null;
     this._xmlMode=false;
     this._msgHandler=null;
+    this._gen=0;  // counts drawings, so what was sent to the last one is sent again
   }
   init(){
     this._wrap=document.getElementById('notation-svg-wrap');
@@ -4325,6 +4733,7 @@ class NotationRenderer{
     this.destroy();
     this._xmlMode=true;
     this._ready=false;
+    this._gen++;
     const iframe=document.createElement('iframe');
     iframe.src='notation.html';
     iframe.style.cssText='width:100%;height:100%;border:none;background:transparent';
@@ -4346,6 +4755,8 @@ class NotationRenderer{
     if(old)old.remove();
     this._wrap.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
     this._ready=false;
+    this._anchors=[];
+    this._gen++;
     if(!bars||!bars.length)return;
     const VF=Vex.VF||Vex.Flow||Vex;
     if(!VF?.Renderer){console.error('VexFlow Renderer missing. Vex keys:',Object.keys(Vex||{}));return;}
@@ -4354,6 +4765,7 @@ class NotationRenderer{
     const PX_PER_BEAT=72;
     const microsPerBeat=meta?.tempoMap?.[meta.tempoMap.length-1]?.microsPerBeat||500000;
     const beatsPerBar=meta?.timeSig?.num||4;
+    const beatValue=meta?.timeSig?.denom||4;
     const barDurationMs=beatsPerBar*microsPerBeat/1000;
     const barW=beatsPerBar*PX_PER_BEAT+30;
     const totalW=bars.length*barW+60;
@@ -4365,59 +4777,61 @@ class NotationRenderer{
     ctx.setFillStyle('rgba(210,210,210,0.9)');
     ctx.setStrokeStyle('rgba(180,180,180,0.9)');
     const useFlats=(meta?.keySig?.sharps||0)<0;
-    let totalMs=0;
-    bars.forEach((bar,bi)=>{
-      totalMs=Math.max(totalMs,(bar.startMs||0)+barDurationMs);
-      const xOff=bi*barW+10;
-      const trebleY=28;
-      const trebleStave=new VF.Stave(xOff,trebleY,barW-4);
-      if(bi===0){trebleStave.addClef('treble');if(meta?.timeSig)trebleStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
-      trebleStave.setContext(ctx).draw();
-      const bassY=Math.round(stripH*0.46);
-      const bassStave=new VF.Stave(xOff,bassY,barW-4);
-      if(bi===0){bassStave.addClef('bass');if(meta?.timeSig)bassStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
-      bassStave.setContext(ctx).draw();
-      const buildVoice=(notes,clef,stave)=>{
-        if(!notes||!notes.length){
-          const rest=new VF.StaveNote({clef,keys:[clef==='treble'?'b/4':'d/3'],duration:'wr'});
-          const voice=new VF.Voice({num_beats:beatsPerBar,beat_value:meta?.timeSig?.denom||4});
-          voice.setStrict(false);
-          voice.addTickable(rest);
-          try{new VF.Formatter().joinVoices([voice]).format([voice],barW-24);}catch(e){}
-          voice.draw(ctx,stave);
-          return;
-        }
-        const staveNotes=[];
-        for(const chord of notes){
-          const keys=chord.notes.map(n=>_midiToVexKey(n,useFlats));
-          const {dur,dotted}=_quantizeDuration(chord.durationMs,microsPerBeat);
-          let sn;
-          try{
-            sn=new VF.StaveNote({clef,keys,duration:dur});
-            if(dotted)VF.Dot.buildAndAttach([sn]);
-            keys.forEach((k,i)=>{
-              if(_needsAccidental(chord.notes[i],meta?.keySig)){
-                sn.addModifier(new VF.Accidental(useFlats?'b':'#'),i);
-              }
-            });
-          }catch(e){
-            sn=new VF.StaveNote({clef,keys:[clef==='treble'?'b/4':'d/3'],duration:'qr'});
-          }
-          staveNotes.push(sn);
-        }
-        const voice=new VF.Voice({num_beats:beatsPerBar,beat_value:meta?.timeSig?.denom||4});
-        voice.setStrict(false);
-        voice.addTickables(staveNotes);
+    const anchors=[];
+    let totalMs=0,endX=0;
+    // One staff's bar as VexFlow notes: items {notes, beats, ms} (no notes: a rest), or older
+    // chords {notes, durationMs}; nothing at all: a whole-bar rest.
+    const staffNotes=(items,clef)=>{
+      const restKey=[clef==='treble'?'b/4':'d/3'];
+      if(!items||!items.length)return[{sn:new VF.StaveNote({clef,keys:restKey,duration:'wr'})}];
+      return items.map(it=>{
+        const rest=!it.notes?.length;
+        const {dur,dotted}=Number.isFinite(it.beats)?_vexDuration(it.beats):_quantizeDuration(it.durationMs,microsPerBeat);
+        let sn;
         try{
-          const fmt=new VF.Formatter();
-          fmt.joinVoices([voice]).format([voice],barW-24);
+          sn=new VF.StaveNote({clef,keys:rest?restKey:it.notes.map(n=>_midiToVexKey(n,useFlats)),duration:dur+(rest?'r':'')});
+          if(dotted)VF.Dot.buildAndAttach([sn],{all:true});
+          if(!rest)it.notes.forEach((n,i)=>{if(_needsAccidental(n,meta?.keySig))sn.addModifier(new VF.Accidental(useFlats?'b':'#'),i);});
+        }catch(e){
+          sn=new VF.StaveNote({clef,keys:restKey,duration:'qr'});
+        }
+        return{sn,ms:it.ms};
+      });
+    };
+    bars.forEach((bar,bi)=>{
+      totalMs=Math.max(totalMs,bar.endMs||(bar.startMs||0)+barDurationMs);
+      const xOff=bi*barW+10;
+      const trebleStave=new VF.Stave(xOff,28,barW-4);
+      const bassStave=new VF.Stave(xOff,Math.round(stripH*0.46),barW-4);
+      if(bi===0){
+        trebleStave.addClef('treble');bassStave.addClef('bass');
+        if(meta?.timeSig){trebleStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);bassStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
+      }
+      trebleStave.setContext(ctx).draw();
+      bassStave.setContext(ctx).draw();
+      endX=xOff+barW-4;
+      // Both staves formatted together, so notes struck together line up across them
+      const staves=[[bar.treble,'treble',trebleStave],[bar.bass,'bass',bassStave]].map(([items,clef,stave])=>{
+        const notes=staffNotes(items,clef);
+        const voice=new VF.Voice({num_beats:beatsPerBar,beat_value:beatValue});
+        voice.setStrict(false);
+        voice.addTickables(notes.map(t=>t.sn));
+        return{notes,voice,stave};
+      });
+      try{
+        new VF.Formatter().joinVoices([staves[0].voice]).joinVoices([staves[1].voice]).format(staves.map(s=>s.voice),barW-24);
+      }catch(e){}
+      for(const{notes,voice,stave}of staves){
+        try{
+          let beams=[];
+          try{beams=VF.Beam.generateBeams(notes.map(t=>t.sn));}catch(e){}
           voice.draw(ctx,stave);
-          const beams=VF.Beam.generateBeams(staveNotes);
           beams.forEach(b=>b.setContext(ctx).draw());
+          for(const t of notes){
+            if(Number.isFinite(t.ms))anchors.push({ms:t.ms,x:(t.sn.getNoteHeadBeginX()+t.sn.getNoteHeadEndX())/2});
+          }
         }catch(e){}
-      };
-      buildVoice(bar.treble,'treble',trebleStave);
-      buildVoice(bar.bass,'bass',bassStave);
+      }
     });
     this._svgEl=this._wrap.querySelector('svg');
     if(this._svgEl){
@@ -4432,6 +4846,14 @@ class NotationRenderer{
     }
     this._totalMs=totalMs||1;
     this._pxPerMs=totalW/this._totalMs;
+    // The music's place on the strip: each note and rest where it is drawn (one per moment,
+    // never backwards), then the final barline
+    anchors.sort((a,b)=>a.ms-b.ms||a.x-b.x);
+    this._anchors=[];
+    for(const a of [...anchors,{ms:totalMs,x:endX}]){
+      const p=this._anchors[this._anchors.length-1];
+      if(!p||(a.ms>p.ms+1&&a.x>=p.x))this._anchors.push(a);
+    }
     this._ready=true;
     }catch(err){
       console.error('VexFlow render failed:',err);
@@ -4447,15 +4869,26 @@ class NotationRenderer{
     if(this._xmlMode&&this._ready&&this._iframe?.contentWindow){this._iframe.contentWindow.postMessage(msg,'*');return true;}
     return false;
   }
-  scrollTo(cursorMs){
+  // beat: where Learn Mode is in the sheet's own beats, when known; the sheet then follows the
+  // music through tempo changes instead of timing it at one tempo.
+  scrollTo(cursorMs,beat=null){
     if(this._xmlMode&&this._iframe?.contentWindow){
-      this._iframe.contentWindow.postMessage({type:'updatePosition',ms:cursorMs},'*');
+      this._iframe.contentWindow.postMessage(beat!==null?{type:'updateBeat',beat}:{type:'updatePosition',ms:cursorMs},'*');
       return;
     }
     if(!this._ready||!this._svgEl)return;
     const wrapW=this._wrap?.offsetWidth||800;
-    const offset=Math.max(0,cursorMs*this._pxPerMs-wrapW/2);
-    this._svgEl.style.transform=`translateX(-${offset}px)`;
+    this._svgEl.style.transform=`translateX(${(wrapW/2-this._xAt(cursorMs)).toFixed(1)}px)`;
+  }
+  // Where the music is at cursorMs on the drawn strip: between the notes and rests either side
+  _xAt(ms){
+    const a=this._anchors,n=a.length;
+    if(!n)return ms*this._pxPerMs;
+    if(ms<=a[0].ms)return a[0].x-(a[0].ms-ms)*this._pxPerMs;
+    if(ms>=a[n-1].ms)return a[n-1].x;
+    let lo=0,hi=n-1;
+    while(lo<hi-1){const mid=(lo+hi)>>1;if(a[mid].ms<=ms)lo=mid;else hi=mid;}
+    return a[lo].x+(ms-a[lo].ms)/(a[hi].ms-a[lo].ms)*(a[hi].x-a[lo].x);
   }
   destroy(){
     if(this._iframe){
@@ -4513,7 +4946,8 @@ class CoachLink{
       document.getElementById('notation-strip').classList.add('visible');
       r.onReady=()=>{this._queue.forEach(q=>r.post(q));this._queue=[];};
       r.renderXml(payload.xml);
-      this._status('Showing '+m.title);
+      // A file with no reliable beat: a rough sheet (Auto clean is on the coach page).
+      this._status('Showing '+m.title+(payload.cleanup==='off'?' (no steady beat: rough sheet; Auto clean is on the coach page)':''));
       return;
     }
     if(m.type==='lesson'){
@@ -4524,8 +4958,12 @@ class CoachLink{
       if(lesson.version===this.lessonVersion)this.app._loadCoachLesson(lesson,!!m.autostart);
       return;
     }
-    if(m.type==='session'){this.sessionActive=!!m.active;return;}
-    if(m.type==='say')return;  // spoken by the coach page
+    if(m.type==='session'){
+      this.sessionActive=!!m.active;
+      if(!m.active)this.app._notationRenderer.post(m);
+      return;
+    }
+    if(m.type==='say'||m.type==='keys')return;  // spoken by / keys lit on the coach page
     // While Learn Mode plays a lesson it scrolls the strip itself; only a live coach
     // session (wait / rehearsal grading) takes the cursor over.
     if(m.type==='cursorBeat'&&!m.live&&this.app._learn?.active)return;
@@ -4570,6 +5008,7 @@ class App{
     this.fx=null;
     this.midi=new MidiHandler();
     this.midiFile=new MidiFilePlayer();
+    this.instrument=new InstrumentInput(this);
     this.fluid=new FluidController();
     this.shaderNotes=new ShaderNotesController();
     this.led=new LedOutput();
@@ -4815,9 +5254,46 @@ class App{
         const lmE=document.getElementById('lhud-lm-end');
         if(lmS)lmS.style.left=sPct+'%';
         if(lmE)lmE.style.left=ePct+'%';
+        _placeLoopTags(sPct,ePct);
       }
-      if(l.active&&Config.lrn.notation&&!this.coach?.sessionActive)this._notationRenderer?.scrollTo(l._currentNoteMs);
+      if(l.active&&Config.lrn.notation&&!this.coach?.sessionActive){
+        this._notationRenderer?.scrollTo(l._currentNoteMs,this._learnBeatAt(l._currentNoteMs));
+        this._showLoopOnSheet();
+      }
     }
+  }
+
+  // Learn Mode's position in beats (quarter notes from the start, as the sheet counts them), from
+  // the events' own beats; null when they have none (a MIDI file played here).
+  _learnBeatAt(ms){
+    const l=this._learn,ev=l._events;
+    if(l._beatsOf!==ev){
+      l._beatsOf=ev;
+      const pts=(ev||[]).filter(e=>Number.isFinite(e.beat)).map(e=>({ms:e.ms,beat:e.beat})).sort((a,b)=>a.ms-b.ms);
+      l._beatPts=[];
+      for(const p of pts){const q=l._beatPts[l._beatPts.length-1];if(!q||(p.ms>q.ms+1&&p.beat>q.beat))l._beatPts.push(p);}
+    }
+    const a=l._beatPts;
+    if(!a.length)return null;
+    if(a.length===1)return a[0].beat;
+    let lo=0,hi=a.length-1;
+    if(ms<=a[0].ms)hi=1; else if(ms>=a[hi].ms)lo=hi-1;
+    else while(lo<hi-1){const mid=(lo+hi)>>1;if(a[mid].ms<=ms)lo=mid;else hi=mid;}
+    const p=a[lo],q=a[hi];
+    return p.beat+(ms-p.ms)*(q.beat-p.beat)/(q.ms-p.ms);
+  }
+
+  // The A–B loop on the sheet, as labelled flags (when the sheet counts in beats)
+  _showLoopOnSheet(){
+    const l=this._learn,r=this._notationRenderer;
+    let msg={type:'range'};
+    if(Config.lrn.loop&&l._totalMs>0){
+      const s=this._learnBeatAt(Config.lrn.loop_start_ms||0);
+      const e=this._learnBeatAt(Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs);
+      if(s!==null&&e!==null)msg={type:'range',start:+s.toFixed(3),end:+e.toFixed(3),loop:true};
+    }
+    const key=r._gen+JSON.stringify(msg);
+    if(key!==this._loopShown&&r.post(msg))this._loopShown=key;
   }
 
   _setupKeyboardMouse(){
@@ -5349,9 +5825,9 @@ class App{
         if(!clef)continue;
         let offsetMs=0;
         for(const chord of clef){
-          const ms=bar.startMs+offsetMs;
+          const ms=chord.ms??bar.startMs+offsetMs;  // chords from _parseMusicXmlDoc know where they start
           for(const note of chord.notes)
-            events.push({ms,durationMs:chord.durationMs,note,channel:ch});
+            events.push({ms,durationMs:chord.durationMs,note,channel:ch,beat:chord.beat});
           offsetMs+=chord.durationMs;
         }
       }
@@ -5376,11 +5852,21 @@ class App{
     const meta=this.midiFile?.meta;
     const events=this._learn?._events;
     if(!events||!events.length)return;
-    const microsPerBeat=meta?.tempoMap?.[meta.tempoMap.length-1]?.microsPerBeat||500000;
-    const beatsPerBar=meta?.timeSig?.num||4;
-    const barDurationMs=beatsPerBar*microsPerBeat/1000;
+    // Beats <-> ms through the file's tempo map, so bars and notes land where they sound
+    const tpb=meta?.ticksPerBeat||480;
+    const segs=[];
+    for(const t of [...(meta?.tempoMap||[])].sort((a,b)=>a.tick-b.tick)){
+      const p=segs[segs.length-1];
+      if(p&&p.tick===t.tick){p.us=t.microsPerBeat;continue;}
+      segs.push({tick:t.tick,us:t.microsPerBeat,ms:p?p.ms+(t.tick-p.tick)*p.us/tpb/1000:0});
+    }
+    if(!segs.length||segs[0].tick>0)segs.unshift({tick:0,us:500000,ms:0});
+    const segAt=(k,v)=>{let s=segs[0];for(const x of segs){if(x[k]>v)break;s=x;}return s;};
+    const beatToMs=b=>{const s=segAt('tick',b*tpb);return s.ms+(b*tpb-s.tick)*s.us/tpb/1000;};
+    const msToBeat=ms=>{const s=segAt('ms',ms);return(s.tick+(ms-s.ms)*1000*tpb/s.us)/tpb;};
+    const barQ=(meta?.timeSig?.num||4)*4/(meta?.timeSig?.denom||4);  // quarter notes per bar
     const totalMs=this._learn._totalMs||1;
-    const numBars=Math.min(400,Math.max(1,Math.ceil(totalMs/barDurationMs)));
+    const numBars=Math.min(400,Math.max(1,Math.ceil(msToBeat(totalMs)/barQ-1e-6)));
     // Use hand assignments if configured; otherwise auto-split at middle C.
     const cfg=this._channelConfig;
     const hasLeftHand=cfg&&cfg.some&&cfg.some(c=>c?.hand==='left'&&!c?.muted);
@@ -5395,37 +5881,45 @@ class App{
       trebleEvents=events.filter(e=>notMuted(e)&&e.note>=60);
       bassEvents=events.filter(e=>notMuted(e)&&e.note<60);
     }
-    const groupIntoBar=(evts,barIdx)=>{
-      const barStart=barIdx*barDurationMs;
-      const barEnd=barStart+barDurationMs;
-      return evts.filter(e=>e.ms>=barStart&&e.ms<barEnd);
-    };
-    const clusterNotes=(barEvts)=>{
-      if(!barEvts.length)return null;
-      const sorted=[...barEvts].sort((a,b)=>a.ms-b.ms);
-      const chords=[];
-      let i=0;
-      while(i<sorted.length){
-        const ev=sorted[i];
-        const cluster=[ev];
-        while(i+1<sorted.length&&Math.abs(sorted[i+1].ms-ev.ms)<=35){
-          i++; cluster.push(sorted[i]);
-        }
-        chords.push({
-          notes:cluster.map(e=>e.note),
-          durationMs:Math.max(100,cluster.reduce((m,e)=>Math.max(m,e.durationMs),0))
-        });
-        i++;
+    // Each staff's chords per bar, on a 16th-note grid: [bar] -> Map(position in the bar -> {notes, beats})
+    const chordsByBar=evts=>{
+      const out=[];
+      for(const e of evts){
+        const b=msToBeat(e.ms),on=Math.round(b*4)/4;
+        const bar=Math.floor(on/barQ+1e-9);
+        if(bar>=numBars)continue;
+        const pos=on-bar*barQ;
+        const beats=Math.max(0.25,Math.round((msToBeat(e.ms+e.durationMs)-b)*4)/4);
+        const m=out[bar]||(out[bar]=new Map());
+        const c=m.get(pos)||{pos,notes:[],beats:0};
+        if(!c.notes.includes(e.note))c.notes.push(e.note);
+        c.beats=Math.max(c.beats,beats);
+        m.set(pos,c);
       }
-      return chords;
+      return out;
     };
+    // A bar of one staff as notes and rests that fill it exactly: each chord held until the next
+    // (or its own end), rests in the gaps
+    const fillBar=(m,bar)=>{
+      if(!m)return null;
+      const bar0=bar*barQ,items=[];
+      let at=0;
+      const rest=len=>{while(len>0.24){const d=_vexStep(len)[0];items.push({notes:[],beats:d,ms:beatToMs(bar0+at)});at+=d;len-=d;}};
+      const chords=[...m.values()].sort((a,b)=>a.pos-b.pos);
+      chords.forEach((c,i)=>{
+        if(c.pos>at)rest(c.pos-at);
+        const room=(i+1<chords.length?chords[i+1].pos:barQ)-c.pos;
+        const d=_vexStep(Math.min(c.beats,room))[0];
+        items.push({notes:c.notes.sort((a,b)=>a-b),beats:d,ms:beatToMs(bar0+c.pos)});
+        at=c.pos+d;
+      });
+      if(at<barQ)rest(barQ-at);
+      return items;
+    };
+    const treble=chordsByBar(trebleEvents),bass=chordsByBar(bassEvents);
     const bars=[];
     for(let b=0;b<numBars;b++){
-      bars.push({
-        startMs:b*barDurationMs,
-        treble:clusterNotes(groupIntoBar(trebleEvents,b)),
-        bass:clusterNotes(groupIntoBar(bassEvents,b))
-      });
+      bars.push({startMs:beatToMs(b*barQ),endMs:beatToMs((b+1)*barQ),treble:fillBar(treble[b],b),bass:fillBar(bass[b],b)});
     }
     this._notationRenderer.render(bars,meta);
   }
@@ -5542,10 +6036,11 @@ class App{
     this._updateNotationVisibility();
   }
 
-  _onLearnNoteOn(note,ch){
+  _onLearnNoteOn(note,ch,input='midi'){
     const l=this._learn;
-    if(!l.active||Config.lrn.mode!=='wait')return;
+    if(!l.active||Config.lrn.mode!=='wait'||input!==(Config.data.instrument.source==='mic'?'mic':'midi'))return;
     if(!this._learnHandFilter(ch))return;
+    Progress.learn(l._pendingChord.has(note));
     if(l._pendingChord.has(note)){
       l._pendingChord.delete(note);
       if(l._pendingChord.size===0)this._learnAdvanceCursor();
@@ -5748,9 +6243,11 @@ class App{
 
   // Every channel message from the MIDI input, plus the mouse and computer keyboard
   // (`computer`), which have no sound of their own so use the synth when live thru is off
-  _liveMidi(d,computer=false){
+  _liveMidi(d,computer=false,input='midi'){
     const st=d[0]&0xF0;
     if(st<0x80||st>=0xF0)return;
+    if(st===0x90&&d[2]>0&&input!==(Config.data.instrument.source==='mic'?'mic':'midi'))return;
+    if(st===0x90&&d[2]>0)Progress.noteOn();
     const au=Config.au;
     let route={dest:au.live_dest,ch:au.live_ch,prog:-1,vol:100};
     if(route.dest==='off'){if(!computer)return;route={dest:'synth',vol:100};}
@@ -6021,7 +6518,7 @@ class App{
       {id:'notes',label:'Notes'},{id:'effects',label:'Effects'},{id:'fluid',label:'Fluid'},
       {id:'shader',label:'Shader'},
       {id:'keyboard',label:'Keyboard'},{id:'display',label:'Display'},
-      {id:'hardware',label:'Hardware'},{id:'sound',label:'Sound'},
+      {id:'instrument',label:'Instrument Input'},{id:'hardware',label:'Hardware'},{id:'sound',label:'Sound'},
       {id:'led',label:'LED Output'},{id:'audience',label:'Audience'},
       {id:'themes',label:'Themes'},{id:'profiles',label:'Profiles'},
     ];
@@ -6116,7 +6613,7 @@ class App{
     this.midiFile.programs={vid:[],ch:[]};
     this.midiFile.filename=p.title;
     const l=this._learn;
-    l._events=p.events.map(e=>({ms:e.ms,durationMs:e.durationMs,note:e.note,channel:e.channel,track:0}));
+    l._events=p.events.map(e=>({ms:e.ms,durationMs:e.durationMs,note:e.note,channel:e.channel,track:0,beat:e.beat}));
     l._totalMs=Math.max(...l._events.map(e=>e.ms+e.durationMs));
     l._currentNoteMs=0;
     l._pendingChord?.clear();

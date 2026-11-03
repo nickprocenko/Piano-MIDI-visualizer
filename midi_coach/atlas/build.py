@@ -12,7 +12,7 @@ import json
 import pathlib
 import sys
 
-from . import STRANDS, content_dir, load_syllabus, templates
+from . import STRANDS, content_dir, familiar, first_steps, load_syllabus, templates
 from .layout import layout
 
 VERSION = 1
@@ -69,7 +69,9 @@ class Tree:
         return req
 
 
-def build(syllabus: dict, catalog: list[dict] | None = None) -> dict:
+def build(syllabus: dict, catalog: list[dict] | None = None, first: bool = True) -> dict:
+    """first: put the coach's own beginner tiers (First steps, Ready to read) before the
+    syllabus's first grade."""
     tree = Tree()
     grades = sorted(syllabus["grades"], key=lambda g: g["order"])
     order = {g["id"]: g["order"] for g in grades}
@@ -144,12 +146,14 @@ def build(syllabus: dict, catalog: list[dict] | None = None) -> dict:
                   "prereqs": [f"{gid}.review"] + [f"{e.split(':')[1]}.{e.split(':')[0]}" for e in g.get("entry", [])]})
 
     _link(tree, order)
+    familiar.add(tree, list(order))
+    young = first_steps.add(tree, order) if first else []
     for n in tree.nodes:  # first stages follow the requirement's own prerequisites
         if n["level"] == "requirement" and n.get("stages"):
             first = tree.by_id[n["stages"][0]]
             first["prereqs"] = _final_stages(tree, n["prereqs"])
     atlas = {"version": VERSION, "source": syllabus.get("source"), "syllabus_version": syllabus.get("version"),
-             "strands": STRANDS, "tiers": [{"id": g["id"], "title": g["title"], "order": g["order"]} for g in grades],
+             "strands": STRANDS, "tiers": young + [{"id": g["id"], "title": g["title"], "order": g["order"]} for g in grades],
              "nodes": tree.nodes}
     layout(atlas)
     return atlas

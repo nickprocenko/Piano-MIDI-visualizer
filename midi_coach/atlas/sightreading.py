@@ -233,13 +233,13 @@ def write_lessons() -> int:
     """Lessons for every sight-reading stage of the Atlas (they read from the pools)."""
     import json
 
-    from . import load_atlas
+    from . import first_steps, load_atlas
 
     atlas = load_atlas()
     folder = content_dir() / "lessons"
     count = 0
     for req in atlas["nodes"]:
-        if req["level"] == "requirement" and req["kind"] == "sight":
+        if req["level"] == "requirement" and req["kind"] == "sight" and req["tier"] not in first_steps.OURS:
             for sid in req["stages"]:
                 lesson = lesson_for(atlas["by_id"][sid], req)
                 (folder / f"{sid}.json").write_text(json.dumps(lesson, indent=1, ensure_ascii=False), encoding="utf-8")

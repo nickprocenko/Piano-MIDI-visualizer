@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import shutil
 import time
 
 from .engraving import tidy_heading
@@ -62,14 +63,64 @@ def _category_folder(category: str) -> str:
 
 
 def list_lessons() -> list[dict]:
-    """Every lesson, newest first, with its category (the folder it's in)."""
+    """Every lesson, newest first, with its category (the folder it's in). A playlist folder's
+    pieces come in the playlist's order instead, each with its `track` number."""
     root = lessons_dir()
     found = []
     for p in [root, *sorted(d for d in root.iterdir() if d.is_dir())]:
         category = UNSORTED if p == root else p.name
         found += [(f, category) for f in p.iterdir() if f.is_file() and f.suffix.lower() in LESSON_SUFFIXES]
     found.sort(key=lambda fc: -fc[0].stat().st_mtime)
-    return [{"title": f.stem, "path": str(f), "category": c, "source": source_note(f)} for f, c in found]
+    listed = [{"title": f.stem, "path": str(f), "category": c, "source": source_note(f)} for f, c in found]
+    for category in {item["category"] for item in listed} - {UNSORTED}:
+        tracks = playlist_files(root / category)
+        if not tracks:
+            continue
+        slots = [i for i, item in enumerate(listed) if item["category"] == category]
+        rank = {str(f): n for n, f in enumerate(tracks)}
+        mine = sorted((listed[i] for i in slots), key=lambda item: rank[item["path"]])
+        for n, (i, item) in enumerate(zip(slots, mine), 1):
+            listed[i] = {**item, "track": n}
+    return listed
+
+
+# A category folder holding this file is a playlist: {"name", "entries": [{"file", "song", "part",
+# "source"}], "missing": [...]}, its pieces in order (midi_coach.playlist writes it).
+PLAYLIST_FILE = "playlist.json"
+
+
+def read_playlist(folder) -> dict | None:
+    try:
+        return json.loads((pathlib.Path(folder) / PLAYLIST_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def playlist_files(folder) -> list[pathlib.Path]:
+    """A playlist folder's pieces in order: those it lists, then any others by name. Empty if
+    the folder isn't a playlist."""
+    folder = pathlib.Path(folder)
+    playlist = read_playlist(folder)
+    if playlist is None:
+        return []
+    listed = [folder / e["file"] for e in playlist.get("entries", [])]
+    here = {f.name for f in folder.iterdir() if f.is_file() and f.suffix.lower() in LESSON_SUFFIXES}
+    named = [f for f in listed if f.name in here]
+    return named + sorted((folder / n for n in here - {f.name for f in named}), key=lambda f: f.name.lower())
+
+
+def playlist_position(path) -> dict | None:
+    """Where a piece sits in its folder's playlist: {"playlist", "track", "total", "previous",
+    "next"} (previous / next are paths or None), or None if it isn't in one."""
+    p = pathlib.Path(path)
+    files = playlist_files(p.parent)
+    keys = [str(f).lower() for f in files]
+    if str(p).lower() not in keys:
+        return None
+    i = keys.index(str(p).lower())
+    playlist = read_playlist(p.parent) or {}
+    return {"playlist": playlist.get("name") or p.parent.name, "track": i + 1, "total": len(files),
+            "previous": str(files[i - 1]) if i else None, "next": str(files[i + 1]) if i + 1 < len(files) else None}
 
 
 _SOURCE_RE = re.compile(r"<source>(.*?)</source>", re.S)
@@ -126,6 +177,45 @@ def move_lesson(source: str, category: str, title: str | None = None) -> str:
     return str(new)
 
 
+def _file_name(title: str | None, fallback: str) -> str:
+    return (re.sub(r'[<>:"/\\|?*]+', "", title).strip(" .") if title else "") or fallback
+
+
+def copy_lesson(source: str, category: str, title: str | None = None) -> str:
+    """Save a copy of a lesson or reference into a category (the coach page's File → Save as).
+    The copy takes the original's part choice; its practice history starts empty."""
+    old = pathlib.Path(source).resolve()
+    if not old.is_file():
+        raise FileNotFoundError(f"No lesson file {source}")
+    new = lessons_dir(category).resolve() / f"{_file_name(title, old.stem)}{old.suffix}"
+    if new.exists():
+        raise FileExistsError(f"{new.name} is already in {category}.")
+    shutil.copy2(old, new)
+    choices = _load_choices()
+    if str(old) in choices:
+        choices[str(new)] = choices[str(old)]
+        _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
+    return str(new)
+
+
+def import_file(name: str, data: bytes, category: str = UNSORTED) -> str:
+    """Keep a MIDI or MusicXML file opened from the computer (File → Open) among the lessons.
+    Opening the same file again reuses the copy; a different file with the same name gets ' (2)'."""
+    p = pathlib.Path(name)
+    if p.suffix.lower() not in LESSON_SUFFIXES:
+        raise ValueError(f"{p.name} isn't a MIDI or MusicXML file.")
+    folder = lessons_dir(category).resolve()
+    stem = _file_name(p.stem, "Opened file")
+    for n in range(1, 100):
+        new = folder / f"{stem}{f' ({n})' if n > 1 else ''}{p.suffix.lower()}"
+        if not new.exists():
+            new.write_bytes(data)
+            return str(new)
+        if new.read_bytes() == data:
+            return str(new)
+    raise FileExistsError(f"Too many files called {p.name} in {category}.")
+
+
 def _repoint(old: str, new: str) -> None:
     def swap(value):
         if isinstance(value, str):
@@ -145,6 +235,14 @@ def _repoint(old: str, new: str) -> None:
     if old in choices:
         choices[new] = choices.pop(old)
         _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
+    old_p, new_p = pathlib.Path(old), pathlib.Path(new)
+    playlist = read_playlist(old_p.parent)
+    if playlist and any(e.get("file") == old_p.name for e in playlist.get("entries", [])):
+        # Renamed in place: the entry follows it. Moved to another folder: it leaves the playlist.
+        same = new_p.parent == old_p.parent
+        playlist["entries"] = [{**e, "file": new_p.name} if e.get("file") == old_p.name and same else e
+                               for e in playlist["entries"] if same or e.get("file") != old_p.name]
+        (old_p.parent / PLAYLIST_FILE).write_text(json.dumps(playlist, indent=2), encoding="utf-8")
 
 
 def _slug(title: str) -> str:
@@ -245,10 +343,12 @@ def build_lesson(
     category: str = AI_EXERCISES,
     out_dir: str | pathlib.Path | None = None,
     filename: str | None = None,
+    part_name: str | None = None,
 ) -> tuple[str, Score]:
     """Create and save a lesson. Returns (path, parsed score). out_dir: write it there (e.g.
     the Atlas's lesson folder) instead of a category of the page's lesson panel; filename: its
-    name there (without .musicxml) when the title isn't one."""
+    name there (without .musicxml) when the title isn't one. part_name: the treble part's
+    name when it isn't a right hand (a flute line is 'Flute')."""
     from music21 import converter, metadata, meter, stream
     from music21.musicxml.m21ToXml import GeneralObjectExporter
 
@@ -270,7 +370,7 @@ def build_lesson(
         score = stream.Score()
         score.metadata = metadata.Metadata(title=title)
         if rh:
-            score.insert(0, _part("Right Hand", rh, "treble", time_signature, key, tempo_bpm, total))
+            score.insert(0, _part(part_name or "Right Hand", rh, "treble", time_signature, key, tempo_bpm, total))
         if lh:
             score.insert(0, _part("Left Hand", lh, "bass", time_signature, key, tempo_bpm if not rh else None, total))
         from .transcribe import _print_accidentals
@@ -310,9 +410,11 @@ def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title:
 
 
 def learn_events(score: Score, side) -> list[dict]:
-    """Note events for the visualizer's Learn Mode: channel 0 = right hand, 1 = left."""
+    """Note events for the visualizer's Learn Mode: channel 0 = right hand, 1 = left. beat (quarter
+    notes, as the sheet counts them) lets its sheet follow the music through tempo changes."""
     return [
-        {"ms": round(n.start * 1000, 1), "durationMs": round(max(50.0, n.duration * 1000), 1), "note": n.pitch, "channel": 0 if side(n) == "right" else 1}
+        {"ms": round(n.start * 1000, 1), "durationMs": round(max(50.0, n.duration * 1000), 1), "note": n.pitch,
+         "channel": 0 if side(n) == "right" else 1, "beat": round(n.beat, 4)}
         for n in select_notes(score)[0]  # drums and parts the user left out don't belong in Learn Mode
     ]
 

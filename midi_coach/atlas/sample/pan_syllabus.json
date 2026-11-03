@@ -1,0 +1,22 @@
+{
+ "source": "Made-up sample flute syllabus for the tests (not any exam board's requirements).",
+ "version": 1,
+ "instrument": "flute",
+ "speeds": {"scale": {"g1": 60, "g2": 66}, "arpeggio": {"g1": 80, "g2": 90}},
+ "grades": [
+  {"id": "g1", "title": "Grade 1", "order": 1,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["C"], "range": "octave", "start_octave": 4},
+    {"type": "scale", "quality": "minor", "keys": ["A"], "range": "octave", "choice": true},
+    {"type": "arpeggio", "quality": "major", "keys": ["C"], "range": "octave", "start_octave": 4}],
+   "sight": {"bars": 2, "times": ["4/4"], "keys": ["C"], "range": ["G4", "D5"], "features": ["crotchets"]},
+   "aural": [{"test": "A", "id": "pulse", "title": "Tap the pulse", "skills": ["pulse"]}]},
+  {"id": "g2", "title": "Grade 2", "order": 2,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["G"], "range": "twelfth"},
+    {"type": "arpeggio", "quality": "major", "keys": ["G"], "range": "twelfth"}],
+   "sight": {"bars": 4, "times": ["3/4"], "keys": ["G"], "range": ["E4", "G5"]},
+   "aural": [{"test": "A", "id": "pulse", "title": "Tap the pulse", "skills": ["pulse"]}]}
+ ],
+ "first_notes_aural": [{"test": "A", "id": "pulse", "title": "Tap the pulse", "skills": ["pulse"]}]
+}

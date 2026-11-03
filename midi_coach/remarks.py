@@ -6,7 +6,8 @@ a problem shows up it is named; the second time comes the way to fix it; after t
 or two. Clean passes in a row stay quiet apart from the streak at three and five. So loop
 practice hears something only when there is something new to say.
 
-Two styles: warm (the default: encouraging, says what went well first) and strict (dry and
+Two styles: friend (the default: a cheerful practice buddy, Duolingo rather than an examiner,
+who celebrates effort and streaks and treats slips as part of learning) and strict (dry and
 demanding). Facts and instructions are shared; verdicts, greetings and sign-offs differ.
 Wording is drawn from phrase pools and avoids the last half of each pool, remembered between
 sessions when the Coach is given a memory file. Criticism is about the playing, never the
@@ -32,8 +33,13 @@ _MIXED = ["C", "C sharp", "D", "E flat", "E", "F", "F sharp", "G", "A flat", "A"
 _NAME_RE = re.compile(r"^([A-G])([#b]?)(-?\d+)$")
 _LETTER_PC = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 
-STYLES = ("warm", "strict")
-DEFAULT_STYLE = "warm"
+STYLES = ("friend", "strict")
+DEFAULT_STYLE = "friend"
+# When the Maestro speaks during a run. greet: hello when you press Start. passes: after a
+# finished pass, "every" one, only when there's "news" (a word otherwise), or "off". sign_off:
+# the summing-up when a run of two or more passes ends.
+PASS_TALK = ("every", "news", "off")
+DEFAULT_TALK = {"greet": True, "passes": "news", "sign_off": True}
 STREAK_NEWS = (3, 5)  # clean passes in a row that get a remark; the others stay quiet
 MILESTONES = (5, 10, 20)
 
@@ -71,14 +77,14 @@ COMMON = {
         "You hit {played} in bar {bar}; the note is {exp}.",
     ],
     "hot": [
-        "Bar {bar} cost you {count}.",
+        "Bar {bar} had {count} slip.",
         "Most of the slips were in bar {bar}.",
         "Bar {bar} had {count} go wrong.",
         "Bar {bar} is the trouble spot, with {count} off.",
         "{Count} slipped in bar {bar}.",
-        "Bar {bar} is where the pass came apart.",
+        "Bar {bar} is the tricky spot.",
         "Bar {bar} needs attention: {count} missed or wrong.",
-        "The problems cluster in bar {bar}.",
+        "The slips cluster in bar {bar}.",
     ],
     "hot-again": [
         "Bar {bar} again, {times} now; take it on its own, slowly.",
@@ -86,7 +92,7 @@ COMMON = {
         "Bar {bar}, {times} in a row; isolate it at half speed.",
         "Same bar, bar {bar}; try it hands separately first.",
         "Bar {bar} keeps tripping you; loop it slowly five times clean.",
-        "Bar {bar} again; practise it alone, then put it back in.",
+        "Bar {bar} again; practice it alone, then put it back in.",
         "That's bar {bar} {times}; slow it right down and get it clean.",
         "Bar {bar} is the bar to work on; give it a few slow, careful repeats.",
     ],
@@ -151,7 +157,7 @@ COMMON = {
     ],
     "fix-stall": [
         "Get the next hand position ready before you need it.", "Keep your eyes one beat ahead of your fingers.",
-        "Work out the fingering for bar {bar} before you start.", "Practise the move into bar {bar} on its own.",
+        "Work out the fingering for bar {bar} before you start.", "Practice the move into bar {bar} on its own.",
         "Read bar {bar} through once before you play it.", "Play bar {bar} slowly a few times until it flows.",
         "Look ahead to bar {bar} while you're still in the bar before.", "Prepare the shift into bar {bar} a little early.",
     ],
@@ -188,88 +194,104 @@ COMMON = {
 # -- phrase pools per style: verdicts, comparisons, greetings, sign-offs ---------
 
 VOICE = {
-    "warm": {
-        "verdict-clean": ["Clean, nicely done.", "That's it, every note.", "Lovely, that was clean.", "Clean pass, well played.",
-                          "Yes, that's the one.", "Every note in place.", "That was solid all the way through.", "Clean and confident."],
-        "verdict-close": ["Close, just a couple of slips.", "Nearly there.", "Very close.", "That was good, with a few loose ends.",
-                          "Almost clean.", "Most of that was right.", "Good pass, just a little tidying left.", "So close."],
-        "verdict-shaky": ["A few too many slips that time.", "That one got a bit shaky.", "Some of it held, some of it slipped.",
-                          "That's still settling in.", "Parts of that are there, parts aren't yet.", "A bit unsteady that time.",
-                          "That one wobbled.", "It's coming, but it isn't secure yet."],
-        "verdict-rough": ["That one got away from you.", "That was a tough pass.", "That's not ready at this speed yet.",
-                          "Lots of slips there.", "That passage isn't learned yet, and that's fine.", "That one fell apart a bit.",
-                          "That was a struggle.", "This one needs slower work."],
-        "improved": ["Better than last time.", "That's progress.", "Improving.", "Fewer slips than before.",
-                     "That's moving the right way.", "Nice, that's an improvement.", "Better, keep going that way.",
-                     "That's cleaner than the last one."],
-        "worse": ["That one slipped compared to the last.", "A step back from the last pass.", "The last pass was cleaner.",
-                  "That one was harder than the last.", "A few more slips that time.", "Not as clean as before.",
-                  "That one got away a little more.", "Last time was tidier."],
-        "same": ["Again.", "Same spot.", "One more.", "Keep at it.", "Stay with it.", "Once more.", "Nearly.", "Getting there."],
-        "do-clean": ["Again, and listen to your tone.", "Once more, make it even and musical.", "Try it without looking at your hands.",
-                     "Again, and shape the phrases this time.", "One more, eyes on the music.", "Now let it breathe a little.",
-                     "Again, and enjoy it.", "Try it once more, a touch more relaxed."],
-        "do-streak": ["{Streak} clean in a row; try it five percent faster.", "That's {streak} clean passes; try it from memory.",
-                      "{Streak} in a row, you've earned a faster tempo.", "{Streak} clean, time to raise the tempo or play from memory.",
-                      "{Streak} in a row, that's settled.", "{Streak} clean passes; nudge the tempo up.",
-                      "That's {streak} clean in a row, really solid.", "{Streak} clean; you could move on or go faster."],
-        "do-streak-learn": ["{Streak} clean in a row; switch to Rehearse and play it in time.",
-                            "That's {streak} clean, the notes are learned; try Rehearse.",
-                            "{Streak} in a row, you're ready to play it in time.", "{Streak} clean; let the cursor move on its own now.",
-                            "{Streak} clean passes; give Rehearse a go.", "The notes are there, {streak} in a row; time for Rehearse.",
-                            "{Streak} clean in a row; try it at tempo.", "That's {streak} without a slip; take it to Rehearse."],
-        "do-rough": ["Slow it right down.", "Try hands separately.", "Half tempo, and get it right.",
-                     "Go back to Learn mode until the notes feel sure.", "Take a smaller section.",
-                     "Slow down and let the notes settle.", "Try it at a slower tempo.", "Work on a few bars at a time."],
-        "do-close": ["Again.", "One more, clean this time.", "From the top, nice and steady.", "Again, and tidy that up.",
-                     "One more time.", "Once more, you're close.", "Again, a little slower.", "Go again."],
-        "greet-new": ["{Title}, a new piece; let's see how it goes.", "First time with {title}; take your time.",
-                      "{Title}, fresh pages; no pressure on the first go.", "Let's start {title}.",
-                      "{Title}, new for you; enjoy the first look.", "Here's {title}; nobody's perfect on day one.",
-                      "{Title}; let's get to know it.", "A new one, {title}; let's begin."],
-        "greet-back": ["{Title} again; your best is {best}.", "Back to {title}; last best was {best}.",
-                       "{Title}, {takes} so far, best {best}.", "Welcome back to {title}; best score {best}.",
-                       "{Title}; your record is {best}, let's see today.", "Back with {title}; the best so far is {best}.",
-                       "{Title} again, {takes} in, best {best}.", "Good to see {title} again; best is {best}."],
-        "greet-away": ["{Days} days since {title}; let's see what stuck.", "It's been {days} days with {title}; take it easy at first.",
-                       "{Title}, {days} days on; let's warm it up.", "Back to {title} after {days} days.",
-                       "{Days} days away from {title}; ease back in.", "{Title} again after {days} days; let's see how it feels.",
-                       "{Days} days since you played {title}; a slow first pass helps.", "Welcome back to {title}, {days} days on."],
-        "greet-key": ["{Count}: {names}.", "Remember the key, {count}: {names}.", "{Names}; that's the key.",
-                      "Keep {names} in mind.", "The key has {count}: {names}.", "Watch for {names}.",
-                      "{Count} in the key: {names}.", "Key signature: {names}."],
-        "greet-wait": ["Learn mode; the cursor waits for you.", "Take your time; the cursor will wait.", "Learn mode, slow is fine.",
-                       "The cursor waits for each chord.", "Learn mode; get the notes right first.", "No rush; the cursor waits.",
-                       "Learn mode; play each chord when you're ready.", "The cursor will wait for the right notes."],
-        "greet-rehearsal": ["{Tempo} percent; the cursor keeps moving.", "Rehearse at {tempo} percent.",
-                            "{Tempo} percent, in time; count yourself in.", "Rehearse at {tempo} percent; keep going if you slip.",
-                            "{Tempo} percent, and the cursor won't wait.", "Rehearse, {tempo} percent; feel the beat first.",
-                            "In time at {tempo} percent.", "{Tempo} percent; keep the pulse going."],
-        "milestone": ["Pass {pass}; your hands are warming up.", "That's pass {pass}, nice persistence.",
-                      "Pass {pass}; this is how it gets learned.", "{Pass} passes in, keep it up.",
-                      "Pass {pass}; maybe a sip of water soon.", "That's {pass} passes.", "Pass {pass}, steady work.",
-                      "{Pass} passes; good stamina."],
-        "pb": ["New personal best on {title}, {score}!", "{Score}, that's a record for you on {title}.", "Personal best, {score}!",
-               "{Score} on {title}, your best yet.", "That's a new best, {score}.", "Record score on {title}: {score}.",
-               "{Score}, the best you've done on {title}.", "Personal best on {title}, {score}, well done."],
-        "wrap": ["{Passes} passes; pass {best_pass} was the best{best_score}.",
-                 "That's {passes} passes today, best was pass {best_pass}{best_score}.",
-                 "{Passes} passes, with pass {best_pass} on top{best_score}.",
-                 "Session over, {passes} passes; best was pass {best_pass}{best_score}.",
-                 "{Passes} passes done; pass {best_pass} was your best{best_score}.",
-                 "That's {passes} passes, and pass {best_pass} stood out{best_score}.",
-                 "Good work, {passes} passes; best was pass {best_pass}{best_score}.",
-                 "{Passes} passes; your best came on pass {best_pass}{best_score}."],
-        "wrap-weak": ["Bar {bar} is the one to work on next time.", "Bar {bar} still needs some love.",
-                      "Next time, start with bar {bar}.", "Bar {bar} is your homework.", "Keep an eye on bar {bar} next session.",
-                      "Bar {bar} is the last tricky spot.", "Give bar {bar} some slow practice tomorrow.",
-                      "Bar {bar} is where to begin next time."],
-        "wrap-good": ["Good session, that's real progress.", "Nice work, rest your hands.", "That's progress, well done.",
-                      "You got better through that session.", "Remember this feeling; it's called progress.",
-                      "Good session; same time tomorrow?", "You improved a lot there.", "Well played; it'll settle overnight."],
-        "wrap-flat": ["Same time tomorrow.", "Rest your hands; it settles overnight.", "Come back to it tomorrow.",
-                      "Good effort; it'll feel easier next time.", "Sleep on it; that helps more than you'd think.",
-                      "Time for a break.", "That's enough for now.", "Take a rest; you'll be fresher tomorrow."],
+    "friend": {
+        "verdict-clean": ["Nailed it!", "Yes, every single note!", "Clean pass, you're on fire!", "Look at you, every note right!",
+                          "Ding ding ding, that's clean!", "Clean as a whistle!", "Flawless, high five!", "You made that look easy!"],
+        "verdict-close": ["So close, just a couple of sneaky slips!", "Ooh, nearly perfect!", "Almost had it, just a tiny wobble!",
+                          "That was really good, with a slip or two!", "Nearly there, you can almost taste it!",
+                          "Most of that was spot on!", "Great pass, just a little tidying left!", "So, so close!"],
+        "verdict-shaky": ["That one got a bit wobbly, no worries!", "Some of that clicked, some is still loading!",
+                          "Tricky one, and that's okay!", "It's coming together, keep going!", "Most of it is there already!",
+                          "A bit bumpy, totally normal at this stage!", "Slips mean you're learning, keep at it!",
+                          "Good try, it's still settling in!"],
+        "verdict-rough": ["Oof, that one got away from us, it happens to everyone!", "Tough one, but you showed up and that counts!",
+                          "That's a hard passage, let's make it smaller!", "Don't worry, every pianist has passes like that!",
+                          "Totally fine, this one just needs slower steps!", "That was a brave try!",
+                          "Plot twist, that one fought back!", "No stress, we'll break this one down!"],
+        "improved": ["Ooh, better than last time!", "Look at that progress!", "Leveling up!", "Fewer slips, nice work!",
+                     "Getting better every time!", "Yes, that's an improvement!", "Better, you're on a roll!",
+                     "Nice, that was tidier than the last one!"],
+        "worse": ["Little dip there, it happens!", "That one was harder, shake it off!", "A small step back, no big deal!",
+                  "The last one was cleaner, and you've still got it in you!", "A few extra slips, deep breath!",
+                  "Not quite like last time, but close!", "Brains get tired, shake out your hands!", "A wobble, try once more fresh!"],
+        "same": ["Again!", "One more!", "Go again!", "Keep going!", "So close!", "Almost there!", "Nearly!", "Once more!"],
+        "do-clean": ["Again, and listen to how pretty it sounds!", "One more, make it even and musical!",
+                     "Try it without peeking at your hands!", "Again, and shape the phrases this time!", "One more, eyes on the music!",
+                     "Now let it breathe a little!", "Again, and have fun with it!", "Once more, nice and relaxed!"],
+        "do-streak": ["{Streak} clean in a row, you're on fire; try it five percent faster!",
+                      "{Streak} in a row, streak alert; let's nudge the tempo up!",
+                      "That's {streak} clean passes; try it from memory if you dare!",
+                      "{Streak} in a row, you've unlocked a faster tempo!",
+                      "{Streak} clean, you're unstoppable; raise the tempo or play from memory!",
+                      "A streak of {streak}, that's locked in!", "{Streak} clean passes; time to speed it up a notch!",
+                      "{Streak} clean in a row; you could move on or go faster!"],
+        "do-streak-learn": ["{Streak} clean in a row, you've learned the notes; try Rehearse and play it in time!",
+                            "That's {streak} clean, new level unlocked: Rehearse!",
+                            "{Streak} in a row, you're ready to play it in time!",
+                            "{Streak} clean; let the cursor move on its own now!",
+                            "{Streak} clean passes, go give Rehearse a try!",
+                            "The notes are yours, {streak} in a row; time for Rehearse!",
+                            "{Streak} clean in a row; let's try it at tempo!",
+                            "That's {streak} without a slip, take it to Rehearse!"],
+        "do-rough": ["Let's slow it right down together.", "Try hands separately, one at a time.", "Half tempo, nice and easy.",
+                     "Back to Learn mode until the notes feel friendly.", "Let's take a smaller bite.",
+                     "Slow and steady wins this one.", "Try a slower tempo, no rush.", "Just a few bars at a time."],
+        "do-close": ["Again, you've totally got this!", "One more, clean this time!", "From the top, nice and steady!",
+                     "Again, and tidy that up!", "One more time!", "Once more, you're so close!", "Again, a little slower!",
+                     "Go again!"],
+        "greet-new": ["Ooh, {title}, a brand new piece; let's explore it!", "First time with {title}, how exciting!",
+                      "{Title}, fresh pages; first tries are for exploring!", "Let's meet {title}!",
+                      "New piece unlocked: {title}!", "{Title}; nobody's perfect on day one, so let's just have fun!",
+                      "{Title}; let's get to know it together!", "A new adventure, {title}; let's go!"],
+        "greet-back": ["{Title} again; your best is {best}, let's have a go!", "Back to {title}, your best so far is {best}!",
+                       "{Title}, {takes} so far, best {best}, nice!", "Welcome back to {title}, best score {best}!",
+                       "Hey, {title} again; your record is {best}!", "{Title} is back, and {best} is the number to play with!",
+                       "{Title} again, {takes} in, best {best}; let's play!", "Yay, {title}; your best is {best}!"],
+        "greet-away": ["{Days} days since {title}; I missed this one!", "Hey stranger, {days} days since {title}; let's warm it up!",
+                       "{Title}, {days} days on; let's see what stuck!", "Back to {title} after {days} days, welcome back!",
+                       "{Days} days away from {title}; ease back in, no pressure!",
+                       "{Title} after {days} days; your fingers remember more than you think!",
+                       "{Days} days since {title}; a slow first pass helps!",
+                       "Welcome back to {title}, {days} days on, and so glad you're here!"],
+        "greet-key": ["{Count}: {names}, keep them handy!", "Quick tip, the key has {count}: {names}.", "{Names}; that's the key!",
+                      "Keep {names} in mind!", "The key has {count}: {names}.", "Watch out for sneaky {names}!",
+                      "{Count} in the key: {names}.", "Your key signature buddies: {names}!"],
+        "greet-wait": ["Learn mode; the cursor waits for you, no rush!", "Take your time, the cursor waits!", "Learn mode, slow is perfect!",
+                       "The cursor waits for each chord, easy does it!", "Learn mode; notes first, speed later!",
+                       "No rush, the cursor is patient!", "Learn mode; play each chord when you're ready!",
+                       "The cursor will wait for you, promise!"],
+        "greet-rehearsal": ["{Tempo} percent, and the cursor keeps rolling; let's go!", "Rehearse at {tempo} percent, you've got this!",
+                            "{Tempo} percent, count yourself in!", "Rehearse at {tempo} percent; if you slip, just keep going!",
+                            "{Tempo} percent, ride the beat!", "Rehearse, {tempo} percent; feel the beat first!",
+                            "In time at {tempo} percent, here we go!", "{Tempo} percent, keep the groove going!"],
+        "milestone": ["Pass {pass}, look at you go!", "That's pass {pass}, love the persistence!",
+                      "Pass {pass}; this is how pianists are made!", "{Pass} passes in, you're on a roll!",
+                      "Pass {pass}, maybe grab a sip of water soon!", "{Pass} passes, what a practice session!",
+                      "Pass {pass}, steady work, I'm impressed!", "{Pass} passes, your fingers are getting strong!"],
+        "pb": ["New personal best on {title}, {score}, woohoo!", "{Score}, that's a new record on {title}, amazing!",
+               "Personal best, {score}, high five!", "{Score} on {title}, your best yet!", "New best, {score}, you did it!",
+               "Record score on {title}: {score}, party time!", "{Score}, the best you've ever done on {title}!",
+               "Personal best on {title}, {score}, so proud of you!"],
+        "wrap": ["{Passes} passes today; pass {best_pass} was the star{best_score}!",
+                 "That's {passes} passes, and pass {best_pass} shone brightest{best_score}!",
+                 "{Passes} passes done; pass {best_pass} was your best{best_score}, nice work!",
+                 "Session complete, {passes} passes; the best was pass {best_pass}{best_score}!",
+                 "{Passes} passes in the bag; pass {best_pass} was the highlight{best_score}!",
+                 "Lesson complete, {passes} passes, with pass {best_pass} on top{best_score}!",
+                 "{Passes} passes, awesome effort; the best was pass {best_pass}{best_score}!",
+                 "Woohoo, {passes} passes; your best came on pass {best_pass}{best_score}!"],
+        "wrap-weak": ["Bar {bar} is our next mission!", "Bar {bar} still needs a little love!", "Next time, let's start with bar {bar}!",
+                      "Bar {bar} is tomorrow's mini challenge!", "Let's give bar {bar} some slow practice next time!",
+                      "Bar {bar} is the last tricky spot, almost there!", "Bar {bar}, you're next, watch out!",
+                      "Bar {bar} is where we begin next time!"],
+        "wrap-good": ["Great session, real progress today!", "You got better right in front of me, love it!",
+                      "Look at that improvement, well done!", "That's progress, and your future self says thanks!",
+                      "Remember this feeling, it's called progress!", "Awesome session; same time tomorrow?",
+                      "You improved so much there!", "Well played; it'll settle in overnight!"],
+        "wrap-flat": ["Showing up is the hard part, and you did it!", "Rest your hands; it settles in overnight!",
+                      "Come back tomorrow, it'll feel easier!", "Good effort; practice days like this count too!",
+                      "Sleep on it, your brain keeps practicing!", "Time for a break, you earned it!",
+                      "Nice work showing up today!", "See you tomorrow, same time?"],
     },
     "strict": {
         "verdict-clean": ["Clean.", "That's how it's done.", "Now we're talking.", "Clean pass; I'll take it.",
@@ -279,7 +301,7 @@ VOICE = {
                           "Nearly there; nearly isn't there.", "Not bad, not good enough either.", "So close; tidy it up.",
                           "Good effort, sloppy finish."],
         "verdict-shaky": ["Sloppy.", "That's guessing, not playing.", "Messy.", "That one fell apart.",
-                          "You're practising mistakes.", "Too many slips.", "That's not ready.", "Too loose."],
+                          "You're practicing mistakes.", "Too many slips.", "That's not ready.", "Too loose."],
         "verdict-rough": ["Stop; that was a train wreck.", "We're not there yet, not even close.", "Way too many mistakes.",
                           "No; start over, slower.", "That was all over the place.", "That isn't learned yet.",
                           "That won't do.", "Nowhere near ready at this speed."],
@@ -439,6 +461,7 @@ class Coach:
         self.context: dict = {}
         self._recent: dict[str, list[str]] = {}
         self._style = DEFAULT_STYLE
+        self._talk = dict(DEFAULT_TALK)
         self._loaded = memory is None
         self.last_lead: str | None = None  # the first sentence of the last full remark
 
@@ -457,6 +480,23 @@ class Coach:
         self._style = value
         self._save()
 
+    @property
+    def talk(self) -> dict:
+        self._load()
+        return dict(self._talk)
+
+    def set_talk(self, **changes) -> dict:
+        """Change when the Maestro speaks (greet, passes, sign_off); returns the whole setting."""
+        self._load()
+        for k, v in changes.items():
+            if k not in DEFAULT_TALK:
+                raise ValueError(f"unknown Maestro setting {k!r}")
+            if k == "passes" and v not in PASS_TALK:
+                raise ValueError(f"passes must be one of {', '.join(PASS_TALK)}")
+            self._talk[k] = v if k == "passes" else bool(v)
+        self._save()
+        return dict(self._talk)
+
     def _load(self) -> None:
         if self._loaded:
             return
@@ -465,8 +505,14 @@ class Coach:
             data = json.loads(pathlib.Path(self.memory()).read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             return
-        if data.get("style") in STYLES:
-            self._style = data["style"]
+        style = {"warm": "friend"}.get(data.get("style"), data.get("style"))  # warm was the friend's old name
+        if style in STYLES:
+            self._style = style
+        talk = data.get("talk")
+        if isinstance(talk, dict):
+            for k, v in talk.items():
+                if k == "passes" and v in PASS_TALK or k in ("greet", "sign_off") and isinstance(v, bool):
+                    self._talk[k] = v
         recent = data.get("recent")
         if isinstance(recent, dict):
             self._recent = {k: [s for s in v if isinstance(s, str)] for k, v in recent.items() if isinstance(v, list)}
@@ -475,7 +521,8 @@ class Coach:
         if self.memory is None:
             return
         try:
-            pathlib.Path(self.memory()).write_text(json.dumps({"style": self._style, "recent": self._recent}, indent=1),
+            pathlib.Path(self.memory()).write_text(json.dumps({"style": self._style, "talk": self._talk, "recent": self._recent},
+                                                              indent=1),
                                                    encoding="utf-8")
         except OSError as exc:
             log.warning("could not save the Maestro's memory: %s", exc)
@@ -498,11 +545,14 @@ class Coach:
 
     # -- start and end of a run (the Maestro greets you and signs off) -------------
 
-    def start(self, context: dict) -> str:
-        """Begin a run and greet it. context: title, mode, tempo_percent, fifths (key signature),
-        best_before (best earlier score on this piece and hand), takes_before, days_away."""
+    def start(self, context: dict) -> str | None:
+        """Begin a run and greet it (None with the greeting off). context: title, mode,
+        tempo_percent, fifths (key signature), best_before (best earlier score on this piece and
+        hand), takes_before, days_away."""
         self.reset()
         self.context = dict(context)
+        if not self.talk["greet"]:
+            return None
         title = context.get("title") or "this piece"
         best, takes, days = context.get("best_before"), context.get("takes_before") or 0, context.get("days_away")
         if days and days >= 2:
@@ -522,7 +572,7 @@ class Coach:
 
     def wrap_up(self) -> str | None:
         """Sign-off for a run of two or more finished passes."""
-        if len(self.history) < 2:
+        if len(self.history) < 2 or not self.talk["sign_off"]:
             return None
         scored = [(i, h["score"]) for i, h in enumerate(self.history, 1) if h["score"] is not None]
         if scored:
@@ -635,7 +685,8 @@ class Coach:
 
     def remark(self, summary: dict | None, report: dict | None = None) -> str | None:
         """What to say after a pass: at most two sentences, a word or two when nothing is new,
-        or None for a clean pass in a streak that isn't worth a remark."""
+        or None for a clean pass in a streak that isn't worth a remark. The pass is remembered
+        whatever talk["passes"] says: "every" makes each pass news, "off" stays silent."""
         if not summary or not summary.get("notes_total"):
             return None
         f = self._facts(summary, report)
@@ -655,6 +706,10 @@ class Coach:
                 break
             streak += 1
         n = len(self.history)
+        self.last_lead = None
+        passes = self.talk["passes"]
+        if passes == "off":
+            return None
 
         lead = None
         # Beating the best from earlier sessions is announced once per run.
@@ -664,9 +719,8 @@ class Coach:
             self.context["pb_said"] = True
         elif n in MILESTONES:
             lead = self._pick("milestone", **{"pass": _num(n)})
-        news = (lead is not None or prev is None or f["grade"] != prev["grade"]
+        news = (passes == "every" or lead is not None or prev is None or f["grade"] != prev["grade"]
                 or (pool is not None and run <= 2) or (f["grade"] == "clean" and streak in STREAK_NEWS))
-        self.last_lead = None
         if not news:
             said = None if f["grade"] == "clean" else self._pick("same")
             self._save()

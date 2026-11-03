@@ -202,10 +202,10 @@ def test_page_runs_an_exam_piece_and_the_examiner_moves_on(exam_content, monkeyp
                 time.sleep(0.002)
             FakeIn.instance.send([0x90, n.pitch, 70])
             FakeIn.instance.send([0x80, n.pitch, 0])
-        _until(lambda: server._atlas.exam() and server._atlas.exam().data["current"] == 1, timeout=15)
+        _until(lambda: server._atlas.exam() and server._atlas.exam().data["current"] == 1
+               and said[-1].startswith("Thank you."), timeout=15)
         result = server._atlas.exam().data["tasks"][0]["result"]
         assert result["of"] == 30 and result.get("take") and 10 <= result["mark"] <= 30, result
-        assert said[-1].startswith("Thank you.")
         state = _post(url + "exam_state")["exam"]
         assert state["progress"]["pieces"] == {"done": 1, "total": 3}
         assert _post(url + "exam_start", {"tier": "initial"})["exam"]["id"] == state["id"]  # picked up, not restarted

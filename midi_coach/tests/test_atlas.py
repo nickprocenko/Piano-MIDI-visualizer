@@ -124,10 +124,25 @@ def test_layout_fixed_and_non_overlapping(tree):
         xs = {by_id[f"{t['id']}.{s['id']}"]["box"][0] for t in tiers}
         assert len(xs) == 1
     assert all(lane["box"][0] >= geo["content_width"] for lane in geo["lanes"])
-    # Review and exam sit in the tier's foot, review above exam.
+    # Review and exam sit in the tier's foot, review above exam (First steps and Ready to read have no exam).
     for t in tiers:
-        rv, ex = by_id[f"{t['id']}.review"]["box"], by_id[f"{t['id']}.exam"]["box"]
-        assert inside(rv, t["box"]) and inside(ex, t["box"]) and rv[1] + rv[3] <= ex[1]
+        rv = by_id[f"{t['id']}.review"]["box"]
+        assert inside(rv, t["box"])
+        if f"{t['id']}.exam" in by_id:
+            ex = by_id[f"{t['id']}.exam"]["box"]
+            assert inside(ex, t["box"]) and rv[1] + rv[3] <= ex[1]
+        else:
+            assert t["id"] in ("first", "ready")
+
+
+def test_layout_prerequisites_sit_above(tree):
+    # Within a grade, a family starts below every family it builds on, whatever the strand.
+    by_id = tree["by_id"]
+    links = [(a, b) for a, b, _ in tree["bundles"]["family"]
+             if by_id[a]["level"] == by_id[b]["level"] == "family" and a.split(".")[0] == b.split(".")[0]]
+    assert links
+    for a, b in links:
+        assert by_id[a]["box"][1] + by_id[a]["box"][3] <= by_id[b]["box"][1], (a, b)
 
 
 def test_bundles_per_zoom_level(tree):
@@ -486,8 +501,8 @@ def test_aural_lessons_from_the_sample(home, tree):
     (content / "lessons").mkdir(parents=True, exist_ok=True)
     (content / "atlas.json").write_text(json.dumps({k: v for k, v in tree.items() if k != "by_id"}), encoding="utf-8")
     count = aural_lessons.write_lessons()
-    stages = [n for n in tree["nodes"] if n["level"] == "stage" and n["kind"] == "aural"]
-    assert count == len(stages)
+    stages = [n for n in tree["nodes"] if n["level"] == "stage" and n["kind"] == "aural" and n["tier"] not in ("first", "ready")]
+    assert count == len(stages)  # First steps and Ready to read write their own (first_steps)
     kinds = set()
     for st in stages:
         lesson = json.loads((content / "lessons" / f"{st['id']}.json").read_text(encoding="utf-8"))

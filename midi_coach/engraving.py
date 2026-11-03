@@ -31,6 +31,7 @@ RULES = {
     "too-many-voices": "more than two voices on one staff",
     "needless-tie": "two tied notes inside one beat that could be written as one note",
     "ledger-lines": "a note on five or more ledger lines, or three notes in a row on four (needs a clef change or 8va/8vb)",
+    "brief-clef-change": "a clef kept for fewer than eight bars whose notes would read in the clef around it by the ledger-lines rule (a hand dipping low for a few bars is read on ledger lines)",
     "key-change-soon": "a key signature change less than six bars after the previous one",
     "heading": "the title printed twice, or 'Music21' as the composer",
     "double-dot": "a double-dotted note or rest",
@@ -38,6 +39,7 @@ RULES = {
     "dangling-hyphen": "a lyric hyphen leading to a note with no syllable",
     "busy-octave-marks": "more than two 8va/8vb marks starting within eight bars of one staff (write the passage with ledger lines or one mark)",
     "needless-octave-mark": "an 8va/8vb over notes that would sit within three ledger lines without it",
+    "octave-mark-wrong-way": "a note under an 8vb that sits above the staff's middle line without it, or under an 8va below it: the mark moved a chord reaching across the staff (or another voice's notes), pushing them off it",
 }
 TUNE_WORDS = ("vocal", "voice", "melody", "tune", "lead", "sing")
 STAFF_LINES = {"treble": (31, 38), "bass": (19, 26)}  # diatonic note numbers of the bottom / top line: E4-F5, G2-A3
@@ -49,12 +51,45 @@ def _in_tune(part) -> bool:
 
 def _ledgers(p, clef, shift: int = 0) -> int:
     """Ledger lines for a pitch as drawn: shift is +1 under an 8vb (drawn an octave up), -1
-    under an 8va."""
+    under an 8va, +2 / -2 under a 15mb / 15ma."""
     kind = "bass" if type(clef).__name__.startswith("Bass") else "treble"
     octave = getattr(clef, "octaveChange", 0) or 0
     d = p.diatonicNoteNum - 7 * octave + 7 * shift  # where it is written
     low, high = STAFF_LINES[kind]
     return (low - d) // 2 if d < low else (d - high) // 2 if d > high else 0  # a note in a space needs no extra line
+
+
+def _brief_clefs(part):
+    """(bar, detail) for each clef kept fewer than eight bars whose notes would read in the
+    clef around it: none on five or more ledger lines, no three chords in a row on four."""
+    clefs = []  # [offset, bar, clef], a change of kind only
+    for c in part.recurse().getElementsByClass("Clef"):
+        m = c.getContextByClass("Measure")
+        kind = (type(c).__name__.startswith("Bass"), getattr(c, "octaveChange", 0) or 0)
+        if not clefs or clefs[-1][3] != kind:
+            clefs.append([float(c.getOffsetInHierarchy(part)), m.number if m else 0, c, kind])
+    if len(clefs) < 2:
+        return
+    measures = part.getElementsByClass("Measure")
+    end_bar = measures[-1].number + 1 if measures else 0
+    notes = [(float(n.getOffsetInHierarchy(part)), n) for n in part.recurse().notes if not n.duration.isGrace]
+    for i, (start, bar, c, _) in enumerate(clefs):
+        last = i == len(clefs) - 1
+        length = (end_bar if last else clefs[i + 1][1]) - bar
+        if length >= 8:
+            continue
+        around = clefs[i - 1][2] if i else clefs[1][2]
+        stop = float("inf") if last else clefs[i + 1][0]
+        worst: dict[float, int] = {}
+        for at, n in notes:
+            if start <= at < stop:
+                worst[at] = max([worst.get(at, 0)] + [_ledgers(p, around) for p in n.pitches])
+        row, fits = 0, True
+        for at in sorted(worst):
+            row = row + 1 if worst[at] == 4 else 0
+            fits = fits and worst[at] <= 4 and row < 3
+        if fits:
+            yield bar, f"{type(c).__name__} for {length} bar{'s' if length != 1 else ''}; its notes read in {type(around).__name__}"
 
 
 # The 'published' profile, for pieces kept exactly as their composers wrote them: only the
@@ -77,6 +112,18 @@ def lint(score, profile: str = "full") -> dict:
         text = str(score)
         xml = text if text.lstrip().startswith("<") else pathlib.Path(text).read_text(encoding="utf-8")
         score = converter.parseData(xml)
+    # Chord symbols and Roman numerals are text over the staff, but music21 counts them as
+    # chords among the notes (ledger lines, accidentals): leave them out of every check.
+    from music21 import harmony as m21harmony
+
+    symbols = list(score.recurse().getElementsByClass(m21harmony.Harmony))
+    if symbols and xml is None:
+        import copy
+
+        score = copy.deepcopy(score)
+        symbols = list(score.recurse().getElementsByClass(m21harmony.Harmony))
+    for h in symbols:
+        h.activeSite.remove(h)
     found: list[tuple[str, str, int, str]] = []
 
     def add(rule, part, bar, detail):
@@ -95,6 +142,8 @@ def lint(score, profile: str = "full") -> dict:
         for i, bar in enumerate(marks):
             if i >= 2 and bar - marks[i - 2] < 8:
                 add("busy-octave-marks", part, bar, f"three octave marks within bars {marks[i - 2]}-{bar}")
+        for bar, detail in _brief_clefs(part):
+            add("brief-clef-change", part, bar, detail)
         for sp in part.recurse().getElementsByClass("Ottava"):
             notes = [x for x in sp.getSpannedElements() if not x.isRest]
             clefs = [x.getContextByClass("Clef") for x in notes]
@@ -102,6 +151,18 @@ def lint(score, profile: str = "full") -> dict:
                     max(_ledgers(p, c) for x, c in zip(notes, clefs) for p in x.pitches) <= 3:
                 m_ = notes[0].getContextByClass("Measure")
                 add("needless-octave-mark", part, m_.number if m_ else 0, f"{sp.type} over {notes[0].pitches[0].nameWithOctave}...")
+            down = str(sp.type).endswith(("vb", "mb"))  # a low passage, drawn higher
+            for x, c in zip(notes, clefs):
+                if c is None:
+                    continue
+                low, high = STAFF_LINES["bass" if type(c).__name__.startswith("Bass") else "treble"]
+                octave = getattr(c, "octaveChange", 0) or 0
+                middle = (low + high) / 2
+                wrong = [p for p in x.pitches if (p.diatonicNoteNum - 7 * octave > middle) == down]
+                if wrong:
+                    m_ = x.getContextByClass("Measure")
+                    add("octave-mark-wrong-way", part, m_.number if m_ else 0,
+                        f"{wrong[0].nameWithOctave} under {sp.type} sits {'above' if down else 'below'} the middle line without it")
         if tune:  # a hyphen must lead to the rest of its word (notes between are a melisma: fine)
             sung = [x for x in part.flatten().notes if x.lyrics and not x.duration.isGrace]
             for a, b in zip(sung, sung[1:] + [None]):
@@ -164,11 +225,13 @@ def lint(score, profile: str = "full") -> dict:
                 clef = el.getContextByClass("Clef")
                 continuing = el.tie is not None and el.tie.type in ("stop", "continue")
                 ottava = next(iter(el.getSpannerSites("Ottava")), None)
-                shift = 0 if ottava is None else (1 if ottava.type.endswith("vb") or ottava.type.endswith("mb") else -1)
+                shift = 0 if ottava is None else ((2 if ottava.type.startswith("15") else 1)
+                                                  * (1 if ottava.type.endswith("vb") or ottava.type.endswith("mb") else -1))
                 lines = max((_ledgers(p, clef, shift) for p in el.pitches), default=0) if clef is not None else 0
                 if lines > 4:
                     add("ledger-lines", part, bar, f"{el.pitches[0].nameWithOctave}: {lines} ledger lines")
-                four_run = four_run + 1 if lines == 4 else 0
+                # A note held on (tied over a barline) is still one note, not another in the row.
+                four_run = four_run + (not continuing) if lines == 4 else 0
                 if four_run == 3:
                     add("ledger-lines", part, bar, f"three notes in a row on four ledger lines (to {el.pitches[0].nameWithOctave})")
                 for p in el.pitches:

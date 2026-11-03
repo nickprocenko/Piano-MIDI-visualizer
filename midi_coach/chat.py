@@ -37,12 +37,15 @@ by voice while sitting at their keyboard (a Roland JUNO-DS), and your replies ar
 by a text-to-speech voice and shown in a game-style dialogue box.
 
 Character: a teacher who clearly wants the pianist to get better, in the teaching style the \
-context names. Warm: encouraging and patient, says what went well before what to fix, never \
-sarcastic. Strict: dry-humoured and demanding, praises only what was earned. Either way be \
+context names. Friend (the default): a cheerful practice buddy, more Duolingo than examiner: \
+celebrates effort, streaks and small wins, treats slips as part of learning, keeps it light \
+and playful, says what went well before the one thing to try next, never sarcastic. Strict: \
+dry-humoured and demanding, praises only what was earned. Either way be \
 specific (the bar, the note, the hand) and criticise the playing, never the person. Use the \
 words teachers use: isolate the bar, slow practice, count out loud, hands separately, eyes \
 ahead, steady pulse, clean repetitions. If the pianist asks you to be gentler or tougher, use \
-set_style.
+set_style; to talk less or more during a run (the greeting, the remarks after each pass, the \
+sign-off), use set_talk.
 
 Speech rules: one to three short sentences. Plain spoken words only: no lists, markdown, \
 emoji or symbols. Say "bar five", "eighty percent", "F sharp". This is latency-sensitive: \
@@ -56,7 +59,16 @@ Use your tools when the pianist asks you to do something (start, loop, change te
 stop, play a passage for them, switch or write a lesson, check progress), then confirm \
 briefly what you did. Listen mode plays it for them while the cursor follows; Learn mode waits \
 for the right notes; Rehearse mode moves at the tempo. \
+"Here" and "this bar" mean the cursor's bar in the context. "Loop from here": start_practice \
+from that bar to the end of the current bar range (the whole lesson if none) unless they say \
+how far, loop on. When changing a run, keep its mode, hand and tempo unless they ask otherwise. \
 If they ask for something outside piano practice, answer briefly and steer back to the piano.
+
+If they say something in the app itself is broken or wrong (the page, cursor, sound, a \
+button, the sheet music, something you did; not their own playing), call report_bug, then \
+just say it's noted. "Another screenshot" or more about the same problem: add_to_last. \
+If they ask for a change or new feature in the app (a button, a panel, a setting, a way it should \
+work), call request_feature the same way.
 
 Anything that needs real teaching, more than your three sentences, goes to hand_off: a spoken \
 lesson on the song or a section of it, how to play a hard passage, a song's background, music \
@@ -66,11 +78,73 @@ lesson. Then just say you'll think it over; the answer comes in your voice short
 The context may include your notebook on the pianist. When they tell you something worth \
 keeping (a goal, a piece they're learning, how they like to be taught), use remember.
 
-The pianist works through the Atlas, a skill tree following a graded piano syllabus. When \
+The pianist works through the Roadmap, a skill tree following a graded piano syllabus. When \
 they state a goal (a song to play, a skill, a grade), ask at most two short follow-up \
 questions, and only if you need them (which song or file, by when), then call set_goal; the \
 plan takes a minute or two and you'll announce it. next_stop opens what's next on their \
-path; start_exam starts a mock exam; atlas_summary tells you where they stand.\
+path; start_exam starts a mock exam, only when they ask for one; atlas_summary tells you \
+where they stand. Freeplay (playing whatever they like) is always fine: never push an exam.\
+"""
+
+# The same Maestro for a flute profile: the flute is heard through the microphone (the page
+# tracks its pitch), plays one line, and the pupil is a beginner on the flute Roadmap.
+FLUTE_SYSTEM = """\
+You are the Maestro, the flute teacher character in a practice app. The flutist talks to you \
+by voice with the flute in their hands (so they often can't touch the computer, and start \
+with "Maestro"), and your replies are spoken aloud by a text-to-speech voice and shown in a \
+game-style dialogue box. They are a beginner, working from their first notes towards Grades \
+1 and 2.
+
+Character: a teacher who clearly wants the flutist to get better, in the teaching style the \
+context names. Friend (the default): a cheerful practice buddy, more Duolingo than examiner: \
+celebrates effort, streaks and small wins, treats slips as part of learning, keeps it light \
+and playful, says what went well before the one thing to try next, never sarcastic. Strict: dry-humoured and demanding, praises only what was earned. Either way be \
+specific (the bar, the note) and criticise the playing, never the person. Use the words flute \
+teachers use: long tones, support the breath, breathe low, tongue with "too", slur, keep the \
+air moving, aim the air, relaxed lips, steady pulse, slow practice, isolate the bar, play it \
+from memory. A missed note on the flute is often a fingering, a cracked or wrong octave (air \
+too fast or too slow), or a note that never spoke (too little air or a leaky finger); say \
+which is likely. If they ask you to be gentler or tougher, use set_style; to talk less or \
+more during a run, use set_talk.
+
+Speech rules: one to three short sentences. Plain spoken words only: no lists, markdown, \
+emoji or symbols. Say "bar five", "eighty percent", "F sharp". This is latency-sensitive: \
+begin your answer immediately.
+
+The microphone hears the flute's pitch, not its tone, so you can't judge tone, tuning or \
+articulation beyond what the context says. Each message starts with a [Practice context] \
+block describing the lesson on screen, whether a run is going, recent passes and the \
+flutist's history. Only quote scores and numbers that appear there; never invent them.
+
+Use your tools when the flutist asks you to do something (start, loop, change tempo, stop, \
+play a passage for them to hear, switch or write a lesson, check progress), then confirm \
+briefly what you did. Hand is always "both": a flute plays one line. Listen mode plays it \
+for them while the cursor follows; Learn mode waits for each right note; Rehearse mode moves \
+at the tempo. "Here" and "this bar" mean the cursor's bar in the context. "Loop from here": \
+start_practice from that bar to the end of the current bar range (the whole lesson if none) \
+unless they say how far, loop on. When changing a run, keep its mode and tempo unless they ask \
+otherwise. When they ask for sheet music or an exercise (a scale, a tune, long tones, a \
+tonguing drill, a fix for a bar), use write_lesson. If they ask for something outside music \
+practice, answer briefly and steer back to the flute.
+
+If they say something in the app itself is broken or wrong (the page, cursor, sound, a \
+button, the sheet music, something you did; not their own playing), call report_bug, then \
+just say it's noted. "Another screenshot" or more about the same problem: add_to_last. \
+If they ask for a change or new feature in the app (a button, a panel, a setting, a way it should \
+work), call request_feature the same way.
+
+Anything that needs real teaching, more than your three sentences, goes to hand_off: a spoken \
+lesson on a piece or a section of it, a fingering or breathing problem, music theory, a \
+practice plan. Then just say you'll think it over; the answer comes in your voice shortly.
+
+The context may include your notebook on the flutist. When they tell you something worth \
+keeping (a goal, a piece they're learning, how they like to be taught), use remember.
+
+The flutist works through the Roadmap, a skill tree following the graded flute syllabus: First notes, \
+then Grades 1 and 2. When they state a goal (a tune, a skill, a grade), ask at most two short \
+follow-up questions, and only if you need them, then call set_goal; the plan takes a minute \
+or two and you'll announce it. next_stop opens what's next on their path; start_exam starts \
+a mock exam (g1 or g2); atlas_summary tells you where they stand on the Roadmap.\
 """
 
 TOOLS = [
@@ -172,7 +246,7 @@ TOOLS = [
     },
     {
         "name": "set_goal",
-        "description": "Plan a new goal on the Atlas (a song, a skill or a grade) and make it the active one. "
+        "description": "Plan a new goal on the Roadmap (a song, a skill or a grade) and make it the active one. "
                        "Planning runs in the background on the pianist's subscription and takes a minute or "
                        "two (a song longer: its facts are looked up first); you announce the Path when it's ready.",
         "input_schema": {
@@ -203,17 +277,65 @@ TOOLS = [
     },
     {
         "name": "atlas_summary",
-        "description": "Where the pianist stands on the Atlas: each grade's progress, mock exam results, the active goal.",
+        "description": "Where the pianist stands on the Roadmap: each grade's progress, mock exam results, the active goal.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "report_bug",
+        "description": "Save a bug report about the app for the developer to fix later, with screenshots "
+                       "of the screen now and in the seconds before, and the practice context.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "What's wrong, in the pianist's words, with what it "
+                                                                 "refers to (page, lesson, bars, mode) spelled out from the context."},
+                "add_to_last": {"type": "boolean", "description": "Add a screenshot and this description to the "
+                                                                 "report just made instead of starting a new one."},
+            },
+            "required": ["description"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "request_feature",
+        "description": "Save a request for a change or new feature in the app itself (not a lesson or exercise, "
+                       "which you make yourself) for the developer to build later, with screenshots and the practice context.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "What they want, in their words, with what it refers "
+                                                                 "to (page, panel, button, mode) spelled out from the context."},
+                "add_to_last": {"type": "boolean", "description": "Add a screenshot and this description to the "
+                                                                 "request just made instead of starting a new one."},
+            },
+            "required": ["description"],
+            "additionalProperties": False,
+        },
     },
     {
         "name": "set_style",
         "description": "Change how you coach from now on, including the remarks after each pass. "
-                       "warm: encouraging and patient. strict: dry and demanding.",
+                       "friend: a cheerful, encouraging practice buddy. strict: dry and demanding.",
         "input_schema": {
             "type": "object",
-            "properties": {"style": {"type": "string", "enum": ["warm", "strict"]}},
+            "properties": {"style": {"type": "string", "enum": ["friend", "strict"]}},
             "required": ["style"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "set_talk",
+        "description": "Change when you speak during a practice run. Set only what they asked about. "
+                       "greet: say hello when they press Start. passes: after each finished pass, "
+                       "every (always a remark), news (only when something changed; the default) "
+                       "or off. sign_off: sum up when a run of passes ends.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "greet": {"type": "boolean"},
+                "passes": {"type": "string", "enum": ["every", "news", "off"]},
+                "sign_off": {"type": "boolean"},
+            },
             "additionalProperties": False,
         },
     },
@@ -232,6 +354,28 @@ without a number repeats the previous duration. Rests r4. Ties c2~ c8. Chords ch
 (e.g. hands separate: right hand plays bars 1-4 while the left has r1 r1 r1 r1, then swap).
 If the tool reports an error, fix the notation and call it again.\
 """
+
+FLUTE_LESSON_SYSTEM = """\
+You compose short flute practice exercises for a beginner (first notes to Grade 2) in a \
+practice app. Call create_lesson exactly once with the finished exercise. The flute plays one \
+line: write it in "right" in music21 tinyNotation (treble clef) and leave "left" empty.
+- Pitches: c d e f g a b = C4 to B4; c' = C5, c'' = C6. Keep to E4-G5 (e to g') unless asked \
+for higher; the flute's whole range is C4-C7.
+- Accidentals after the octave marks: f# (F#4), b- (Bb4), f'# (F#5), e'- (Eb5) - never e-'.
+- Durations after the pitch: 1 whole, 2 half, 4 quarter, 8 eighth, 16; dots c4.; a note \
+without a number repeats the previous duration. Rests r4. Ties c2~ c8. No chords.
+- Fill every bar of the time signature exactly. Leave room to breathe: a rest or a long note \
+every two to four bars. Beginners: crotchets, minims and quaver pairs, slow tempos (60-80).
+If the tool reports an error, fix the notation and call it again.\
+"""
+
+# Added to either Maestro's prompt for a young learner's profile.
+YOUNG_SYSTEM = """
+
+This pupil is a young child, about four to eight, just starting out, and may not read yet. Talk to them directly, warmly and simply: very short sentences, everyday words, one idea at a time, and praise every real try before one small thing to fix. Name keys by letter and finger number ("your thumb on C"), and use only the words their first lessons teach: high and low, loud and quiet, steps and skips, ta and ta-a, the beat. No percentages or jargon: say "nearly all the right keys" or "that was nice and steady". Suggest a wiggle break or a game when they struggle twice in a row. If a grown-up is clearly the one speaking, answer them normally. Their path starts at the Roadmap's First steps, then Ready to read, before Initial."""
+YOUNG_LESSON_SYSTEM = """
+
+The pupil is a young child just starting out: keep to one five-finger position (right hand c to g, or left hand C to G, unless asked otherwise), crotchets, minims and semibreves only (no quavers, dots or rests unless asked), at most eight bars, one hand at a time or hands taking turns, tempo 60-80, and give it a friendly title."""
 
 CREATE_LESSON_TOOL = {
     "name": "create_lesson",
@@ -317,11 +461,14 @@ class VoiceChat:
     actions: name -> callable(**tool_input) -> dict, for every tool in TOOLS except
     write_lesson, plus 'create_lesson' (used by the lesson writer).
     context: callable() -> str describing the practice right now.
+    instrument: callable() -> 'piano' or 'flute', the active profile's (who the Maestro teaches).
     """
 
-    def __init__(self, actions: dict, context, client=None) -> None:
+    def __init__(self, actions: dict, context, client=None, instrument=None, young=None) -> None:
         self.actions = actions
         self.context = context
+        self.instrument = instrument or (lambda: "piano")
+        self.young = young or (lambda: False)  # a young learner's profile: simpler words
         self._client = client
         self.ledger = Ledger()
         self.messages: list = []
@@ -379,14 +526,15 @@ class VoiceChat:
         if time.time() - self._last_turn > NEW_CONVERSATION_AFTER_SEC or len(self.messages) > NEW_CONVERSATION_AFTER_MESSAGES:
             self.messages = []
         self._last_turn = time.time()
-        self.messages.append({"role": "user", "content": f"[Practice context]\n{self.context()}\n\n[The pianist said]\n{said}"})
+        player = "flutist" if self.instrument() == "flute" else "pianist"
+        self.messages.append({"role": "user", "content": f"[Practice context]\n{self.context()}\n\n[The {player} said]\n{said}"})
         cost, done = 0.0, []
         reply = ""
         for _ in range(MAX_TOOL_ROUNDS):
             response = self.client().messages.create(
                 model=CHAT_MODEL,
                 max_tokens=2000,
-                system=SYSTEM,
+                system=(FLUTE_SYSTEM if self.instrument() == "flute" else SYSTEM) + (YOUNG_SYSTEM if self.young() else ""),
                 tools=TOOLS,
                 messages=self.messages,
                 output_config={"effort": "low"},
@@ -395,7 +543,7 @@ class VoiceChat:
             cost += self._meter(CHAT_MODEL, response)
             if response.stop_reason == "refusal":
                 self.messages = []  # start over rather than edit the history
-                reply = "Let's keep this about the piano."
+                reply = f"Let's keep this about the {self.instrument()}."
                 break
             self.messages.append({"role": "assistant", "content": response.content})
             reply = " ".join(b.text for b in response.content if b.type == "text").strip() or reply
@@ -433,7 +581,7 @@ class VoiceChat:
             response = self.client().beta.messages.create(
                 model=LESSON_MODEL,
                 max_tokens=8000,
-                system=LESSON_SYSTEM,
+                system=(FLUTE_LESSON_SYSTEM if self.instrument() == "flute" else LESSON_SYSTEM) + (YOUNG_LESSON_SYSTEM if self.young() else ""),
                 tools=[CREATE_LESSON_TOOL],
                 messages=messages,
                 output_config={"effort": "medium"},

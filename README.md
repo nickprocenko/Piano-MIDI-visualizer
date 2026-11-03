@@ -8,6 +8,7 @@ Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/"
 ## Features
 
 - Real-time MIDI input via the **Web MIDI API** (USB MIDI devices — tested with Roland JUNO-DS)
+- **Instrument Input** — use a microphone or audio interface for monophonic voice and instrument pitch detection, with per-instrument tuning, sensitivity, and octave shift
 - Rising-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
 - **Learn Mode** — drop a MIDI or MusicXML file, choose tracks and hands, and follow along at your own pace (Wait or Free-play)
 - **Freeplay** — just plug in and play, no file needed
@@ -55,12 +56,15 @@ Open **SETTINGS** from the main menu. Tabs:
 | Shader | GPU note rendering — presets or custom Shadertoy-style GLSL (WebGL2) |
 | Keyboard | Piano height, brightness, visibility |
 | Display | Background slides, frame rate cap |
+| Instrument Input | Choose MIDI or microphone/audio input, supported instrument, sensitivity, audio device, octave shift, and per-profile practice progress |
 | Hardware | MIDI CC mappings |
 | Sound | Synth volume and reverb, where new songs and your live keyboard play, Learn mode play-along, MIDI outputs and All notes off |
 | LED Output | ESP32 serial / BLE config |
 | Audience | WebSocket URL for live audience colour votes |
 | Themes | Save / load / delete colour presets |
 | Scenes & Profiles | Full visual snapshots |
+
+For microphone input, use **Settings → Instrument Input → Instrument via audio**, choose an instrument, and press **Start listening**. Audio capture requires a secure browser context (HTTPS or localhost) and microphone permission. This mode tracks one note at a time; use headphones when sending detected notes to speakers to avoid feedback. Guitar, bass, bowed and wind instruments, voice, ukulele, and whistle are supported.
 
 ## Learn Mode
 

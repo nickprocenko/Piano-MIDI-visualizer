@@ -102,8 +102,8 @@ class Placement:
     @classmethod
     def start(cls, tier: str) -> "Placement":
         atlas = load_atlas()
-        order = [t["id"] for t in sorted(atlas["tiers"], key=lambda t: t["order"])]
-        if tier not in order:
+        order = [t["id"] for t in sorted(atlas["tiers"], key=lambda t: t["order"]) if f"{t['id']}.exam" in atlas["by_id"]]
+        if tier not in order:  # only grades with a mock exam (not First steps or Ready to read)
             raise ValueError(f"No grade {tier!r}.")
         old = cls.current()
         if old and old.data.get("exam"):
@@ -164,6 +164,10 @@ class Placement:
     def finish(self) -> None:
         """Credit the grades passed and set the first grade failed as the goal."""
         out = outcome(self.data["order"], self.results)
+        if out["credited"]:  # the tiers without an exam below the highest grade passed come with it
+            tiers = sorted(load_atlas()["tiers"], key=lambda t: t["order"])
+            top = next(t["order"] for t in tiers if t["id"] == out["credited"][-1])
+            out["credited"] = [t["id"] for t in tiers if t["order"] <= top]
         for tier in out["credited"]:
             store.append_event("placement_credit", tier=tier, placement=self.data["started"])
         weak: list[str] = []
@@ -206,18 +210,22 @@ def _exam(exam_id: str) -> ExamSession | None:
         return None
 
 
-def _set_goal(tier: str, weak: list[str]) -> str:
-    """The grade to work towards, as the active goal; its Path puts the weak items first."""
+def _set_goal(tier: str, weak: list[str], target: str | None = None, source: str = "placement",
+              activate: bool = True) -> str:
+    """The grade to work towards, as the active goal (activate=False keeps the one you have);
+    its Path puts the weak items first. target: the node it aims at (the tier's exam)."""
     atlas = load_atlas()
     title = next(t["title"] for t in atlas["tiers"] if t["id"] == tier)
+    target = target or f"{tier}.exam"
     states = store.progress(atlas, rebuild=True)
-    families = mastery.path_families(atlas, states, [f"{tier}.exam"], first=weak)
+    families = mastery.path_families(atlas, states, [target], first=weak)
     goals = store.load_goals()
-    goal_id = f"placement-{tier}-{store.now()[:10]}"
+    goal_id = f"{source}-{tier}-{store.now()[:10]}"
     goals["goals"] = [g for g in goals["goals"] if g["id"] != goal_id]
-    goals["goals"].append({"id": goal_id, "title": title, "kind": "grade", "targets": [f"{tier}.exam"],
+    goals["goals"].append({"id": goal_id, "title": title, "kind": "grade", "targets": [target],
                            "families": [f["family"] for f in families], "first": weak, "bridges": [],
-                           "status": "active", "created": store.now(), "source": "placement"})
-    goals["active"] = goal_id
+                           "status": "active", "created": store.now(), "source": source})
+    if activate:
+        goals["active"] = goal_id
     store.save_goals(goals)
     return goal_id

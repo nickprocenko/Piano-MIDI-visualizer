@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Piano Coach</title>
+<link rel="icon" href="favicon.ico" sizes="16x16 24x24 32x32 48x48">
+<link rel="icon" href="coach.png" type="image/png" sizes="256x256">
 <style>
   :root {
     --bg: #0a0c12;
@@ -17,9 +19,13 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text); font: 14px/1.5 'Segoe UI', Arial, sans-serif; }
   body { display: flex; flex-direction: column; }
-  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--panel); border-bottom: 1px solid rgba(255,255,255,.08); flex-wrap: wrap; }
-  h1 { font-size: 17px; font-weight: 600; }
+  header { display: flex; align-items: center; gap: 6px 16px; padding: 8px 20px; background: var(--panel); border-bottom: 1px solid rgba(255,255,255,.08); flex-wrap: wrap; }
+  h1 { font-size: 16px; font-weight: 600; }
   #title { color: var(--accent); }
+  /* A piece from a playlist folder: step to the previous / next one */
+  #playlist-nav { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  #playlist-nav button { padding: 2px 9px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #playlist-nav button:disabled { opacity: .35; cursor: default; }
   #status { color: var(--muted); flex: 1; min-width: 200px; }
   #conn { font-size: 12px; color: var(--muted); }
   #conn.live::before { content: '● '; color: var(--hit); }
@@ -28,11 +34,12 @@
   #menu label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
   #menu select, #menu input[type=number] { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 4px 6px; font: inherit; }
   #menu input[type=number] { width: 52px; }
-  /* Metronome: start button + beat dots in the menu bar, everything else in a drop-down */
+  /* Metronome: start button + beat dots in the control row, everything else in its drop-down */
   #metro-wrap { position: relative; display: inline-flex; align-items: center; gap: 8px; }
   #metro-wrap button { padding: 4px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   #metro-wrap button:disabled { opacity: .4; cursor: default; }
-  #m-menu { padding: 4px 8px !important; color: var(--muted) !important; font-size: 12px !important; }
+  #metro-wrap > button { padding: 7px 12px; }  /* as tall as the drop-downs beside it */
+  #m-menu { padding: 7px 10px !important; color: var(--muted) !important; font-size: 12px !important; }
   #m-menu[aria-expanded=true] { border-color: var(--accent) !important; color: var(--text) !important; }
   #metro { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 340px; max-width: calc(100vw - 40px);
            flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; background: var(--panel);
@@ -45,17 +52,17 @@
   #m-dots i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.14); transition: background .05s; }
   #m-dots i.accent { box-shadow: inset 0 0 0 1px var(--accent); }
   #m-dots i.lit { background: var(--accent); }
-  /* Songs / Lessons panel on the left */
-  #lib-toggle { padding: 4px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
-  #lib-toggle[aria-expanded=true] { border-color: var(--accent); }
+  /* Songs / Lessons panel */
   #workspace { flex: 1; display: flex; min-height: 0; position: relative; }
   #stage { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  #library { width: 300px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid rgba(255,255,255,.08); }
+  #library { width: 320px; flex: none; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid rgba(255,255,255,.08); }
   body.lib-closed #library { display: none; }
   body.running #lib-list { opacity: .5; pointer-events: none; }
   .tabs { display: flex; border-bottom: 1px solid rgba(255,255,255,.08); }
   .tabs button { flex: 1; padding: 10px 0 8px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
   .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+  .tabs #lib-close { flex: none; padding: 10px 14px 8px; font-weight: 400; }
+  .tabs #lib-close:hover { color: var(--text); }
   #lib-search { margin: 10px 12px 4px; padding: 6px 9px; background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 5px; font: inherit; }
   #lib-list { flex: 1; overflow-y: auto; padding-bottom: 14px; }
   .lib-group { padding: 12px 14px 4px; color: var(--muted); font: 700 11px 'Segoe UI', Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
@@ -65,14 +72,25 @@
   .lib-item .meta { display: block; color: var(--muted); font-size: 11.5px; }
   .lib-item .meta b { color: var(--text); font-weight: 600; }
   .lib-note { padding: 8px 14px; color: var(--muted); font-size: 12px; }
+  .lib-online { display: block; margin: 10px 12px 0; width: calc(100% - 24px); padding: 7px 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+  .lib-online:hover { border-color: var(--accent); }
   @media (max-width: 760px) {
     #library { position: absolute; z-index: 25; top: 0; bottom: 0; left: 0; width: min(300px, 85vw); box-shadow: 10px 0 30px rgba(0,0,0,.5); }
   }
+  /* Full screen (Explore from Home: you're choosing a new piece): the search is the whole page;
+     ⇤ shrinks it to the panel beside the sheet */
+  body.lib-full[data-view=practice] > header, body.lib-full[data-view=practice] > #menu,
+  body.lib-full[data-view=practice] > #dock, body.lib-full[data-view=practice] > #npc,
+  body.lib-full[data-view=practice] #stage { display: none; }
+  body.lib-full[data-view=practice] #library { position: static; flex: 1; width: auto; border-right: 0; box-shadow: none;
+                                               padding: 0 max(0px, (100% - 760px) / 2); }
+  .tabs #lib-size { flex: none; padding: 10px 10px 8px; font-weight: 400; }
+  .tabs #lib-size:hover { color: var(--text); }
   /* Parts: what you play, what's shown, what sounds; and what each part of the file is */
   #parts-wrap { position: relative; display: inline-flex; }
   #parts-btn { padding: 4px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   #parts-btn[aria-expanded=true] { border-color: var(--accent); }
-  #parts { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 440px; max-width: calc(100vw - 40px);
+  #parts { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 440px; max-width: calc(100vw - 40px); max-height: 70vh; overflow-y: auto;
            padding: 12px 14px; background: var(--panel); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
   #parts.open { display: block; }
   #parts h2 { margin: 2px 0 6px; color: var(--muted); font: 700 11px 'Segoe UI', Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
@@ -85,6 +103,13 @@
   .snd { width: 34px; padding: 2px 0; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   .snd[aria-pressed=true] { border-color: var(--accent); background: rgba(0,180,180,.15); }
   .snd:disabled { opacity: .3; cursor: default; }
+  #mix .c-snd { text-align: left; }
+  .snd-cell { display: flex; align-items: center; gap: 6px; }
+  .vol { width: 110px; accent-color: var(--accent); }
+  .vol:disabled { opacity: .3; }
+  .vol-val { min-width: 32px; color: var(--muted); font-size: 11.5px; text-align: right; }
+  #menu.listen #mix .c-play { display: none; }
+  #menu.running #part-roles, #menu.running #parts-save, #menu.running #out-port { opacity: .5; pointer-events: none; }  /* the faders stay live */
   #parts .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
   #parts select { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 3px 5px; font: inherit; }
   #part-roles { max-height: 240px; overflow-y: auto; }
@@ -108,7 +133,8 @@
   #mic { max-width: 170px; }
   #ask { width: 190px; background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 5px 8px; font: inherit; }
   #ask:disabled { opacity: .4; }
-  #heard { padding: 0 20px; color: var(--muted); font-size: 13px; font-style: italic; min-height: 1.3em; }
+  #heard { padding: 4px 20px 0; color: var(--muted); font-size: 13px; font-style: italic; }
+  #heard:empty, #last:empty { display: none; }
   .seg { display: inline-flex; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; overflow: hidden; }
   .seg button { background: transparent; color: var(--muted); border: 0; padding: 5px 12px; font: inherit; cursor: pointer; }
   .seg button.on { background: var(--accent); color: #031414; font-weight: 600; }
@@ -117,16 +143,73 @@
   #go:disabled { opacity: .45; cursor: default; }
   #menu.running .setting, #metro.running .m-lock { opacity: .5; pointer-events: none; }
   #menu.record .play-only, #menu.listen .not-listen { display: none; }
-  #mode-hint { color: var(--muted); font-size: 12px; max-width: 250px; line-height: 1.25; }
   #go.rec { background: var(--miss); }
-  #last { padding: 6px 20px; color: var(--muted); font-size: 13px; min-height: 1.5em; }
+  #last { padding: 6px 20px 0; color: var(--muted); font-size: 13px; }
+  #flute-tuner { display: block; padding: 0 20px; font-size: 15px; font-variant-numeric: tabular-nums; color: var(--muted); }
+  #flute-tuner:empty { display: none; }
+  #flute-tuner.in-tune { color: var(--accent); }
+  .handsfree { font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer; }
   #last b { color: var(--text); font-weight: 600; }
-  main { flex: 1; display: flex; align-items: center; padding: 16px 0; min-height: 0; }
+  main { flex: 1; display: flex; align-items: center; padding: 10px 0; min-height: 0; }
   #strip { width: 100%; height: min(var(--strip-h, 420px), 100%); border-top: 1px solid rgba(255,255,255,.08); border-bottom: 1px solid rgba(255,255,255,.08); background: rgba(8,10,16,.88); }
   iframe { width: 100%; height: 100%; border: 0; display: block; }
   iframe[hidden] { display: none; }
+  /* View: the sheet, the falling notes (roll.js), or the sheet above the falling notes */
+  #roll-wrap { display: none; position: relative; flex: 1; min-height: 160px; width: 100%; }
+  #roll { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  body[data-show=notes] #strip { display: none; }
+  body[data-show=notes] #roll-wrap, body[data-show=both] #roll-wrap { display: block; }
+  body[data-show=notes] main, body[data-show=both] main { flex-direction: column; align-items: stretch; padding: 0; }
+  body[data-show=both] #strip { flex: none; height: min(var(--strip-h, 420px), 45%); }
+  #view button.on { background: rgba(0,180,180,.15); color: var(--accent); }
   #sheet-notice { max-width: 640px; margin: 48px auto; padding: 0 20px; color: var(--muted); font-size: 15px; text-align: center; }
-  footer { display: flex; gap: 18px; padding: 10px 20px; color: var(--muted); font-size: 12px; flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,.08); }
+  /* A sheet drawn from a file with no reliable beat: say so, and offer Auto clean */
+  #sheet-warn { display: flex; align-items: center; gap: 12px; margin: 6px 20px 0; padding: 7px 12px; border: 1px solid rgba(232,180,60,.45);
+                border-radius: 6px; background: rgba(232,180,60,.08); color: #e8c46a; font-size: 13px; line-height: 1.35; }
+  #sheet-warn[hidden] { display: none; }
+  #sheet-warn span { flex: 1; }
+  #cleanup-open { flex: none; padding: 4px 12px; border: 1px solid #e8c46a; border-radius: 5px; background: transparent; color: #e8c46a; font: 600 12.5px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  /* This sheet, under Maestro: Analysis (chords, Roman numerals, lyrics and sections written
+     over the sheet) and Cleanup (Auto clean) */
+  #sheet-tools { display: flex; flex-direction: column; gap: 10px; align-self: stretch; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
+  #sheet-tools[hidden], .tool-row[hidden], #sheet-details label[hidden] { display: none; }
+  #sheet-tools h3 { color: var(--muted); font: 700 11px 'Segoe UI', Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+  .tool-row { display: flex; align-items: flex-start; gap: 12px; color: var(--muted); font-size: 12px; }
+  .tool-name { flex: none; width: 64px; padding-top: 5px; }
+  .tool-body { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+  .tool-hint { max-width: 300px; line-height: 1.35; }
+  .tool-hint:empty { display: none; }
+  .tool-checks { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+  .tool-checks label { cursor: pointer; }
+  .tool-btn { padding: 4px 12px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; color: var(--accent); font: 600 12.5px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  .tool-btn:disabled { opacity: .5; cursor: default; }
+  /* Play along with a recording: the YouTube player and its sync controls (video.js) */
+  #video-panel { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; margin: 8px 20px 0; }
+  #video-panel[hidden], #video-results[hidden], #video-panel button[hidden] { display: none; }
+  #yt-wrap { position: relative; flex: none; width: min(360px, 100%); aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; background: #000; }
+  #yt-player { width: 100%; height: 100%; }
+  #yt-empty { position: absolute; inset: 0; background: #000; display: flex; align-items: center; justify-content: center; padding: 16px; color: var(--muted); font-size: 13px; text-align: center; }
+  #yt-empty[hidden] { display: none; }
+  #video-side { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: 12.5px; }
+  .v-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  .v-row label { display: inline-flex; align-items: center; gap: 6px; }
+  #video-panel input, #video-panel select { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  #video-link { flex: 1 1 200px; min-width: 0; }
+  #video-bar, #video-from, #video-to { width: 52px; }
+  #video-yt { color: var(--accent); text-decoration: none; }
+  #video-yt:hover { text-decoration: underline; }
+  #video-panel button { padding: 4px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #video-panel button:hover { border-color: var(--accent); }
+  #video-panel button:disabled { opacity: .4; cursor: default; }
+  #video-sync.tapping { border-color: var(--accent); background: rgba(0,180,180,.15); color: var(--accent); font-weight: 600; }
+  #video-sync.hit { background: rgba(0,180,180,.45); }
+  #video-results { display: flex; flex-direction: column; gap: 4px; }
+  #video-results button { text-align: left; color: var(--muted); }
+  #video-note { line-height: 1.4; }
+  #video-note b { color: var(--text); font-weight: 600; }
+  /* Bottom bar: the Maestro on the left, the colour key on the right */
+  #dock { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 24px; padding: 7px 20px; background: var(--panel); border-top: 1px solid rgba(255,255,255,.08); }
+  footer { display: flex; gap: 14px; margin-left: auto; color: var(--muted); font-size: 12px; flex-wrap: wrap; cursor: help; }
   .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
   /* NPC dialogue box: the Maestro (built-in remarks) or Claude (the say tool) */
   #npc { position: fixed; left: 20px; bottom: 60px; z-index: 20; display: flex; gap: 14px; align-items: flex-start;
@@ -159,26 +242,74 @@
   #atlas-results p { padding: 6px 12px; }
   #atlas-level { margin-left: auto; color: var(--muted); font-size: 12px; }
   #atlas-body { flex: 1; display: flex; min-height: 0; }
-  #atlas-svg { flex: 1; min-width: 0; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
-  #atlas-side { width: 320px; flex: none; overflow-y: auto; padding: 14px 16px; background: var(--panel); border-left: 1px solid rgba(255,255,255,.08); }
-  @media (max-width: 760px) { #atlas-body { flex-direction: column; } #atlas-side { width: auto; max-height: 40%; border-left: 0; border-top: 1px solid rgba(255,255,255,.08); } }
-  #atlas-svg text { fill: var(--text); font-family: 'Segoe UI', Arial, sans-serif; }
+  #atlas-map { position: relative; flex: 1; min-width: 0; min-height: 0; }
+  #atlas-svg { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; touch-action: none; }
+  /* Shown only once the map is zoomed or moved away from the whole view */
+  #atlas-home { position: absolute; top: 10px; right: 10px; padding: 5px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: var(--panel); color: var(--text); font: inherit; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+  #atlas-home[hidden] { display: none; }
+  /* The two side panels: dragged wider at their grip, or folded down to a rail */
+  .a-panel { flex: none; overflow-y: auto; padding: 0 16px 14px; background: var(--panel); }
+  #atlas-side { width: 320px; }
+  #atlas-tasks { width: 280px; }
+  .a-panel[data-collapsed] { width: 34px !important; padding: 0; overflow: hidden; }
+  .a-panel[data-collapsed] > :not(.a-rail), .a-panel:not([data-collapsed]) > .a-rail { display: none !important; }
+  .a-rail { width: 100%; height: 100%; padding: 12px 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; writing-mode: vertical-rl; text-align: start; }
+  .a-rail:hover { color: var(--text); background: rgba(255,255,255,.04); }
+  .a-collapse { flex: none !important; padding: 6px 10px !important; border: 0 !important; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+  .a-collapse:hover { color: var(--text); }
+  .a-grip { flex: none; width: 5px; cursor: col-resize; background: rgba(255,255,255,.08); touch-action: none; }
+  .a-grip:hover, .a-grip.a-dragging { background: var(--accent); }
+  .a-panel-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; margin: 0 -16px 10px; padding: 4px 0 4px 16px; background: var(--panel); border-bottom: 1px solid rgba(255,255,255,.08); font-weight: 600; }
+  /* The side panel's tabs; none is lit while a skill on the map is open */
+  #atlas-tabs { position: sticky; top: 0; z-index: 1; display: flex; margin: 0 -16px 10px; background: var(--panel); border-bottom: 1px solid rgba(255,255,255,.08); }
+  #atlas-tabs button { flex: 1; padding: 10px 8px 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+  #atlas-tabs button:hover { color: var(--text); }
+  #atlas-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); cursor: default; }
+  /* The Route panel: one route's families, requirements and stages; a click zooms the map to one, an exercise starts */
+  #atlas-task-list .t-unsaved { font-size: 12.5px; margin: 0 0 6px; }
+  #atlas-task-list .t-unsaved a { display: inline; padding: 0; color: var(--accent); }
+  #atlas-task-list .t-go { display: none; margin-left: auto; color: var(--accent); font-size: 12px; white-space: nowrap; }
+  #atlas-task-list a:hover .t-go, #atlas-task-list a.on .t-go { display: inline; }
+  #atlas-task-list .t-goal { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+  #atlas-task-list .t-fam { margin: 6px 0; border: 1px solid rgba(255,255,255,.08); border-radius: 6px; padding: 4px 6px; }
+  #atlas-task-list details > summary { cursor: pointer; display: flex; align-items: flex-start; gap: 4px; font-size: 13px; }
+  #atlas-task-list details > summary::before { content: '▸'; color: var(--muted); padding-top: 2px; }
+  #atlas-task-list details[open] > summary::before { content: '▾'; }
+  #atlas-task-list .t-ring { margin-left: auto; padding-top: 2px; }
+  #atlas-task-list a { display: flex; gap: 6px; align-items: flex-start; padding: 2px 4px; border-radius: 4px; color: var(--text); text-decoration: none; }
+  #atlas-task-list a:hover { background: rgba(255,255,255,.06); }
+  #atlas-task-list a.on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  #atlas-task-list .t-req { margin: 4px 0 0 2px; font-size: 13px; }
+  #atlas-task-list .t-stages { margin-left: 16px; font-size: 12.5px; }
+  #atlas-task-list .t-stages a { color: var(--muted); }
+  #atlas-task-list .a-dot { width: 8px; height: 8px; margin-top: 5px; }
+  @media (max-width: 760px) {
+    #atlas-body { flex-direction: column; }
+    .a-panel { width: auto !important; max-height: 30%; }
+    .a-panel[data-collapsed] { height: 34px; }
+    .a-rail { writing-mode: horizontal-tb; padding: 0 12px; }
+    .a-grip { display: none; }
+  }
+  /* The map draws like a graph of notes: dots coloured by strand, filled by progress, names under them, no boxes */
+  #atlas-svg text { fill: var(--text); font-family: 'Segoe UI', Arial, sans-serif;
+                    paint-order: stroke; stroke: var(--bg); stroke-width: var(--halo, 3px); stroke-linejoin: round; }  /* a halo where lines pass behind */
+  #atlas-svg text, #atlas-svg foreignObject { pointer-events: none; }  /* hover and clicks reach the shape under a label */
   #atlas-svg .a-muted { fill: var(--muted); }
-  .a-tier { fill: rgba(255,255,255,.015); stroke: rgba(255,255,255,.16); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .a-tier-title, .a-strand-title, .a-gate-title { font-weight: 700; }
-  .a-strand { fill: color-mix(in srgb, var(--tint) 6%, transparent); stroke: color-mix(in srgb, var(--tint) 30%, transparent); vector-effect: non-scaling-stroke; }
-  .a-family { fill: #161a24; stroke: rgba(255,255,255,.2); vector-effect: non-scaling-stroke; }  /* opaque: edges pass behind */
-  .a-family-frame { fill: rgba(14,17,24,.75); stroke: rgba(255,255,255,.08); vector-effect: non-scaling-stroke; }
-  #atlas-svg .a-family-title { fill: var(--muted); font-weight: 600; }
-  .a-req { stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-  .a-req-frame { fill: #11141c; stroke: rgba(255,255,255,.12); vector-effect: non-scaling-stroke; }
-  .a-req-title { color: var(--text); line-height: 1.25; text-align: center; overflow: hidden; }
-  .a-stage { stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  #atlas-svg .a-name, #atlas-svg .a-family-title { font-weight: 600; }
+  #atlas-svg .a-on-solid { fill: var(--bg); stroke: none; }
+  .a-hit { fill: transparent; }
+  .a-divider { stroke: rgba(255,255,255,.07); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .a-node { stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .a-stage.a-final { stroke-width: 2.5; }
+  .a-stem { stroke-width: 1; opacity: .35; vector-effect: non-scaling-stroke; }
+  .a-req-title { color: var(--text); line-height: 1.25; text-align: center; overflow: hidden; }
   .a-review, .a-exam { stroke: #e3b341; stroke-width: 2; vector-effect: non-scaling-stroke; }
   .a-gold { stroke: #e3b341 !important; stroke-width: 3 !important; }
-  .a-edge { fill: none; stroke: rgba(255,255,255,.08); }
+  .a-edge { fill: none; stroke: rgba(255,255,255,.13); }
   .a-edge.a-hot { stroke: var(--accent); }
+  /* Hovering a dot: it and its links stay lit, the rest fades */
+  #atlas-world.a-fade .a-g:not(.a-lit), #atlas-world.a-fade .a-edge:not(.a-hot) { opacity: .15; }
   /* A goal's temporary nodes (bridges, song capstones), in each grade's margin lane */
   .a-temp { stroke-dasharray: 4 3; stroke: #e3b341 !important; vector-effect: non-scaling-stroke; }
   .a-edge.a-temp-edge { stroke: rgba(227,179,65,.55); stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
@@ -200,6 +331,16 @@
   #path-next { border-color: var(--accent) !important; color: var(--accent) !important; font-weight: 600 !important; }
   .a-funnel { stroke: rgba(227,179,65,.3); }
   .a-selected { fill: none; stroke: #fff; }
+  /* Dots on the route shown in the Route panel */
+  .a-onroute { stroke-width: 3px; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 3px var(--accent)); }
+  /* Planner: saved routes, the active one opened */
+  .p-routes-head { margin: 12px 0 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .p-route { display: block; width: 100%; margin: 3px 0 0; padding: 6px 10px; text-align: left; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .p-route:hover { background: rgba(255,255,255,.06); }
+  .p-route.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 600; }
+  .p-route-body { padding: 2px 4px 6px 10px; }
+  .p-unsaved { margin: 8px 0; padding: 6px 8px; border: 1px dashed rgba(255,255,255,.2); border-radius: 6px; font-size: 13px; }
+  .p-quick { margin-top: 6px; padding: 5px 10px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; font: inherit; cursor: pointer; }
   .a-click { cursor: pointer; }
   .a-click:hover { filter: brightness(1.4); }
   #atlas-svg .a-star { fill: #e3b341; }
@@ -213,7 +354,7 @@
   .a-practised { background: rgba(0,180,180,.28); }
   .a-proficient { background: var(--accent); }
   .a-mastered { background: var(--accent); border-color: #e3b341; }
-  #atlas-practise, #lib-atlas { border-color: var(--accent) !important; color: var(--accent) !important; font-weight: 600 !important; }
+  .p-quick, #lib-atlas { border-color: var(--accent) !important; color: var(--accent) !important; font-weight: 600 !important; }
   #lib-atlas { display: block; width: calc(100% - 24px); margin: 10px 12px 2px; padding: 8px 12px; border: 1px solid var(--accent); border-radius: 6px; background: transparent; font: inherit; cursor: pointer; text-align: left; }
   /* Step panel: the stage being practised, above the sheet music */
   #step-panel { margin: 8px 20px 0; padding: 10px 14px; background: var(--panel); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; }
@@ -230,17 +371,42 @@
   .sp-body p { margin-bottom: 6px; }
   .sp-text { font-size: 15px; }
   .sp-options { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* Getting to know you (the Atlas's Where to start tab) */
+  .wl-bar { height: 8px; margin: 8px 0 12px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
+  .wl-bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
+  .wl-q { font-size: 16px; font-weight: 600; margin: 8px 0; }
+  .wl-staff { display: block; width: 100%; max-width: 240px; margin: 4px 0 10px; color: var(--text); }
+  .wl-options { display: flex; flex-direction: column; gap: 8px; }
+  .wl-options button, .wl-go, .wl-skip { padding: 9px 14px; border: 1px solid rgba(255,255,255,.18); border-bottom-width: 3px; border-radius: 10px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  .wl-options button:hover:not(:disabled), .wl-options button.on { border-color: var(--accent); background: rgba(0,180,180,.12); }
+  .wl-options button.ok { border-color: #3fb950; background: rgba(63,185,80,.18); }
+  .wl-options button.no { border-color: #e3b341; background: rgba(227,179,65,.12); }
+  .wl-go { border-color: var(--accent); color: var(--accent); font-weight: 650; }
+  .wl-skip { border: 0; padding: 4px 0; color: var(--muted); }
+  .wl-say { min-height: 1.4em; font-weight: 600; color: var(--accent); }
+  .sp-say { padding: 1px 8px !important; margin-left: 6px; }
+  /* A young learner's profile: big print and big buttons in the step panel. */
+  body[data-young="1"] .sp-text { font-size: 22px; line-height: 1.4; }
+  #step-panel .sp-act.stop { background: var(--miss); color: #fff; }
+  body[data-young="1"] .sp-options button, body[data-young="1"] .sp-act { font-size: 20px !important; padding: 10px 20px !important; }
   #sp-verdict { margin-left: 10px; font-weight: 600; }
   .sp-review { margin-left: auto; margin-right: 8px; color: #e3b341; }
   .sp-review button { padding: 1px 8px !important; font-size: 12px !important; }
   /* Exam card: a mock exam in progress, or its marks */
   #exam-panel { margin: 8px 20px 0; padding: 10px 14px; background: var(--panel); border: 1px solid var(--accent); border-radius: 8px; }
-  #exam-panel[hidden] { display: none; }
+  #exam-panel.ex-compact { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 6px 8px 6px 14px; }
+  #exam-panel.ex-compact .ex-head h3 { display: none; }
+  #exam-panel.ex-compact .ex-head { order: 1; }
+  #exam-panel.ex-compact .ex-place { flex: 1; margin: 0; padding: 0; border: 0; background: none; }
+  #exam-panel.ex-compact .ex-place .ex-row { display: inline-flex; margin: 0 0 0 12px !important; vertical-align: middle; }
+  #exam-panel.ex-compact > .ex-row { order: 2; }
+  #exam-panel.ex-compact > .ex-row > span { display: none; }
+  #exam-panel.ex-compact button { padding: 3px 10px; }
+  #exam-panel[hidden] { display: none !important; }  /* after .ex-compact's display: flex, which would win */
   #exam-panel button { padding: 5px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   #exam-panel button.ex-go { border-color: var(--accent); color: var(--accent); font-weight: 600; }
   .ex-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .ex-head h3 { font-size: 15px; }
-  .ex-mock { color: var(--muted); font-size: 11.5px; }
   .ex-sections { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
   .ex-sec { padding: 2px 9px; border-radius: 10px; border: 1px solid rgba(255,255,255,.15); font-size: 12px; color: var(--muted); }
   .ex-sec.on { border-color: var(--accent); color: var(--text); }
@@ -257,18 +423,111 @@
   .ex-place { margin: 4px 0 6px; padding: 6px 10px; border-left: 3px solid var(--accent); background: rgba(255,255,255,.03); font-size: 13.5px; }
   .ex-place ol { margin: 4px 0 0 18px; }
   .ex-report { white-space: pre-wrap; font: 12.5px/1.45 ui-monospace, Consolas, monospace; color: var(--muted); max-height: 220px; overflow: auto; margin: 6px 0; }
-  /* Top dash bar: the essential tabs, the Atlas first, and the profile */
+  /* Task navigation and profile */
   #dash { display: flex; align-items: center; gap: 4px; padding: 0 20px; background: #0d1018; border-bottom: 1px solid rgba(255,255,255,.1); flex-wrap: wrap; }
   #dash .brand { padding: 9px 14px 9px 0; margin-right: 8px; background: transparent; border: 0; color: var(--text); font: 700 14px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
   #dash .brand b { color: var(--accent); }
   #dash .dtab { padding: 10px 14px 8px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
   #dash .dtab:hover { color: var(--text); }
   #dash .dtab[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+  #dash .dtab[aria-current=page] { color: var(--text); border-bottom-color: var(--accent); }
   #dash .dtab.atlas { color: var(--accent); }
   #dash .dtab.atlas[aria-selected=true] { color: var(--text); }
+  #dash-where { padding: 10px 14px 8px; border-bottom: 2px solid var(--accent); color: var(--text); font: 600 13px 'Segoe UI', Arial, sans-serif; }
+  #dash-where:empty { display: none; }
   #dash .spacer { flex: 1; }
   #profile-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 5px; border: 1px solid rgba(255,255,255,.15); border-radius: 18px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   #profile-chip:hover { border-color: var(--accent); }
+  /* File menu (beside Home) and its dialogs */
+  #file-wrap { position: relative; }
+  #file-btn { padding: 10px 14px 8px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #file-btn:hover, #file-btn[aria-expanded=true] { color: var(--text); }
+  #prefs-btn { padding: 10px 14px 8px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #prefs-btn:hover, #prefs-btn[aria-expanded=true] { color: var(--text); }
+  #file-menu { position: absolute; top: 100%; left: 0; z-index: 50; min-width: 230px; padding: 5px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  #file-menu[hidden] { display: none; }
+  #file-menu button { display: flex; justify-content: space-between; gap: 18px; width: 100%; padding: 7px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; text-align: left; cursor: pointer; }
+  #file-menu button:hover:not(:disabled), #file-menu button:focus-visible { background: rgba(0,180,180,.14); outline: none; }
+  #file-menu button:disabled { color: var(--muted); opacity: .55; cursor: default; }
+  #file-menu kbd { color: var(--muted); font: 11.5px 'Segoe UI', Arial, sans-serif; }
+  #file-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid rgba(255,255,255,.1); }
+  dialog.file-dlg [hidden] { display: none; }
+  dialog.file-dlg { margin: auto; width: min(420px, calc(100vw - 32px)); padding: 18px 20px; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: 0 16px 40px rgba(0,0,0,.55); }
+  dialog.file-dlg::backdrop { background: rgba(0,0,0,.5); }
+  dialog.file-dlg h2 { margin: 0 0 12px; font-size: 16px; }
+  dialog.file-dlg form { display: flex; flex-direction: column; gap: 12px; }
+  dialog.file-dlg label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+  dialog.file-dlg input, dialog.file-dlg select { padding: 6px 8px; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: var(--bg); color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; }
+  dialog.file-dlg .dlg-row { display: flex; justify-content: flex-end; gap: 8px; }
+  dialog.file-dlg .dlg-row button { padding: 6px 14px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  dialog.file-dlg .dlg-row button:last-child { border-color: var(--accent); background: var(--accent); color: #031414; font-weight: 600; }
+  dialog.file-dlg .dlg-row button:disabled { opacity: .5; cursor: default; }
+  dialog.file-dlg .dlg-msg { min-height: 1em; margin: 0; color: var(--miss); font-size: 12px; }
+  dialog.file-dlg .dlg-hint { margin: 0; color: var(--muted); font-size: 12px; }
+  #folders-dlg { width: min(560px, calc(100vw - 32px)); }
+  #folders-list { margin: 0; padding: 0; list-style: none; max-height: 220px; overflow-y: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 5px; }
+  #folders-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 12.5px; overflow-wrap: anywhere; }
+  #folders-list li + li { border-top: 1px solid rgba(255,255,255,.06); }
+  #folders-list li span { flex: 1; min-width: 0; }
+  #folders-list li em { color: var(--miss); font-style: normal; font-size: 11.5px; }
+  #folders-list li button { flex: none; padding: 2px 8px; border: 1px solid rgba(255,255,255,.18); border-radius: 4px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+  #folders-list li button:hover { color: var(--text); border-color: var(--miss); }
+  #folders-list li.none { color: var(--muted); }
+  .folders-add { display: flex; gap: 6px; }
+  .folders-add input { flex: 1; min-width: 0; }
+  .folders-add button { flex: none; padding: 6px 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .folders-add button:disabled { opacity: .5; cursor: default; }
+  dialog.file-dlg label.check { flex-direction: row; align-items: flex-start; gap: 8px; color: var(--text); font-size: 13px; }
+  dialog.file-dlg label.check input { margin: 2px 0 0; padding: 0; }
+  dialog.file-dlg label.check .dlg-hint { display: block; margin-top: 2px; overflow-wrap: anywhere; }
+  #folders-always { overflow-wrap: anywhere; }
+  #conn-server { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  #conn-server i { width: 9px; height: 9px; border-radius: 50%; background: var(--miss); }
+  #conn-server.live i { background: var(--hit); }
+  /* Preferences (prefs.js): sections on the left, the chosen one on the right */
+  #prefs-dlg { width: min(700px, calc(100vw - 32px)); padding: 0; accent-color: var(--accent); }
+  #prefs-dlg > form { flex-direction: row; gap: 0; min-height: 440px; }
+  #prefs-nav { flex: none; display: flex; flex-direction: column; gap: 2px; width: 170px; padding: 18px 10px; border-right: 1px solid rgba(255,255,255,.08); background: rgba(0,0,0,.15); }
+  #prefs-nav h2 { margin: 0 8px 12px; }
+  #prefs-nav button { padding: 7px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font: 13px 'Segoe UI', Arial, sans-serif; text-align: left; cursor: pointer; }
+  #prefs-nav button:hover, #prefs-nav button:focus-visible { color: var(--text); background: rgba(255,255,255,.05); outline: none; }
+  #prefs-nav button[aria-selected=true] { color: var(--text); background: rgba(0,180,180,.16); box-shadow: inset 3px 0 0 var(--accent); }
+  #prefs-body { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 18px 20px; }
+  #prefs-body section { display: flex; flex-direction: column; gap: 12px; flex: 1; }
+  #prefs-body section[hidden] { display: none; }
+  #prefs-body h3 { margin: 0; font-size: 15px; }
+  #prefs-body h4 { margin: 6px 0 -4px; color: var(--text); font-size: 13px; }
+  #prefs-body .dlg-row { margin-top: 14px; }
+  #prefs-body .dlg-hint:empty, #prefs-body .dlg-msg:empty { display: none; }
+  #prefs-dlg input[type=range] { padding: 0; }
+  .pref-group { display: contents; }
+  .pref-pair { display: flex; align-items: center; gap: 8px; }
+  .pref-pair > select, .pref-pair > input[type=range] { flex: 1; min-width: 0; }
+  .pref-pair .pref-val { min-width: 3.2em; color: var(--muted); font-size: 12px; text-align: right; }
+  .pref-btn { flex: none; align-self: flex-start; padding: 6px 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: transparent; color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  .pref-pair .pref-btn { align-self: auto; }
+  .pref-btn:hover:not(:disabled) { border-color: var(--accent); }
+  .pref-btn:disabled { opacity: .5; cursor: default; }
+  #pref-level { display: block; height: 6px; border-radius: 6px; background: rgba(255,255,255,.1); overflow: hidden; }
+  #pref-level i { display: block; height: 100%; width: 0; background: var(--hit); transition: width .06s linear; }
+  #pref-mic-note { color: var(--miss); }
+  #am-graph { display: block; width: 100%; height: 120px; border: 1px solid rgba(255,255,255,.1); border-radius: 5px; background: rgba(0,0,0,.25); }
+  #am-now { margin: -4px 0 0; min-height: 1.4em; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  #am-log, #am-info { margin: 0; padding: 8px 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 5px; font: 11.5px/1.5 Consolas, 'Cascadia Mono', monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #am-log { height: 13.5em; overflow-y: auto; white-space: pre; overflow-x: auto; }
+  #am-info { color: var(--muted); font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; }
+  #am-msg { color: var(--muted); }
+  #prefs-body section[data-pane=audiomidi] { max-height: min(640px, calc(100vh - 80px)); overflow-y: auto; padding-right: 4px; }
+  #pref-folders { margin: 0; padding: 8px 10px; max-height: 160px; overflow: auto; border: 1px solid rgba(255,255,255,.1); border-radius: 5px; font: 12.5px/1.5 'Segoe UI', Arial, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+  #pref-keys { border-collapse: collapse; font-size: 13px; }
+  #pref-keys td { padding: 5px 8px; border-top: 1px solid rgba(255,255,255,.06); vertical-align: top; }
+  #pref-keys td:first-child { white-space: nowrap; color: var(--muted); }
+  #pref-keys kbd { padding: 1px 6px; border: 1px solid rgba(255,255,255,.2); border-radius: 4px; color: var(--text); font: 12px 'Segoe UI', Arial, sans-serif; }
+  @media (max-width: 600px) {
+    #prefs-dlg > form { flex-direction: column; min-height: 0; }
+    #prefs-nav { flex-direction: row; flex-wrap: wrap; width: auto; padding: 12px; border-right: 0; border-bottom: 1px solid rgba(255,255,255,.08); }
+    #prefs-nav h2 { width: 100%; margin-bottom: 6px; }
+  }
   .avatar { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #031414; font-weight: 700; font-size: 13px; }
   /* Main menu: pick who is practicing */
   #mainmenu { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 30%, #152032, var(--bg) 70%); }
@@ -283,48 +542,414 @@
   .mm-card.current { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
   .mm-card .avatar { width: 52px; height: 52px; font-size: 24px; margin-bottom: 8px; }
   .mm-card .mm-name { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mm-card .mm-inst { display: block; font-size: 11px; color: var(--muted); }
   .mm-card .mm-tools { position: absolute; top: 3px; right: 3px; display: none; gap: 2px; }
   #mainmenu.editing .mm-tools { display: flex; }
   .mm-tools span { padding: 0 5px; border-radius: 4px; color: var(--muted); }
   .mm-tools span:hover { background: rgba(255,255,255,.12); color: var(--text); }
-  #mm-new { display: flex; justify-content: center; gap: 8px; margin-bottom: 14px; }
+  #mm-new { display: flex; justify-content: center; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .mm-young { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .mm-young input { width: auto !important; }
+  #mm-new select { padding: 7px 8px; background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 6px; font: inherit; }
   #mm-new input { width: 200px; padding: 7px 10px; background: var(--panel); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 6px; font: inherit; }
   #mainmenu button.mm-btn { padding: 7px 14px; background: transparent; border: 1px solid rgba(255,255,255,.2); border-radius: 6px; color: var(--text); font: inherit; cursor: pointer; }
   #mainmenu button.mm-btn.primary { background: var(--accent); border-color: var(--accent); color: #031414; font-weight: 600; }
   #mm-msg { min-height: 20px; margin-top: 12px; color: var(--miss); font-size: 13px; }
+  #home-view { display: none; flex: 1; width: min(1040px, 100%); margin: 0 auto; padding: clamp(24px, 6vh, 64px) 28px 36px; overflow-y: auto; flex-direction: column; gap: 30px; }
+  body[data-view=home] #home-view { display: flex; }
+  body[data-view=home] > header, body[data-view=home] > #menu, body[data-view=home] > #dock,
+  body[data-view=home] > #workspace, body[data-view=home] > #npc { display: none; }
+  .home-intro { max-width: 680px; }
+  .eyebrow { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .14em; }
+  .home-intro h1 { margin: 7px 0 8px; font-size: clamp(26px, 4vw, 38px); line-height: 1.15; }
+  .home-intro > p:last-child { color: var(--muted); font-size: 16px; }
+  /* Which instrument you're learning now: one pill per instrument, like a course switcher */
+  .home-inst { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .home-inst button { display: flex; align-items: center; gap: 7px; padding: 7px 14px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: var(--panel); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
+  .home-inst button:hover, .home-inst button:focus-visible { border-color: var(--accent); outline: none; }
+  .home-inst button[aria-pressed=true] { border-color: var(--accent); background: rgba(0,180,180,.16); font-weight: 650; cursor: default; }
+  .home-inst button.new { border-style: dashed; color: var(--muted); }
+  .home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .home-card.wide { grid-column: 1 / -1; min-height: 0; }
+  .home-card { min-height: 184px; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 20px; border: 1px solid rgba(255,255,255,.11); border-radius: 12px; background: var(--panel); color: var(--text); text-align: left; font: inherit; cursor: pointer; transition: border-color .15s, transform .15s, background .15s; }
+  .home-card:hover, .home-card:focus-visible { border-color: var(--accent); background: #171d28; transform: translateY(-2px); outline: none; }
+  .home-card-primary { border-color: rgba(0,180,180,.55); background: linear-gradient(135deg, rgba(0,180,180,.13), var(--panel) 65%); }
+  .home-card-icon { color: var(--accent); font-size: 24px; line-height: 1; }
+  .home-card-title { margin-top: 5px; font-size: 17px; font-weight: 650; }
+  .home-card-detail { color: var(--muted); font-size: 13px; }
+  .home-card-action { display: flex; gap: 8px; align-items: center; margin-top: auto; color: var(--accent); font-size: 13px; font-weight: 600; }
+  /* Today (today.js): the one-button session, at the top of Home and beside a lesson */
+  .today-card, .home-grid, .home-coach { width: 100%; max-width: 860px; }  /* one column, centred */
+  .today-card { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; border: 1px solid rgba(0,180,180,.55); border-radius: 12px; background: linear-gradient(135deg, rgba(0,180,180,.13), var(--panel) 65%); }
+  .today-card.td-all { border-color: rgba(227,179,65,.6); background: linear-gradient(135deg, rgba(227,179,65,.12), var(--panel) 65%); }
+  .today-head { display: flex; align-items: flex-start; gap: 16px; }
+  .today-head > div { flex: 1; min-width: 0; }
+  .today-head h2 { margin: 5px 0 3px; font-size: 20px; }
+  .today-sub { color: var(--muted); font-size: 13px; }
+  .today-go { flex: none; padding: 10px 20px; border: 0; border-radius: 8px; background: var(--accent); color: #031414; font: 700 15px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  .today-go:hover, .today-go:focus-visible { filter: brightness(1.12); outline: none; }
+  .today-bar { height: 6px; border-radius: 6px; background: rgba(255,255,255,.1); overflow: hidden; }
+  .today-bar i { display: block; height: 100%; width: 0; border-radius: 6px; background: var(--accent); transition: width .4s; }
+  .td-all .today-bar i { background: #e3b341; }
+  .td-parts { list-style: none; display: grid; gap: 6px; }
+  .td-part { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(0,0,0,.18); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  .td-part:hover, .td-part:focus-visible { border-color: var(--accent); outline: none; }
+  .td-part.on { border-color: rgba(0,180,180,.6); box-shadow: inset 3px 0 0 var(--accent); }
+  .td-mark { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); color: var(--muted); font-size: 12px; font-weight: 700; }
+  .td-part.done .td-mark { border-color: var(--hit); background: var(--hit); color: #031414; }
+  .td-part.done b { color: var(--muted); font-weight: 600; }
+  .td-text { flex: 1; min-width: 0; font-size: 14px; }
+  .td-label { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+  .td-where { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .td-min { flex: none; color: var(--muted); font-size: 12px; }
+  .today-replan { align-self: flex-end; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
+  .today-replan:hover { color: var(--text); }
+  #lesson-today { margin-top: auto; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; gap: 8px; }
+  #lesson-today[hidden] { display: none; }
+  #lesson-today h3 { font-size: 13px; letter-spacing: .04em; }
+  #lesson-today h3 span { margin-left: 4px; color: var(--muted); font-weight: 400; }
+  #lesson-today .td-part { padding: 6px 8px; gap: 8px; }
+  #lesson-today .td-text { font-size: 13px; }
+  #lesson-today .td-where, #lesson-today .td-min { display: none; }
+  .td-cheer { color: var(--hit); font-size: 13px; font-weight: 600; }
+  .td-next { padding: 8px 12px; border: 0; border-radius: 6px; background: var(--accent); color: #031414; font: 700 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  .home-coach { display: flex; gap: 16px; align-items: center; padding: 18px 20px; border: 1px solid rgba(0,180,180,.28); border-radius: 12px; background: rgba(0,180,180,.06); }
+  .home-coach-icon, .maestro-avatar { flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #23a3a3, #053636); color: #fff; font: 28px/1 'Segoe UI Symbol', 'Noto Music', serif; }
+  .home-coach h2 { margin-bottom: 3px; font-size: 15px; }
+  .home-coach p { color: var(--muted); font-size: 13px; }
+  .home-coach-action { flex: none; margin-left: auto; padding: 8px 12px; border: 1px solid rgba(0,180,180,.5); border-radius: 6px; background: transparent; color: var(--accent); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  .home-coach-action:disabled { opacity: .5; cursor: default; }
+  /* YouTube (youtube.js): play along with a video on youtube.com, through the extension */
+  #youtube-view { display: none; flex: 1; width: min(1040px, 100%); margin: 0 auto; padding: clamp(24px, 5vh, 52px) 28px 36px; overflow-y: auto; flex-direction: column; align-items: center; gap: 18px; }
+  #youtube-view > * { width: 100%; max-width: 860px; }
+  body[data-view=youtube] #youtube-view { display: flex; }
+  body[data-view=youtube] > header, body[data-view=youtube] > #menu, body[data-view=youtube] > #dock,
+  body[data-view=youtube] > #workspace, body[data-view=youtube] > #npc { display: none; }
+  .ytv-card { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border: 1px solid rgba(255,255,255,.11); border-radius: 12px; background: var(--panel); }
+  .ytv-card[hidden] { display: none; }
+  .ytv-card h2 { font-size: 16px; }
+  .ytv-card p, .ytv-card li { color: var(--muted); font-size: 13.5px; }
+  .ytv-card b { color: var(--text); font-weight: 600; }
+  .ytv-status { flex-direction: row; align-items: center; gap: 14px; }
+  .ytv-dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+  .ytv-status.live { border-color: rgba(21,154,60,.55); }
+  .ytv-status.live .ytv-dot { background: var(--hit); box-shadow: 0 0 0 4px rgba(21,154,60,.2); }
+  .ytv-status.installed .ytv-dot { background: var(--accent); }
+  .ytv-status.outdated { border-color: rgba(227,179,65,.6); }
+  .ytv-status.outdated .ytv-dot { background: #e3b341; }
+  .ytv-status > div { flex: 1; min-width: 0; }
+  .ytv-song { flex-direction: row; align-items: flex-start; gap: 16px; }
+  .ytv-thumb { flex: none; width: 168px; aspect-ratio: 16 / 9; border-radius: 8px; background: #000 center / cover; }
+  .ytv-thumb[hidden] { display: none; }
+  .ytv-song > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .ytv-song h2 { color: var(--accent); overflow-wrap: anywhere; }
+  .ytv-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .ytv-btn { display: inline-flex; align-items: center; padding: 7px 12px; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; background: transparent; color: var(--text); font: 600 13px 'Segoe UI', Arial, sans-serif; text-decoration: none; cursor: pointer; }
+  .ytv-btn:hover, .ytv-btn:focus-visible { border-color: var(--accent); outline: none; }
+  .ytv-btn.primary { background: var(--accent); border-color: var(--accent); color: #031414; }
+  .ytv-btn[hidden] { display: none; }
+  .ytv-steps { display: flex; flex-direction: column; gap: 8px; margin-left: 20px; }
+  .ytv-path { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+  .ytv-path code { padding: 3px 7px; border-radius: 4px; background: var(--bg); color: var(--text); font: 12.5px ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+  .ytv-path .ytv-btn { padding: 3px 9px; font-size: 12px; }
+  #ytv-setup summary { cursor: pointer; font-weight: 600; font-size: 16px; }
+  #ytv-setup[open] summary { margin-bottom: 4px; }
+  .ytv-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .ytv-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(0,0,0,.18); }
+  .ytv-row.on { border-color: rgba(0,180,180,.6); box-shadow: inset 3px 0 0 var(--accent); }
+  .ytv-row img { flex: none; width: 80px; aspect-ratio: 16 / 9; border-radius: 4px; object-fit: cover; background: #000; }
+  .ytv-row > div { flex: 1; min-width: 0; }
+  .ytv-name { display: block; color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ytv-sub { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ytv-row .ytv-btn { flex: none; padding: 5px 10px; font-size: 12px; }
+  .ytv-msg { color: var(--miss); font-size: 13px; }
+  .ytv-msg:empty { display: none; }
+  .ytv-steps + p { margin-top: 10px; }
+  @media (max-width: 640px) {
+    #youtube-view { padding: 20px 12px; }
+    .ytv-song { flex-direction: column; }
+    .ytv-thumb { width: 100%; }
+    .ytv-row { flex-wrap: wrap; }
+    .ytv-row img { width: 64px; }
+    .ytv-row > div { flex-basis: calc(100% - 76px); }
+  }
+  #menu { display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 0 20px; }
+  /* One row: what to do (modes), how (Settings, Bar controls), and Start; each mode's hover says what it does */
+  #session-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 0; }
+  #mode { width: max-content; }
+  #mode-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  #mode button { padding: 7px 14px; }
+  #video-btn { padding: 7px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
+  #video-btn:hover { border-color: var(--accent); color: var(--text); }
+  #video-btn[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+  /* Record a new idea: its own mode, the same stage with only the metronome and ● Record */
+  body[data-view=record] #mode, body[data-view=record] #video-btn, body[data-view=record] #video-panel,
+  body[data-view=record] #library, body[data-view=record] #pick-piece { display: none; }
+  #pick-piece { padding: 5px 11px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+  #pick-piece:hover { border-color: var(--accent); color: var(--text); }
+  body:not([data-view=practice]) #pick-piece { display: none; }
+  #go { margin: 0 0 0 auto; min-width: 110px; padding: 8px 18px; }
+  /* Too narrow for one row: Start stays up beside the modes and the drop-downs take the row under them */
+  @media (min-width: 761px) and (max-width: 1260px) {
+    #go { order: 1; }
+    #control-tabs { order: 2; flex-basis: 100%; }
+  }
+  /* One drop-down per kind of setting. A panel doesn't scroll, so the pop-up inside one
+     (Parts) isn't clipped by it; the pop-up scrolls itself instead. */
+  #control-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  #control-tabs > details { position: relative; }
+  #control-tabs summary { width: fit-content; padding: 7px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; color: var(--muted); white-space: nowrap; cursor: pointer; list-style: none; }
+  #control-tabs summary:hover { border-color: var(--accent); color: var(--text); }
+  #control-tabs summary::-webkit-details-marker { display: none; }
+  #control-tabs details[open] > summary { border-color: var(--accent); color: var(--accent); }
+  .menu-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+                width: max-content; max-width: calc(100vw - 40px); padding: 12px 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .menu-row { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }  /* a label that holds buttons */
+  #settings-menu .menu-row { flex-wrap: wrap; }
+  #settings-menu kbd, #actions-menu kbd { color: var(--muted); font: 11.5px 'Segoe UI', Arial, sans-serif; }
+  #actions-menu .menu-panel { align-items: stretch; gap: 0; min-width: 230px; padding: 5px; }
+  .act-item { display: flex; justify-content: space-between; gap: 18px; padding: 7px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; text-align: left; cursor: pointer; }
+  .act-item:hover:not(:disabled), .act-item:focus-visible { background: rgba(0,180,180,.14); outline: none; }
+  .act-item:disabled { color: var(--muted); opacity: .55; cursor: default; }
+  #actions-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid rgba(255,255,255,.1); }
+  #transport-controls { display: grid; gap: 8px; width: min(640px, calc(100vw - 40px)); }
+  #transport-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+  .t-btn { display: inline-flex; align-items: center; gap: 4px; height: 26px; min-width: 26px; padding: 0 7px; justify-content: center; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .t-btn:hover:not(:disabled) { border-color: var(--accent); }
+  .t-btn:disabled { opacity: .4; cursor: default; }
+  .t-btn[aria-pressed=true], .t-toggle:has(input:checked) { border-color: var(--accent); background: rgba(0,180,180,.15); }
+  .t-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+  #timeline-position { min-width: 46px; text-align: right; color: var(--text); }
+  #timeline-total { color: var(--muted); }
+  #timeline-track { position: relative; flex: 1 1 180px; min-width: 140px; display: flex; align-items: center; height: 26px; }
+  /* Marks sit where the slider's thumb centre goes: 8px in from each end. */
+  #timeline-marks { position: absolute; inset: 0 8px; pointer-events: none; }
+  #timeline-marks .tl-range { position: absolute; top: 4px; bottom: 4px; border: 1px solid var(--muted); border-width: 0 2px; border-radius: 2px; background: rgba(255,255,255,.07); }
+  #timeline-marks .tl-range.loop { border-color: var(--accent); background: rgba(0,180,180,.16); }
+  #timeline-marks .tl-bm { position: absolute; top: 1px; width: 0; height: 0; margin-left: -4px; border: 4px solid transparent; border-top: 6px solid #f2b84b; }
+  #timeline { position: relative; width: 100%; height: 5px; margin: 0; appearance: none; border-radius: 6px; background: linear-gradient(to right, var(--accent) var(--progress, 0%), rgba(255,255,255,.16) var(--progress, 0%)); cursor: pointer; }
+  #bookmarks { display: flex; flex-wrap: wrap; gap: 6px; }
+  #bookmarks button { padding: 2px 4px 2px 8px; border: 1px solid rgba(242,184,75,.45); border-radius: 12px; background: transparent; color: var(--text); font: 12px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #bookmarks button:hover { border-color: #f2b84b; }
+  #bookmarks .x { margin-left: 4px; padding: 0 4px; color: var(--muted); border-radius: 8px; }
+  #bookmarks .x:hover { color: var(--text); background: rgba(255,255,255,.12); }
+  #timeline::-webkit-slider-thumb { width: 16px; height: 16px; appearance: none; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  #timeline::-moz-range-thumb { width: 12px; height: 12px; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  #timeline:disabled { opacity: .4; cursor: default; }
+  #maestro-panel { flex: 1 1 520px; min-width: 0; display: flex; align-items: center; gap: 10px; }
+  .maestro-avatar { width: 30px; height: 30px; font-size: 18px; }
+  #coach-composer { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  #talk { padding: 5px 12px; }
+  #ask { flex: 1; width: auto; min-width: 80px; padding: 6px 10px; }
+  #ai-spend { white-space: nowrap; }
+  body[data-view=progress] > header, body[data-view=progress] > #menu, body[data-view=progress] > #dock,
+  body[data-view=progress] > #npc { display: none; }
+  body[data-view=progress] > #workspace { display: flex; }
+  body[data-view=progress] #library, body[data-view=progress] #stage { display: none; }
+  body[data-view=progress] #atlas-view { display: flex; }
+  /* Lesson: an Atlas stage in a pared-down Practice page (atlas.js stepOpen): the lesson's
+     exercises on the left, the step panel and the sheet; Stop shows only while a step runs */
+  #lesson-nav { display: none; width: 260px; flex: none; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; padding: 12px 14px; background: var(--panel); border-right: 1px solid rgba(255,255,255,.08); }
+  body[data-view=lesson] #lesson-nav { display: flex; }
+  #lesson-back { align-self: flex-start; padding: 5px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #lesson-back:hover { border-color: var(--accent); }
+  #lesson-name { font-size: 16px; line-height: 1.3; }
+  #lesson-stages { list-style: none; }
+  #lesson-stages a { display: flex; gap: 8px; align-items: flex-start; padding: 7px 8px; border-radius: 6px; color: var(--text); text-decoration: none; }
+  #lesson-stages a:hover { background: rgba(255,255,255,.05); }
+  #lesson-stages a.on { background: rgba(0,180,180,.14); box-shadow: inset 3px 0 0 var(--accent); }
+  body[data-view=lesson] #library, body[data-view=lesson] #video-panel, body[data-view=lesson] #cleanup-open,
+  body[data-view=lesson] footer, body[data-view=lesson] .sp-close { display: none; }
+  body[data-view=lesson]:not(.running) > #menu { display: none; }
+  body[data-view=lesson] #session-row > :not(#go) { display: none; }
+  @media (max-width: 760px) { #lesson-nav { width: 180px; } }
+  #mainmenu { padding: 24px 16px; overflow-y: auto; }
+  #mainmenu .mm-box { width: min(560px, 100%); margin: auto; }
+  #mm-new { width: 100%; flex-wrap: wrap; }
+  #mm-new input { width: auto; min-width: 0; flex: 1 1 180px; }
+  #mainmenu button.mm-btn.primary { flex: 0 0 auto; }
+  @media (max-width: 760px) {
+    #home-view { padding: 28px 18px; gap: 22px; }
+    #mode-picker { width: 100%; flex-wrap: wrap; }
+    #mode { flex: 1 1 180px; width: auto; min-width: 0; }
+    #mode button { flex: 1 1 0; min-width: 0; padding: 8px 4px; }
+    #dock { padding: 7px 12px; }
+    #maestro-panel { flex-basis: 100%; }
+    footer { display: none; }
+    #voice-wrap { max-width: 100%; flex-wrap: wrap; }
+    #ai-spend { display: none; }
+  }
+  @media (max-width: 520px) {
+    #dash { gap: 0; padding: 0 8px; }
+    #dash .brand { display: none; }
+    #dash .dtab { padding: 9px 8px 7px; font-size: 12px; }
+    #profile-chip { margin-left: auto; padding-right: 6px; }
+    #chip-name { display: none; }
+    .home-grid { grid-template-columns: 1fr; gap: 10px; }
+    .home-card { min-height: 150px; }
+    .home-coach { align-items: flex-start; flex-wrap: wrap; padding: 15px; }
+    .home-coach > div { flex: 1; min-width: 180px; }
+    .home-coach-action { margin-left: 58px; }
+    #mode button { font-size: 12px; }
+  }
 </style>
 </head>
-<body>
-<nav id="dash" aria-label="Main tabs">
-  <button class="brand" id="dash-brand" title="Main menu: choose who is practicing">Piano <b>Coach</b></button>
-  <button class="dtab atlas" role="tab" data-dash="atlas" title="The skill tree: every grade, strand and stage, with your progress">◈ Atlas</button>
-  <button class="dtab" role="tab" data-dash="songs" title="Your song library">♪ Songs</button>
-  <button class="dtab" role="tab" data-dash="lessons" title="Exercises and lessons you've saved">✎ Lessons</button>
-  <button class="dtab" role="tab" data-dash="path" title="Your goals and the active one's Path">➜ Path</button>
-  <button class="dtab" role="tab" data-dash="level" title="Mock exams from the grade you name, up or down until your level is found">✓ Find my level</button>
+<body data-view="home">
+<nav id="dash" aria-label="Main navigation">
+  <button class="brand" id="dash-brand" title="Go to Home">Piano <b>Coach</b></button>
+  <span id="file-wrap">
+    <button id="file-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="file-menu">File ▾</button>
+    <div id="file-menu" role="menu" aria-label="File" hidden>
+      <button role="menuitem" data-file="open" title="Open a MIDI or MusicXML file from your computer. A copy is kept with your lessons (Unsorted).">Open file… <kbd>Ctrl+O</kbd></button>
+      <button role="menuitem" data-file="save-as" class="needs-score" title="Save a copy of this sheet under a new name, in a category of your Songs / Lessons">Save as… <kbd>Ctrl+Shift+S</kbd></button>
+      <button role="menuitem" data-file="download" class="needs-score" title="Save the file this sheet comes from onto your computer (Downloads)">Download sheet file</button>
+      <hr>
+      <button role="menuitem" data-file="profile" title="Switch to another profile, or add one">Switch profile…</button>
+    </div>
+  </span>
+  <button id="prefs-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="prefs-dlg" title="Connections, microphone and speakers, the Maestro's voice, the sheet, song folders and shortcuts (Ctrl+,)">Preferences</button>
+  <input type="file" id="file-pick" accept=".mid,.midi,.musicxml,.xml,.mxl" hidden>
+  <button class="dtab" data-dash="home">Home</button>
+  <span id="dash-where" title="The mode you're in. To change modes, go back to Home: that stops what's running"></span>
   <span class="spacer"></span>
   <button id="profile-chip" title="Switch profile"><span class="avatar" id="chip-avatar">?</span><span id="chip-name">Profile</span></button>
-</nav><header>
-  <button id="lib-toggle" aria-controls="library" aria-expanded="true" title="Show / hide songs and lessons">☰ Songs &amp; lessons</button>
-  <h1>Piano Coach · <span id="title">no score yet</span></h1>
+</nav>
+<main id="home-view">
+  <section class="home-intro">
+    <p class="eyebrow">YOUR PRACTICE, MADE CLEAR</p>
+    <h1>What would you like to work on?</h1>
+    <p>Choose a starting point. Your Maestro can help you decide what comes next.</p>
+    <div class="home-inst" id="home-inst" role="group" aria-label="Instrument you're learning"></div>
+  </section>
+  <section class="today-card" id="today-card" aria-label="Today's practice">
+    <div class="today-head">
+      <div>
+        <p class="eyebrow">TODAY</p>
+        <h2 id="today-title">Today</h2>
+        <p class="today-sub" id="today-sub">Planning your practice…</p>
+      </div>
+      <button class="today-go" id="today-go" data-act="next">Start ▸</button>
+    </div>
+    <div class="today-bar" title="Minutes practiced today"><i id="today-fill"></i></div>
+    <ol class="td-parts" id="today-parts"></ol>
+    <button class="today-replan" id="today-replan" title="Make today's plan again from where your Path is now">Plan again</button>
+  </section>
+  <section class="home-grid" aria-label="Choose an activity">
+    <button class="home-card" id="home-practice">
+      <span class="home-card-icon" aria-hidden="true">♫</span>
+      <span class="home-card-title">Session</span>
+      <span class="home-card-detail" id="home-piece">Choose a song or lesson to begin.</span>
+      <span class="home-card-action">Open practice <b aria-hidden="true">→</b></span>
+    </button>
+    <button class="home-card" id="home-explore">
+      <span class="home-card-icon" aria-hidden="true">⌕</span>
+      <span class="home-card-title">Explore music</span>
+      <span class="home-card-detail">Find songs, saved lessons, and exercises.</span>
+      <span class="home-card-action">Browse songs &amp; lessons <b aria-hidden="true">→</b></span>
+    </button>
+    <button class="home-card" id="home-record">
+      <span class="home-card-icon" aria-hidden="true">●</span>
+      <span class="home-card-title">Record a new idea</span>
+      <span class="home-card-detail">Play over the metronome and turn your take into sheet music.</span>
+      <span class="home-card-action">Start a recording <b aria-hidden="true">→</b></span>
+    </button>
+    <button class="home-card" id="home-progress">
+      <span class="home-card-icon" aria-hidden="true">◈</span>
+      <span class="home-card-title" id="home-atlas">Open the Roadmap</span>
+      <span class="home-card-detail">Your learning path: explore skills, set a goal, or see where to start.</span>
+      <span class="home-card-action">Open the map <b aria-hidden="true">→</b></span>
+    </button>
+    <button class="home-card wide" id="home-youtube">
+      <span class="home-card-icon" aria-hidden="true">▶</span>
+      <span class="home-card-title">Play along on YouTube</span>
+      <span class="home-card-detail">Play a song’s video on youtube.com: the sheet follows it.</span>
+      <span class="home-card-action">Open YouTube play-along <b aria-hidden="true">→</b></span>
+    </button>
+  </section>
+  <aside class="home-coach">
+    <span class="home-coach-icon" aria-hidden="true">𝄞</span>
+    <div>
+      <h2>Your Maestro is here to help</h2>
+      <p id="home-coach-copy">Not sure where to start? Ask for a piece, a practice plan, or help with a tricky passage.</p>
+    </div>
+    <button class="home-coach-action" id="home-ask"><span id="home-ask-label">Ask Maestro</span> <span aria-hidden="true">→</span></button>
+  </aside>
+</main>
+<main id="youtube-view" aria-label="Play along on YouTube">
+  <section class="home-intro">
+    <p class="eyebrow">PLAY ALONG ON YOUTUBE</p>
+    <h1>The sheet follows the video</h1>
+    <p>Play a song’s video on youtube.com and the sheet and the visualizer’s strip move with it, with your taps and loop.</p>
+  </section>
+  <section class="ytv-card ytv-status" id="ytv-status" aria-live="polite">
+    <span class="ytv-dot" aria-hidden="true"></span>
+    <div><h2 id="ytv-state">Looking for the extension…</h2><p id="ytv-state-detail"></p></div>
+  </section>
+  <section class="ytv-card ytv-song" aria-label="The song open now">
+    <span class="ytv-thumb" id="ytv-thumb" hidden></span>
+    <div>
+      <p class="eyebrow">THIS SONG</p>
+      <h2 id="ytv-title">No song open</h2>
+      <p id="ytv-detail"></p>
+      <div class="ytv-actions">
+        <a class="ytv-btn primary" id="ytv-open" target="_blank" rel="noopener" hidden>Play along on YouTube ↗</a>
+        <a class="ytv-btn" id="ytv-find" target="_blank" rel="noopener" hidden>Find it on YouTube ↗</a>
+        <button class="ytv-btn" id="ytv-here" hidden title="Play the video above the sheet in a Session instead">Play it here</button>
+        <button class="ytv-btn" id="ytv-pick">Choose a song</button>
+      </div>
+      <p class="ytv-msg" id="ytv-msg"></p>
+    </div>
+  </section>
+  <details class="ytv-card" id="ytv-setup">
+    <summary>Set up the extension (once)</summary>
+    <ol class="ytv-steps">
+      <li>In Chrome or Edge, open the extensions page. The coach can’t open it for you: copy this into the address bar.
+        <span class="ytv-path"><code id="ytv-ext-url">chrome://extensions</code><button class="ytv-btn" data-copy="ytv-ext-url">Copy</button></span></li>
+      <li>Turn on <b>Developer mode</b> (a switch at the top right in Chrome, on the left in Edge).</li>
+      <li>Press <b>Load unpacked</b> and choose this folder:
+        <span class="ytv-path"><code id="ytv-folder">…</code><button class="ytv-btn" data-copy="ytv-folder">Copy</button><button class="ytv-btn" id="ytv-reveal">Show in Explorer</button></span></li>
+      <li>Open any video on youtube.com. A small <b>𝄞 Piano Coach</b> box appears at its top right, and the light above turns green.</li>
+    </ol>
+    <p>When the extension’s files change, press its reload button (↻) on the extensions page, then reload the YouTube tab.</p>
+  </details>
+  <section class="ytv-card" aria-label="Songs synced to a video">
+    <h2>Your synced videos</h2>
+    <p id="ytv-empty">None yet. Open a song, find its video on YouTube and press <b>Use this video for this song</b> in the Piano Coach box.</p>
+    <ul class="ytv-list" id="ytv-list"></ul>
+  </section>
+</main>
+<header>
+  <h1><span id="title">no score yet</span></h1>
+  <span id="playlist-nav" hidden>
+    <button id="pl-prev" title="The previous piece in this playlist">◀</button>
+    <span id="pl-where"></span>
+    <button id="pl-next" title="The next piece in this playlist">▶</button>
+  </span>
+  <button id="pick-piece" title="Search your songs and lessons for another piece (the sheet stays until you choose one)">Change piece</button>
   <div id="status">Ask Claude to show a score or start a practice run.</div>
   <div id="conn" class="down">connecting…</div>
 </header>
 <div id="menu">
-  <label class="setting not-listen">Input <select id="port"></select></label>
-  <span class="seg setting" id="mode">
-    <button data-mode="listen" title="Hear the piece on your keyboard while the cursor follows the score. Nothing to play, nothing graded">Listen</button>
-    <button data-mode="learn" title="The cursor flows at tempo and waits on each chord for the right notes">Learn</button>
-    <button data-mode="rehearse" title="The cursor moves at tempo; notes are graded as they pass">Rehearse</button>
-    <button data-mode="record" title="Play over the metronome; what you play is written out as sheet music">Record</button>
-  </span>
-  <span id="mode-hint" aria-live="polite"></span>
-  <span id="parts-wrap" class="setting play-only">
+  <div id="session-row">
+    <div id="mode-picker">
+      <span class="seg setting" id="mode" aria-label="Choose a practice mode">
+        <button data-mode="learn" title="The cursor waits on each chord until you play the right notes">Learn</button>
+        <button data-mode="rehearse" title="The cursor moves at tempo; notes are graded as they pass">Rehearse</button>
+        <button data-mode="listen" title="Hear the piece while the cursor follows. Nothing to play, nothing graded">Listen</button>
+      </span>
+      <button id="video-btn" aria-pressed="false" aria-controls="video-panel" title="Play along with a recording: a YouTube video plays and the sheet follows it">▶ Video</button>
+    </div>
+  <div id="control-tabs">
+    <details id="playing-settings">
+      <summary title="MIDI input, which parts you play, which bars, and the tempo">Playing ▾</summary>
+      <div class="menu-panel">
+  <label class="setting not-listen">MIDI input <select id="port"></select></label>
+  <span id="parts-wrap" class="play-only">
     <button id="parts-btn" aria-haspopup="true" aria-expanded="false" aria-controls="parts" title="What you play, what's shown and what the keyboard plays along">Play: both hands ▾</button>
     <div id="parts" role="dialog" aria-label="Parts">
       <h2>This piece</h2>
       <table id="mix">
-        <thead><tr><th></th><th title="You play it: graded, and Learn waits for it">You play</th><th title="Drawn on the sheet">Show</th><th title="Played on the MIDI output along with you (parts you don't play and can see)">Sound</th></tr></thead>
+        <thead><tr><th></th><th class="c-play" title="You play it: graded, and Learn waits for it">You play</th><th title="Drawn on the sheet">Show</th><th class="c-snd" title="Played on the MIDI output, shown or not: Listen plays every part you leave on; when you play, the parts you don't play sound along with you if you turn them on">Sound</th></tr></thead>
         <tbody id="mix-rows"></tbody>
       </table>
       <label class="hint">Sound goes to <select id="out-port" title="MIDI output the parts you don't play are sent to"></select></label>
@@ -336,8 +961,122 @@
   </span>
   <label class="setting play-only">Bars <input type="number" id="from" min="1" placeholder="1"> – <input type="number" id="to" min="1" placeholder="end"></label>
   <label class="setting" id="tempo-wrap">Tempo <input type="range" id="tempo" min="30" max="150" step="5" value="100"> <span id="tempo-val">100%</span></label>
-  <label class="setting play-only"><input type="checkbox" id="loop"> Loop</label>
+      </div>
+    </details>
+    <details id="sheet-settings">
+      <summary title="Sheet music, falling notes or both, and how the sheet is drawn">Sheet ▾</summary>
+      <div class="menu-panel">
+  <span class="menu-row">Show <span class="seg" id="view" aria-label="What to show">
+    <button data-show="sheet" title="Sheet music">Sheet</button>
+    <button data-show="notes" title="The visualizer's view: the notes fall onto a keyboard. Scroll on it to change how fast they fall">Falling notes</button>
+    <button data-show="both" title="The sheet above, the falling notes under it">Both</button>
+  </span></span>
+  <span class="menu-row">Labels <span class="seg" id="aid-level" aria-label="How much the sheet is labeled">
+    <button data-aid="all" title="Note names and counting on every bar. The quickest start, but lean on it and you learn to read the labels, not the music">Easy</button>
+    <button data-aid="coach" title="Labels only where you slip: note names on a bar where you play wrong keys or hunt for them, counting where you play off the beat. They come off once you play that bar clean twice">Coached</button>
+    <button data-aid="off" title="No labels: read the music yourself">Hard</button>
+  </span></span>
+  <span class="menu-row">
+    <label title="The letter name on each notehead, filled or hollow like the note; a sharp or flat beside it, from the key signature too"><input type="checkbox" id="aid-names"> Note names</label>
+    <label title="The beats under each bar (1 & 2 &), faint where you hold or rest"><input type="checkbox" id="aid-counts"> Counting</label>
+  </span>
+  <label title="Show dynamics (pp to ff, hairpins) on the sheet. For MIDI files they're worked out from how hard each passage was played."><input type="checkbox" id="dynamics"> Dynamics</label>
+  <label title="Sideways: one long line moving past a fixed cursor. Two rows: the sheet as rows across the page, the row you're playing on top and the next one under it, scrolling down.">Layout <select id="layout">
+    <option value="line">Scrolls sideways</option><option value="rows">Two rows, scrolls down</option>
+  </select></label>
+  <label title="How big the sheet is drawn. Smaller shows more bars at once; larger makes the notes easier to read.">Zoom <input type="range" id="zoom" min="50" max="200" step="10" value="100"> <span id="zoom-val">100%</span></label>
+      </div>
+    </details>
+    <details id="maestro-settings">
+      <summary title="How the Maestro coaches you, when it speaks during a run, and whether it reads replies aloud">Maestro ▾</summary>
+      <div class="menu-panel">
+  <label class="setting" title="How the Maestro coaches you: Warm is encouraging, Strict is dry and demanding">Style <select id="style">
+    <option value="friend">Friend</option><option value="strict">Strict</option></select></label>
+  <label class="setting" title="When you press Start, the Maestro says hello: the piece, its key signature, your best score on it"><input type="checkbox" id="talk-greet" checked> Hello at Start</label>
+  <label class="setting" title="What the Maestro says when a pass ends. Every pass: always a remark. When something’s new: only when the playing changed or a slip shows up (a word otherwise). Nothing: stays quiet; the pass line still shows above the sheet.">After a pass <select id="talk-passes">
+    <option value="every">Every pass</option><option value="news">When something’s new</option><option value="off">Nothing</option></select></label>
+  <label class="setting" title="When a run of two or more passes ends, the Maestro sums it up: your best pass and the bar to work on"><input type="checkbox" id="talk-signoff" checked> Sum up at the end</label>
   <label class="setting play-only not-listen" title="With Loop on, the Maestro changes the bars, hand, tempo or mode between passes the way a teacher would, and says what it did. Say “no” or “undo” to put it back."><input type="checkbox" id="autopilot"> Maestro decides</label>
+  <label class="setting" id="voice-wrap" title="Read the Maestro's and Claude's comments aloud"><input type="checkbox" id="voice"> Read replies aloud <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
+  <div id="sheet-tools" hidden>
+    <h3>This sheet</h3>
+    <div id="sheet-details" class="tool-row" hidden>
+      <span class="tool-name">Analysis</span>
+      <div class="tool-body">
+        <button id="details-btn" class="tool-btn" title="Add chords, Roman numerals, lyrics and section names to this sheet. What the file shows appears straight away; then Claude looks the song up on your subscription, which takes a few minutes."></button>
+        <span id="details-note" class="tool-hint" aria-live="polite"></span>
+        <div class="tool-checks">
+          <label hidden title="Chord names over the right hand (G, Em7, D/F#)"><input type="checkbox" data-detail="chords"> Chords</label>
+          <label hidden title="Roman numerals under the left hand: each chord's place in the key (I, IV, V⁷, ii⁶)"><input type="checkbox" data-detail="roman"> Roman</label>
+          <label hidden title="The words, under the tune"><input type="checkbox" data-detail="lyrics"> Lyrics</label>
+          <label hidden title="Where each section starts (Verse, Chorus...)"><input type="checkbox" data-detail="sections"> Sections</label>
+        </div>
+      </div>
+    </div>
+    <div id="playable-row" class="tool-row" hidden>
+      <span class="tool-name">Two hands</span>
+      <div class="tool-body">
+        <button id="playable-btn" class="tool-btn" title="Make the parts you play fit two hands: a key two parts play at once is played once, notes one hand can't reach go to the other hand, and what neither hand can reach is left out. Then the sheet is checked for anything hard to read."></button>
+        <span id="playable-note" class="tool-hint" aria-live="polite"></span>
+      </div>
+    </div>
+    <div id="cleanup-row" class="tool-row" hidden>
+      <span class="tool-name">Cleanup</span>
+      <div class="tool-body">
+        <button id="cleanup-btn" class="tool-btn"></button>
+        <span class="tool-hint">Redraws the sheet on a beat followed from the playing. Only the notation changes, never when the notes sound.</span>
+      </div>
+    </div>
+  </div>
+      </div>
+    </details>
+    <details id="screen-controls" class="play-only">
+      <summary title="Step bar by bar, restart, repeat a range, bookmark bars, or drag the bar timeline. Double-click a bar on the sheet to jump there">Bar controls ▾</summary>
+      <div id="transport-controls" class="menu-panel">
+        <div id="transport-row">
+          <button type="button" id="timeline-back" class="t-btn" title="Previous bar" aria-label="Previous bar">◀</button>
+          <button type="button" id="timeline-restart" class="t-btn" title="Back to the start of the selected bars" aria-label="Restart">↺</button>
+          <button type="button" id="timeline-forward" class="t-btn" title="Next bar" aria-label="Next bar">▶</button>
+          <span id="timeline-position">Bar 1</span>
+          <div id="timeline-track">
+            <div id="timeline-marks" aria-hidden="true"></div>
+            <input type="range" id="timeline" min="0" max="0" step="1" value="0" aria-label="Score bar">
+          </div>
+          <span id="timeline-total">/ 0</span>
+          <label class="t-btn t-toggle setting" title="Repeat the selected bars (Playing → Bars)"><input type="checkbox" id="loop"> 🔁 Loop</label>
+          <button type="button" id="bm-add" class="t-btn" aria-pressed="false" title="Bookmark this bar">🔖</button>
+        </div>
+        <div id="bookmarks" hidden></div>
+      </div>
+    </details>
+    <details id="settings-menu">
+      <summary title="Settings that hold in every mode: where the sound goes, keeping the screen on, and the rest of Preferences">Settings ▾</summary>
+      <div class="menu-panel">
+  <label class="setting" title="MIDI output for Listen and for the parts you don't play (the same as Sound goes to, under Parts)">Sound out <select id="set-out"></select></label>
+  <label id="wake-wrap" title="Stop the screen dimming or locking while this page is open, so it's still there when your hands are on the keys"><input type="checkbox" id="wake-lock"> Keep the screen on</label>
+  <span class="menu-row">Preferences
+    <button type="button" class="t-btn" data-prefs="connections">Connections</button>
+    <button type="button" class="t-btn" data-prefs="audio">Mic &amp; speakers</button>
+    <button type="button" class="t-btn" data-prefs="keys">Shortcuts</button>
+    <button type="button" class="t-btn" data-prefs="">All… <kbd>Ctrl+,</kbd></button>
+  </span>
+      </div>
+    </details>
+    <details id="actions-menu">
+      <summary title="Things to do now, in any mode: jump back, bookmark, the metronome, a video, ask the Maestro, save, full screen">Actions ▾</summary>
+      <div class="menu-panel" role="menu" aria-label="Actions">
+        <button role="menuitem" class="act-item play-only" data-act="restart" data-target="timeline-restart" title="Back to the start of the selected bars (the start of the piece when none are chosen)">Back to the start</button>
+        <button role="menuitem" class="act-item play-only" data-act="bookmark" data-target="bm-add" title="Bookmark the bar you're on, or remove its bookmark">Bookmark this bar</button>
+        <button role="menuitem" class="act-item" data-act="metronome" data-target="m-go" title="Start or stop the metronome">Metronome on / off <kbd>M</kbd></button>
+        <button role="menuitem" class="act-item play-only" data-act="video" data-target="video-btn" title="Play along with a recording: a YouTube video plays and the sheet follows it">Play along with a video</button>
+        <button role="menuitem" class="act-item play-only" data-act="piece" data-target="pick-piece" title="Search your songs and lessons for another piece">Change piece…</button>
+        <hr>
+        <button role="menuitem" class="act-item" data-act="ask" data-target="ask" title="Type a question to the Maestro (or hold Space to talk)">Ask the Maestro…</button>
+        <button role="menuitem" class="act-item needs-score" data-act="save-as" title="Save a copy of this sheet under a new name, in a category of your Songs / Lessons">Save a copy… <kbd>Ctrl+Shift+S</kbd></button>
+        <button role="menuitem" class="act-item needs-score" data-act="download" title="Save the file this sheet comes from onto your computer (Downloads)">Download sheet file</button>
+        <button role="menuitem" class="act-item" data-act="fullscreen" id="act-fullscreen" title="Fill the screen with the coach (Esc to leave)">Full screen</button>
+      </div>
+    </details>
   <span id="metro-wrap">
     <button id="m-go" title="Start / stop the metronome (M)">♩ Metronome</button>
     <button id="m-menu" aria-haspopup="true" aria-expanded="false" aria-controls="metro" title="Metronome settings">80 BPM ▾</button>
@@ -362,46 +1101,87 @@
       <label title="How loud the in-between clicks are, compared to the beat">Sub vol <input type="range" id="m-subvol" min="0" max="100" step="5" value="50" style="width:70px"></label>
     </div>
   </span>
-  <label title="How the Maestro coaches you: Warm is encouraging, Strict is dry and demanding">Maestro <select id="style">
-    <option value="warm">Warm</option><option value="strict">Strict</option></select></label>
-  <label id="voice-wrap" title="Read Claude's comments and each pass summary aloud"><input type="checkbox" id="voice"> Voice <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
-  <span><button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
-    <span id="level" aria-hidden="true"><i></i></span>
-    <select id="mic" title="Microphone" hidden></select>
-    <input id="ask" type="text" placeholder="…or type to the Maestro" disabled> <span id="ai-spend"></span></span>
-  <button id="go">Start</button>
+  </div>
+    <button id="go">Start</button>
+  </div>
 </div>
 <div id="workspace">
   <aside id="library" aria-label="Songs and lessons">
     <div class="tabs" role="tablist">
       <button role="tab" id="tab-songs" data-tab="songs" aria-selected="true" aria-controls="lib-list">Songs</button>
       <button role="tab" id="tab-lessons" data-tab="lessons" aria-selected="false" aria-controls="lib-list">Lessons</button>
+      <button id="lib-size" title="Make the search full screen" aria-label="Make search full screen">⤢</button>
+      <button id="lib-close" title="Close the search (the sheet stays as it is)" aria-label="Close search">✕</button>
     </div>
     <input id="lib-search" type="search" placeholder="Search songs…" aria-label="Search">
     <div id="lib-list" role="tabpanel"></div>
+  </aside>
+  <aside id="lesson-nav" aria-label="This lesson's exercises">
+    <button id="lesson-back" title="Back to the map (your finished steps are saved)">← Roadmap</button>
+    <h2 id="lesson-name"></h2>
+    <ol id="lesson-stages"></ol>
+    <section id="lesson-today" aria-label="Today's practice" hidden></section>
   </aside>
   <div id="stage">
     <div id="exam-panel" hidden></div>
     <div id="step-panel" hidden></div>
     <div id="last"></div>
     <div id="heard"></div>
-    <main><div id="strip"><iframe id="sheet" src="notation.html" title="Sheet music"></iframe><p id="sheet-notice" hidden></p></div></main>
+    <section id="video-panel" aria-label="Play along with a recording" hidden>
+      <div id="yt-wrap"><div id="yt-player"></div><p id="yt-empty">Paste a YouTube link, or find the song on YouTube.</p></div>
+      <div id="video-side">
+        <div class="v-row">
+          <input id="video-link" type="url" placeholder="Paste a YouTube link" aria-label="YouTube link">
+          <button id="video-use">Use</button>
+          <button id="video-find" title="Search YouTube for this song">Find on YouTube</button>
+        </div>
+        <div id="video-results" hidden></div>
+        <div class="v-row">
+          <button id="video-sync" title="Line the video up with the sheet: tap on the first beat of each bar">Tap to sync</button>
+          <label>from bar <input id="video-bar" type="number" min="0" value="1"></label>
+          <button id="video-done" hidden>Done</button>
+          <button id="video-clear" title="Forget the taps for this video">Forget taps</button>
+          <label>Speed <select id="video-speed"><option value="1">100%</option></select></label>
+        </div>
+        <div class="v-row">
+          <label title="Repeat these bars while the video plays (a second before the first bar, for a run-up)"><input type="checkbox" id="video-loop"> Loop bars</label>
+          <input id="video-from" type="number" min="0" aria-label="Loop from bar"> – <input id="video-to" type="number" min="0" aria-label="Loop to bar">
+          <a id="video-yt" target="_blank" rel="noopener" title="Play it on YouTube itself: with the Piano Coach extension the sheet follows it there too" hidden>Open on YouTube ↗</a>
+        </div>
+        <p id="video-note" aria-live="polite"></p>
+      </div>
+    </section>
+    <div id="sheet-warn" role="note" hidden><span id="sheet-warn-text"></span><button id="cleanup-open" data-opens="maestro-settings" title="Under Maestro → This sheet" hidden></button></div>
+    <main><div id="strip"><iframe id="sheet" src="notation.html?grow=2.5" title="Sheet music"></iframe><p id="sheet-notice" hidden></p></div>
+      <div id="roll-wrap"><canvas id="roll" aria-label="Falling notes"></canvas></div></main>
   </div>
-  <section id="atlas-view" aria-label="The Atlas" hidden>
+  <section id="atlas-view" aria-label="Progress and learning path" hidden>
     <div id="atlas-bar">
-      <button id="atlas-close" title="Back to practice (Esc)">← Practice</button>
-      <input id="atlas-search" type="search" placeholder="Search the Atlas, e.g. E flat major" aria-label="Search the Atlas">
-      <button id="atlas-home" title="See the whole Atlas (Home)">Whole Atlas</button>
-      <button id="atlas-place" title="Mock exams from the grade you name, up or down until your level is found">Find my level</button>
-      <button id="atlas-path" title="Your goals and the active one's Path">Path</button>
+      <button id="atlas-close" title="Back to Home (Esc)">← Home</button>
+      <input id="atlas-search" type="search" placeholder="Search skills, e.g. E flat major" aria-label="Search skills">
       <div id="atlas-results" hidden></div>
       <span id="atlas-level"></span>
     </div>
     <div id="atlas-body">
-      <svg id="atlas-svg" aria-label="Skill tree"><g id="atlas-world"></g></svg>
-      <aside id="atlas-side">
-        <div id="atlas-detail"><p class="a-muted">Scroll to zoom, drag to move. Click a grade, strand or family to zoom in; click a stage to see its lesson.</p></div>
-        <div id="atlas-path"></div>
+      <aside id="atlas-tasks" class="a-panel" aria-label="Route">
+        <div class="a-panel-head"><span>Route</span><button class="a-collapse" title="Hide this panel">«</button></div>
+        <div id="atlas-task-list"></div>
+        <button class="a-rail" title="Show the route and start its exercises">Route</button>
+      </aside>
+      <div class="a-grip" data-panel="atlas-tasks" title="Drag to resize · double-click to hide"></div>
+      <div id="atlas-map">
+        <svg id="atlas-svg" aria-label="Skill tree"><g id="atlas-world"></g></svg>
+        <button id="atlas-home" title="Zoom back out to the whole learning map (Home)" hidden>⤢ Whole map</button>
+      </div>
+      <div class="a-grip" data-panel="atlas-side" title="Drag to resize · double-click to hide"></div>
+      <aside id="atlas-side" class="a-panel">
+        <div id="atlas-tabs" role="tablist">
+          <button data-tab="path" role="tab" title="Set a goal, and your saved routes">Planner</button>
+          <button data-tab="place" role="tab" title="A few friendly questions to find where your path starts">Where to start</button>
+          <button class="a-collapse" title="Hide this panel">»</button>
+        </div>
+        <div id="atlas-detail"><p class="a-muted">Your skills and milestones. Scroll to zoom, drag to move, or choose a stage to practice it.</p></div>
+        <button class="a-rail" title="Show the Planner and skill details">Planner</button>
       </aside>
     </div>
   </section>
@@ -410,13 +1190,25 @@
   <div id="npc-face" aria-hidden="true">𝄞</div>
   <div><div id="npc-name">Maestro</div><div id="npc-text"></div></div>
 </div>
-<footer>
-  <span><i class="sw" style="background:#00a6b8"></i>Play next</span>
-  <span><i class="sw" style="background:var(--hit)"></i>Hit</span>
-  <span><i class="sw" style="background:var(--miss)"></i>Missed</span>
-  <span><i class="heat"></i>Bar heat map: clean → most problems</span>
-  <span>Drag, scroll or ← → to look around · Home = back to the cursor</span>
-</footer>
+<div id="dock">
+  <section id="maestro-panel" aria-label="Ask the Maestro">
+    <span class="maestro-avatar" aria-hidden="true">𝄞</span>
+    <div id="coach-composer">
+      <button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
+      <span id="level" aria-hidden="true"><i></i></span>
+      <select id="mic" title="Microphone" hidden></select>
+      <input id="ask" type="text" placeholder="Ask Maestro about your practice…" aria-label="Message Maestro" disabled>
+      <span id="ai-spend"></span>
+    </div>
+  </section>
+  <footer title="Drag, scroll or ← → to look around the sheet · Home = back to the cursor">
+    <span><i class="sw" style="background:#00a6b8"></i>Play next</span>
+    <span><i class="sw" style="background:var(--hit)"></i>Hit</span>
+    <span><i class="sw" style="background:var(--miss)"></i>Missed</span>
+    <span title="Bar heat map: clean → most problems"><i class="heat"></i>Trouble bars</span>
+  </footer>
+</div>
+<script src="roll.js"></script>
 <script>
 "use strict";
 const frame = document.getElementById('sheet');
@@ -424,7 +1216,7 @@ const statusEl = document.getElementById('status');
 const titleEl = document.getElementById('title');
 const connEl = document.getElementById('conn');
 
-let frameLoaded = false, scoreReady = false, queue = [], scoreVersion = 0;
+let frameLoaded = false, scoreReady = false, queue = [], scoreVersion = 0, timelineBars = [];
 
 frame.addEventListener('load', () => { frameLoaded = true; if (scoreVersion) loadScore(scoreVersion); });
 window.addEventListener('message', e => {
@@ -434,10 +1226,14 @@ window.addEventListener('message', e => {
     queue.forEach(m => frame.contentWindow.postMessage(m, '*'));
     queue = [];
   } else if (e.data.type === 'height') {
-    // Fit the strip to the drawn score (it scales down itself when the page is shorter).
+    // Fit the strip to the drawn score at up to 2.5x (it scales itself to whatever height it gets).
     document.getElementById('strip').style.setProperty('--strip-h', Math.max(120, e.data.h) + 'px');
   } else if (e.data.type === 'error') {
     statusEl.textContent = 'Sheet music error: ' + e.data.msg;
+  } else if (e.data.type === 'barClick' && Number.isFinite(e.data.beat)) {
+    const bar = timelineBars.find(b => Math.abs(b.start_beat - e.data.beat) < 0.02)
+      || timelineBars.filter(b => b.start_beat <= e.data.beat + 0.02).pop();
+    if (bar) jumpToBar(bar.number);
   }
 });
 
@@ -460,6 +1256,176 @@ function forward(msg) {
   else queue.push(msg);
 }
 
+function selectedTimelineBounds() {
+  if (!timelineBars.length) return [0, -1];
+  const first = Number($('from').value);
+  const last = Number($('to').value);
+  let low = first ? timelineBars.findIndex(b => b.number >= first) : 0;
+  let high = timelineBars.length - 1;
+  if (last) {
+    high = -1;
+    for (let i = 0; i < timelineBars.length; i++) {
+      if (timelineBars[i].number <= last) high = i;
+    }
+  }
+  if (low < 0) low = timelineBars.length - 1;
+  if (high < 0) high = 0;
+  if (high < low) high = low;
+  return [low, high];
+}
+
+function setTimelineBars(bars) {
+  timelineBars = bars.filter(b => Number.isFinite(b.number) && Number.isFinite(b.start_beat));
+  const slider = $('timeline');
+  slider.disabled = timelineBars.length === 0;
+  if (timelineBars.length) {
+    const [low] = selectedTimelineBounds();
+    slider.value = low;
+  }
+  updateTimeline();
+}
+
+// The slider spans the whole piece; it stays inside the selected bars, drawn as a band on it
+// (in the accent colour when they repeat), with a tick on each bookmarked bar.
+function updateTimeline() {
+  const slider = $('timeline');
+  const [low, high] = selectedTimelineBounds();
+  slider.min = 0;
+  slider.max = Math.max(0, timelineBars.length - 1);
+  const index = Math.max(low, Math.min(high, Number(slider.value) || low));
+  slider.value = index;
+  const bar = timelineBars[index];
+  if (!bar) {
+    $('timeline-position').textContent = 'No score';
+    $('timeline-total').textContent = '/ 0';
+    $('timeline-marks').innerHTML = '';
+    drawBookmarks();
+    return;
+  }
+  slider.style.setProperty('--progress', `${timelineFrac(index) * 100}%`);
+  $('timeline-position').textContent = `Bar ${bar.number}`;
+  $('timeline-total').textContent = `/ ${timelineBars[timelineBars.length - 1].number}`;
+  $('timeline-back').disabled = index <= low;
+  $('timeline-forward').disabled = index >= high;
+  drawTimelineMarks(low, high);
+  drawBookmarks();
+  showRange();
+}
+
+const timelineFrac = i => timelineBars.length > 1 ? i / (timelineBars.length - 1) : 0;
+const pct = f => `${(f * 100).toFixed(2)}%`;
+
+function drawTimelineMarks(low, high) {
+  const marks = $('timeline-marks');
+  marks.innerHTML = '';
+  if ($('from').value || $('to').value) {
+    const band = document.createElement('div');
+    band.className = 'tl-range' + ($('loop').checked ? ' loop' : '');
+    band.style.left = pct(timelineFrac(low));
+    band.style.width = `max(2px, ${pct(timelineFrac(high) - timelineFrac(low))})`;
+    marks.appendChild(band);
+  }
+  for (const n of bookmarks()) {
+    const i = timelineBars.findIndex(b => b.number === n);
+    if (i < 0) continue;
+    const tick = document.createElement('div');
+    tick.className = 'tl-bm';
+    tick.style.left = pct(timelineFrac(i));
+    marks.appendChild(tick);
+  }
+}
+
+// -- bookmarks: bars marked in this piece (remembered in this browser) ---------------
+const bookmarkKey = () => mixPath ? 'bookmarks.' + mixPath : null;
+function bookmarks() {
+  const key = bookmarkKey();
+  if (!key) return [];
+  try { return (JSON.parse(store.get(key, '[]')) || []).filter(Number.isFinite); } catch (e) { return []; }
+}
+function setBookmarks(list) {
+  const key = bookmarkKey();
+  if (key) store.set(key, JSON.stringify([...new Set(list)].sort((a, b) => a - b)));
+  updateTimeline();
+}
+
+function drawBookmarks() {
+  const box = $('bookmarks'), list = bookmarks().filter(n => timelineBars.some(b => b.number === n));
+  const here = timelineBars[Number($('timeline').value)];
+  const marked = !!here && list.includes(here.number);
+  $('bm-add').setAttribute('aria-pressed', marked);
+  $('bm-add').title = marked ? `Remove the bookmark on bar ${here.number}` : 'Bookmark this bar';
+  $('bm-add').disabled = !here;
+  box.hidden = !list.length;
+  box.innerHTML = list.map(n => `<button type="button" data-bar="${n}" title="Jump to bar ${n}">Bar ${n}` +
+    `<span class="x" data-remove="${n}" title="Remove this bookmark" aria-label="Remove the bookmark on bar ${n}">✕</span></button>`).join('');
+}
+
+// A bookmark or a double-click on the sheet: go to that bar. Outside the selected bars, the
+// selection is let go first (it can't be while a run is going: the run plays those bars).
+function jumpToBar(number) {
+  const index = timelineBars.findIndex(b => b.number === number);
+  if (index < 0) return;
+  const [low, high] = selectedTimelineBounds();
+  if (index < low || index > high) {
+    if (running) {
+      statusEl.textContent = `Bar ${number} is outside the bars you chose (${timelineBars[low].number}–${timelineBars[high].number}).`;
+      return;
+    }
+    $('from').value = $('to').value = '';
+  }
+  seekTimeline(index);
+}
+
+// The Bars range on the sheet: flags where it starts and ends, "Loop start" / "Loop end" while
+// Repeat is on. Nothing when no bars are chosen.
+let rangeSent = null;
+function showRange() {
+  const [low, high] = selectedTimelineBounds();
+  const chosen = ($('from').value || $('to').value) && timelineBars[low] && timelineBars[high];
+  const msg = chosen ? {type: 'range', start: timelineBars[low].start_beat, end: timelineBars[high].end_beat, loop: $('loop').checked}
+    : {type: 'range'};
+  const key = JSON.stringify(msg);
+  if (key === rangeSent) return;
+  rangeSent = key;
+  forward(msg);
+}
+
+function updateTimelineFromBeat(beat) {
+  if (!timelineBars.length || !Number.isFinite(beat)) return;
+  let index = 0;
+  for (let i = 1; i < timelineBars.length && timelineBars[i].start_beat <= beat; i++) index = i;
+  $('timeline').value = index;
+  updateTimeline();
+}
+
+async function seekTimeline(index) {
+  const [low, high] = selectedTimelineBounds();
+  if (high < low) return;
+  const target = Math.max(low, Math.min(high, Number(index)));
+  $('timeline').value = target;
+  updateTimeline();
+  const bar = timelineBars[target];
+  if (!bar) return;
+  try {
+    await cmd('seek', {bar: bar.number});
+  } catch (err) {
+    statusEl.textContent = err.message;
+  }
+}
+
+function restartTimeline() {
+  const [low] = selectedTimelineBounds();
+  seekTimeline(low);
+}
+
+function positionControlPanel(details) {
+  const panel = details.querySelector('.menu-panel');
+  if (!details.open || !panel) return;
+  panel.style.left = '0px';
+  const overflow = panel.getBoundingClientRect().right - (window.innerWidth - 16);
+  if (overflow > 0) panel.style.left = `${-overflow}px`;
+}
+
 async function loadScore(version) {
   scoreReady = false;
   queue = queue.filter(m => m.type !== 'marks' && m.type !== 'heat');
@@ -469,16 +1435,110 @@ async function loadScore(version) {
     const payload = await res.json();
     if (payload.version !== version) return;  // a newer score arrived meanwhile
     readScoreTempo(payload);
+    setTimelineBars(payload.bars || []);
+    coachRoll.score(payload);  // the falling notes are drawn even when the file is too big for a sheet
     loadMix(payload.path);
-    // A live recording or a huge file comes without sheet music, with the reason instead.
+    // A huge file comes without sheet music, with the reason instead.
     sheetShown = !!payload.xml;
     $('sheet-notice').textContent = payload.notice || '';
     $('sheet-notice').hidden = sheetShown;
     frame.hidden = !sheetShown;
-    if (sheetShown) frame.contentWindow.postMessage({type: 'loadScore', xml: payload.xml, staves: payload.staves, hidden: hiddenRoles()}, '*');
+    showSheetWarning(payload);
+    showDetails(sheetShown ? payload.details : null);
+    showPlaylist(payload.playlist);
+    if (sheetShown) frame.contentWindow.postMessage({type: 'loadScore', xml: payload.xml, staves: payload.staves, hidden: hiddenRoles(),
+                                                     dynamics: $('dynamics').checked, details: detailsShown(), aids: aidSettings(), layout: $('layout').value,
+                                                     zoom: $('zoom').value / 100}, '*');
+    rangeSent = null;  // the bars chosen, on this sheet
+    showRange();
   } catch (err) {
     statusEl.textContent = 'Could not load score: ' + err;
   }
+}
+
+// A piece in a playlist folder (lessons/<name>/playlist.json): where it is, and ◀ ▶ to the
+// pieces either side. Only by button: nothing moves on by itself.
+let playlistAt = null;
+function showPlaylist(at) {
+  playlistAt = at || null;
+  $('playlist-nav').hidden = !playlistAt;
+  if (!playlistAt) return;
+  $('pl-where').textContent = `${playlistAt.playlist} · ${playlistAt.track} of ${playlistAt.total}`;
+  syncPlaylistButtons();
+}
+function syncPlaylistButtons() {
+  $('pl-prev').disabled = running || !playlistAt?.previous;
+  $('pl-next').disabled = running || !playlistAt?.next;
+}
+
+// Maestro → This sheet shows only what this sheet offers.
+function syncSheetTools() {
+  $('sheet-tools').hidden = $('sheet-details').hidden && $('cleanup-row').hidden && $('playable-row').hidden;
+}
+
+// A file with no reliable beat still gets its sheet, as a rough draft: say so above it. Auto
+// clean (Maestro → This sheet) redraws it on a beat followed from the playing, and back to the
+// original; the warning has a button that opens it there. A MIDI sheet that asks a hand for
+// more than it can play says so the same way, pointing to Clean.
+function showSheetWarning(payload) {
+  const btn = $('cleanup-btn');
+  const playable = payload.playable;
+  const warning = payload.warning || (playable && playable.warning);
+  $('sheet-warn').hidden = !warning;
+  $('sheet-warn-text').textContent = warning || '';
+  $('cleanup-row').hidden = !payload.cleanup;
+  btn.dataset.on = payload.cleanup === 'on' ? '1' : '';
+  btn.textContent = payload.cleanup === 'on' ? 'Show original' : 'Auto clean';
+  btn.disabled = false;
+  $('cleanup-open').hidden = !payload.warning && !(playable && playable.warning);
+  $('cleanup-open').textContent = (payload.warning ? btn.textContent : 'Clean') + ' in Maestro ▾';
+  showPlayable(playable, payload.path);
+  syncSheetTools();
+}
+
+// Clean (Maestro → This sheet): makes the parts you play fit two hands, and back to the file's
+// own notes. What it changed stays beside the button, and the sheet check after a clean (it
+// comes back with the button's answer, the redrawn score separately, in either order).
+let playablePath = null, playableCheck = null;
+function showPlayable(state, path) {
+  const btn = $('playable-btn');
+  playablePath = path;
+  $('playable-row').hidden = !state;
+  if (!state) return;
+  btn.dataset.on = state.on ? '1' : '';
+  btn.textContent = state.on ? 'Show original' : 'Clean';
+  btn.disabled = false;
+  const check = playableCheck && playableCheck.path === path && playableCheck.on === !!state.on ? playableCheck.text : '';
+  $('playable-note').textContent = [state.on ? state.summary : state.summary || (state.warning ? '' : 'Both hands can play every note.'),
+                                    check].filter(Boolean).join(' ');
+}
+
+// Sheet details (chords, Roman numerals, lyrics, sections): the button adds them, the boxes
+// show and hide each kind. Looking a song up takes a few minutes on the subscription; the
+// sheet is redrawn when it's done.
+const DETAIL_KINDS = ['chords', 'roman', 'lyrics', 'sections'];
+const DETAIL_BUTTON = {none: 'Add chords & lyrics', local: 'Look up the song', researching: 'Looking up…',
+                       done: 'Look again', failed: 'Try again'};
+function detailsShown() {
+  return Object.fromEntries(DETAIL_KINDS.map(k => [k, store.get('details.' + k, '1') === '1']));
+}
+function showDetails(info) {
+  const box = $('sheet-details'), btn = $('details-btn');
+  box.hidden = !info;
+  syncSheetTools();
+  if (!info) return;
+  const shown = detailsShown();
+  box.querySelectorAll('input[data-detail]').forEach(input => {
+    input.checked = shown[input.dataset.detail];
+    input.parentElement.hidden = !(info.has || {})[input.dataset.detail];
+  });
+  btn.textContent = DETAIL_BUTTON[info.state] || DETAIL_BUTTON.none;
+  btn.disabled = info.state === 'researching';
+  btn.dataset.state = info.state;
+  $('details-note').textContent = info.state === 'researching'
+    ? 'Claude is looking this song up (a few minutes). What the file shows is on the sheet already.'
+    : (info.note || '');
+  $('details-note').title = (info.conflicts || []).join('\n') + ((info.sources || []).length ? '\nSources: ' + info.sources.join(', ') : '');
 }
 
 function connect() {
@@ -490,15 +1550,19 @@ function connect() {
     if (msg.type === 'score') {
       titleEl.textContent = msg.title;
       document.title = 'Piano Coach · ' + msg.title;
-      if (msg.version !== scoreVersion) { scoreVersion = msg.version; loadScore(msg.version); loadParts(); loadLessons(); }
+      if (msg.version !== scoreVersion) { scoreVersion = msg.version; loadScore(msg.version); loadParts(); loadLessons(); if (typeof videoScoreChanged === 'function') videoScoreChanged(); }
       return;
     }
     if (msg.type === 'status') { statusEl.textContent = msg.text; return; }  // shown in the header
     if (msg.type === 'practice') { showPractice(msg); return; }
+    if (msg.type === 'cursorBeat') updateTimelineFromBeat(msg.beat);
     if (msg.type === 'atlas') { atlasEvent(msg); return; }
     if (msg.type === 'say') { showNpc(msg.text, msg.speaker); speak(msg.text, msg.interrupt); return; }
     if (msg.type === 'metronome') { metroFollow(msg); return; }
+    if (msg.type === 'sound') { if (typeof fluteExample === 'function') fluteExample(msg); return; }  // a flute's examples
     if (msg.type === 'lesson') return;  // the visualizer's Learn Mode push; this page uses its own menu
+    coachRoll.event(msg);
+    if (msg.type === 'keys') return;  // only the falling notes light the keys
     forward(msg);
   };
   es.addEventListener('open', () => { loadPorts(); loadLessons(); loadParts(); loadVoices(); loadVoiceStatus(); loadStyle(); });
@@ -512,7 +1576,169 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('coach.' + k); return v === null ? d : v; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('coach.' + k, v); } catch (e) {} },
 };
+// The speakers for the page's own sounds (the Kokoro voice, the metronome, lesson tones), chosen
+// in Preferences. Audio contexts are kept so a new choice reaches the ones already open.
+const audioSinks = new Set();
+function routeAudio(target) {
+  if (!target?.setSinkId) return Promise.resolve();
+  if (target instanceof AudioContext) audioSinks.add(target);
+  const id = store.get('speaker', '');
+  if ((target.sinkId || '') === id) return Promise.resolve();
+  return target.setSinkId(id).catch(() => {});  // unplugged: stays on the Windows default
+}
+function setSpeaker(id) {
+  store.set('speaker', id);
+  for (const ctx of audioSinks) {
+    if (ctx.state === 'closed') audioSinks.delete(ctx); else routeAudio(ctx);
+  }
+}
 let running = false, mode = store.get('mode', 'learn');
+$('pl-prev').addEventListener('click', () => playlistAt?.previous && loadPiece(playlistAt.previous));
+$('pl-next').addEventListener('click', () => playlistAt?.next && loadPiece(playlistAt.next));
+
+$('cleanup-btn').addEventListener('click', async () => {
+  const btn = $('cleanup-btn');
+  const label = btn.textContent;
+  const on = !btn.dataset.on;
+  btn.disabled = true;
+  if (on) btn.textContent = 'Cleaning… (up to a minute the first time)';
+  try {
+    await cmd('cleanup', {on});  // the redrawn score arrives over the event stream
+  } catch (err) {
+    statusEl.textContent = err.message;
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+});
+
+$('playable-btn').addEventListener('click', async () => {
+  const btn = $('playable-btn');
+  const label = btn.textContent;
+  const on = !btn.dataset.on;
+  btn.disabled = true;
+  if (on) btn.textContent = 'Cleaning and checking the sheet…';
+  try {
+    const out = await cmd('playable', {on});  // the redrawn score arrives over the event stream
+    playableCheck = out.check ? {path: playablePath, on: out.playable === 'on', text: out.check} : null;
+    showPlayable({on: out.playable === 'on', summary: out.summary || 'Both hands can already play every note.'}, playablePath);
+  } catch (err) {
+    statusEl.textContent = err.message;
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+});
+
+$('sheet-details').addEventListener('change', e => {
+  const kind = e.target.dataset && e.target.dataset.detail;
+  if (!kind) return;
+  store.set('details.' + kind, e.target.checked ? '1' : '');
+  forward({type: 'details', show: {[kind]: e.target.checked}});  // the sheet redraws with them shown or hidden
+});
+$('details-btn').addEventListener('click', async () => {
+  const btn = $('details-btn');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Looking up…';
+  try {
+    await cmd('details', {refresh: ['done', 'failed'].includes(btn.dataset.state)});  // the sheet arrives over the event stream
+  } catch (err) {
+    statusEl.textContent = err.message;
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+});
+
+// The drop-downs beside the mode buttons (Playing, Sheet, Maestro, Bar controls): one open at
+// a time, closed by a click elsewhere (or on the sheet's iframe, which blurs the window) or Escape.
+const controlMenus = [...document.querySelectorAll('#control-tabs > details')];
+controlMenus.forEach(details => {
+  details.addEventListener('toggle', () => {
+    if (!details.open) { if (details.contains($('parts'))) partsMenu(false); return; }  // not still open next time
+    controlMenus.forEach(other => { if (other !== details) other.open = false; });
+    positionControlPanel(details);
+  });
+});
+// A button elsewhere can open one (data-opens="<its id>"), like Auto clean on the sheet warning.
+document.querySelectorAll('[data-opens]').forEach(b => b.addEventListener('click', () => { $(b.dataset.opens).open = true; }));
+// The path as clicked: a Sound button in Parts is redrawn while its click is still on its way up.
+document.addEventListener('click', e => {
+  const opens = e.target.closest && e.target.closest('[data-opens]')?.dataset.opens;
+  controlMenus.forEach(d => { if (d.open && d.id !== opens && !e.composedPath().includes(d)) d.open = false; });
+});
+window.addEventListener('blur', () => controlMenus.forEach(d => { d.open = false; }));
+// Escape closes a pop-up inside a drop-down (Parts) first. Parts' own Escape handler is added
+// later, so it's still open when this one runs.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || $('parts').classList.contains('open')) return;
+  const open = controlMenus.find(d => d.open);
+  if (open) { open.open = false; open.querySelector('summary').focus(); }
+});
+window.addEventListener('resize', () => controlMenus.forEach(positionControlPanel));
+
+// Settings and Actions: what holds or works in every mode. Sound out is a copy of Parts'
+// "Sound goes to", refreshed each time the menu opens.
+$('settings-menu').addEventListener('toggle', e => {
+  if (!e.target.open) return;
+  const copy = $('set-out');
+  copy.innerHTML = outSel.innerHTML;
+  if (!outSel.options.length) copy.add(new Option('none found', ''));
+  copy.disabled = !outSel.options.length;
+  copy.value = outSel.value;
+});
+$('set-out').addEventListener('change', e => { outSel.value = e.target.value; outSel.dispatchEvent(new Event('change')); });
+document.querySelectorAll('[data-prefs]').forEach(b => b.addEventListener('click', () => {
+  $('settings-menu').open = false;
+  openPreferences(b.dataset.prefs || undefined);
+}));
+
+// Keep the screen on: a wake lock, taken again whenever the page comes back into view
+// (the browser drops it when the tab is hidden).
+let wakeLock = null;
+async function holdWake(on) {
+  store.set('wakeLock', on);
+  if (!on) { wakeLock?.release(); wakeLock = null; return; }
+  try { wakeLock = await navigator.wakeLock.request('screen'); }
+  catch (err) { statusEl.textContent = 'Could not keep the screen on: ' + err.message; }
+}
+if ('wakeLock' in navigator) {
+  $('wake-lock').checked = store.get('wakeLock') === 'true';
+  $('wake-lock').addEventListener('change', e => holdWake(e.target.checked));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && $('wake-lock').checked) holdWake(true);
+  });
+  if ($('wake-lock').checked) holdWake(true);
+} else $('wake-wrap').hidden = true;
+
+// Actions run the page's own buttons, so each does exactly what its button does; an item is
+// off while its button is (no bar to bookmark, no Maestro, no sheet to save).
+const ACTS = {
+  'save-as': () => document.querySelector('#file-menu [data-file=save-as]').click(),
+  download: () => document.querySelector('#file-menu [data-file=download]').click(),
+  ask: () => $('ask').focus(),
+  fullscreen: () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(),
+};
+const actItems = [...document.querySelectorAll('#actions-menu .act-item')];
+$('actions-menu').addEventListener('toggle', e => {
+  if (!e.target.open) return;
+  const t = $('title').textContent.trim(), hasScore = !!t && t !== 'no score yet';
+  actItems.forEach(b => {
+    b.disabled = (b.dataset.target && $(b.dataset.target).disabled) || (b.classList.contains('needs-score') && !hasScore);
+  });
+  $('act-fullscreen').textContent = document.fullscreenElement ? 'Leave full screen' : 'Full screen';
+});
+$('actions-menu').addEventListener('click', e => {
+  const item = e.target.closest('.act-item');
+  if (!item || item.disabled) return;
+  $('actions-menu').open = false;
+  (ACTS[item.dataset.act] || (() => $(item.dataset.target).click()))();
+});
+$('actions-menu').addEventListener('keydown', e => {
+  if (!['ArrowDown', 'ArrowUp'].includes(e.key)) return;
+  const all = actItems.filter(b => !b.disabled && b.offsetParent), i = all.indexOf(document.activeElement);
+  if (!all.length) return;
+  e.preventDefault();
+  all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length].focus();
+});
 
 async function cmd(name, body) {
   const res = await fetch('cmd/' + name, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
@@ -521,25 +1747,26 @@ async function cmd(name, body) {
   return out;
 }
 
-// What each mode does, next to the buttons: the names alone don't say.
+// What each mode does, on hovering its button (and Start): the names alone don't say.
 const MODE_HINTS = {
   listen: 'Your keyboard plays it and the cursor follows. Just listen and watch.',
   learn: 'Play it yourself: the cursor waits on each chord until you get the notes.',
   rehearse: 'Play it in time: the cursor keeps going and grades notes as they pass.',
   record: 'Play anything over the metronome (after a count-in); it’s written out as sheet music.',
 };
+document.querySelectorAll('#mode button').forEach(b => { b.title = MODE_HINTS[b.dataset.mode]; });
 
 function setMode(m) {
   if (!MODE_HINTS[m]) m = 'learn';
   mode = m;
   document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
   $('tempo-wrap').style.display = m === 'record' ? 'none' : '';  // Learn flows at it too
-  $('mode-hint').textContent = MODE_HINTS[m];
+  go.title = MODE_HINTS[m];
   menu.classList.toggle('record', m === 'record');
   menu.classList.toggle('listen', m === 'listen');
   drawMixer();
   if (!running) showGo();
-  store.set('mode', m);
+  if (m !== 'record') store.set('mode', m);  // Record is its own mode from Home; a Session opens on the last of these
 }
 
 function showGo() {
@@ -567,7 +1794,8 @@ async function loadPorts() {
 // search). Lessons: teaching material (exercises), with how your practice of each went.
 
 const lib = {tab: store.get('tab', 'songs') === 'lessons' ? 'lessons' : 'songs', items: [], categories: [], current: '',
-             songs: [], matches: 0, total: 0, query: '', timer: null};
+             songs: [], matches: 0, total: 0, query: '', timer: null,
+             online: false, web: {query: null, songs: [], busy: false, error: ''}};
 
 async function loadLessons() {
   try {
@@ -587,10 +1815,68 @@ async function searchSongs() {
   } catch (err) { statusEl.textContent = 'Could not search the library: ' + err.message; }
 }
 
+// bitmidi.com, only when asked (a button under the library's results); Preferences → Song folders turns it off.
+async function loadSources() {
+  try { lib.online = (await cmd('song_sources')).online; renderLibrary(); } catch (err) {}
+}
+
+async function searchOnline() {
+  const query = lib.query;
+  lib.web = {query, songs: [], busy: true, error: ''};
+  renderLibrary();
+  try {
+    const out = await cmd('songs_online', {query});
+    if (lib.web.query === query) lib.web.songs = out.songs;
+  } catch (err) {
+    if (lib.web.query === query) lib.web.error = err.message;
+  }
+  if (lib.web.query !== query) return;
+  lib.web.busy = false;
+  renderLibrary();
+}
+
+async function fetchOnline(song) {
+  statusEl.textContent = `Downloading “${song.title}” from bitmidi.com…`;
+  try {
+    libraryFull(false);
+    const out = await cmd('fetch_online', {id: song.id});
+    song.path = out.path;
+    statusEl.textContent = `Saved “${song.title}” in your library.`;
+    if (matchMedia('(max-width: 760px)').matches) showLibrary(false);
+    searchSongs();
+  } catch (err) { statusEl.textContent = err.message; }
+}
+
+function renderOnline(list) {
+  const web = lib.web;
+  if (web.query !== lib.query) {
+    const b = document.createElement('button');
+    b.className = 'lib-online';
+    b.textContent = `Search bitmidi.com for “${lib.query}”`;
+    b.title = 'Look for MIDI files of this song online. Nothing is downloaded until you pick one.';
+    b.addEventListener('click', searchOnline);
+    list.appendChild(b);
+    return;
+  }
+  libText(list, 'lib-group', 'On bitmidi.com');
+  if (web.busy) return libText(list, 'lib-note', 'Searching…');
+  if (web.error) return libText(list, 'lib-note', web.error);
+  if (!web.songs.length) return libText(list, 'lib-note', 'Nothing there either. Try fewer or different words.');
+  for (const song of web.songs) {
+    const b = document.createElement('button');
+    b.className = 'lib-item' + (song.path && song.path === lib.current ? ' current' : '');
+    const sub = song.path ? 'In your library' : `${song.views.toLocaleString()} views · click to download`;
+    b.innerHTML = `${esc(song.title)}<span class="meta">${sub}</span>`;
+    b.title = 'A file someone uploaded to bitmidi.com: its name is only what they called it.';
+    b.addEventListener('click', () => song.path ? loadPiece(song.path) : fetchOnline(song));
+    list.appendChild(b);
+  }
+}
+
 function setTab(tab) {
   lib.tab = tab;
   store.set('tab', tab);
-  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab));
+  document.querySelectorAll('.tabs button[data-tab]').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab));
   $('lib-search').placeholder = tab === 'songs' ? 'Search songs…' : 'Search lessons…';
   renderLibrary();
 }
@@ -605,7 +1891,7 @@ function ago(when) {
 }
 
 function historyLine(h) {
-  if (!h) return 'Not practised yet';
+  if (!h) return 'Not practiced yet';
   const bits = [`${h.runs} run${h.runs === 1 ? '' : 's'}`];
   if (h.best !== null) bits.push(`best <b>${h.best}%</b>`);
   if (h.last) bits.push(ago(h.last));
@@ -637,9 +1923,9 @@ function renderLibrary() {
   if (kind === 'lesson') {  // the Atlas first; saved exercise files below it
     const open = document.createElement('button');
     open.id = 'lib-atlas';
-    open.textContent = '◈ Open the Atlas';
+    open.textContent = '◈ Open the Roadmap';
     open.title = 'The skill tree: every grade, strand and stage, with your progress';
-    open.addEventListener('click', () => atlasShow(true));
+    open.addEventListener('click', () => window.dispatchEvent(new CustomEvent('coach:navigate', {detail: {view: 'progress'}})));
     list.appendChild(open);
     if (mine.length) libText(list, 'lib-group', 'Other lessons');
   }
@@ -648,7 +1934,7 @@ function renderLibrary() {
   for (const category of lib.categories) {
     const items = mine.filter(l => l.category === category);
     if (!items.length) continue;
-    libText(list, 'lib-group', category);
+    libText(list, 'lib-group', items[0].track ? `${category} · playlist` : category);
     for (const l of items) {
       const tag = l.source && l.source.includes('from MIDI') ? 'from MIDI · ' : '';
       list.appendChild(libItem(l, tag + historyLine(l.history)));
@@ -658,41 +1944,60 @@ function renderLibrary() {
     if (!mine.length) libText(list, 'lib-note', words.length ? 'No lesson matches.' : 'No lessons yet. Ask Claude or the Maestro for an exercise.');
     return;
   }
-  libText(list, 'lib-group', words.length ? 'Library' : 'Library · recently practised');
+  libText(list, 'lib-group', words.length ? 'Library' : 'Library · recently practiced');
   for (const song of lib.songs) list.appendChild(libItem(song, `${esc(song.folder)} · ${historyLine(song.history)}`));
   if (!words.length) libText(list, 'lib-note', `Type to search all ${lib.total.toLocaleString()} songs in your library.`);
   else if (!lib.matches) libText(list, 'lib-note', 'No song in the library matches.');
   else if (lib.matches > lib.songs.length) libText(list, 'lib-note', `Showing ${lib.songs.length} of ${lib.matches}. Type more to narrow it down.`);
+  if (words.length && lib.online) renderOnline(list);
 }
 
 async function loadPiece(path) {
   try {
+    // A full-screen search shrinks to its panel first, so the new sheet draws on a visible stage.
+    libraryFull(false);
     await cmd('load', {lesson: path});
     $('from').value = ''; $('to').value = '';
+    // The search stays open beside the new sheet; on a narrow screen it covers the sheet, so it closes.
     if (matchMedia('(max-width: 760px)').matches) showLibrary(false);
   } catch (err) { statusEl.textContent = err.message; }
 }
 
 function showLibrary(open) {
   document.body.classList.toggle('lib-closed', !open);
-  $('lib-toggle').setAttribute('aria-expanded', open);
+  if (!open) libraryFull(false);
   store.set('library', open ? '' : 'closed');
+  window.dispatchEvent(new CustomEvent('coach:viewchange'));
 }
 
-document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+// Full screen when you come to choose a new piece (Explore from Home); a panel beside the sheet otherwise.
+function libraryFull(on) {
+  document.body.classList.toggle('lib-full', on);
+  const b = $('lib-size');
+  b.textContent = on ? '⇤' : '⤢';
+  b.title = on ? 'Shrink the search to a panel beside the sheet' : 'Make the search full screen';
+  b.setAttribute('aria-label', on ? 'Shrink search to a side panel' : 'Make search full screen');
+  window.dispatchEvent(new CustomEvent('coach:viewchange'));  // the bar says Explore or Session
+}
+
+$('lib-close').addEventListener('click', () => showLibrary(false));
+$('lib-size').addEventListener('click', () => libraryFull(!document.body.classList.contains('lib-full')));
+
+document.querySelectorAll('.tabs button[data-tab]').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
 $('lib-search').addEventListener('input', e => {
   lib.query = e.target.value.trim();
   renderLibrary();
   clearTimeout(lib.timer);
   lib.timer = setTimeout(searchSongs, 200);
 });
-$('lib-toggle').addEventListener('click', () => showLibrary(document.body.classList.contains('lib-closed')));
 
 // -- parts: what you play, what's shown, what sounds ------------------------------
 // Per piece (remembered in this browser): You play (graded; Learn waits for it), Show (drawn
-// on the sheet) and Sound (a part you don't play but can see, sent to the MIDI output along
-// with you; muted until you turn it on). What each part of the file is (a hand, both hands,
-// pedals, vocals) is saved on the server, like the part choice Claude makes.
+// on the sheet) and Sound, with a volume each, shown or not. When you play, Sound is a part
+// you don't play sent to the MIDI output along with you (muted until you turn it on); Listen
+// has its own Sound, on for every part but the vocals. Moving them mid-run is heard straight
+// away. What each part of the file is (a hand, both hands, pedals, vocals) is saved on the
+// server, like the part choice Claude makes.
 
 const ROLES = ['right', 'left', 'pedals', 'vocals'];
 const ROLE_LABELS = {right: 'Right hand', left: 'Left hand', pedals: 'Pedals (feet)', vocals: 'Vocals'};
@@ -706,15 +2011,33 @@ function loadMix(path) {
   mixPath = path || null;
   let saved = {};
   try { saved = JSON.parse(store.get('mix.' + path, '{}')) || {}; } catch (e) {}
-  mix = {play: {right: true, left: true, pedals: false, ...saved.play}, show: {...saved.show}, sound: {...saved.sound}};
+  mix = {play: {right: true, left: true, pedals: false, ...saved.play}, show: {...saved.show}, sound: {...saved.sound},
+         hear: {...saved.hear}, vol: {...saved.vol}};
   drawMixer();
+  updateTimeline();  // this piece's bookmarks
 }
 
 function saveMix() { if (mixPath) store.set('mix.' + mixPath, JSON.stringify(mix)); }
 const played = r => r !== 'vocals' && !!mix.play[r];
 const shown = r => mix.show[r] !== false;
-const sounding = r => !played(r) && shown(r) && mix.sound[r] === true;
+const sounding = r => !played(r) && mix.sound[r] === true;
+const hearing = r => mix.hear[r] ?? r !== 'vocals';  // Listen
+const volume = r => Number.isFinite(mix.vol[r]) ? mix.vol[r] : 100;
 const hiddenRoles = () => ROLES.filter(r => !shown(r));
+
+// {role: 0..1} for the server: 0 for a part that's muted in this mode.
+function gains() {
+  const on = mode === 'listen' ? hearing : sounding;
+  return Object.fromEntries(parts.roles.map(r => [r, on(r) ? volume(r) / 100 : 0]));
+}
+
+// A fader moved or a part muted while a run is going: the run hears it from the next note.
+let mixTimer = null;
+function sendMix() {
+  if (!running) return;
+  clearTimeout(mixTimer);
+  mixTimer = setTimeout(() => cmd('mix', {gains: gains()}).catch(() => {}), 60);
+}
 
 // The hand the server grades: 'both' / 'right' / 'left', plus '+pedals' when you play the pedals.
 function handValue() {
@@ -737,29 +2060,33 @@ function drawMixer() {
   if (!mix) return;
   const rows = $('mix-rows');
   rows.innerHTML = '';
+  const listen = mode === 'listen';
   for (const r of parts.roles) {
     const name = ROLE_LABELS[r], lower = name.toLowerCase();
-    const mutable = !played(r) && shown(r), on = sounding(r);
+    const mutable = listen || !played(r), on = listen ? hearing(r) : sounding(r), vol = volume(r);
     const play = r === 'vocals' ? '<span class="na" title="Vocals are shown and heard, never graded">–</span>'
-      : `<input type="checkbox" data-k="play" data-r="${r}" ${played(r) ? 'checked' : ''} aria-label="You play the ${lower}">`;
-    const tip = !mutable ? (played(r) ? 'You play this part' : 'Show it to be able to hear it')
+      : `<input type="checkbox" data-k="play" data-r="${r}" ${played(r) ? 'checked' : ''} ${running ? 'disabled title="Stop to change what you play"' : ''} aria-label="You play the ${lower}">`;
+    const tip = !mutable ? 'You play this part'
+      : listen ? (on ? 'Listen plays it: click to mute' : 'Muted: click to hear it')
       : on ? 'Plays along on the MIDI output: click to mute' : 'Muted: click to have the keyboard play it along with you';
     const tr = document.createElement('tr');
-    tr.innerHTML = `<th scope="row">${name}</th><td>${play}</td>` +
+    tr.innerHTML = `<th scope="row">${name}</th><td class="c-play">${play}</td>` +
       `<td><input type="checkbox" data-k="show" data-r="${r}" ${shown(r) ? 'checked' : ''} aria-label="Show the ${lower}"></td>` +
-      `<td><button class="snd" data-r="${r}" aria-pressed="${on}" ${mutable ? '' : 'disabled'} aria-label="Sound the ${lower}" title="${tip}">${on ? '🔊' : '🔇'}</button></td>`;
+      `<td class="c-snd"><span class="snd-cell"><button class="snd" data-r="${r}" aria-pressed="${on}" ${mutable ? '' : 'disabled'} aria-label="Sound the ${lower}" title="${tip}">${on ? '🔊' : '🔇'}</button>` +
+      `<input type="range" class="vol" data-r="${r}" min="0" max="100" step="5" value="${vol}" ${mutable && on ? '' : 'disabled'} aria-label="${name} volume" title="${name} volume">` +
+      `<span class="vol-val">${mutable && on ? vol + '%' : ''}</span></span></td>`;
     rows.appendChild(tr);
   }
-  const listen = mode === 'listen';
   const mine = listen ? listenRoles() : ['right', 'left', 'pedals'].filter(r => played(r) && parts.roles.includes(r));
   const label = mine.join(' + ') === 'right + left' ? 'both hands'
     : mine.length === 1 && ['right', 'left'].includes(mine[0]) ? mine[0] + ' hand' : mine.join(' + ').replace('right + left', 'both hands');
   $('parts-btn').textContent = listen ? `Hear: ${label || 'nothing'} ▾`
     : `Play: ${label || 'both hands'}${parts.roles.some(sounding) ? ' · 🔊' : ''} ▾`;
+  coachRoll.parts(hiddenRoles(), listen ? ROLES : ROLES.filter(played));  // parts you don't play fall faint
 }
 
-// Listen sounds every part that's shown; vocals only with their Sound on, as when you play.
-const listenRoles = () => parts.roles.filter(r => r === 'vocals' ? sounding(r) : shown(r));
+// The parts Listen plays, shown or not.
+const listenRoles = () => parts.roles.filter(hearing);
 
 function drawRoles() {
   const box = $('part-roles');
@@ -808,9 +2135,19 @@ $('mix-rows').addEventListener('change', e => {
 $('mix-rows').addEventListener('click', e => {
   const b = e.target.closest('.snd');
   if (!b || b.disabled) return;
-  mix.sound[b.dataset.r] = !sounding(b.dataset.r);
+  const r = b.dataset.r;
+  if (mode === 'listen') mix.hear[r] = !hearing(r);
+  else mix.sound[r] = !sounding(r);
   saveMix();
   drawMixer();
+  sendMix();
+});
+$('mix-rows').addEventListener('input', e => {
+  if (!e.target.classList.contains('vol')) return;
+  mix.vol[e.target.dataset.r] = Number(e.target.value);
+  e.target.nextElementSibling.textContent = e.target.value + '%';  // not redrawn: that would end the drag
+  saveMix();
+  sendMix();
 });
 outSel.addEventListener('change', () => store.set('output', outSel.value));
 $('parts-save').addEventListener('click', async () => {
@@ -848,20 +2185,36 @@ function showRunSettings(s) {
   $('tempo-val').textContent = $('tempo').value + '%';
   $('loop').checked = !!s.loop;
   $('autopilot').checked = !!s.autopilot;
+  updateTimeline();
   store.set('tempo', $('tempo').value);
   store.set('loop', s.loop ? '1' : ''); store.set('autopilot', s.autopilot ? '1' : '');
 }
 
 async function loadStyle() {
-  try { $('style').value = (await cmd('maestro')).style; } catch (err) {}
+  try {
+    const m = await cmd('maestro');
+    $('style').value = m.style;
+    showTalk(m.talk);
+  } catch (err) {}
+}
+
+function showTalk(t) {  // when the Maestro speaks in a run
+  if (!t) return;
+  $('talk-greet').checked = t.greet;
+  $('talk-passes').value = t.passes;
+  $('talk-signoff').checked = t.sign_off;
 }
 
 function showPractice(p) {
   if (p.style) $('style').value = p.style;  // also changed by voice ("be gentler")
+  showTalk(p.talk);  // and "don't greet me"
   if (running && !p.running) loadLessons();  // the run's result shows in the history
   running = !!p.running;
   menu.classList.toggle('running', running);
   document.body.classList.toggle('running', running);
+  drawMixer();  // what you play is fixed for the run; what sounds isn't
+  syncPlaylistButtons();
+  if (typeof stepRunning === 'function') stepRunning();  // a lesson step's Start is Stop while it runs
   const s = p.settings || {};
   if (['wait', 'rehearsal', 'listen'].includes(s.mode)) showRunSettings(s);
   // A recording's grid is fixed when it starts, so its tempo can't change mid-take.
@@ -870,6 +2223,7 @@ function showPractice(p) {
   const where = p.port ? ` · ${s.mode === 'listen' ? 'playing on' : 'listening on'} <b>${esc(p.port)}</b>` : '';
   const pass = running && s.loop ? ` · pass ${p.pass}` : '';
   $('last').innerHTML = (p.last ? esc(p.last) : '') + (running ? (p.last ? ' · ' : '') + 'running' + pass + where : '');
+  if (typeof flutePractice === 'function') flutePractice(p);  // a run on the microphone: hear the flute
 }
 
 // -- voice -------------------------------------------------------------------
@@ -908,8 +2262,8 @@ function fillVoices() {
   voiceSel.value = values.includes(saved) ? saved : kokoroVoices.length ? 'kokoro:' + kokoroVoices[0].id : 'web:' + english.name;
 }
 
-function speak(text, interrupt) {
-  if (!voiceBox.checked || !text) return;
+function speak(text, interrupt, force) {  // force: asked for (a 🔊 button), even with the voice switched off
+  if ((!voiceBox.checked && !force) || !text) return;
   // Browsers only let a page play sound once it has been clicked.
   if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
     statusEl.textContent = 'Click anywhere on this page to let the coach speak.';
@@ -934,6 +2288,7 @@ async function playNext() {
     const audio = item.audio = new Audio(URL.createObjectURL(blob));
     audio.volume = voiceVol.value / 100;
     audio.onended = audio.onerror = () => { URL.revokeObjectURL(audio.src); if (speaking === item) playNext(); };
+    await routeAudio(audio);
     await audio.play();
   } catch (err) {
     if (speaking !== item) return;
@@ -1066,12 +2421,26 @@ async function loadVoiceStatus() {
     voiceReady = s.available;
     voiceCap = s.cap;
     talkBtn.disabled = $('ask').disabled = !s.available;
+    $('home-ask').disabled = !s.available;
+    $('home-ask').title = s.available ? 'Ask the Maestro for help' : 'Maestro chat needs an Anthropic API key';
+    $('home-ask-label').textContent = s.available ? 'Ask Maestro' : 'Chat unavailable';
+    $('home-coach-copy').textContent = s.available
+      ? 'Not sure where to start? Ask for a piece, a practice plan, or help with a tricky passage.'
+      : 'Practice coaching still works. Text and voice conversations need an Anthropic API key.';
+    $('ask').placeholder = s.available
+      ? 'Ask Maestro about a note, a bar, a technique, or what to practice next…'
+      : 'Practice feedback works; chatting with the Maestro needs an Anthropic API key';
     talkBtn.title = s.available ? 'Tap to talk, tap again to send (or hold it, or hold Space)' : s.reason;
     if (s.available) loadMics().catch(() => {});
     showSpend(s.spent_today);
   } catch (err) {
     voiceReady = false;
     talkBtn.disabled = $('ask').disabled = true;
+    $('home-ask').disabled = true;
+    $('home-ask').title = 'Maestro chat is unavailable';
+    $('home-ask-label').textContent = 'Chat unavailable';
+    $('home-coach-copy').textContent = 'Practice coaching still works. Maestro chat is unavailable right now.';
+    $('ask').placeholder = 'Practice feedback works; Maestro chat is unavailable right now';
   }
 }
 
@@ -1124,6 +2493,7 @@ async function startTalking() {
     $('heard').textContent = 'Microphone ready. Tap Talk (or hold Space) and speak.';
     return;
   }
+  fetch('cmd/talk', {method: 'POST'}).catch(() => {});  // where the cursor is: the "here" in what they say
   startMeter(micStream);
   micChunks = [];
   micRecorder = new MediaRecorder(micStream);
@@ -1163,7 +2533,8 @@ async function sendTalk() {
 }
 
 // Space talks unless you're typing text (a focused dropdown or checkbox doesn't count).
-const typing = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|number|search)$/.test(el.type));
+const typing = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|number|search)$/.test(el.type))
+  || !!el.closest?.('dialog[open]');  // Space presses the dialog's buttons (Preferences, Save as…)
 // Tap = start, tap again = send (touchscreens); press and hold = talk until you let go.
 talkBtn.addEventListener('pointerdown', e => {
   e.preventDefault();
@@ -1306,6 +2677,7 @@ function metroCtx() {
   if (!metro.ctx) {
     metro.ctx = new AudioContext({latencyHint: 'interactive'});
     metro.noise = noiseBuffer(metro.ctx);
+    routeAudio(metro.ctx);
   }
   metro.ctx.resume();
   return metro.ctx;
@@ -1522,10 +2894,81 @@ portSel.addEventListener('change', () => store.set('port', portSel.value));
 $('style').addEventListener('change', async e => {
   try { await cmd('maestro', {style: e.target.value}); } catch (err) { statusEl.textContent = err.message; loadStyle(); }
 });
-$('loop').addEventListener('change', e => store.set('loop', e.target.checked ? '1' : ''));
+for (const [id, key] of [['talk-greet', 'greet'], ['talk-passes', 'passes'], ['talk-signoff', 'sign_off']]) {
+  $(id).addEventListener('change', async e => {
+    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    try { await cmd('maestro', {talk: {[key]: value}}); } catch (err) { statusEl.textContent = err.message; loadStyle(); }
+  });
+}
+$('loop').addEventListener('change', e => { store.set('loop', e.target.checked ? '1' : ''); updateTimeline(); });
+$('dynamics').checked = !!store.get('dynamics', '');
+$('dynamics').addEventListener('change', e => {
+  store.set('dynamics', e.target.checked ? '1' : '');
+  forward({type: 'dynamics', show: e.target.checked});  // the sheet redraws with them shown or hidden
+});
+// Sheet ▸ Labels, like a game's difficulty: Easy labels every bar, Coached only the bars the
+// Maestro sees you slip on (aids.py, until you play them clean), Hard none.
+function aidSettings() {
+  const level = store.get('aids', 'coach');
+  return {level: ['all', 'coach', 'off'].includes(level) ? level : 'coach',
+          names: store.get('aids.names', '1') === '1', counts: store.get('aids.counts', '1') === '1'};
+}
+function syncAids() {
+  const s = aidSettings();
+  document.querySelectorAll('#aid-level button').forEach(b => b.classList.toggle('on', b.dataset.aid === s.level));
+  $('aid-names').checked = s.names;
+  $('aid-counts').checked = s.counts;
+  forward({type: 'aidSettings', ...s});  // the sheet shows or hides them in place
+}
+document.querySelectorAll('#aid-level button').forEach(b => b.addEventListener('click', () => { store.set('aids', b.dataset.aid); syncAids(); }));
+$('aid-names').addEventListener('change', e => { store.set('aids.names', e.target.checked ? '1' : ''); syncAids(); });
+$('aid-counts').addEventListener('change', e => { store.set('aids.counts', e.target.checked ? '1' : ''); syncAids(); });
+syncAids();
+$('layout').value = store.get('layout', 'line') === 'rows' ? 'rows' : 'line';
+$('layout').addEventListener('change', e => {
+  store.set('layout', e.target.value);
+  forward({type: 'layout', mode: e.target.value});  // the sheet redraws in the new layout
+});
+$('zoom').value = store.get('zoom', '100');
+$('zoom-val').textContent = $('zoom').value + '%';
+$('zoom').addEventListener('input', e => {
+  $('zoom-val').textContent = e.target.value + '%';
+  store.set('zoom', e.target.value);
+  forward({type: 'zoom', zoom: e.target.value / 100});
+});
+// View: the sheet, the falling notes, or both (remembered in this browser)
+function setView(v) {
+  v = ['sheet', 'notes', 'both'].includes(v) ? v : 'sheet';
+  document.body.dataset.show = v;
+  store.set('show', v);
+  document.querySelectorAll('#view button').forEach(b => b.classList.toggle('on', b.dataset.show === v));
+  coachRoll.show(v !== 'sheet');
+}
+document.querySelectorAll('#view button').forEach(b => b.addEventListener('click', () => setView(b.dataset.show)));
+setView(store.get('show', 'sheet'));
+$('timeline').addEventListener('input', updateTimeline);
+$('timeline').addEventListener('change', e => seekTimeline(e.target.value));
+$('timeline-back').addEventListener('click', () => seekTimeline(Number($('timeline').value) - 1));
+$('timeline-forward').addEventListener('click', () => seekTimeline(Number($('timeline').value) + 1));
+$('timeline-restart').addEventListener('click', restartTimeline);
+$('bm-add').addEventListener('click', () => {
+  const here = timelineBars[Number($('timeline').value)];
+  if (!here) return;
+  const list = bookmarks();
+  setBookmarks(list.includes(here.number) ? list.filter(n => n !== here.number) : [...list, here.number]);
+});
+$('bookmarks').addEventListener('click', e => {
+  const remove = e.target.closest('[data-remove]');
+  if (remove) { setBookmarks(bookmarks().filter(n => n !== Number(remove.dataset.remove))); return; }
+  const b = e.target.closest('[data-bar]');
+  if (b) jumpToBar(Number(b.dataset.bar));
+});
+[$('from'), $('to')].forEach(el => el.addEventListener('change', () => {
+  updateTimeline();
+}));
 $('autopilot').addEventListener('change', e => {
   store.set('autopilot', e.target.checked ? '1' : '');
-  if (e.target.checked) $('loop').checked = true, store.set('loop', '1');  // it acts between loop passes
+  if (e.target.checked) $('loop').checked = true, store.set('loop', '1'), showRange();  // it acts between loop passes
 });
 portSel.addEventListener('focus', loadPorts);
 
@@ -1542,12 +2985,16 @@ go.addEventListener('click', async () => {
     const from = $('from').value, to = $('to').value;
     const bars = from || to ? `${from || 1}-${to || from || 9999}` : '';
     if (mode === 'listen') {
-      await cmd('start', {mode, roles: listenRoles(), bars, tempo: +$('tempo').value, loop: $('loop').checked, output: outSel.value});
+      // Every part, muted ones at 0, so a part turned on mid-run is heard.
+      if (!listenRoles().length) throw new Error('Every part is muted: turn one on under Playing → Hear.');
+      await cmd('start', {mode, roles: parts.roles, gains: gains(), bars, tempo: +$('tempo').value, loop: $('loop').checked,
+                          output: outSel.value, start_bar: timelineBars[Number($('timeline').value)]?.number});
       return;
     }
     await cmd('start', {mode, hand: handValue(), bars, tempo: +$('tempo').value, loop: $('loop').checked,
                         autopilot: $('autopilot').checked, port: portSel.value,
-                        backing: parts.roles.filter(sounding), output: outSel.value,
+                        backing: parts.roles.filter(sounding), gains: gains(), output: outSel.value,
+                        start_bar: timelineBars[Number($('timeline').value)]?.number,
                         count_in: mode === 'rehearse' && $('m-follow').checked && !$('m-follow').disabled});
   } catch (err) {
     statusEl.textContent = err.message;
@@ -1561,6 +3008,7 @@ loadMix(null);
 setTab(lib.tab);
 showLibrary(store.get('library', '') !== 'closed' && !matchMedia('(max-width: 760px)').matches);
 searchSongs();
+loadSources();
 $('tempo').value = store.get('tempo', '100');
 $('tempo-val').textContent = $('tempo').value + '%';
 $('loop').checked = !!store.get('loop', '');
@@ -1568,6 +3016,10 @@ $('autopilot').checked = !!store.get('autopilot', '');
 connect();
 </script>
 <script src="atlas.js"></script>
+<script src="today.js"></script>
+<script src="flute.js"></script>
+<script src="video.js"></script>
+<script src="youtube.js"></script>
 <div id="mainmenu" role="dialog" aria-modal="true" aria-label="Choose a profile">
   <div class="mm-box">
     <h1>Piano <b>Coach</b></h1>
@@ -1575,6 +3027,11 @@ connect();
     <div id="mm-list"></div>
     <form id="mm-new">
       <input id="mm-name" type="text" maxlength="30" placeholder="New profile name" aria-label="New profile name" autocomplete="off">
+      <select id="mm-instrument" aria-label="Instrument" title="The first instrument to learn (add another later on Home). Piano: the keyboard over MIDI. Flute: the microphone. Each has its own Roadmap.">
+        <option value="piano">Piano</option><option value="flute">Flute</option>
+      </select>
+      <label class="mm-young" title="For a child from about four: the Maestro uses simple words, lesson steps are read aloud in big print, and the Roadmap starts at First steps">
+        <input id="mm-young" type="checkbox"> Young learner</label>
       <button class="mm-btn primary" type="submit">Add profile</button>
     </form>
     <div>
@@ -1584,6 +3041,146 @@ connect();
     <p id="mm-msg" role="alert"></p>
   </div>
 </div>
+<dialog id="save-as-dlg" class="file-dlg" aria-labelledby="save-as-title">
+  <form method="dialog">
+    <h2 id="save-as-title">Save a copy</h2>
+    <label>Name <input id="save-as-name" type="text" maxlength="120" required autocomplete="off"></label>
+    <label>Category <select id="save-as-cat"></select></label>
+    <label id="save-as-new-wrap" hidden>New category name <input id="save-as-new" type="text" maxlength="60" autocomplete="off"></label>
+    <p class="dlg-hint">The copy keeps this sheet's parts. Its practice history starts fresh.</p>
+    <p class="dlg-msg" id="save-as-msg" role="alert"></p>
+    <div class="dlg-row"><button value="cancel" formnovalidate>Cancel</button><button value="save" id="save-as-go">Save</button></div>
+  </form>
+</dialog>
+<dialog id="folders-dlg" class="file-dlg" aria-labelledby="folders-title">
+  <form method="dialog">
+    <h2 id="folders-title">Song folders</h2>
+    <p class="dlg-hint">The Songs search looks for MIDI and MusicXML files in these folders, and in every folder inside them.</p>
+    <ul id="folders-list"></ul>
+    <div class="folders-add">
+      <input id="folders-path" type="text" placeholder="Paste a folder, e.g. D:/Music/MIDI" aria-label="Folder to add" autocomplete="off">
+      <button type="button" id="folders-browse">Browse…</button>
+      <button type="button" id="folders-add">Add</button>
+    </div>
+    <p class="dlg-hint" id="folders-always"></p>
+    <label class="check"><input type="checkbox" id="folders-online"><span>Also offer to search bitmidi.com when a song isn't in these folders<span class="dlg-hint" id="folders-downloads"></span></span></label>
+    <p class="dlg-msg" id="folders-msg" role="alert"></p>
+    <div class="dlg-row"><button value="close">Done</button></div>
+  </form>
+</dialog>
+<dialog id="prefs-dlg" class="file-dlg" aria-labelledby="prefs-title">
+  <form method="dialog">
+    <nav id="prefs-nav" role="tablist" aria-orientation="vertical" aria-labelledby="prefs-title">
+      <h2 id="prefs-title">Preferences</h2>
+      <button type="button" role="tab" data-pane="connections">Connections</button>
+      <button type="button" role="tab" data-pane="audio">Microphone &amp; speakers</button>
+      <button type="button" role="tab" data-pane="audiomidi">Audio to MIDI</button>
+      <button type="button" role="tab" data-pane="maestro">Maestro</button>
+      <button type="button" role="tab" data-pane="sheet">Sheet</button>
+      <button type="button" role="tab" data-pane="library">Song folders</button>
+      <button type="button" role="tab" data-pane="keys">Shortcuts</button>
+    </nav>
+    <div id="prefs-body">
+      <section data-pane="connections" role="tabpanel" hidden>
+        <h3>Connections</h3>
+        <div id="conn-server"><i aria-hidden="true"></i><span id="conn-server-text"></span></div>
+        <label>MIDI input (your keyboard) <select id="conn-port"></select></label>
+        <label>Sound out (parts you don't play, and Listen) <select id="conn-out"></select></label>
+        <p class="dlg-hint">Keyboard missing? Plug it in and press Refresh. Only one program can use it at a time, so close other piano apps first.</p>
+        <button type="button" class="pref-btn" id="conn-refresh">Refresh</button>
+      </section>
+      <section data-pane="audio" role="tabpanel" hidden>
+        <h3>Microphone &amp; speakers</h3>
+        <label>Microphone (talking to the Maestro, singing and spoken answers in lessons, the flute)
+          <select id="pref-mic"></select></label>
+        <span id="pref-level" title="How loud the microphone hears you" aria-hidden="true"><i></i></span>
+        <p class="dlg-hint" id="pref-mic-note"></p>
+        <button type="button" class="pref-btn" id="pref-mic-allow" hidden>Allow the microphone</button>
+        <p class="dlg-hint">Plug in a USB microphone or headset at any time: it's added to the list straight away. Speak and watch the bar move to check it hears you.</p>
+        <p class="dlg-msg" id="pref-mic-msg" role="alert"></p>
+        <label>Speakers (the Maestro's natural voice, the metronome, lesson tones)
+          <span class="pref-pair"><select id="pref-speaker"></select><button type="button" class="pref-btn" id="pref-speaker-test">Test</button></span></label>
+        <p class="dlg-hint">Windows voices always use the Windows default speakers. The keyboard's own sound comes from Sound out, under Connections.</p>
+      </section>
+      <section data-pane="audiomidi" role="tabpanel" hidden>
+        <h3>Audio to MIDI</h3>
+        <p class="dlg-hint">How the microphone turns the flute into notes. Play while you change these: the graph shows what the microphone hears (gray: level, dashed: the gate, dots: the pitch, green: the note it's holding), the list what it sends. Notes reach the coach only during a run; here they're a test.</p>
+        <canvas id="am-graph" aria-label="Microphone level and pitch over the last four seconds"></canvas>
+        <p id="am-now" aria-live="off"></p>
+        <h4>Input</h4>
+        <label>Buffer size (longer hears lower and steadier, shorter reacts faster)
+          <span class="pref-pair"><select id="am-size"></select><span class="pref-val" id="am-size-val"></span></span></label>
+        <label>Look again
+          <span class="pref-pair"><select id="am-hop">
+            <option value="1">Every buffer</option><option value="2">Every half buffer</option><option value="4">Every quarter buffer</option>
+          </select><span class="pref-val" id="am-hop-val"></span></span></label>
+        <label>Noise gate (sounds quieter than this are ignored)
+          <span class="pref-pair"><input type="range" id="am-gate" min="-75" max="-20" step="1"><span class="pref-val" id="am-gate-val"></span>
+            <button type="button" class="pref-btn" id="am-noise" title="Stay quiet for 2 seconds: the gate is set just above the room's noise">Measure room noise</button></span></label>
+        <label>Pitch clarity needed (higher ignores breathy or noisy sound)
+          <span class="pref-pair"><input type="range" id="am-strict" min="70" max="95" step="1"><span class="pref-val" id="am-strict-val"></span></span></label>
+        <h4>Notes out</h4>
+        <label>A note starts once its pitch holds for
+          <span class="pref-pair"><input type="range" id="am-start" min="10" max="150" step="5"><span class="pref-val" id="am-start-val"></span></span></label>
+        <label>A note ends after this much silence
+          <span class="pref-pair"><input type="range" id="am-end" min="15" max="250" step="5"><span class="pref-val" id="am-end-val"></span></span></label>
+        <label>Extra input latency (an audio interface or Bluetooth headset; taken off each note's time)
+          <span class="pref-pair"><input type="range" id="am-latency" min="0" max="250" step="5"><span class="pref-val" id="am-latency-val"></span></span></label>
+        <p class="dlg-msg" id="am-msg" role="status"></p>
+        <pre id="am-log" aria-label="MIDI notes sent"></pre>
+        <pre id="am-info"></pre>
+        <button type="button" class="pref-btn" id="am-reset">Reset to defaults</button>
+      </section>
+      <section data-pane="maestro" role="tabpanel" hidden>
+        <h3>Maestro</h3>
+        <label>Coaching style <select id="pref-style"></select></label>
+        <div class="pref-group">
+          <label class="check"><input type="checkbox" id="pref-talk-greet"><span>Hello at Start</span></label>
+          <label>After a pass <select id="pref-talk-passes"></select></label>
+          <label class="check"><input type="checkbox" id="pref-talk-signoff"><span>Sum up at the end</span></label>
+        </div>
+        <div id="pref-voice-row" class="pref-group">
+          <label class="check"><input type="checkbox" id="pref-voice"><span>Read replies aloud</span></label>
+          <label>Voice <span class="pref-pair"><select id="pref-voice-name"></select><button type="button" class="pref-btn" id="pref-voice-test">Test</button></span></label>
+          <label>Voice volume <span class="pref-pair"><input type="range" id="pref-voice-vol" min="5" max="100" step="5"><span class="pref-val" id="pref-voice-vol-val"></span></span></label>
+        </div>
+        <p class="dlg-hint">The same settings as the Maestro menu over the sheet.</p>
+      </section>
+      <section data-pane="sheet" role="tabpanel" hidden>
+        <h3>Sheet</h3>
+        <label>Show <select id="pref-show">
+          <option value="sheet">Sheet music</option><option value="notes">Falling notes</option><option value="both">Both</option></select></label>
+        <label>Layout <select id="pref-layout"></select></label>
+        <label>Zoom <span class="pref-pair"><input type="range" id="pref-zoom" min="50" max="200" step="10"><span class="pref-val" id="pref-zoom-val"></span></span></label>
+        <label class="check"><input type="checkbox" id="pref-dynamics"><span>Show dynamics (pp to ff, hairpins)</span></label>
+        <p class="dlg-hint">The same settings as the Sheet menu over the sheet.</p>
+      </section>
+      <section data-pane="library" role="tabpanel" hidden>
+        <h3>Song folders</h3>
+        <p class="dlg-hint">The Songs search looks for MIDI and MusicXML files in these folders, and in every folder inside them.</p>
+        <pre id="pref-folders"></pre>
+        <button type="button" class="pref-btn" id="pref-folders-btn">Change folders…</button>
+      </section>
+      <section data-pane="keys" role="tabpanel" hidden>
+        <h3>Keyboard shortcuts</h3>
+        <table id="pref-keys"><tbody>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>Open a MIDI or MusicXML file</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>Save a copy of the sheet</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>Preferences</td></tr>
+          <tr><td>Hold <kbd>Space</kbd></td><td>Talk to the Maestro (let go to send)</td></tr>
+          <tr><td><kbd>M</kbd></td><td>Start or stop the metronome</td></tr>
+          <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Look around the sheet (with <kbd>Shift</kbd>: further)</td></tr>
+          <tr><td><kbd>Home</kbd></td><td>Back to the cursor (in the Roadmap: the whole map)</td></tr>
+          <tr><td><kbd>T</kbd></td><td>Tap a downbeat, while a video is open</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Close a menu, or leave the Roadmap</td></tr>
+        </tbody></table>
+      </section>
+      <div class="dlg-row"><button value="close">Done</button></div>
+    </div>
+  </form>
+</dialog>
 <script src="profiles.js"></script>
+<script src="file.js"></script>
+<script src="prefs.js"></script>
 </body>
 </html>

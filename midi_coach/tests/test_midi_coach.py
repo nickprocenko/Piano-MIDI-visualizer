@@ -101,6 +101,60 @@ def test_load_reference_parts_bars(ref):
     assert parse_bars("9-16") == (9, 16) and parse_bars("12") == (12, 12)
 
 
+def test_bar_transport_starts_with_notes_in_the_requested_bar(ref):
+    from midi_coach import server
+
+    all_notes, _ = select_notes(ref, "right")
+    start_bar = ref.bar(6)
+    remaining = server._from_bar(ref, all_notes, start_bar.number)
+
+    assert remaining
+    assert min(note.start for note in remaining) >= start_bar.start - 1e-6
+    assert min(note.beat for note in remaining) >= start_bar.start_beat
+
+
+def test_transport_restart_waits_for_stop_and_preserves_loop_range(monkeypatch):
+    from midi_coach import server
+
+    events = []
+    class FakeRecorder:
+        def stop(self, reason):
+            events.append(("stop", reason))
+
+        def wait(self, timeout):
+            events.append(("wait", timeout))
+            return True
+
+    settings = {"reference": "piece.mid", "bars": "2-8", "mode": "wait", "loop": True, "start_bar": 5}
+    monkeypatch.setattr(server, "recorder", FakeRecorder())
+    monkeypatch.setattr(server, "_practice", {**server._practice, "settings": settings, "pass": 2, "stopping": False})
+    monkeypatch.setattr(server, "_live", {"session": None, "watcher": None})
+    monkeypatch.setattr(server, "_begin_pass", lambda got, pass_no: events.append(("begin", got, pass_no)) or {"mode": "wait"})
+
+    server._restart_at_bar(settings, 2)
+
+    assert events[0] == ("stop", "transport seek")
+    assert events[1] == ("wait", 5)
+    assert events[2] == ("begin", settings, 2)
+    assert settings["bars"] == "2-8" and settings["start_bar"] == 5 and settings["loop"]
+
+
+def test_next_loop_pass_returns_to_the_selected_range(monkeypatch):
+    from midi_coach import server
+
+    settings = {"reference": "piece.mid", "bars": "2-8", "mode": "wait", "loop": True, "start_bar": 5}
+    started = []
+    monkeypatch.setattr(server, "_practice", {**server._practice, "settings": settings, "pass": 3, "stopping": False})
+    monkeypatch.setattr(server, "_busy", lambda: False)
+    monkeypatch.setattr(server, "_begin_pass", lambda got, pass_no: started.append((got, pass_no)) or {})
+
+    server._next_pass()
+
+    assert settings["start_bar"] is None
+    assert settings["bars"] == "2-8" and settings["loop"]
+    assert started == [(settings, 4)]
+
+
 def test_perfect_take_at_slower_tempo(ref):
     notes, _ = select_notes(ref, "both")
     take = _perform(ref, tempo_ratio=0.8)
@@ -308,6 +362,20 @@ def test_recorder_plain_silence_stop(fake_rtmidi):
     assert rec.status()["stop_reason"] == "silence"
 
 
+def test_recorder_reports_held_keys(fake_rtmidi):
+    rec = midi_io.Recorder()
+    seen = []
+    rec.on_keys = lambda held: seen.append(sorted(held))
+    rec.start(None, silence_sec=5, max_sec=30, lead_in_sec=5)
+    FakeIn.instance.send([0x90, 60, 70])
+    FakeIn.instance.send([0x90, 64, 70])
+    FakeIn.instance.send([0xB0, 64, 127])  # the pedal lights no key
+    FakeIn.instance.send([0x80, 60, 0])
+    FakeIn.instance.send([0x90, 64, 0])  # note-on at velocity 0 lets go too
+    rec.stop()
+    assert seen == [[60], [60, 64], [64], [], []]  # and nothing is left lit when it ends
+
+
 def test_build_events_tempo_and_range(ref):
     notes, _ = select_notes(ref, "right", bars=(2, 2))
     t0, t1 = ref.bar_range_times(2, 2)
@@ -434,10 +502,11 @@ def test_live_wait_mode(ref):
     assert sess.hits == len(notes) == len(hub.statuses("hit"))
     cursors = [e[3] if e[3] is not None else e[1] for e in hub.events if e[0] == "cursor"]
     assert cursors == sorted(cursors) and cursors[-1] == pytest.approx(3.5)  # last eighth of bar 1
-    # After each chord the cursor flows on at the score's tempo instead of jumping ahead.
+    # After each chord the cursor flows on to the next instead of jumping, getting there ahead
+    # of the tempo (this player is slower than it, so the tempo sets the pace).
     glides = [e for e in hub.events if e[0] == "cursor" and e[3] is not None]
     assert len(glides) == len(notes) - 1
-    assert all(g[3] - g[1] == pytest.approx(0.5) and g[2] == pytest.approx(ref.bpm_at(0) / 60) for g in glides)
+    assert all(g[3] - g[1] == pytest.approx(0.5) and g[2] == pytest.approx(ref.bpm_at(0) / 60 / live.GLIDE_SHARE) for g in glides)
     summary = sess.summary()
     assert summary["per_bar"]["1"]["wrong"] == 1
     assert summary["slips"] == [{"bar": 1, "played": 61, "expected": [72]}]
@@ -472,6 +541,108 @@ def test_live_rehearsal_mode(ref):
     assert sess.hits == 6 and sess.misses == 2
     assert len(hub.statuses("missed")) == 2
     assert any(e[0] == "cursor" and e[2] > 0 for e in hub.events)  # moving cursor with tempo
+
+
+def test_live_reports_slips_for_labels(ref):
+    from midi_coach import live
+
+    notes, _ = select_notes(ref, "right", bars=(1, 2))
+    slips = []
+    sess = live.LiveSession("wait", ref, notes, None, on_slip=lambda bar, what: slips.append((bar, what)))
+    sess.start()
+    sess.on_message(0.0, _on(61))  # a wrong key
+    sess.on_message(live.STUCK_SEC + 1, _on(notes[0].pitch))  # then a long hunt for the right one
+    assert slips == [(1, "pitch"), (1, "stuck")]
+
+    slips.clear()
+    sess = live.LiveSession("rehearsal", ref, notes, None, on_slip=lambda bar, what: slips.append((bar, what)))
+    sess._clock = 100.0  # the first note is due now; no ticker, so nothing is marked missed
+    due = lambda n: 100.0 + (n.start - notes[0].start)
+    second, ninth = notes[1], notes[8]  # an eighth into bar 1; the first of bar 2
+    sess.on_message(due(second), _on(second.pitch))  # on time: a hit
+    sess.on_message(due(second) + 0.05, _on(second.pitch))  # struck again in its window: no slip
+    sess.on_message(due(ninth) + 0.4, _on(ninth.pitch))  # the right key, late: counting
+    sess.on_message(due(ninth) + 0.5, _on(30))  # a key that isn't near: note names
+    assert slips == [(2, "rhythm"), (2, "pitch")]
+
+
+def test_aids_label_bars_where_you_slip_and_take_them_off(ref):
+    from midi_coach import aids
+
+    pushed = []
+    a = aids.Aids(push=pushed.append)
+    a.begin_pass(ref, {1, 2, 3})
+    assert pushed == [[]]
+    a.slip(1, "pitch")
+    assert len(pushed) == 1  # one slip could be an accident
+    a.slip(1, "stuck")
+    assert pushed[-1] == [{"bar": 1, "start": 0.0, "end": 4.0, "kinds": ["names"]}]  # on mid-pass
+    a.slip(2, "rhythm")
+    changes = a.end_pass(True, {"mode": "rehearsal"}, {"per_bar": [{"bar": 3, "timing_ms": 120}, {"bar": 2, "timing_ms": 20}]})
+    assert changes["added"] == {"names": [1], "counts": [3]} and changes["left"] == 2
+    assert "note names on bar 1" in aids.remark(changes) and "counting on bar 3" in aids.remark(changes)
+
+    def clean_pass(bars={1, 2, 3}, finished=True):
+        a.begin_pass(ref, bars)
+        return a.end_pass(finished)
+
+    assert clean_pass()["removed"] == {}  # one clean pass: still on
+    assert clean_pass(finished=False)["removed"] == {}  # stopped halfway: doesn't count
+    assert clean_pass(bars={2})["removed"] == {}  # didn't play bars 1 or 3
+    a.begin_pass(ref, {1, 3})
+    a.slip(3, "rhythm")  # slipped again: bar 3 starts over
+    assert a.end_pass(True)["removed"] == {"names": [1]}
+    assert [b["bar"] for b in pushed[-1]] == [3]
+    assert clean_pass()["removed"] == {}
+    changes = clean_pass()
+    assert changes == {"added": {}, "removed": {"counts": [3]}, "left": 0}
+    assert aids.remark(changes) == "Labels off bar 3: you've got it. No labels left on this piece. Try Hard under Sheet, Labels."
+    assert pushed[-1] == []
+
+    a.slip(1, "pitch")
+    a.slip(1, "pitch")
+    other = types.SimpleNamespace(path="other.mid", bars=ref.bars, bar=ref.bar)
+    a.begin_pass(other, {1})  # another piece: its own labels
+    assert a.left == 0 and pushed[-1] == []
+
+
+def test_display_replays_labels(ref):
+    from midi_coach import display
+
+    hub = display.DisplayHub()
+    hub.load_score(ref)
+    hub.aids([{"bar": 2, "start": 4.0, "end": 8.0, "kinds": ["counts"]}])
+    assert {"type": "aids", "bars": [{"bar": 2, "start": 4.0, "end": 8.0, "kinds": ["counts"]}], "off": False} in hub.snapshot()
+    hub.aids([], off=True)
+    assert {"type": "aids", "bars": [], "off": True} in hub.snapshot()
+
+
+def test_live_stop_freezes_cursor_before_publishing_inactive(ref):
+    from midi_coach import live
+
+    notes, _ = select_notes(ref, "right", bars=(1, 1))
+
+    class StopCheckingHub(RecordingHub):
+        session_ref = None
+
+        def session(self, active, mode=None):
+            if not active:
+                assert self.session_ref.stopped
+            super().session(active, mode)
+
+    hub = StopCheckingHub()
+    sess = live.LiveSession("rehearsal", ref, notes, hub)
+    hub.session_ref = sess
+    sess.start()
+    sess.on_message(time.perf_counter(), _on(notes[0].pitch))
+    time.sleep(0.3)
+
+    sess.stop()
+    cursor_count = sum(event[0] == "cursor" for event in hub.events)
+    time.sleep(0.1)
+
+    assert sum(event[0] == "cursor" for event in hub.events) == cursor_count
+    assert ("session", False, "rehearsal") in hub.events
 
 
 def test_display_server_streams_state(ref):
@@ -593,12 +764,12 @@ def test_remarks_stay_short_and_fresh(tmp_path):
             assert len(pool) >= 8, name
             for line in pool:
                 assert len(re.findall(r"[.!?](?=\s|$)", line)) == 1, line
-    assert remarks.VOICE["warm"].keys() == remarks.VOICE["strict"].keys()
+    assert remarks.VOICE["friend"].keys() == remarks.VOICE["strict"].keys()
 
-    # Warm by default; the style and the recent wording survive a restart.
+    # Friend by default; the style and the recent wording survive a restart.
     memory = tmp_path / "maestro.json"
     coach = remarks.Coach(random.Random(3), memory=lambda: memory)
-    assert coach.style == "warm"
+    assert coach.style == "friend"
     rough = {"mode": "wait", "hits": 4, "missed": 0, "wrong_presses": 12, "notes_total": 16, "per_bar": {}, "slips": []}
     for _ in range(3):
         said = coach.remark(rough)
@@ -606,9 +777,11 @@ def test_remarks_stay_short_and_fresh(tmp_path):
     coach.style = "strict"
     later = remarks.Coach(random.Random(3), memory=lambda: memory)
     assert later.style == "strict" and later._recent == coach._recent
-    said_before = list(coach._recent["warm:verdict-rough"])
-    later.style = "warm"
+    said_before = list(coach._recent["friend:verdict-rough"])
+    later.style = "friend"
     assert later._pick("verdict-rough") not in said_before
+    memory.write_text('{"style": "warm"}')  # the friend's old name
+    assert remarks.Coach(memory=lambda: memory).style == "friend"
     try:
         later.style = "mean"
     except ValueError:
@@ -730,10 +903,49 @@ def test_maestro_style_is_a_setting(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "hub", display.DisplayHub())
     monkeypatch.setattr(server, "_coach", remarks.Coach(memory=lambda: tmp_path / "maestro.json"))
     monkeypatch.setattr(server, "_practice", {**server._practice, "settings": None, "last": None, "running": False})
-    assert server._cmd_maestro({}) == {"style": "warm", "styles": ["warm", "strict"]}
+    out = server._cmd_maestro({})
+    assert out["style"] == "friend" and out["styles"] == ["friend", "strict"]
     assert server._voice.actions["set_style"](style="strict")["style"] == "strict"
     assert "Teaching style: strict." in server._voice_context()
     assert json.loads((tmp_path / "maestro.json").read_text())["style"] == "strict"
+
+
+def test_maestro_talk_settings(monkeypatch, tmp_path):
+    import json
+    import random
+
+    from midi_coach import display, remarks, server
+
+    memory = tmp_path / "maestro.json"
+    coach = remarks.Coach(random.Random(1), memory=lambda: memory)
+    assert coach.talk == {"greet": True, "passes": "news", "sign_off": True}
+    clean = _wait_summary()
+    coach.start({"title": "Etude", "mode": "wait"})
+    assert coach.remark(clean)
+    assert coach.remark(clean) is None  # second clean pass in a row: nothing new
+
+    coach.set_talk(passes="every")
+    assert coach.remark(clean)  # every pass gets a remark
+    coach.set_talk(greet=False, passes="off", sign_off=False)
+    assert coach.start({"title": "Etude", "mode": "wait"}) is None and coach.context["title"] == "Etude"
+    assert coach.remark(clean) is None and coach.remark(clean) is None and coach.last_lead is None
+    assert len(coach.history) == 2  # still remembered, for the autopilot and the voice chat
+    assert coach.wrap_up() is None
+    assert remarks.Coach(memory=lambda: memory).talk == {"greet": False, "passes": "off", "sign_off": False}
+    try:
+        coach.set_talk(passes="sometimes")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown passes setting accepted")
+
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_coach", remarks.Coach(memory=lambda: tmp_path / "other.json"))
+    monkeypatch.setattr(server, "_practice", {**server._practice, "settings": None, "last": None, "running": False})
+    assert server._cmd_maestro({})["talk"]["passes"] == "news"
+    assert server._voice.actions["set_talk"](greet=False)["talk"] == {"greet": False, "passes": "news", "sign_off": True}
+    assert "no greeting" in server._voice_context()
+    assert json.loads((tmp_path / "other.json").read_text())["talk"]["greet"] is False
 
 
 def test_coach_context_reads_key_title_and_history(ref, tmp_path, monkeypatch):
@@ -900,6 +1112,49 @@ def test_voice_route_and_context(monkeypatch, ref):
         server.hub.shutdown()
 
 
+def test_voice_context_says_where_here_is(monkeypatch, ref):
+    """'Loop from here' means the bar the cursor was on when Talk was pressed, not where a
+    moving cursor has got to by the time the speech is transcribed."""
+    from midi_coach import display, server, stt
+
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_practice", {**server._practice, "settings": None, "last": None, "running": False})
+    monkeypatch.setattr(server, "_talk", {})
+    server._cmd_load({"lesson": "etude"})
+    assert "Cursor at bar 1 " in server._voice_context()  # a loaded lesson starts at the top
+
+    server.hub.cursor(ref.bars[1].start_beat + 0.5, 1.0, live=True)
+    assert "Cursor at bar 2 " in server._voice_context()
+    server._cmd_talk({})
+    server.hub.cursor(ref.bars[3].start_beat, 1.0, live=True)  # the music moved on while they spoke
+    seen = []
+    monkeypatch.setattr(stt, "transcribe", lambda audio: "loop from here")
+    monkeypatch.setattr(server, "_voice_reply", lambda heard: seen.append(server._voice_context()) or {"heard": heard})
+    server._voice_audio(b"audio")
+    assert "Cursor at bar 2 " in seen[0]
+    assert "Cursor at bar 4 " in server._voice_context()  # a typed message later: the cursor as it is then
+
+
+def test_atlas_lesson_replaces_a_running_freeplay_song(monkeypatch, ref):
+    """Opening a lesson from the Atlas while a Freeplay run is still going stops that run and
+    puts the lesson's music on the sheet, instead of quietly leaving the last song up."""
+    from midi_coach import display, server
+
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_practice", {**server._practice, "settings": None, "last": None, "running": False})
+    running = {"on": True}
+    monkeypatch.setattr(server, "_busy", lambda: running["on"])
+    monkeypatch.setattr(server, "_listening", lambda: False)
+    monkeypatch.setattr(server, "_cmd_stop", lambda body: running.update(on=False) or {"stopped": True})
+    out = server._atlas_show(str(ref.path))
+    assert not running["on"] and server.hub.score_path == out["path"] == ref.path
+
+    running["on"] = True  # a run that won't stop: the page hears why, not silence
+    monkeypatch.setattr(server, "_cmd_stop", lambda body: {"stopped": True})
+    with pytest.raises(RuntimeError, match="Stop the current run"):
+        server._atlas_show(str(ref.path))
+
+
 def test_tts_routes(monkeypatch, tmp_path):
     import io
     import json
@@ -970,6 +1225,8 @@ def test_mcp_wait_mode_end_to_end(ref, fake_rtmidi, monkeypatch):
         assert out["stop_reason"] == "finished the piece", out
         comp = out["comparison"]
         assert comp["scores"]["method"].startswith("wait mode") and comp["live"]["hits"] == 16
+        assert comp["scores"]["notes"] == 100
+        assert comp["notes"]["correct"] == 16 and comp["notes"]["missed"] == 0
         heat = server.hub._heat
         assert heat and {b["bar"] for b in heat} == {1, 2}
         shown = await server.show_heatmap()
@@ -979,6 +1236,24 @@ def test_mcp_wait_mode_end_to_end(ref, fake_rtmidi, monkeypatch):
         asyncio.run(run())
     finally:
         server.hub.shutdown()
+
+
+def test_wait_mode_grade_uses_live_accuracy():
+    from midi_coach.server import _wait_mode_note_grade
+
+    grade = _wait_mode_note_grade(
+        {"hits": 6, "missed": 0, "wrong_presses": 2, "notes_total": 8},
+        expected_notes=8,
+    )
+    assert grade["scores"]["notes"] == 75
+    assert grade["notes"] == {
+        "correct": 6,
+        "wrong": 0,
+        "missed": 2,
+        "extra": 2,
+        "accuracy_pct": 75.0,
+        "precision_pct": 75.0,
+    }
 
 
 def _post(url, body=None):
@@ -1043,6 +1318,88 @@ def test_page_menu_learn_loop(ref, fake_rtmidi, monkeypatch):
         server.hub.shutdown()
 
 
+def test_page_file_menu_open_save_as_download(ref, fake_rtmidi, monkeypatch):
+    import base64
+    import urllib.request
+
+    from midi_coach import display, lessons, server
+
+    monkeypatch.setenv("MIDI_COACH_NO_BROWSER", "1")
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    server.hub.commands.update(server.PAGE_COMMANDS)
+    root = server.hub.start()
+    url = root + "cmd/"
+    original = pathlib.Path(ref.path).read_bytes()
+    try:
+        assert "error" in _post(url + "save_as", {"title": "Copy"})  # nothing on the page yet
+        _post(url + "load", {"lesson": "etude"})
+        with urllib.request.urlopen(root + "file") as res:  # Download: the file the sheet came from
+            assert res.read() == original
+            assert "Practice%20Etude%20in%20C.mid" in res.headers["Content-Disposition"]
+
+        saved = _post(url + "save_as", {"title": "Etude: my copy", "category": "Solo piano"})
+        assert pathlib.Path(saved["path"]) == lessons.lessons_dir("Solo piano").resolve() / "Etude my copy.mid"
+        assert pathlib.Path(saved["path"]).read_bytes() == original and pathlib.Path(ref.path).is_file()
+        assert "already in" in _post(url + "save_as", {"title": "Etude my copy", "category": "Solo piano"})["error"]
+
+        data = base64.b64encode(original).decode()
+        opened = _post(url + "open_file", {"name": "My piece.mid", "data": data})
+        path = pathlib.Path(opened["path"])
+        assert path.parent == lessons.lessons_dir().resolve() and path.name == "My piece.mid"
+        assert server.hub.score_path == opened["path"]
+        assert _post(url + "open_file", {"name": "My piece.mid", "data": data})["path"] == opened["path"]  # the same file again
+        bad = _post(url + "open_file", {"name": "My piece.mid", "data": base64.b64encode(b"not midi").decode()})
+        assert "Couldn't read" in bad["error"] and not (path.parent / "My piece (2).mid").exists()
+        assert "isn't a MIDI" in _post(url + "open_file", {"name": "notes.txt", "data": data})["error"]
+    finally:
+        server.hub.shutdown()
+
+
+def test_deleted_sheet_file_is_not_searched_by_title(ref, monkeypatch, tmp_path):
+    from midi_coach import display, server
+
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    gone = tmp_path / "home" / "lessons" / "Needs review" / "Practice Etude in C (with vocals).musicxml"
+    with pytest.raises(FileNotFoundError, match="moved or deleted"):  # not 'ambiguous', not another file
+        library.get_score(str(gone))
+    server.hub.score_path = str(gone)  # the page's sheet, deleted while it was open
+    assert server._cmd_parts({}) == {"path": None, "parts": [], "roles": []}
+
+
+def test_page_seek_restarts_learn_at_requested_bar_without_saving_partial_take(ref, fake_rtmidi, monkeypatch):
+    from midi_coach import display, server
+
+    monkeypatch.setenv("MIDI_COACH_NO_BROWSER", "1")
+    monkeypatch.setattr(server, "recorder", midi_io.Recorder())
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_live", {"session": None, "watcher": None})
+    monkeypatch.setattr(server, "_practice", {**server._practice, "pass": 0, "last": None, "settings": None, "running": False})
+    server.hub.commands.update(server.PAGE_COMMANDS)
+    url = server.hub.start() + "cmd/"
+
+    try:
+        assert _post(url + "load", {"lesson": "etude"})["bars"] == len(ref.bars)
+        assert [bar["number"] for bar in server.hub.score_payload()["bars"]] == [bar.number for bar in ref.bars]
+        started = _post(url + "start", {"mode": "learn", "hand": "right", "bars": "1-3", "loop": True, "port": "JUNO-DS 0"})
+        assert started["mode"] == "wait", started
+        _until(lambda: server.recorder.active)
+        first_session = server._live["session"]
+
+        assert _post(url + "seek", {"bar": 2}) == {"bar": 2, "seeking": True}
+        _until(lambda: server._live["session"] is not first_session and server.recorder.active)
+        session = server._live["session"]
+        assert min(note.start for note in session.notes) >= ref.bars[1].start - 1e-6
+        assert server._practice["settings"]["bars"] == "1-3"
+
+        _post(url + "stop")
+        _until(lambda: not server._practice["running"])
+        assert not asyncio.run(server.list_takes(reference="etude"))["takes"]
+    finally:
+        server._practice["stopping"] = True
+        server.recorder.stop()
+        server.hub.shutdown()
+
+
 def test_page_listen_plays_it_for_you(ref, fake_rtmidi, monkeypatch):
     from midi_coach import display, server
 
@@ -1078,6 +1435,42 @@ def test_page_listen_plays_it_for_you(ref, fake_rtmidi, monkeypatch):
                 sounding.discard(m[1])
         assert not sounding and FakeOut.sent[-1][1] == [0xB0, 64, 0]  # everything let go
         assert library.list_takes() == []  # nothing saved or graded
+    finally:
+        server._practice["stopping"] = True
+        if server._live["session"]:
+            server._live["session"].stop()
+        server.hub.shutdown()
+
+
+def test_page_listen_plays_each_part_at_its_fader(ref, fake_rtmidi, monkeypatch):
+    from midi_coach import display, server
+
+    monkeypatch.setenv("MIDI_COACH_NO_BROWSER", "1")
+    monkeypatch.setattr(server, "recorder", midi_io.Recorder())
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_live", {"session": None})
+    monkeypatch.setattr(server, "_practice", {**server._practice, "pass": 0, "last": None, "settings": None})
+    server.hub.commands.update(server.PAGE_COMMANDS)
+    url = server.hub.start() + "cmd/"
+    left = {n.pitch for n in ref.notes if n.part == 1 and n.start < ref.bars[1].start}
+    right = {n.pitch for n in ref.notes if n.part == 0 and n.start < ref.bars[1].start}
+    try:
+        _post(url + "load", {"lesson": "etude"})
+        muted = _post(url + "start", {"mode": "listen", "roles": ["right", "left"], "gains": {"right": 0, "left": 0}})
+        assert "muted" in muted["error"]
+        started = _post(url + "start", {"mode": "listen", "bars": "1", "roles": ["right", "left"],
+                                        "gains": {"right": 0.5, "left": 0}})
+        assert started["mode"] == "listen", started
+        session = server._live["session"]
+        assert set(session.lanes) == {"right", "left"}  # the muted part is there to turn up mid-run
+        assert _post(url + "mix", {"gains": {"right": 0.25}}) == {"gains": {"right": 0.25}, "live": True}
+        assert session.accompanist.gains == {"right": 0.25, "left": 0.0}
+        assert server._practice["settings"]["gains"] == {"right": 0.25, "left": 0.0}  # kept for the next pass
+        _until(lambda: any(m[0] & 0xF0 == 0x90 and m[2] and m[1] in right for _, m in FakeOut.sent), timeout=8)
+        _post(url + "stop")
+        _until(lambda: not server._practice["running"])
+        ons = [m for _, m in FakeOut.sent if m[0] & 0xF0 == 0x90 and m[2]]
+        assert ons and all(m[1] not in left - right for m in ons)  # the left hand stays silent
     finally:
         server._practice["stopping"] = True
         if server._live["session"]:
@@ -1145,6 +1538,7 @@ def test_build_lesson_two_hands(ref):
     events = lessons.learn_events(score, side)
     d5 = [e for e in events if e["note"] == 74]
     assert [e["ms"] for e in d5] == [2000.0, 3500.0]  # 120 bpm: bar 2 starts at 2 s
+    assert [e["beat"] for e in d5] == [4.0, 7.0]  # the sheet's beats, for the visualizer's cursor
     assert {e["channel"] for e in events} == {0, 1}
     # Lessons live in the reference library.
     assert library.resolve_reference("g warm-up").name == "g-warm-up.musicxml"
@@ -1759,7 +2153,39 @@ def test_broken_folder_is_skipped(ref, tmp_path):
     assert [h["name"] for h in library.find_references("practice etude")] == ["Practice Etude in C.mid"]
 
 
-def test_live_recording_gets_no_sheet_and_no_count_in(ref, tmp_path):
+def _write_unsteady_take(path, wobble=0.04, bars=16, seed=3):
+    """A piece played without a click at about 92 BPM, the tempo wandering a few percent
+    each beat, saved at the default 120 BPM: right-hand eighths over a left-hand chord on
+    each bar's downbeat. Too unsteady for regrid to trust on its own."""
+    rng = random.Random(seed)
+    ticks_per_sec = PPQ * 2  # 120 BPM in the file
+    t, bpm, notes = 0.0, 92.0, []
+    for bar in range(bars):
+        for beat in range(4):
+            bpm = min(max(bpm * (1 + rng.uniform(-wobble, wobble)), 70), 115)
+            dur = 60 / bpm
+            if beat == 0:
+                notes += [(t, t + dur * 3.8, p) for p in (48, 52, 55)]
+            for k in range(2):
+                on = t + k * dur / 2 + rng.gauss(0, 0.008)
+                notes.append((on, on + dur / 2 * 0.9, 67 + (bar * 3 + beat * 2 + k) % 8))
+            t += dur
+    events = []
+    for on, off, pitch in notes:
+        events += [(round(on * ticks_per_sec), mido.Message("note_on", note=pitch, velocity=70)),
+                   (round(off * ticks_per_sec), mido.Message("note_off", note=pitch))]
+    mid = mido.MidiFile(ticks_per_beat=PPQ)
+    tr = mido.MidiTrack()
+    mid.tracks.append(tr)
+    last = 0
+    for tick, msg in sorted(events, key=lambda e: (e[0], e[1].type == "note_on")):
+        tr.append(msg.copy(time=max(0, tick - last)))
+        last = max(last, tick)
+    mid.save(str(path))
+    return path
+
+
+def test_live_recording_gets_a_rough_sheet_and_no_count_in(ref, tmp_path):
     from midi_coach import display, live
 
     live_path = _write_live_take(tmp_path / "songs" / "Nocturne live.mid")
@@ -1769,14 +2195,71 @@ def test_live_recording_gets_no_sheet_and_no_count_in(ref, tmp_path):
     hub = display.DisplayHub()
     hub.load_score(played)
     payload = hub.score_payload()
-    assert payload["xml"] is None and "recorded live" in payload["notice"] and payload["grid"] is False
+    # Drawn anyway, on the file's own grid, with a warning and the Auto clean offer.
+    assert payload["xml"].lstrip().startswith("<?xml") and payload["notice"] is None
+    assert payload["cleanup"] == "off" and "No steady beat" in payload["warning"] and payload["grid"] is False
     assert payload["tempo"] is None  # Match score / Follow score have nothing to go on
     hub.load_score(ref)
     payload = hub.score_payload()
     assert payload["xml"].lstrip().startswith("<?xml") and payload["notice"] is None
+    assert payload["warning"] is None and payload["cleanup"] is None
     assert payload["tempo"] == {"bpm": BPM, "beats": 4, "type": 4}
     info = asyncio.run(__import__("midi_coach.server", fromlist=["x"]).inspect_reference(str(live_path)))
-    assert info["played_live"] and "bar numbers" in info["timing_note"]
+    assert info["played_live"] and "bar numbers" in info["timing_note"] and "Auto clean" in info["timing_note"]
+
+
+def test_auto_clean_finds_the_beat_of_unsteady_playing(ref, tmp_path, monkeypatch):
+    from midi_coach import display, regrid, server
+
+    path = _write_unsteady_take(tmp_path / "songs" / "Unsteady.mid")
+    raw = library.get_score("unsteady")
+    assert raw.played_live and raw.regrid is None  # the automatic regrid doesn't trust it
+    monkeypatch.setattr(server, "_show", lambda score, notes: server.hub.load_score(score))
+    server.hub.score_path = raw.path
+    assert server._cmd_cleanup({"on": True}) == {"cleanup": "on"}
+
+    score = library.get_score("unsteady")
+    assert not score.played_live and score.regrid["cleaned"]
+    right = sorted((n for n in score.notes if n.pitch >= 60), key=lambda n: n.start)
+    assert [b.beat - a.beat for a, b in zip(right, right[1:])] == [0.5] * (len(right) - 1)  # eighths, not dotted
+    assert len(score.bars) == 16 and {n.beat for n in score.notes if n.pitch == 48} == {4.0 * k for k in range(16)}
+    assert [(n.start, n.pitch) for n in score.notes] == [(n.start, n.pitch) for n in raw.notes]  # notation only
+    payload = server.hub.score_payload()
+    assert payload["cleanup"] == "on" and "Auto-cleaned" in payload["warning"] and payload["grid"]
+    assert payload["xml"].count("<measure ") == 32  # 16 bars on each of two staves
+
+    library.save_hands(score, {0: "both"})  # a part choice keeps the cleanup
+    assert library.get_score("unsteady").regrid["cleaned"]
+    assert server._cmd_cleanup({"on": False}) == {"cleanup": "off"}
+    assert library.get_score("unsteady").played_live and server.hub.score_payload()["cleanup"] == "off"
+    assert library.load_roles(score) == {0: "both"}
+
+    monkeypatch.setattr(regrid, "track_free", lambda notes, bpm: [])
+    path.write_bytes(path.read_bytes())  # a new date: the cached map is not used
+    os.utime(path, (time.time() + 5, time.time() + 5))
+    assert "couldn't find" in server._cmd_cleanup({"on": True})["error"]
+    assert not library.cleanup_chosen(raw.path)
+
+
+def test_auto_clean_keeps_the_reading_that_writes_plainest(ref, tmp_path, monkeypatch):
+    from midi_coach import regrid
+
+    _write_unsteady_take(tmp_path / "songs" / "Unsteady.mid")
+    raw = library.get_score("unsteady")
+    [(good, quality), *_] = regrid.track_free(raw.notes, 120.0)
+    # The same beat read 20% fast: dotted eighths and chords tied over the beat, though no
+    # single note breaks an engraving rule. Offered first (as if it fitted a little better).
+    stretched = regrid.BeatMap(good.secs, [b * 1.2 for b in good.beats])
+    assert regrid.rhythm_cost([n.beat for n in regrid.apply(raw, stretched, quality).notes]) > \
+        regrid.rhythm_cost([n.beat for n in regrid.apply(raw, good, quality).notes])
+    monkeypatch.setattr(regrid, "track_free", lambda notes, bpm: [(stretched, quality), (good, quality)])
+    library.set_cleanup(raw.path, True)
+
+    score = library.get_score("unsteady")
+    assert score.regrid["cleaned"] and score.regrid["choices"] == 2 and score.regrid["engraving_problems"] == 0
+    assert score.beat_map.beats == good.beats
+    right = sorted((n for n in score.notes if n.pitch >= 60), key=lambda n: n.start)
+    assert [b.beat - a.beat for a, b in zip(right, right[1:])] == [0.5] * (len(right) - 1)
 
 
 def test_huge_file_gets_no_sheet(ref, monkeypatch):
@@ -1788,6 +2271,22 @@ def test_huge_file_gets_no_sheet(ref, monkeypatch):
     hub.load_score(ref)
     assert hub.score_payload()["xml"] is None and "too much to draw" in hub.score_payload()["notice"]
     assert hub.score_payload()["grid"] is True  # the metronome can still follow it
+
+
+def test_falling_notes_come_with_the_score(ref, monkeypatch):
+    from midi_coach import display
+
+    monkeypatch.setattr(display, "SHEET_MAX_NOTES", 100)  # no sheet: the falling notes are still drawn
+    hub = display.DisplayHub()
+    hub.load_score(ref)
+    notes = hub.score_payload()["notes"]
+    assert len(notes) == len(ref.notes)
+    by_start = {(round(n.beat, 3), n.pitch): n for n in ref.notes}
+    for beat, length, pitch, role in notes:
+        n = by_start[(beat, pitch)]
+        assert role == ("right" if pitch >= 60 else "left")
+        assert length == pytest.approx(ref.beat_of(n.end) - n.beat, abs=1e-3)
+    assert {length for _, length, pitch, _ in notes if pitch >= 60} == {0.5}  # eighth notes
 
 
 def _write_drifting_band(path, bars=24):
@@ -1882,6 +2381,34 @@ def test_piano_sheet_of_a_band_file(ref, tmp_path):
     hub.load_score(library.get_score("drifting song"))
     second = hub.score_payload()
     assert second["version"] == first["version"] + 1 and second["xml"] != first["xml"]  # redrawn for the new parts
+
+
+def test_piano_sheet_marks_dynamics_from_velocities(ref, tmp_path):
+    from fractions import Fraction
+
+    from midi_coach import sheet
+
+    assert not sheet.wanted(ref)  # a crescendo inside each bar, the same level every bar: no marks to add
+    mid = mido.MidiFile(str(ref.path))
+    for tr in mid.tracks:
+        tick = 0
+        for msg in tr:
+            tick += msg.time
+            if msg.type == "note_on" and msg.velocity:
+                bar = tick // (4 * PPQ)
+                # p for 8 bars (bar 4 accented: one loud bar is not a new dynamic), then f
+                msg.velocity = 100 if bar == 3 else 45 if bar < 8 else 95
+    path = tmp_path / "songs" / "Dynamic Etude.mid"
+    mid.save(str(path))
+    score = library.get_score(str(path))
+    onsets = [(Fraction(n.beat).limit_denominator(48), n.velocity) for n in score.notes]
+    # f on the first note after the rest bars (9 and 10)
+    assert [(float(at), mark) for at, mark in sheet.dynamic_marks(score, onsets)] == [(0.0, "p"), (40.0, "f")]
+    assert sheet.wanted(score)  # a plain piano file, written by us so the dynamics are on it
+    xml = sheet.build(score)["xml"]
+    assert xml.count("<dynamics") == 2 and "<p />" in xml.replace("<p/>", "<p />") and "<f />" in xml.replace("<f/>", "<f />")
+    drawn = load_score(tmp_path / "dyn.musicxml") if (tmp_path / "dyn.musicxml").write_text(xml, encoding="utf-8") else None
+    assert sorted((n.beat, n.pitch) for n in drawn.notes) == sorted((n.beat, n.pitch) for n in score.notes)
 
 
 def test_split_hands_follows_the_hands_not_middle_c():
@@ -2040,6 +2567,7 @@ def test_grand_staff_clefs_keys_and_short_notes():
 
     from music21 import converter
 
+    from midi_coach.engraving import lint
     from midi_coach.transcribe import grand_staff
 
     # D flat major: written with 5 flats, not C sharp major's 7 sharps.
@@ -2047,11 +2575,22 @@ def test_grand_staff_clefs_keys_and_short_notes():
     events += [("left", F(b * 4), F(b * 4 + 4), 49) for b in range(4)]
     out = grand_staff(events, "t")
     assert out["key"] == "Db" and "<fifths>-5</fifths>" in out["xml"]
-    # A right hand that drops low for two bars changes to bass clef and back.
+    # A right hand that drops too low to read in treble for two bars (C3, a run on four ledger
+    # lines) changes to bass clef and back.
     events = [("right", F(b * 4 + k), F(b * 4 + k + 1), 48 if b in (1, 2) else 72) for b in range(4) for k in range(4)]
     events += [("left", F(b * 4), F(b * 4 + 4), 36) for b in range(4)]
     right = converter.parseData(grand_staff(events, "t")["xml"]).parts[0]
     assert [(float(c.getOffsetInHierarchy(right)), c.sign) for c in right.recurse().getElementsByClass("Clef")] == [(0.0, "G"), (4.0, "F"), (12.0, "G")]
+    # Dipping for four bars to notes that read on ledger lines (Great Gig in the Sky bars
+    # 22-25: G3, B flat 3, E flat 3, one D3) stays in treble.
+    dip = [(55, 58, 62), (51, 58, 62), (55, 50, 58), (55, 58, 63)]
+    events = [("right", F(b * 4 + k), F(b * 4 + k + 1), 72) for b in range(12) for k in range(4) if not 4 <= b < 8]
+    events += [("right", F(b * 4 + k), F(b * 4 + k + 1), p) for b in range(4, 8) for k in range(3) for p in [dip[b - 4][k]]]
+    events += [("left", F(b * 4), F(b * 4 + 4), 39) for b in range(12)]
+    out = grand_staff(events, "t")["xml"]
+    right = converter.parseData(out).parts[0]
+    assert [c.sign for c in right.recurse().getElementsByClass("Clef")] == ["G"]
+    assert not lint(out)["counts"]["brief-clef-change"] and not lint(out)["counts"]["ledger-lines"]
     # A short note on an eighth before a gap is written as an eighth, not a 16th and a rest.
     events = [("right", F(k, 2), F(k, 2) + F(1, 4), 72) for k in range(0, 8, 2)] + [("left", F(0), F(4), 48)]
     notes = converter.parseData(grand_staff(events, "t")["xml"]).parts[0].recurse().notes
@@ -2115,6 +2654,22 @@ def test_engraving_rules_catch_known_mistakes():
     assert found["needless-accidental"] == 1 and found["missing-accidental"] == 1
     assert found["double-dot"] == 1 and found["too-short"] == 1
 
+    # Bass clef for four bars on the treble staff, over G3s that read on two ledger lines:
+    # flagged. The same four bars down at C3, a run on four ledger lines, need it: not flagged.
+    from music21 import clef
+
+    def dip(pitch):
+        bars = [bar(*[note.Note(pitch if 2 <= b < 6 else "C5", quarterLength=1) for _ in range(4)]) for b in range(12)]
+        for b, m in enumerate(bars):
+            m.number = b + 1
+        bars[0].insert(0, clef.TrebleClef())
+        bars[2].insert(0, clef.BassClef())
+        bars[6].insert(0, clef.TrebleClef())
+        return engraving.lint(stream.Score([stream.Part(bars)]))["findings"]
+
+    assert [(f[0], f[2]) for f in dip("G3") if f[0] == "brief-clef-change"] == [("brief-clef-change", 3)]
+    assert not [f for f in dip("C3") if f[0] == "brief-clef-change"]
+
 
 def test_grand_staff_is_readable_without_losing_notes(tmp_path):
     from fractions import Fraction as F
@@ -2145,6 +2700,42 @@ def test_grand_staff_is_readable_without_losing_notes(tmp_path):
     score = load_score(path)  # ...but still graded as F1
     assert {(round(n.beat, 3), n.pitch) for n in score.notes if n.part == 2} == {(float(on), p) for h, on, _, p in events if h == "left"}
     assert {(round(n.beat, 3), n.pitch) for n in score.notes if n.part == 0} == {(float(on), p) for on, _, p, _ in tune}
+
+
+def test_grand_staff_writes_a_note_two_octaves_out_under_15mb(tmp_path):
+    from fractions import Fraction as F
+
+    from midi_coach import engraving
+    from midi_coach.transcribe import grand_staff
+
+    # A synth line in the bass that ends on a C0 held for two bars (a sound effect in a band
+    # file): nine ledger lines as written, still five under 8vb, so it goes under 15mb.
+    events = [("left", F(k, 2), F(k + 1, 2), (40, 43, 45, 50)[k % 4]) for k in range(16)]
+    events += [("left", F(8), F(16), 12)] + [("right", F(b * 4), F(b * 4 + 4), 64) for b in range(4)]
+    out = grand_staff(events, "t")
+    report = engraving.lint(out["xml"])
+    assert not report["findings"], report["findings"][:5]
+    assert 'size="15"' in out["xml"]
+    path = tmp_path / "t.musicxml"
+    path.write_text(out["xml"], encoding="utf-8")
+    score = load_score(path)  # still graded as C0
+    assert 12 in {n.pitch for n in score.notes}
+    assert sorted(n.pitch for n in score.notes) == sorted(p for *_, p in events)
+
+
+def test_a_low_note_held_over_bars_is_one_note_on_four_ledger_lines():
+    from fractions import Fraction as F
+
+    from midi_coach import engraving
+    from midi_coach.transcribe import grand_staff
+
+    # An F1 held for three bars after one short F1 (a synth line in a band file): written tied
+    # over the barlines, it is two notes on four ledger lines, not four in a row needing 8vb.
+    events = [("left", F(0), F(1), 29), ("left", F(4), F(16), 29)] + [("right", F(b * 4), F(b * 4 + 4), 64) for b in range(4)]
+    out = grand_staff(events, "t")
+    assert "<octave-shift" not in out["xml"] and "<tied" in out["xml"]
+    report = engraving.lint(out["xml"])
+    assert not report["findings"], report["findings"][:5]
 
 
 def test_grand_staff_voices_spelling_and_lengths():
@@ -2260,11 +2851,28 @@ def test_backing_is_what_you_dont_play(ref, tmp_path):
     _write_organ(tmp_path / "songs" / "Organ Hymn.mid")
     score = library.get_score("organ hymn")
     ix = {p.name: p.index for p in score.parts}
-    backing = server._backing_notes(score, "right+pedals", ["right", "left", "pedals", "vocals"], "2-3", 60)
-    assert {n.part for n in backing} == {ix["Lower"], ix["Choir Vocals"]}
+    lanes = server._backing_notes(score, "right+pedals", ["right", "left", "pedals", "vocals"], "2-3", 60)
+    assert set(lanes) == {"left", "vocals"}
+    assert {n.part for n in lanes["left"]} == {ix["Lower"]} and {n.part for n in lanes["vocals"]} == {ix["Choir Vocals"]}
     t0, t1 = score.bar_range_times(2, 3)
-    assert all(t0 - 1e-6 <= n.start < t1 for n in backing)
-    assert server._backing_notes(score, "both", None, None, 60) == []
+    assert all(t0 - 1e-6 <= n.start < t1 for part in lanes.values() for n in part)
+    assert server._backing_notes(score, "both", None, None, 60) == {}
+
+
+def test_accompanist_plays_each_lane_at_its_volume(fake_rtmidi):
+    acc = midi_io.Accompanist()
+    acc.gains.update({"left": 0.5, "vocals": 0.0})
+    now = time.perf_counter()
+    acc.schedule([(0.0, [0x90, 60, 80]), (0.05, [0x80, 60, 0])], now, "right")  # no fader: as written
+    acc.schedule([(0.0, [0x90, 48, 100]), (0.05, [0x80, 48, 0])], now, "left")
+    acc.schedule([(0.0, [0x90, 72, 90]), (0.05, [0x80, 72, 0])], now, "vocals")  # muted, its note-off too
+    acc.schedule([(0.3, [0x90, 50, 100]), (0.35, [0x80, 50, 0])], now, "left")
+    _until(lambda: [0x80, 48, 0] in [m for _, m in FakeOut.sent])
+    acc.gains["left"] = 1.0  # a fader moved mid-run: heard from the next note
+    _until(lambda: [0x80, 50, 0] in [m for _, m in FakeOut.sent])
+    acc.close()
+    assert [m for _, m in FakeOut.sent] == [[0x90, 60, 80], [0x90, 48, 50], [0x80, 60, 0], [0x80, 48, 0],
+                                            [0x90, 50, 100], [0x80, 50, 0]]
 
 
 def test_accompanist_sends_notes_only_and_lets_go(fake_rtmidi):
@@ -2285,8 +2893,8 @@ class FakeAccompanist:
         self.scheduled = []
         self.closed = False
 
-    def schedule(self, events, start):
-        self.scheduled.append((start, events))
+    def schedule(self, events, start, lane=None):
+        self.scheduled.append((start, events) if lane is None else (start, events, lane))
 
     def close(self):
         self.closed = True
@@ -2326,6 +2934,24 @@ def test_live_runs_play_the_backing(ref):
     finally:
         sess.stop()
     assert acc.closed
+
+
+def test_backing_by_role_is_scheduled_per_role(ref):
+    from midi_coach import live
+
+    right, _ = select_notes(ref, "right", bars=(1, 2))
+    left, _ = select_notes(ref, "left", bars=(1, 2))
+    acc = FakeAccompanist()
+    sess = live.LiveSession(live.LISTEN, ref, right + left, None, backing={"right": right, "left": left, "vocals": []},
+                            accompanist=acc, pedal=[(0.0, 127)])
+    sess.start()
+    try:
+        assert [s[2] for s in acc.scheduled] == ["right", "left"]  # a role with no notes is left out
+        pedals = [[m for _, m in s[1] if m[0] & 0xF0 == 0xB0] for s in acc.scheduled]
+        assert pedals[0] and not pedals[1]  # the pedal goes once
+        assert {m[1] for _, m in acc.scheduled[1][1] if m[0] & 0xF0 == 0x90} == {n.pitch for n in left}
+    finally:
+        sess.stop()
 
 
 def test_page_songs_lessons_and_parts(ref, tmp_path, fake_rtmidi, monkeypatch):
@@ -2566,3 +3192,44 @@ def test_build_lesson_prints_a_repeated_accidental_once_per_bar(tmp_path):
     xml = pathlib.Path(path).read_text(encoding="utf-8")
     assert xml.count("<accidental>sharp</accidental>") == 3 and xml.count("<accidental>natural</accidental>") == 1
     assert [n.pitch for n in score.notes] == [66, 67, 66, 69, 66, 65, 66]
+
+
+def test_launcher_reuses_only_a_coach_started_after_the_code_changed(tmp_path):
+    """The shortcut opens the running coach only if it's current; a copy from before an update
+    is restarted (practice) or reported (Claude Desktop), never shown half-working."""
+    import json
+    import os
+    import socket
+    import urllib.request
+
+    from midi_coach import display, launch
+
+    hub = display.DisplayHub()
+    url = hub.start()
+    try:
+        info = json.loads(urllib.request.urlopen(url + "version").read())
+        assert info["pid"] == os.getpid() and info["started"] == hub.started
+        assert launch.running(int(url.rsplit(":", 1)[1].strip("/"))) == info
+        assert urllib.request.urlopen(url + "favicon.ico").headers["Content-Type"] == "image/x-icon"
+    finally:
+        hub.shutdown()
+    with socket.socket() as s:  # a port nothing listens on
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+    assert launch.running(free) is None
+
+    code = tmp_path / "pkg"
+    (code / "tests").mkdir(parents=True)
+    (code / "a.py").write_text("")
+    (code / "tests" / "test_a.py").write_text("")
+    (code / "logo.png").write_text("")
+    os.utime(code / "a.py", (1000, 1000))
+    os.utime(code / "tests" / "test_a.py", (5000, 5000))
+    os.utime(code / "logo.png", (5000, 5000))
+    assert launch.newest_source([code]) == 1000  # tests and images don't count
+    assert launch.is_current({"started": 1001}, 1000)
+    assert not launch.is_current({"started": 999}, 1000) and not launch.is_current({}, 1000)
+
+    assert launch.is_practice(r'"C:\repo\.venv\Scripts\python.exe" -m midi_coach.launch')
+    assert launch.is_practice("python -m midi_coach.practice great gig")
+    assert not launch.is_practice("python -m midi_coach")  # Claude Desktop's server

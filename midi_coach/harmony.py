@@ -113,22 +113,38 @@ def chords_by_bar(score: Score, notes: list[Note], bars: tuple[int, int] | None 
     return out
 
 
-def estimate_key(notes: list[Note]) -> str | None:
+def _key_corr(weights: list[float], profile: list[float], tonic: int) -> float:
+    xs = [weights[(tonic + i) % 12] for i in range(12)]
+    mx, my = sum(xs) / 12, sum(profile) / 12
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, profile))
+    den = (sum((x - mx) ** 2 for x in xs) * sum((y - my) ** 2 for y in profile)) ** 0.5
+    return num / den if den else 0.0
+
+
+def _key_weights(notes: list[Note]) -> list[float]:
     weights = [0.0] * 12
     for n in notes:
         weights[n.pitch % 12] += n.duration
+    return weights
+
+
+def estimate_key(notes: list[Note]) -> str | None:
+    weights = _key_weights(notes)
     if not any(weights):
         return None
-
-    def corr(profile, tonic):
-        xs = [weights[(tonic + i) % 12] for i in range(12)]
-        mx, my = sum(xs) / 12, sum(profile) / 12
-        num = sum((x - mx) * (y - my) for x, y in zip(xs, profile))
-        den = (sum((x - mx) ** 2 for x in xs) * sum((y - my) ** 2 for y in profile)) ** 0.5
-        return num / den if den else 0.0
-
-    best = max(((corr(p, t), t, mode) for t in range(12) for p, mode in ((_MAJOR, ""), (_MINOR, "m"))))
+    best = max(((_key_corr(weights, p, t), t, mode) for t in range(12) for p, mode in ((_MAJOR, ""), (_MINOR, "m"))))
     return _NAMES[best[1]] + best[2]
+
+
+def key_for_signature(notes: list[Note], sharps: int) -> tuple[int, bool]:
+    """(tonic pitch class, minor?) for a passage under a key signature with this many sharps
+    (negative: flats): the major key or its relative minor, whichever the notes fit better."""
+    major = (7 * sharps) % 12
+    weights = _key_weights(notes)
+    if not any(weights):
+        return major, False
+    minor = (major + 9) % 12
+    return (minor, True) if _key_corr(weights, _MINOR, minor) > _key_corr(weights, _MAJOR, major) else (major, False)
 
 
 def _root_and_quality(chord: str) -> tuple[int, str] | None:

@@ -11,6 +11,14 @@ from __future__ import annotations
 
 PLAY_METRICS = ("notes", "timing", "overall", "tempo_stability")
 DEFAULT_PASS = {"metric": "notes", "min": 90}
+# How a score reads on the page: 'notes 72' says nothing to a learner, '72% of the notes right' does.
+SAID = {"notes": "{:.0f}% of the notes right", "timing": "{:.0f}% of the notes in time", "overall": "overall score {:.0f}",
+        "tempo_stability": "steadiness {:.0f}", "pitch": "{:.0f}% in tune", "taps": "{:.0f}% of the taps in time"}
+NEED = {"notes": "{}%", "timing": "{}%", "pitch": "{}%", "taps": "{}%"}  # the rest need a plain number
+
+
+def _wrong(n) -> str:
+    return f"{n} wrong key{'' if n == 1 else 's'}"
 
 
 def evaluate(step: dict, report: dict | None = None, live: dict | None = None, score: float | None = None) -> dict:
@@ -22,20 +30,22 @@ def evaluate(step: dict, report: dict | None = None, live: dict | None = None, s
     if score is None:
         scores = (report or {}).get("scores") or {}
         if metric not in scores:
-            return {"passed": False, "score": None, "metric": metric, "detail": f"no {metric} score for this pass"}
+            return {"passed": False, "score": None, "metric": metric, "detail": "couldn't measure that pass, so try it once more"}
         score = float(scores[metric])
     passed = score >= rule["min"]
-    detail.append(f"{metric} {score:.0f} {'≥' if passed else '<'} {rule['min']}")
+    detail.append(SAID.get(metric, metric + " {:.0f}").format(score)
+                  + ("" if passed else f" (need {NEED.get(metric, '{}').format(rule['min'])})"))
     pct = ((report or {}).get("tempo") or {}).get("percent_of_reference")
     if rule.get("tempo_min_pct") is not None:
-        if pct is None or pct < rule["tempo_min_pct"]:
-            passed = False
-        detail.append(f"tempo {pct if pct is not None else '?'}% (need {rule['tempo_min_pct']}%)")
+        fast = pct is not None and pct >= rule["tempo_min_pct"]
+        passed = passed and fast
+        detail.append(f"speed {pct if pct is not None else '?'}% of full" + ("" if fast else f" (need {rule['tempo_min_pct']}%)"))
     if rule.get("max_wrong") is not None:
         wrong = (live or {}).get("wrong_presses")
-        if wrong is None or wrong > rule["max_wrong"]:
-            passed = False
-        detail.append(f"{wrong if wrong is not None else '?'} wrong (at most {rule['max_wrong']})")
+        few = wrong is not None and wrong <= rule["max_wrong"]
+        passed = passed and few
+        detail.append((_wrong(wrong) if wrong is not None else "wrong keys not counted")
+                      + ("" if few else f" (at most {rule['max_wrong']})"))
     return {"passed": bool(passed), "score": round(score, 1), "metric": metric, "detail": ", ".join(detail)}
 
 

@@ -69,7 +69,7 @@ def level_summary(atlas: dict, states: dict) -> list[str]:
         if st.get("done") or ex.get("best"):
             lines.append(f"{t['title']}: {st.get('done', 0)} of {st.get('total', 0)} requirements known"
                          + (f"; mock exam best {ex['best']}/150" if ex.get("best") else ""))
-    return lines or ["Nothing practised on the tree yet."]
+    return lines or ["Nothing practiced on the tree yet."]
 
 
 def catalog_lines(atlas: dict) -> list[str]:

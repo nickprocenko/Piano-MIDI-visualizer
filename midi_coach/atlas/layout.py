@@ -54,35 +54,30 @@ def layout(atlas: dict) -> None:
     content_w = x
     width = content_w + LANE_W
 
+    needs = _family_prereqs(nodes, by_id)
     y = 0
     lanes = []
     for tier in sorted((n for n in nodes if n["level"] == "tier"), key=lambda n: n["order"]):
         top = y
         bottom_content = top + TIER_HEAD
+        # Families keep their order down their strand, but each one also starts below every
+        # family of this tier it builds on, whatever the strand: a link never points up.
+        queues = {s: [c for c in children.get(f"{tier['id']}.{s}", []) if c["level"] == "family"] for s in strands}
+        cursor = {s: top + TIER_HEAD for s in strands}
+        bottom: dict[str, float] = {}
+        while any(queues.values()):
+            ready = [s for s in strands if queues[s] and all(p in bottom for p in needs.get(queues[s][0]["id"], ()))]
+            if not ready:  # links that disagree with a strand's order: place the earliest-starting one anyway
+                ready = [min((s for s in strands if queues[s]), key=lambda s: cursor[s])]
+            for s in ready:
+                fam = queues[s].pop(0)
+                fy = max([cursor[s]] + [bottom[p] + FAM_GAP for p in needs.get(fam["id"], ()) if p in bottom])
+                cy = _place_family(fam, col_x[s] + STRAND_PAD, fy, COLS[s], children, by_id)
+                bottom[fam["id"]] = cy
+                cursor[s] = cy + FAM_GAP
         for s in strands:
             strand = by_id[f"{tier['id']}.{s}"]
-            cy = top + TIER_HEAD
-            cx = col_x[s] + STRAND_PAD
-            fams = [c for c in children.get(strand["id"], []) if c["level"] == "family"]
-            for fam in fams:
-                fy = cy
-                cy += FAM_HEAD
-                reqs = [c for c in children.get(fam["id"], []) if c["level"] == "requirement"]
-                if not reqs:
-                    cy += FAM_EMPTY - FAM_HEAD + 14
-                for row in range(0, len(reqs), COLS[s]):
-                    chunk = reqs[row:row + COLS[s]]
-                    row_h = max(_req_height(r) for r in chunk)
-                    for c, req in enumerate(chunk):
-                        rx = cx + c * REQ_W
-                        req["box"] = [rx + 4, cy, REQ_W - 8, _req_height(req)]
-                        for k, sid in enumerate(req.get("stages", [])):
-                            sx = rx + REQ_W / 2
-                            sy = cy + REQ_HEAD + k * STAGE_DY + STAGE_DY / 2
-                            by_id[sid]["box"] = [sx - STAGE_R, sy - STAGE_R, 2 * STAGE_R, 2 * STAGE_R]
-                    cy += row_h + 6
-                fam["box"] = [cx - 6, fy, COLS[s] * REQ_W + 12, cy - fy + 4]
-                cy += FAM_GAP
+            cy = cursor[s]
             strand["box"] = [col_x[s] + 4, top + TIER_HEAD - 12, col_w[s] - 8, max(cy - top - TIER_HEAD + 12, 40)]
             bottom_content = max(bottom_content, cy)
         height = bottom_content - top + TIER_FOOT
@@ -104,6 +99,41 @@ def layout(atlas: dict) -> None:
                          "columns": [{"strand": s, "x": col_x[s], "w": col_w[s]} for s in strands],
                          "lanes": lanes, "stage_r": STAGE_R}
     atlas["bundles"] = bundles(nodes, by_id)
+
+
+def _place_family(fam: dict, cx: float, fy: float, cols: int, children: dict, by_id: dict) -> float:
+    """Box a family, its requirements (in rows of `cols`) and their stages from fy down;
+    returns the family's bottom."""
+    cy = fy + FAM_HEAD
+    reqs = [c for c in children.get(fam["id"], []) if c["level"] == "requirement"]
+    if not reqs:
+        cy += FAM_EMPTY - FAM_HEAD + 14
+    for row in range(0, len(reqs), cols):
+        chunk = reqs[row:row + cols]
+        row_h = max(_req_height(r) for r in chunk)
+        for c, req in enumerate(chunk):
+            rx = cx + c * REQ_W
+            req["box"] = [rx + 4, cy, REQ_W - 8, _req_height(req)]
+            for k, sid in enumerate(req.get("stages", [])):
+                sx = rx + REQ_W / 2
+                sy = cy + REQ_HEAD + k * STAGE_DY + STAGE_DY / 2
+                by_id[sid]["box"] = [sx - STAGE_R, sy - STAGE_R, 2 * STAGE_R, 2 * STAGE_R]
+        cy += row_h + 6
+    fam["box"] = [cx - 6, fy, cols * REQ_W + 12, cy - fy + 4]
+    return cy + 4
+
+
+def _family_prereqs(nodes: list[dict], by_id: dict) -> dict[str, set[str]]:
+    """{family: the other families of its tier that anything inside it builds on}."""
+    out: dict[str, set[str]] = {}
+    for n in nodes:
+        for p in n.get("prereqs", []):
+            if p not in by_id or n["level"] in ("tier", "strand", "review", "exam"):
+                continue
+            a, b = _ancestor(by_id[p], "family", by_id), _ancestor(n, "family", by_id)
+            if a != b and by_id[a]["level"] == by_id[b]["level"] == "family" and a.split(".")[0] == b.split(".")[0]:
+                out.setdefault(b, set()).add(a)
+    return out
 
 
 def _ancestor(node: dict, level: str, by_id: dict) -> str:

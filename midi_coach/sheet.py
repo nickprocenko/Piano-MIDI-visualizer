@@ -5,13 +5,15 @@ writes only the parts you play (your confirmed choice, else the suggestion), eac
 its own staff, from the same notes the coach grades - so the sheet, the hit/miss marks
 and the grading agree. A vocal line goes on a staff above the piano and a bass-pedal part
 on one below it (notes.ROLES). Files whose beat grid was recovered (regrid.py) are written on that
-grid, with tempo marks where the tempo moves.
+grid, with tempo marks where the tempo moves. Dynamics (pp to ff) are marked from how hard
+the notes were played; the page shows or hides them (its Dynamics setting).
 
 Results are cached in <home>/derived, keyed by the file and the part choice.
 """
 
 from __future__ import annotations
 
+import json
 import pathlib
 from fractions import Fraction
 
@@ -20,18 +22,21 @@ from .notes import MIDI_SUFFIXES, OTHER_ROLES, SPLIT_VERSION, Score, effective_r
 from .regrid import snap
 from .transcribe import grand_staff
 
-VERSION = 6  # bump when the output changes, so cached sheets are rewritten
+VERSION = 9  # bump when the output changes, so cached sheets are rewritten
 MIN_TEMPO_CHANGE = 2.0  # BPM: smaller drifts don't get a new tempo mark
 
 
 def wanted(score: Score) -> bool:
     """Write our own piano sheet (rather than converting the whole file) for MIDI files that
-    aren't plain piano, whose beat grid had to be recovered, or that keep both hands in one
-    track (a straight conversion would put every note on one staff)."""
+    aren't plain piano, whose beat grid had to be recovered or couldn't be (a rough draft on
+    the file's own grid), that keep both hands in one track (a straight conversion would
+    put every note on one staff), whose dynamics change (a straight conversion marks none),
+    or that Clean made playable (the file itself still has the notes it took out)."""
     if pathlib.Path(score.path).suffix.lower() not in MIDI_SUFFIXES:
         return False
-    return (not is_plain_piano(score) or score.beat_map is not None or len(playable_parts(score)) == 1
-            or any(r in OTHER_ROLES for r in score.roles.values()))
+    return (score.clean is not None or not is_plain_piano(score) or score.beat_map is not None or score.played_live
+            or len(playable_parts(score)) == 1 or any(r in OTHER_ROLES for r in score.roles.values())
+            or len(dynamic_marks(score, [(Fraction(n.beat).limit_denominator(48), n.velocity) for n in score.notes])) > 1)
 
 
 TEMPO_SMOOTH_BARS = 5  # tempo marks follow the median over this many bars, not one bar's wobble
@@ -94,6 +99,41 @@ def _tempo_marks(score: Score) -> list[tuple[Fraction, float]]:
     return marks
 
 
+# Velocity -> printed dynamic: each mark's band is centred on the velocity notation programs
+# play it at (pp 33, p 49, mp 64, mf 80, f 96, ff 112).
+DYNAMIC_BANDS = ((41, "pp"), (57, "p"), (72, "mp"), (88, "mf"), (104, "f"))
+MIN_DYNAMIC_SPREAD = 4.0  # velocity spread below this: a sequenced file with no dynamics to show
+
+
+def dynamic_marks(score: Score, onsets: list[tuple[Fraction, int]]) -> list[tuple[Fraction, str]]:
+    """Dynamic marks from how hard the notes were played: one at the first note, then one
+    wherever the level changes and stays changed for the next bar too (an accented bar is
+    not a new dynamic). A bar's level is the 75th percentile of its velocities, so a melody
+    over a softer accompaniment is heard at the melody's level. A file with (nearly) one
+    velocity throughout has no dynamics, so it gets none."""
+    import bisect
+    import statistics
+
+    if len(onsets) < 2 or statistics.pstdev(v for _, v in onsets) < MIN_DYNAMIC_SPREAD or not score.bars:
+        return []
+    starts = [Fraction(b.start_beat).limit_denominator(48) for b in score.bars]
+    per_bar: dict[int, list[tuple[Fraction, int]]] = {}
+    for at, velocity in sorted(onsets):
+        per_bar.setdefault(max(0, bisect.bisect_right(starts, at) - 1), []).append((at, velocity))
+
+    def level(bar: list[tuple[Fraction, int]]) -> str:
+        velocities = sorted(v for _, v in bar)
+        loud = velocities[min(len(velocities) - 1, (3 * len(velocities)) // 4)]
+        return next((mark for top, mark in DYNAMIC_BANDS if loud < top), "ff")
+
+    bars = [(per_bar[b][0][0], level(per_bar[b])) for b in sorted(per_bar)]
+    marks = [bars[0]]
+    for (at, here), (_, after) in zip(bars[1:], bars[2:] + [(None, None)]):
+        if here != marks[-1][1] and after == here:
+            marks.append((at, here))
+    return marks
+
+
 def build(score: Score, split_note: int = 60) -> dict:
     """{xml, bars, notes, key, parts, staves} for the parts the user plays, plus the vocal
     line and the bass pedals; staves is the role of each staff, top to bottom."""
@@ -105,18 +145,21 @@ def build(score: Score, split_note: int = 60) -> dict:
         raise ValueError("No notes in the chosen parts.")
     side = analysis.side_resolver(score, split_note)
     grids = grids_for([n.beat for n in notes + pedals])
-    events = []
+    events, onsets = [], []
     for group, staff in ((notes, None), (pedals, "pedals")):
         for n in group:
             on = _beat(n.beat, grids)
             events.append((staff or side(n), on, _end(score.beat_of(n.end), on, grids), n.pitch))
+            onsets.append((on, n.velocity))
     tune_grids = grids_for([n.beat for n in sung])  # its own grid: a sung triplet over straight piano
     tune = []
     for n in sung:
         on = _beat(n.beat, tune_grids)
         tune.append((on, _end(score.beat_of(n.end), on, tune_grids), n.pitch, None))
     title = pathlib.Path(score.path).stem
-    out = grand_staff(events, title, time_signatures(score), _tempo_marks(score), melody=tune or None)
+    source = f"{pathlib.Path(score.path).name}, cleaned for two hands: {score.clean['summary']}" if score.clean else None
+    out = grand_staff(events, title, time_signatures(score), _tempo_marks(score), melody=tune or None,
+                      dynamics=dynamic_marks(score, onsets), source=source)
     staves = ["vocals"] * bool(tune) + ["right", "left"] + ["pedals"] * bool(pedals)
     return {**out, "parts": info.get("method"), "staves": staves}
 
@@ -148,7 +191,9 @@ def piano_xml(score: Score, split_note: int = 60) -> str:
 
     choice = ",".join(f"{i}{h[0]}" for i, h in sorted(score.roles.items())) or "suggested"
     hands = f"{hand_model.splitter()}-v{SPLIT_VERSION}"  # a sheet split by the old search is rebuilt once the model is installed
-    cache = library.derived_path(score.path, "musicxml", f"sheet-v{VERSION}|{choice}|{split_note}|{score.regrid is not None}|{hands}")
+    grid = json.dumps(score.beat_map.to_json()) if score.beat_map else ""  # a recovered grid that changes gives a new sheet
+    clean = f"|clean-v{score.clean['version']}" if score.clean else ""
+    cache = library.derived_path(score.path, "musicxml", f"sheet-v{VERSION}|{choice}|{split_note}|{grid}|{hands}{clean}")
     try:
         return cache.read_text(encoding="utf-8")
     except OSError:

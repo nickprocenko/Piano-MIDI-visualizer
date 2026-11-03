@@ -22,17 +22,17 @@ REFERENCE = library.REPO_ROOT / "reference"
 # Readability findings a song may still have (engraving.lint); every other song must have none.
 # Great Balls of Fire: its one-track piano gives the left hand chords over two octaves wide
 # (see 'wide' below), which no clef or 8va can make readable.
-LINT_ALLOWED = {"Jerry Lee Lewis - Great Balls of Fire [1379].mid": {"ledger-lines": 1, "busy-octave-marks": 1}}
+LINT_ALLOWED = {"Jerry Lee Lewis - Great Balls of Fire.mid": {"ledger-lines": 1, "busy-octave-marks": 1}}
 
 # file name: (key, suggested {hand: parts}, baseline counts)
 SONGS = {
-    "Pink Floyd - Great Gig in the Sky [3447].mid": ("Gm", {"both": [2]}, dict(wide=0, hops=2, ledger=2, accidentals=85)),
-    "The Beatles - Let It Be [2552].mid": ("C", {"both": [3]}, dict(wide=0, hops=0, ledger=99, accidentals=8)),
+    "Pink Floyd - Great Gig in the Sky.mid": ("Gm", {"both": [2]}, dict(wide=0, hops=2, ledger=2, accidentals=85)),
+    "The Beatles - Let It Be.mid": ("C", {"both": [3]}, dict(wide=0, hops=0, ledger=99, accidentals=8)),
     "Billy Joel - Piano Man [157].mid": ("C", {"right": [0], "left": [1]}, dict(wide=0, hops=0, ledger=18, accidentals=48)),
-    "Journey - Don't Stop Believin [3093].mid": ("Db", {"both": [0]}, dict(wide=0, hops=0, ledger=35, accidentals=0)),
-    "The Doors - Light My Fire [2820].mid": ("D", {"right": [0], "left": [6]}, dict(wide=0, hops=0, ledger=7, accidentals=264)),
-    "Jerry Lee Lewis - Great Balls of Fire [1379].mid": ("C", {"both": [0], "left": [1]}, dict(wide=59, hops=0, ledger=212, accidentals=198)),
-    "Queen - Bohemian Rhapsody [3476].mid": ("Bb", {"both": [2]}, dict(wide=3, hops=7, ledger=30, accidentals=246)),
+    "Journey - Don't Stop Believin.mid": ("Db", {"both": [0]}, dict(wide=0, hops=0, ledger=35, accidentals=0)),
+    "The Doors - Light My Fire.mid": ("D", {"right": [0], "left": [6]}, dict(wide=0, hops=0, ledger=7, accidentals=264)),
+    "Jerry Lee Lewis - Great Balls of Fire.mid": ("C", {"both": [0], "left": [1]}, dict(wide=59, hops=0, ledger=212, accidentals=198)),
+    "Queen - Bohemian Rhapsody.mid": ("Bb", {"both": [2]}, dict(wide=3, hops=7, ledger=30, accidentals=246)),
 }
 MARK_REACH = 0.26  # beats: how far docs/notation.html looks for a note to mark
 

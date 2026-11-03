@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import random
 
-from . import aural, content_dir, load_atlas, load_syllabus
+from . import aural, content_dir, first_steps, load_atlas, load_syllabus
 
 ITEMS_PER_SKILL = 2
 METRES = {"metre-2-3": [2, 3], "metre-2-3-4": [2, 3, 4], "metre-2-3-4-68": [2, 3, 4, 6]}
@@ -201,7 +201,7 @@ def write_lessons(seed: int = 1) -> int:
     folder.mkdir(parents=True, exist_ok=True)
     count = 0
     for req in atlas["nodes"]:
-        if req["level"] != "requirement" or req["kind"] != "aural":
+        if req["level"] != "requirement" or req["kind"] != "aural" or req["tier"] in first_steps.OURS:  # those write their own
             continue
         test = tests.get((req["tier"], req["spec"]["id"]), req["spec"])
         for sid in req["stages"]:

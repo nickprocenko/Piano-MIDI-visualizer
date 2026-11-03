@@ -205,7 +205,8 @@ def review_items(atlas: dict, states: dict, tier: str, count: int = 10) -> list[
 
 def path_families(atlas: dict, states: dict, targets: list[str], today: dt.date | None = None,
                   extra_prereqs: dict[str, list[str]] | None = None, first: list[str] | None = None) -> list[dict]:
-    """A goal's Path: every requirement the targets need (their prerequisites, recursively)
+    """A goal's Path: every requirement the targets need (their prerequisites, recursively, through
+    the ones not known yet)
     that isn't proficient yet - or is mastered but due a recheck - in an order that keeps
     prerequisites first, then by tier, strand and position; grouped into families in the
     order their first requirement comes up. extra_prereqs: temporary bridge nodes' links.
@@ -239,15 +240,6 @@ def path_families(atlas: dict, states: dict, targets: list[str], today: dt.date 
             raw = by_id[rid].get("prereqs", [])
         return [r for p in raw for r in requirements_of(p)]
 
-    wanted: set[str] = set()
-    stack = [r for t in targets for r in requirements_of(t)]
-    while stack:
-        rid = stack.pop()
-        if rid in wanted:
-            continue
-        wanted.add(rid)
-        stack += prereqs(rid)
-
     def needed(rid: str) -> tuple[bool, bool]:
         st = states.get(rid)
         if st is None:
@@ -255,6 +247,18 @@ def path_families(atlas: dict, states: dict, targets: list[str], today: dt.date 
         if rank(st["level"]) < rank("proficient"):
             return True, False
         return recheck_due(st, today), True
+
+    # A requirement you know already brings none of its prerequisites (knowing Initial's C major
+    # scale means First steps' finger games aren't on your way to Grade 1).
+    wanted: set[str] = set()
+    stack = [r for t in targets for r in requirements_of(t)]
+    while stack:
+        rid = stack.pop()
+        if rid in wanted:
+            continue
+        wanted.add(rid)
+        if needed(rid)[0]:
+            stack += prereqs(rid)
 
     keep = {}
     for rid in wanted:

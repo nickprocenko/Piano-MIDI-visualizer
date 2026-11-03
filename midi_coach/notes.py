@@ -64,6 +64,7 @@ class Note:
     velocity: int
     part: int = 0
     beat: float = 0.0  # quarter notes from the start of the file (for score display)
+    hand: str | None = None  # 'right' | 'left' when Clean (playable.py) gave it to a hand other than its part's
 
     @property
     def duration(self) -> float:
@@ -124,6 +125,8 @@ class Score:
     beat_map: object | None = field(default=None, repr=False)
     regrid: dict | None = field(default=None, repr=False)
     _sides: dict = field(default_factory=dict, repr=False)  # split_resolver's cache
+    # Set when Clean made the hands' parts playable (playable.py): what it changed.
+    clean: dict | None = field(default=None, repr=False)
 
     def beat_of(self, t: float) -> float:
         """Beat (quarter notes from the start) at a time in seconds."""
@@ -738,6 +741,13 @@ def select_notes(
     base, plus, extra = hand.partition("+")
     if not parts and (base in OTHER_ROLES or plus):
         return _select_role(score, hand, base, extra, bars, split_note)
+    if score.clean and not parts and hand in ("right", "left"):
+        # Clean handed some notes to the other hand, so a note's hand isn't always its part's.
+        from .analysis import side_resolver
+
+        notes, info = select_notes(score, "both", bars=bars, split_note=split_note)
+        side = side_resolver(score, split_note)
+        return [n for n in notes if side(n) == hand], {**info, "hand": hand}
     info: dict = {"hand": hand}
     notes = score.notes
     playable = playable_parts(score)
@@ -861,6 +871,77 @@ ONE_HANDED = 0.9  # share of a part's notes above middle C for it to be a right-
 
 def _is_keyboard(p: Part) -> bool:
     return p.is_piano or (p.program is not None and p.program in _ORGANS)
+
+
+# Every keyboard a band's keyboard player might cover, for keyboard_parts: pianos and organs,
+# synth strings and brass, synth leads and pads. Not the leads that stand in for a voice (85)
+# or a guitar (84, 87).
+_SYNTH_PROGRAMS = {50, 51, 62, 63} | set(range(80, 96)) - {84, 85, 87}
+_DRUM_NAME = re.compile(r"\b(drums?|snare|toms?|cym\w*|hi.?hats?|kick|rototoms?)\b")
+_VOICE_NAME = re.compile(r"voice|vocal|vox|choir|sing")
+_KEYBOARD_NAME = re.compile(r"piano|organ|synth|keys|keyboard|rhodes|wurli|moog|clav|mellotron|hammond|harpsi|\be\.?p\b")
+_OTHER_NAME = re.compile(r"guit|gtr|bass|sax|oboe|flute|trumpet|horn|violin|viola|cello|strings")
+MIN_KEYBOARD_NOTES = 16  # fewer than this isn't a part worth practicing
+
+
+def keyboard_parts(score: Score) -> list[dict[int, str]]:
+    """Every keyboard part of a band file a keyboard player would learn, busiest first, each as
+    {part index: 'right' | 'left' | 'both'}: pianos, organs and synths, by track name first and
+    then by instrument. Tracks that are one keyboard split up (a right and a left hand, or the
+    notes of one chord on two channels) come as one part; a line one hand plays, above or below
+    middle C, goes to that hand, not split between two. Drums, voices, bass and parts that
+    only double a bigger keyboard part are left out. Wider than the hand suggestion, which only
+    looks for the part a pianist's two hands would take."""
+    found = []
+    for p in score.parts:
+        name = p.name.lower()
+        if p.drums or _is_bass(p) or p.note_count < MIN_KEYBOARD_NOTES or _DRUM_NAME.search(name) or _VOICE_NAME.search(name):
+            continue
+        if _KEYBOARD_NAME.search(name):
+            found.append(p)
+        elif not _OTHER_NAME.search(name) and (_is_keyboard(p) or p.program in _SYNTH_PROGRAMS):
+            found.append(p)
+    doubles = _doublings(score, found)
+    found = [p for p in found if p.index not in doubles]
+
+    def family(p: Part) -> int:
+        return 0 if p.is_piano else p.program // 8
+
+    groups: list[dict[int, str]] = []
+    taken: set[int] = set()
+    for p in sorted(found, key=lambda p: (-p.note_count, p.index)):
+        if p.index in taken:
+            continue
+        group = {p.index: "both"}
+        taken.add(p.index)
+        for q in found:
+            if q.index in taken or family(q) != family(p):
+                continue
+            if len(group) == 1 and _hand_pair(score, p, q):
+                hi, lo = sorted((p, q), key=lambda x: -x.mean_pitch)
+                group = {hi.index: "right", lo.index: "left"}
+                taken.add(q.index)
+            elif _same_rhythm(score, q, p):  # the other notes of its chords
+                group[q.index] = "both"
+                taken.add(q.index)
+        if len(group) == 1 and not _two_handed(score, p):  # a line for one hand, on its side of middle C
+            if _share_below(score, p, 60) <= 1 - ONE_HANDED:
+                group = {p.index: "right"}
+            elif _share_below(score, p, 60 + 8) >= ONE_HANDED:
+                group = {p.index: "left"}
+        groups.append(group)
+    return groups
+
+
+def _same_rhythm(score: Score, small: Part, big: Part) -> bool:
+    """Nearly every note of `small` starts with a note of `big`, at any pitch."""
+    starts = sorted(n.start for n in _part_notes(score, big))
+    mine = _part_notes(score, small)
+    hit = 0
+    for n in mine:
+        k = bisect.bisect_left(starts, n.start - CHORD_GAP)
+        hit += k < len(starts) and starts[k] <= n.start + CHORD_GAP
+    return hit >= DOUBLING * len(mine)
 
 
 def _part_notes(score: Score, p: Part) -> list[Note]:

@@ -19,9 +19,10 @@ import os
 import pathlib
 import queue
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 from .notes import MUSICXML_SUFFIXES, Score
 
@@ -29,7 +30,16 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATIC_FILES = {
     "/": (pathlib.Path(__file__).parent / "static" / "coach.html", "text/html; charset=utf-8"),
     "/atlas.js": (pathlib.Path(__file__).parent / "static" / "atlas.js", "application/javascript; charset=utf-8"),
-    "/profiles.js": (pathlib.Path(__file__).parent / "static" / "profiles.js", "application/javascript; charset=utf-8"),
+    "/today.js": (pathlib.Path(__file__).parent / "static" / "today.js", "application/javascript; charset=utf-8"),
+    "/profiles.js":(pathlib.Path(__file__).parent / "static" / "profiles.js", "application/javascript; charset=utf-8"),
+    "/flute.js": (pathlib.Path(__file__).parent / "static" / "flute.js", "application/javascript; charset=utf-8"),
+    "/video.js": (pathlib.Path(__file__).parent / "static" / "video.js", "application/javascript; charset=utf-8"),
+    "/youtube.js": (pathlib.Path(__file__).parent / "static" / "youtube.js", "application/javascript; charset=utf-8"),
+    "/file.js": (pathlib.Path(__file__).parent / "static" / "file.js", "application/javascript; charset=utf-8"),
+    "/prefs.js": (pathlib.Path(__file__).parent / "static" / "prefs.js", "application/javascript; charset=utf-8"),
+    "/roll.js": (pathlib.Path(__file__).parent / "static" / "roll.js", "application/javascript; charset=utf-8"),
+    "/coach.png": (pathlib.Path(__file__).parent / "static" / "coach.png", "image/png"),
+    "/favicon.ico": (pathlib.Path(__file__).parent / "static" / "coach.ico", "image/x-icon"),
     "/notation.html": (REPO_ROOT / "docs" / "notation.html", "text/html; charset=utf-8"),
     "/opensheetmusicdisplay.min.js": (REPO_ROOT / "src" / "static" / "opensheetmusicdisplay.min.js", "application/javascript"),
 }
@@ -43,15 +53,46 @@ def sheet_problem(score: Score) -> str | None:
 
     if pathlib.Path(score.path).suffix.lower() in MUSICXML_SUFFIXES:
         return None  # already notation
-    if score.played_live:
-        return ("This file was recorded live, so it has no steady beat to write sheet music from. "
-                "Practice still works: Learn mode follows the notes, and the visualizer shows them as falling notes.")
     if sheet.wanted(score):
         return None  # a piano sheet of the chosen parts only: small whatever the file
     if len(score.notes) > SHEET_MAX_NOTES:
         return (f"This file has {len(score.notes):,} notes across {len(score.parts)} parts - too much to draw as sheet "
-                "music. Choose the parts you play and practise those.")
+                "music. Choose the parts you play and practice those.")
     return None
+
+
+def cleanup_state(score: Score) -> str | None:
+    """'off' for a MIDI file with no reliable beat (its sheet is a rough draft that Auto clean
+    can redraw), 'on' once Auto clean has redrawn it, None for every other file."""
+    if score.regrid and score.regrid.get("cleaned"):
+        return "on"
+    if score.played_live and pathlib.Path(score.path).suffix.lower() not in MUSICXML_SUFFIXES:
+        return "off"
+    return None
+
+
+def playable_state(score: Score) -> dict | None:
+    """Maestro → This sheet's Clean button for a MIDI file: {"on", "summary", "warning"}:
+    what Clean changed, or where the hands are asked for what they can't play (a warning over
+    the sheet). None for a file that is notation already."""
+    from . import playable
+
+    if pathlib.Path(score.path).suffix.lower() in MUSICXML_SUFFIXES:
+        return None
+    if score.clean:
+        return {"on": True, "summary": score.clean["summary"], "warning": None}
+    bars = playable.unplayable_bars(score)
+    return {"on": False, "summary": None, "warning": (
+        f"In {playable._bars_text(bars)} a hand is asked for more than it can play (a chord too wide, "
+        "or a key two parts play at once). Clean makes the parts fit two hands.") if bars else None}
+
+
+SHEET_WARNINGS = {
+    "off": ("No steady beat in this file (it was probably played live), so the bar lines and rhythms "
+            "in this sheet are rough. Auto clean follows the playing to find a beat and redraws it."),
+    "on": ("Auto-cleaned: the beat was guessed from the playing, so check the rhythms by ear. "
+           "The notes still play and are graded at their real times."),
+}
 
 
 class _Server(ThreadingHTTPServer):
@@ -59,6 +100,26 @@ class _Server(ThreadingHTTPServer):
     # listening, so requests reach whichever one Windows picks. Without it a
     # busy port raises and start() moves on to the next one.
     allow_reuse_address = os.name != "nt"
+
+
+def roll_notes(score: Score) -> list[list]:
+    """The notes for the coach page's falling-notes view, as [beat, length in beats, pitch, role]
+    with the role the Parts menu shows and hides (right, left, pedals, vocals). Parts with no
+    role (drums, the rest of a band) are left out, as on the piano sheet."""
+    from .analysis import side_resolver
+    from .notes import HAND_ROLES, effective_roles, playable_parts
+
+    roles = effective_roles(score) or {p.index: "both" for p in playable_parts(score)}
+    side = side_resolver(score)
+    out = []
+    for n in score.notes:
+        role = roles.get(n.part)
+        if role is None:
+            continue
+        if role in HAND_ROLES:
+            role = side(n)
+        out.append([round(n.beat, 3), round(max(0.05, score.beat_of(n.end) - n.beat), 3), n.pitch, role])
+    return out
 
 
 def score_to_musicxml(path: str) -> str:
@@ -78,6 +139,7 @@ class DisplayHub:
         self._clients: list[queue.Queue] = []
         self._server: ThreadingHTTPServer | None = None
         self.url: str | None = None
+        self.started: float | None = None  # when the server opened its port; the launcher compares it with the code
         self.score_path: str | None = None
         self._score_key: tuple | None = None
         self._xml_cache: dict[str, str] = {}
@@ -85,8 +147,10 @@ class DisplayHub:
         self._version = 0
         self._marks: dict[tuple[float, int], str] = {}
         self._heat: list[dict] | None = None
+        self._aids: dict | None = None  # labels the coach put on bars (aids.py)
         self._status = ""
         self._cursor: dict | None = None
+        self._cursor_at = 0.0  # time.monotonic() of the last cursor message
         self._lesson: dict | None = None
         self._lesson_version = 0
         self._session: dict = {"type": "session", "active": False}
@@ -98,6 +162,10 @@ class DisplayHub:
         self.voice_handler = None
         # callable(audio: bytes) -> {heard}, for POST /voice/transcribe (an answer said aloud, no chat)
         self.transcribe_handler = None
+        # The YouTube extension's last command: {seen: time.time(), version} (version None before 1.1)
+        self.extension: dict | None = None
+        # callable(version) run on each of its commands, to remember it across restarts
+        self.extension_hook = None
 
     # -- server ------------------------------------------------------------
 
@@ -118,6 +186,7 @@ class DisplayHub:
         self._server.daemon_threads = True
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
         self.url = f"http://127.0.0.1:{self._server.server_address[1]}/"
+        self.started = time.time()
         return self.url
 
     def shutdown(self) -> None:
@@ -137,29 +206,46 @@ class DisplayHub:
     # -- state -------------------------------------------------------------
 
     def load_score(self, score: Score) -> None:
-        key = (score.path, tuple(sorted(score.roles.items())))  # a new part choice redraws the sheet
+        from . import details, lessons, sheet
+
+        # A new part choice, turning Auto clean or Clean on or off, or new details redraws the sheet.
+        key = (score.path, tuple(sorted(score.roles.items())), score.regrid is not None, details.stamp(score.path), score.clean is not None)
         if key == self._score_key and self._score_payload:
             return
-        from . import sheet
-
         notice = sheet_problem(score)
         xml = None if notice else self.sheet_xml(score)
         staves = sheet.staves(score) if xml else []
+        offered = bool(xml) and details.offered(score.path)
+        if offered:
+            xml = details.apply(xml, details.load(score.path), staves, score)
         first = score.bars[0] if score.bars else None
+        bars = [{"number": bar.number, "start_beat": round(bar.start_beat, 4), "end_beat": round(bar.end_beat, 4)}
+                for bar in score.bars]
         # The metronome's Match score / Follow score need a real beat grid.
         tempo = None if score.played_live or not first else {
             "bpm": round(score.bpm_at(first.start), 2), "beats": first.numerator, "type": first.denominator}
+        cleanup = cleanup_state(score) if xml else None
+        playable = playable_state(score) if xml else None
+        notes = roll_notes(score)
         with self._lock:
             self._version += 1
+            new_piece = score.path != self.score_path
+            if new_piece:
+                self._aids = None
             self.score_path = score.path
             self._score_key = key
             self._score_payload = {"version": self._version, "title": pathlib.Path(score.path).stem, "path": score.path, "xml": xml,
-                                   "notice": notice, "grid": not score.played_live, "tempo": tempo, "staves": staves}
+                                   "notice": notice, "warning": SHEET_WARNINGS.get(cleanup), "cleanup": cleanup, "playable": playable,
+                                   "details": details.status(score.path) if offered else None,
+                                   "grid": not score.played_live, "tempo": tempo, "staves": staves, "bars": bars,
+                                   "notes": notes, "playlist": lessons.playlist_position(score.path)}
             self._marks.clear()
             self._heat = None
             self._cursor = None
             self._status = ""
         self._broadcast({"type": "score", "version": self._version, "title": pathlib.Path(score.path).stem})
+        if new_piece:  # the labels were for the last piece's bars
+            self._broadcast({"type": "aids", "bars": [], "off": False})
 
     def sheet_xml(self, score: Score) -> str | None:
         """What to draw for a score: a piano sheet of the chosen parts for band arrangements and
@@ -189,6 +275,15 @@ class DisplayHub:
             self._heat = bars
         self._broadcast({"type": "heat", "bars": bars or []})
 
+    def aids(self, bars: list[dict], off: bool = False) -> None:
+        """The bars the coach labels for this player, [{bar, start, end, kinds}] with kinds from
+        "names" (note names) and "counts" (counting); the page shows them at its Labels level.
+        off: no labels at all, whatever that level is (a mock exam)."""
+        msg = {"type": "aids", "bars": list(bars), "off": off}
+        with self._lock:
+            self._aids = msg
+        self._broadcast(msg)
+
     def cursor(self, beat: float, beats_per_sec: float = 0.0, live: bool = False, until: float | None = None) -> None:
         """live=True: a practice session drives the cursor (the visualizer then lets it
         override Learn Mode's own scrolling); otherwise it's just positioning.
@@ -199,7 +294,18 @@ class DisplayHub:
             msg["until"] = round(until, 4)
         with self._lock:
             self._cursor = msg
+            self._cursor_at = time.monotonic()
         self._broadcast(msg)
+
+    def cursor_beat(self) -> float | None:
+        """Where the cursor is now: its last position carried on at its speed, for at most two
+        seconds so a cursor nobody updates any more doesn't run off. None before any cursor."""
+        with self._lock:
+            cur, at = self._cursor, self._cursor_at
+        if not cur:
+            return None
+        beat = cur["beat"] + cur["bps"] * min(time.monotonic() - at, 2.0)
+        return min(beat, cur["until"]) if "until" in cur else beat
 
     def lesson(self, payload: dict) -> int:
         """Publish a lesson for the visualizer's Learn Mode (title, xml, events, mode...)."""
@@ -240,6 +346,16 @@ class DisplayHub:
         None stops it. Not replayed to pages that connect later."""
         self._broadcast({"type": "metronome", **(grid or {"stop": True})})
 
+    def keys(self, held: list[int]) -> None:
+        """The keys held down on the keyboard now, while a run listens to it (the falling-notes
+        view lights them). Not replayed to pages that connect later."""
+        self._broadcast({"type": "keys", "on": sorted(held)})
+
+    def sound(self, notes: list | None) -> None:
+        """Have the coach page play notes itself ([[start sec, length sec, pitch, velocity], ...],
+        a flute profile's examples), or stop them (None). Not replayed to pages that connect later."""
+        self._broadcast({"type": "sound", "notes": notes} if notes is not None else {"type": "sound", "stop": True})
+
     def flash(self, text: str) -> None:
         self._broadcast({"type": "flash", "text": text})
 
@@ -268,6 +384,8 @@ class DisplayHub:
                 out.append({"type": "marks", "reset": True, "marks": [{"beat": b, "pitch": p, "status": s} for (b, p), s in self._marks.items()]})
             if self._heat:
                 out.append({"type": "heat", "bars": self._heat})
+            if self._aids:
+                out.append(self._aids)
             if self._cursor:
                 cur = {**self._cursor, "bps": 0.0}
                 if "until" in cur:  # mid-glide: a late page parks at the waiting chord
@@ -332,6 +450,18 @@ def _make_handler(hub: DisplayHub):
             self.end_headers()
             self.wfile.write(body)
 
+        def _from_extension(self) -> None:
+            """Note a command from the YouTube extension (its worker's requests carry its origin)."""
+            version = self.headers.get("X-Piano-Coach-Extension")
+            if not version and not (self.headers.get("Origin") or "").startswith(("chrome-extension://", "extension://")):
+                return
+            hub.extension = {"seen": time.time(), "version": version}
+            if hub.extension_hook:
+                try:
+                    hub.extension_hook(version)
+                except OSError:
+                    pass
+
         def do_POST(self) -> None:
             path = self.path.split("?", 1)[0]
             voice = {"/voice": hub.voice_handler, "/voice/transcribe": hub.transcribe_handler}.get(path)
@@ -343,6 +473,7 @@ def _make_handler(hub: DisplayHub):
                     result = {"error": str(exc)}
                 return self._send(400 if "error" in result else 200, json.dumps(result).encode(), "application/json")
             handler = hub.commands.get(path[len("/cmd/"):]) if path.startswith("/cmd/") else None
+            self._from_extension()
             if handler is None:
                 return self._send(404, b'{"error":"unknown command"}', "application/json")
             try:
@@ -360,6 +491,8 @@ def _make_handler(hub: DisplayHub):
                 return self._events()
             if path in ("/tts", "/tts/voices"):
                 return self._tts(path)
+            if path == "/version":  # for midi_coach.launch: is this copy older than the code on disk?
+                return self._send(200, json.dumps({"started": hub.started, "pid": os.getpid()}).encode(), "application/json")
             if path == "/lesson":
                 payload = hub.lesson_payload()
                 if not payload:
@@ -370,6 +503,8 @@ def _make_handler(hub: DisplayHub):
                 if not payload:
                     return self._send(404, b'{"error":"no score loaded"}', "application/json")
                 return self._send(200, json.dumps(payload).encode(), "application/json")
+            if path == "/file":  # File → Download: the sheet on the page, as the file it was loaded from
+                return self._download()
             if path in STATIC_FILES:
                 file, ctype = STATIC_FILES[path]
                 try:
@@ -377,6 +512,23 @@ def _make_handler(hub: DisplayHub):
                 except OSError:
                     pass
             self._send(404, b"not found", "text/plain")
+
+        def _download(self) -> None:
+            file = pathlib.Path(hub.score_path) if hub.score_path else None
+            try:
+                data = file.read_bytes() if file else None
+            except OSError:
+                data = None
+            if data is None:
+                return self._send(404, b'{"error":"no score loaded"}', "application/json")
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(file.name)}")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
 
         def _tts(self, path: str) -> None:
             """Kokoro speech for the coach page; 404 tells the page to use the browser's voices."""

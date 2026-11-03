@@ -98,6 +98,31 @@ def _whole_words(words: list[tuple[float, str, bool]], placed: set[int]) -> dict
     return out
 
 
+def place_lyrics(score, tune_notes: list[Note], words: list[tuple[float, str, bool]]) -> dict[int, tuple[str, str]]:
+    """(text, syllabic) for the tune notes (by index) the file's syllables are sung on.
+
+    Syllables go onto the tune's notes in order: each on the nearest note after the previous
+    syllable's, within LYRIC_REACH beats (a tie goes to the earlier note). Singers anticipate
+    the beat - 'self in times' a sixteenth early - so the nearest note isn't always on the beat."""
+    lyric_on: dict[int, int] = {}
+    beats = [n.beat for n in tune_notes]
+    last = -1
+    for i, (when, _, _) in enumerate(words):
+        at = score.beat_of(when)
+        best = None
+        for k in range(last + 1, len(beats)):
+            d = beats[k] - at
+            if d > LYRIC_REACH:
+                break
+            if d >= -LYRIC_REACH and (best is None or abs(d) < abs(beats[best] - at) - 1e-6):
+                best = k
+        if best is not None:
+            lyric_on[best] = i
+            last = best
+    sung = _whole_words(words, set(lyric_on.values()))
+    return {k: sung[i] for k, i in lyric_on.items()}
+
+
 def _snapped(score, n: Note, grids) -> tuple[Fraction, Fraction]:
     on = _beat(n.beat, grids)
     return on, _end(score.beat_of(n.end), on, grids)
@@ -139,28 +164,8 @@ def song_lesson(reference: str, title: str | None = None, melody: int | None = N
     tune_notes = sorted((n for n in score.notes if n.part == tune_part.index), key=lambda n: (n.start, -n.pitch))
     tune_grids = grids_for([n.beat for n in tune_notes])
     words = midi_lyrics(score.path) if pathlib.Path(score.path).suffix.lower() in MIDI_SUFFIXES else []
-    # Syllables go onto the tune's notes in order: each on the nearest note after the previous
-    # syllable's, within LYRIC_REACH beats (a tie goes to the earlier note). Singers anticipate
-    # the beat - 'self in times' a sixteenth early - so the nearest note isn't always on the beat.
-    lyric_on: dict[int, int] = {}
-    beats = [n.beat for n in tune_notes]
-    last = -1
-    for i, (when, _, _) in enumerate(words):
-        at = score.beat_of(when)
-        best = None
-        for k in range(last + 1, len(beats)):
-            d = beats[k] - at
-            if d > LYRIC_REACH:
-                break
-            if d >= -LYRIC_REACH and (best is None or abs(d) < abs(beats[best] - at) - 1e-6):
-                best = k
-        if best is not None:
-            lyric_on[best] = i
-            last = best
-    sung = _whole_words(words, set(lyric_on.values()))
-    tune = []
-    for k, n in enumerate(tune_notes):
-        tune.append((*_snapped(score, n, tune_grids), n.pitch, sung.get(lyric_on[k]) if k in lyric_on else None))
+    sung = place_lyrics(score, tune_notes, words)
+    tune = [(*_snapped(score, n, tune_grids), n.pitch, sung.get(k)) for k, n in enumerate(tune_notes)]
 
     made = "converted from MIDI: note lengths and rests read from how long keys were held" \
         if pathlib.Path(score.path).suffix.lower() in MIDI_SUFFIXES else "from MusicXML"
@@ -193,7 +198,7 @@ def song_lesson(reference: str, title: str | None = None, melody: int | None = N
 
     readability = engraving.lint(out["xml"])
     return {"path": str(path), "title": title, "category": category, "bars": out["bars"], "key": out["key"],
-            "key_changes": out["keys"], "lyrics": f"{len(lyric_on)} of {len(words)} syllables placed" if words else "none in the file",
+            "key_changes": out["keys"], "lyrics": f"{len(sung)} of {len(words)} syllables placed" if words else "none in the file",
             "piano": info.get("method"), "vocal": f"part {tune_part.index} {tune_part.name} ({tune_part.instrument}), {why}",
             "check": {k_: {"notes": n, "same as source": ok, **({"missing": miss, "extra": extra} if not ok else {})}
                       for k_, (n, ok, miss, extra) in check.items()},

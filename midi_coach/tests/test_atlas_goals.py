@@ -173,3 +173,22 @@ def test_a_bridge_belongs_to_its_own_goal(content):
     theirs = [r["id"] for f in planner.path(second) for r in f["requirements"]]
     assert first["bridges"][0] in mine and first["bridges"][0] not in theirs
     assert set(theirs) == set(mine) - {first["bridges"][0]}
+
+
+def test_a_route_to_a_lesson_is_shown_then_quick_saved_once(content):
+    from midi_coach.atlas.runtime import AtlasCoach
+
+    coach = AtlasCoach()
+    g1 = next(n for n in content["nodes"] if n["level"] == "requirement" and n["tier"] == "g1" and n.get("prereqs"))
+    stage = g1["stages"][0]
+    route = coach.cmd_route({"id": stage})  # an exercise's route is its lesson's
+    order = [r["id"] for f in route["path"] for r in f["requirements"]]
+    assert route["target"] == g1["id"] and order[-1] == g1["id"] and set(g1["prereqs"]) & set(order[:-1])
+    assert all(any(s["id"] for s in r["stages"]) for f in route["path"] for r in f["requirements"])
+    assert store.load_goals()["goals"] == []  # looking saves nothing
+
+    state = coach.cmd_goal_quick({"id": stage})
+    assert state["goal"]["title"] == g1["title"] and state["goal"]["targets"] == [g1["id"]]
+    assert [r["id"] for f in state["path"] for r in f["requirements"]] == order
+    again = coach.cmd_goal_quick({"id": g1["id"]})
+    assert len(again["goals"]) == 1 and again["active"] == state["active"]

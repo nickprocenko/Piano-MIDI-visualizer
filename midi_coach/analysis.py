@@ -238,7 +238,13 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
 
 
 def side_resolver(score: Score, split_note: int = 60):
-    """Return a function Note -> 'right'/'left' for reference notes."""
+    """Return a function Note -> 'right'/'left' for reference notes: the hand Clean gave a
+    note (Note.hand), else its part's."""
+    side = _part_side_resolver(score, split_note)
+    return lambda n: n.hand or side(n)
+
+
+def _part_side_resolver(score: Score, split_note: int = 60):
     hands = effective_hands(score)
     if hands:
         shared = split_resolver(score, {i for i, h in hands.items() if h == "both"}, split_note)

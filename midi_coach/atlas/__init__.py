@@ -12,6 +12,10 @@ tree and its generated lessons live in <home>/atlas/content (never in git): this
 holds only the engine, the templates and made-up sample data for the tests.
 
     python -m midi_coach.atlas.build        build <home>/atlas/content/atlas.json
+
+A flute profile gets Pan instead: the same kind of tree for the flute (a First notes tier,
+then ABRSM Flute Grades 1-2), built by atlas.pan into <home>/atlas/pan with the same
+engine, page and progress store.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import json
 import os
 import pathlib
 
+from .. import profiles
 from ..library import home, profile_home
 
 PACKAGE = pathlib.Path(__file__).parent
@@ -33,6 +38,12 @@ STRANDS = [
     {"id": "theory", "title": "Theory", "glyph": "♭"},
 ]
 LEVELS = ("tier", "strand", "family", "requirement", "stage")  # far to near; plus "review" and "exam"
+TREES = {"piano": {"name": "Roadmap", "folder": "content"}, "flute": {"name": "Roadmap", "folder": "pan"}}
+
+
+def tree_name() -> str:
+    """What the active profile's tree is called in the UI: 'Roadmap' for every instrument."""
+    return TREES[profiles.instrument()]["name"]
 
 
 def shared_dir() -> pathlib.Path:
@@ -43,15 +54,17 @@ def shared_dir() -> pathlib.Path:
 
 
 def user_dir() -> pathlib.Path:
-    """The active profile's atlas folder: its progress, goals, temporary nodes and exam results."""
-    path = profile_home() / "atlas"
+    """The active profile's atlas folder for its current instrument: its progress, goals,
+    temporary nodes and exam results."""
+    path = profile_home() / profiles.atlas_folder()
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def content_dir() -> pathlib.Path:
-    """The syllabus facts, built tree and lessons (MIDI_COACH_ATLAS_CONTENT overrides)."""
-    path = pathlib.Path(os.environ.get("MIDI_COACH_ATLAS_CONTENT") or shared_dir() / "content")
+    """The syllabus facts, built tree and lessons of the active profile's instrument
+    (MIDI_COACH_ATLAS_CONTENT overrides)."""
+    path = pathlib.Path(os.environ.get("MIDI_COACH_ATLAS_CONTENT") or shared_dir() / TREES[profiles.instrument()]["folder"])
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -60,7 +73,7 @@ def load_syllabus(path: str | pathlib.Path | None = None) -> dict:
     p = pathlib.Path(path) if path else content_dir() / "syllabus.json"
     if not p.is_file():
         raise FileNotFoundError(f"No syllabus at {p}. It is drafted locally from your copy of the ABRSM syllabus "
-                                "(see 'The Atlas' in midi_coach/README.md).")
+                                "(see 'The Roadmap' in midi_coach/README.md).")
     return json.loads(p.read_text(encoding="utf-8"))
 
 
