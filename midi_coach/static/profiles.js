@@ -6,14 +6,20 @@
   let editing = false;
 
   const initial = p => (p.name.trim()[0] || '?').toUpperCase();
-  const INSTRUMENTS = [{id: 'piano', name: 'Piano', glyph: '🎹'}, {id: 'flute', name: 'Flute', glyph: '🎶'}];
+  const INSTRUMENTS = [{id: 'piano', name: 'Piano', glyph: '🎹'}, {id: 'flute', name: 'Flute', glyph: '🎶'},
+                       {id: 'sax', name: 'Alto sax', glyph: '🎷'}, {id: 'voice', name: 'Vocals', glyph: '🎤'}];
   const instName = id => (INSTRUMENTS.find(i => i.id === id) || INSTRUMENTS[0]).name;
 
   function renderChip() {
     const p = view.profiles.find(x => x.id === view.active) || {name: 'Profile'};
     $('chip-name').textContent = p.name;
     $('chip-avatar').textContent = initial(p);
-    document.body.dataset.instrument = p.instrument || 'piano';  // flute: the microphone, and the flute Roadmap
+    document.body.dataset.instrument = p.instrument || 'piano';  // flute, sax, voice: the microphone, and their Roadmap
+    // How flute.js hears it: pitch limits, and the sax's written pitch (+9). Sent with the profiles.
+    if (view.instrument) {
+      window.coachInstrument = view.instrument;
+      window.dispatchEvent(new CustomEvent('coach:instrument'));
+    }
     document.body.dataset.young = p.young ? '1' : '';  // a child: steps read aloud, in big print
     $('home-atlas').textContent = 'Open the Roadmap';
     renderInstruments(p);
@@ -37,15 +43,26 @@
               : `Start learning ${inst.name.toLowerCase()} too. It gets its own Roadmap; your ${instName(p.instrument).toLowerCase()} progress stays.`;
       box.appendChild(b);
     }
+    if ((p.instrument || 'piano') === 'voice') {  // a singer's octave: the Roadmap in the treble clef, or an octave down
+      const v = document.createElement('button');
+      v.dataset.voice = p.voice === 'low' ? 'high' : 'low';
+      v.className = 'voice';
+      v.textContent = p.voice === 'low' ? 'Low voice' : 'High voice';
+      v.title = `You sing with a ${p.voice || 'high'} voice. Switch to a ${v.dataset.voice} voice: the same Roadmap and progress, ` +
+                (v.dataset.voice === 'low' ? 'an octave lower (tenor, baritone, bass)' : 'in the treble clef (soprano, alto)');
+      box.appendChild(v);
+    }
   }
 
   $('home-inst').addEventListener('click', e => {
-    const b = e.target.closest('button[data-instrument]');
     const p = view.profiles.find(x => x.id === view.active);
+    const v = e.target.closest('button[data-voice]');
+    if (v && p) { change('profile_voice', {id: p.id, voice: v.dataset.voice}); return; }
+    const b = e.target.closest('button[data-instrument]');
     if (!b || !p || b.dataset.instrument === p.instrument) return;
     const to = b.dataset.instrument;
     if (!(p.instruments || []).includes(to) &&
-        !confirm(`Start learning ${instName(to).toLowerCase()} on "${p.name}"? It gets its own Roadmap ${to === 'flute' ? '(the microphone hears you play)' : '(the keyboard over MIDI)'}; your ${instName(p.instrument).toLowerCase()} progress stays.`)) return;
+        !confirm(`Start learning ${instName(to).toLowerCase()} on "${p.name}"? It gets its own Roadmap ${to === 'piano' ? '(the keyboard over MIDI)' : to === 'voice' ? '(the microphone hears you sing)' : '(the microphone hears you play)'}; your ${instName(p.instrument).toLowerCase()} progress stays.`)) return;
     change('profile_instrument', {id: p.id, instrument: to});
   });
 
@@ -137,8 +154,11 @@
   $('mm-new').addEventListener('submit', e => {
     e.preventDefault();
     const name = $('mm-name').value.trim();
-    if (name) change('profile_new', {name, instrument: $('mm-instrument').value, young: $('mm-young').checked});
+    if (name) change('profile_new', {name, instrument: $('mm-instrument').value, young: $('mm-young').checked, voice: $('mm-voice').value});
   });
+  const showVoice = () => { $('mm-voice').hidden = $('mm-instrument').value !== 'voice'; };
+  $('mm-instrument').addEventListener('change', showVoice);
+  showVoice();
   $('mm-edit').addEventListener('click', () => { editing = !editing; renderMenu(); });
   $('mm-continue').addEventListener('click', enter);
   $('dash-brand').addEventListener('click', () => go('home'));

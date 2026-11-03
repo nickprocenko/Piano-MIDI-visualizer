@@ -1,5 +1,10 @@
 // The flute through the microphone, for the coach page (loaded after coach.html's script,
 // sharing its globals: $, cmd, store, speaking, talking, showAnswer, showNpc, stopSpeaking).
+// The alto saxophone and the voice are heard the same way: the profile view (profiles.js puts
+// it in window.coachInstrument) gives each one's pitch range, YIN threshold and how far a note
+// may waver, and the sax's transposition: its music is written 9 semitones above how it
+// sounds, so every pitch heard is moved up 9 (the notes, the tuner and the welcome's check all
+// read written pitch) and the page's examples are moved down 9 to sound right.
 //
 // Notes: while a run listens on the microphone (input 'Microphone (flute)'), the pitch is
 // tracked with YIN (de Cheveigne & Kawahara, as the sing-back steps in atlas.js) on 1024-sample
@@ -26,6 +31,16 @@ const MIC_PORT = 'Microphone (flute)';
 const FLUTE = {fmin: 240, fmax: 2400, threshold: 0.12, rmsGate: 0.012, holdFrames: 3, endFrames: 4, change: 0.6,
                dip: 0.35, rise: 0.6};
 const VAD = {startMs: 40, beforeMs: 90, end: 0.75, maxSec: 8, minSec: 0.35, fluteShare: 0.55, rate: 16000};
+// What changes per instrument (instruments.py): FLUTE's limits, and the transposition.
+const MIC_SOUND = {flute: {partials: [[1, 1], [2, .15]], cents: 8},  // the examples' tone: harmonics, vibrato depth
+                   sax: {partials: [[1, 1], [2, .5], [3, .32], [4, .18], [5, .1]], cents: 6},
+                   voice: {partials: [[1, 1], [2, .3], [3, .12]], cents: 18}};
+const micInstrument = () => window.coachInstrument || {id: 'flute', name: 'Flute', transpose: 0, mic: null};
+const micTranspose = () => micInstrument().transpose || 0;
+const micName = () => {
+  const id = micInstrument().id;
+  return id === 'voice' ? 'your voice' : id === 'sax' ? 'your saxophone' : 'your flute';
+};
 // Preferences → Audio to MIDI. size/hop in samples; gateDb is FLUTE.rmsGate in dBFS (-38 = 0.012);
 // strict is the YIN threshold; startMs/endMs become holdFrames/endFrames; latencyMs is extra
 // input delay (audio interface, Bluetooth) added to every note's ago_ms.
@@ -77,7 +92,8 @@ registerProcessor('flute-frames', Frames);`;
 function audioMidiSettings() {
   let saved = {};
   try { saved = JSON.parse(store.get('audioMidi', '{}')) || {}; } catch (e) {}
-  return {...AUDIO_MIDI, ...saved};
+  const mic = micInstrument().mic || {};
+  return {...AUDIO_MIDI, ...(mic.threshold ? {strict: mic.threshold} : {}), ...saved};  // the instrument's strictness unless you set one
 }
 
 const hopMs = () => flute.hop / flute.sr * 1000;
@@ -90,6 +106,8 @@ function fluteApply() {  // the saved settings onto FLUTE and flute (the frame c
   flute.latencyMs = s.latencyMs;
   FLUTE.rmsGate = Math.pow(10, s.gateDb / 20);
   FLUTE.threshold = s.strict;
+  const mic = micInstrument().mic;
+  if (mic) Object.assign(FLUTE, {fmin: mic.fmin, fmax: mic.fmax, change: mic.change});
   FLUTE.holdFrames = framesFor(s.startMs);
   FLUTE.endFrames = framesFor(s.endMs);
 }
@@ -190,7 +208,7 @@ function fluteFrame(buf) {
   if (own) { fluteEnd(); flute.cand = flute.speech = null; }
   flute.clarity = 0;
   const hz = rms > FLUTE.rmsGate ? flutePitch(buf, flute.sr) : null;
-  const m = hz ? 69 + 12 * Math.log2(hz / 440) : null;
+  const m = hz ? 69 + 12 * Math.log2(hz / 440) + micTranspose() : null;  // written pitch (a sax's is 9 above what sounds)
   if ((flute.run || flute.monitor) && !own) fluteTrack(m, rms, now);
   if (flute.run && flute.taps) fluteClap(m, rms, now);
   flute.env = 0.9 * flute.env + 0.1 * rms;
@@ -265,8 +283,9 @@ function fluteClap(m, rms, now) {
 
 // -- examples -----------------------------------------------------------------------------------
 
-// {notes: [[start s, length s, pitch, velocity], ...]} plays them on a soft flute-like tone (the
-// fundamental, a little octave, a slow vibrato); {stop: true} stops them. Each new one stops the last.
+// {notes: [[start s, length s, pitch, velocity], ...]} plays them on a soft tone like the
+// instrument's (MIC_SOUND: a few harmonics, a slow vibrato), a transposing instrument's written
+// pitches moved to how they sound; {stop: true} stops them. Each new one stops the last.
 function fluteExample(msg) {
   if (example.out) {
     const out = example.out;
@@ -281,27 +300,28 @@ function fluteExample(msg) {
     const ctx = example.ctx;
     ctx.resume();
     const out = example.out = ctx.createGain(), lfo = ctx.createOscillator(), depth = ctx.createGain();
+    const sound = MIC_SOUND[micInstrument().id] || MIC_SOUND.flute, shift = micTranspose();
     out.gain.value = 0.25;
     out.connect(ctx.destination);
     lfo.frequency.value = 5;
-    depth.gain.value = 8;  // cents
+    depth.gain.value = sound.cents;
     lfo.connect(depth);
     const t0 = ctx.currentTime + 0.08;
     let end = 0;
     for (const [at, len, pitch, velocity] of msg.notes) {
-      const t = t0 + at, d = Math.max(0.08, len), hz = 440 * Math.pow(2, (pitch - 69) / 12);
-      const env = ctx.createGain(), octave = ctx.createGain();
+      const t = t0 + at, d = Math.max(0.08, len), hz = 440 * Math.pow(2, (pitch - shift - 69) / 12);
+      const env = ctx.createGain();
       env.gain.setValueAtTime(0, t);
       env.gain.linearRampToValueAtTime(0.4 + 0.6 * velocity / 127, t + 0.04);
       env.gain.setTargetAtTime(0, t + d - 0.02, 0.03);
       env.connect(out);
-      octave.gain.value = 0.15;
-      octave.connect(env);
-      for (const [f, to] of [[hz, env], [2 * hz, octave]]) {
-        const osc = ctx.createOscillator();
-        osc.frequency.value = f;
+      for (const [k, level] of sound.partials) {
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.frequency.value = k * hz;
+        g.gain.value = level;
         depth.connect(osc.detune);
-        osc.connect(to);
+        osc.connect(g);
+        g.connect(env);
         osc.start(t);
         osc.stop(t + d + 0.2);
       }
@@ -480,7 +500,7 @@ function calShow() {  // the controls and the numbers beside them, from the save
                     flute.ctx?.baseLatency ? `audio engine ${Math.round(flute.ctx.baseLatency * 1000)} ms` : ''].filter(Boolean);
   $('am-info').textContent = [
     `${sr} Hz, ${s.size}-sample window (${ms(s.size)}), a new frame every ${ms(flute.hop)}.`,
-    `Lowest pitch it can hear: ${Math.round(lowest)} Hz (${fluteNoteName(Math.ceil(69 + 12 * Math.log2(lowest / 440)))}), highest ${FLUTE.fmax} Hz.`,
+    `Lowest pitch it can hear: ${Math.round(lowest)} Hz (${fluteNoteName(Math.ceil(69 + 12 * Math.log2(lowest / 440)) + micTranspose())}), highest ${FLUTE.fmax} Hz.`,
     `A note is recognized about ${Math.round(s.size / 2 / sr * 1000 + (FLUTE.holdFrames - 1) * hopMs())} ms after it starts; ` +
       `that delay${s.latencyMs ? ' plus the extra latency' : ''} is taken off its time, so it's graded on time.`,
     reported.length ? `Reported by Windows: ${reported.join(', ')}.` : '',
@@ -603,17 +623,19 @@ async function flutePractice(p) {
   if (!want) { fluteEnd(); fluteClose(); return; }
   try { await fluteOpen(); } catch (err) {
     flute.run = false;
-    $('heard').textContent = 'The flute needs the microphone: ' + err.message;
+    $('heard').textContent = `The coach needs the microphone to hear ${micName()}: ` + err.message;
   }
 }
 
 (() => {
   const box = document.createElement('label');
   box.className = 'handsfree';
-  box.title = 'Keep the microphone open and act on anything that starts with “Maestro” (both hands stay on the flute). ' +
+  box.title = 'Keep the microphone open and act on anything that starts with “Maestro” (both hands stay on your instrument). ' +
               'Speech is transcribed on this PC; only what follows “Maestro” goes to the Maestro.';
   box.innerHTML = '<input type="checkbox" id="handsfree"> Hands-free';
   $('ai-spend').before(box);
   $('handsfree').addEventListener('change', e => fluteHandsFree(e.target.checked));
   if (store.get('handsfree', '')) { $('handsfree').checked = true; fluteHandsFree(true); }
 })();
+
+window.addEventListener('coach:instrument', fluteApply);  // the profile's instrument: its limits

@@ -573,6 +573,7 @@
   .home-inst button:hover, .home-inst button:focus-visible { border-color: var(--accent); outline: none; }
   .home-inst button[aria-pressed=true] { border-color: var(--accent); background: rgba(0,180,180,.16); font-weight: 650; cursor: default; }
   .home-inst button.new { border-style: dashed; color: var(--muted); }
+  .home-inst button.voice { margin-left: 4px; border-color: transparent; background: transparent; color: var(--muted); font-size: 13px; }  /* a singer's high or low voice */
   .home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .home-card.wide { grid-column: 1 / -1; min-height: 0; }
   .home-card { min-height: 184px; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 20px; border: 1px solid rgba(255,255,255,.11); border-radius: 12px; background: var(--panel); color: var(--text); text-align: left; font: inherit; cursor: pointer; transition: border-color .15s, transform .15s, background .15s; }
@@ -3051,8 +3052,11 @@ connect();
     <div id="mm-list"></div>
     <form id="mm-new">
       <input id="mm-name" type="text" maxlength="30" placeholder="New profile name" aria-label="New profile name" autocomplete="off">
-      <select id="mm-instrument" aria-label="Instrument" title="The first instrument to learn (add another later on Home). Piano: the keyboard over MIDI. Flute: the microphone. Each has its own Roadmap.">
-        <option value="piano">Piano</option><option value="flute">Flute</option>
+      <select id="mm-instrument" aria-label="Instrument" title="The first instrument to learn (add another later on Home). Piano: the keyboard over MIDI. Flute, alto sax and vocals: the microphone. Each has its own Roadmap.">
+        <option value="piano">Piano</option><option value="flute">Flute</option><option value="sax">Alto sax</option><option value="voice">Vocals</option>
+      </select>
+      <select id="mm-voice" aria-label="Voice" title="High voice (soprano, alto): the vocal Roadmap in the treble clef. Low voice (tenor, baritone, bass): the same an octave lower. You can switch later on Home." hidden>
+        <option value="high">High voice</option><option value="low">Low voice</option>
       </select>
       <label class="mm-young" title="For a child from about four: the Maestro uses simple words, lesson steps are read aloud in big print, and the Roadmap starts at First steps">
         <input id="mm-young" type="checkbox"> Young learner</label>
@@ -3115,7 +3119,7 @@ connect();
       </section>
       <section data-pane="audio" role="tabpanel" hidden>
         <h3>Microphone &amp; speakers</h3>
-        <label>Microphone (talking to the Maestro, singing and spoken answers in lessons, the flute)
+        <label>Microphone (talking to the Maestro, singing and spoken answers in lessons, the flute, sax or voice)
           <select id="pref-mic"></select></label>
         <span id="pref-level" title="How loud the microphone hears you" aria-hidden="true"><i></i></span>
         <p class="dlg-hint" id="pref-mic-note"></p>
@@ -3128,7 +3132,7 @@ connect();
       </section>
       <section data-pane="audiomidi" role="tabpanel" hidden>
         <h3>Audio to MIDI</h3>
-        <p class="dlg-hint">How the microphone turns the flute into notes. Play while you change these: the graph shows what the microphone hears (gray: level, dashed: the gate, dots: the pitch, green: the note it's holding), the list what it sends. Notes reach the coach only during a run; here they're a test.</p>
+        <p class="dlg-hint">How the microphone turns the flute, sax or voice into notes. Play while you change these: the graph shows what the microphone hears (gray: level, dashed: the gate, dots: the pitch, green: the note it's holding), the list what it sends. Notes reach the coach only during a run; here they're a test.</p>
         <canvas id="am-graph" aria-label="Microphone level and pitch over the last four seconds"></canvas>
         <p id="am-now" aria-live="off"></p>
         <h4>Input</h4>

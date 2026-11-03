@@ -33,7 +33,7 @@ the bottom, next to the colour key:
 | Home / Practice / Explore / Roadmap | Start with a clear task, then use the top navigation to return to the score, search for music, or view your learning map and goals |
 | YouTube | Play along with a song's video on youtube.com: whether the extension is connected (or needs a reload), the song open now with its video, the extension's setup steps, and every song you've synced to a video. See [Videos that only play on YouTube](#videos-that-only-play-on-youtube) |
 | File | The menu left of Home. **Open file…** (Ctrl+O): a MIDI or MusicXML file from your computer; a copy is kept in your lessons (*Unsorted*) and shown, and opening the same file again reuses it. **Save as…** (Ctrl+Shift+S): a copy of the sheet on the page under a new name, in any category (or a new one); it keeps the sheet's parts, starts with no practice history, and becomes the sheet you're on. **Download sheet file**: the file the sheet comes from, to your Downloads. **Switch profile…** opens the profile menu |
-| Preferences | Beside File (Ctrl+,). Its settings are remembered in this browser. **Connections**: whether the page is connected to the coach, and the MIDI input and output (the same choices as under **Playing** and **Parts**), with **Refresh** after plugging a keyboard in. **Microphone & speakers**: the microphone everything that listens uses (talking to the Maestro, singing and spoken answers in lessons, the flute), with a level bar to check it hears you. A USB microphone or headset plugged in later is added to the list straight away, and the header says so. **Allow the microphone** appears until Windows has let the page use one, since device names stay hidden until then. **Speakers** picks where the page's own sounds go (the Kokoro voice, the metronome, lesson tones), with **Test**. **Audio to MIDI**: how the microphone turns the flute into notes (buffer size, noise gate, pitch clarity, note timings, input latency), with a live graph of what it hears and a list of the notes it sends (see [Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone)). Windows voices always use the default speakers, and the keyboard's sound follows Sound out. **Maestro**: coaching style, when it speaks in a run (the same three as the **Maestro** menu), read replies aloud, voice and volume. **Sheet**: sheet / falling notes / both, layout, zoom, dynamics (the same as the **Maestro** and **Sheet** menus). **Song folders**: the folders the Songs search looks in (and every folder inside them). **Change folders…**: paste a path or press **Browse…** for Windows' folder picker, then **Add**; **Remove** stops searching a folder without touching its files. Saved in `config.json` → `search_folders`, so the desktop visualizer uses the same list. The tick box below turns the bitmidi.com search on or off. **Shortcuts**: the page's keyboard shortcuts |
+| Preferences | Beside File (Ctrl+,). Its settings are remembered in this browser. **Connections**: whether the page is connected to the coach, and the MIDI input and output (the same choices as under **Playing** and **Parts**), with **Refresh** after plugging a keyboard in. **Microphone & speakers**: the microphone everything that listens uses (talking to the Maestro, singing and spoken answers in lessons, the flute, sax or voice), with a level bar to check it hears you. A USB microphone or headset plugged in later is added to the list straight away, and the header says so. **Allow the microphone** appears until Windows has let the page use one, since device names stay hidden until then. **Speakers** picks where the page's own sounds go (the Kokoro voice, the metronome, lesson tones), with **Test**. **Audio to MIDI**: how the microphone turns the flute, sax or voice into notes (buffer size, noise gate, pitch clarity, note timings, input latency), with a live graph of what it hears and a list of the notes it sends (see [Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone)). Windows voices always use the default speakers, and the keyboard's sound follows Sound out. **Maestro**: coaching style, when it speaks in a run (the same three as the **Maestro** menu), read replies aloud, voice and volume. **Sheet**: sheet / falling notes / both, layout, zoom, dynamics (the same as the **Maestro** and **Sheet** menus). **Song folders**: the folders the Songs search looks in (and every folder inside them). **Change folders…**: paste a path or press **Browse…** for Windows' folder picker, then **Add**; **Remove** stops searching a folder without touching its files. Saved in `config.json` → `search_folders`, so the desktop visualizer uses the same list. The tick box below turns the bitmidi.com search on or off. **Shortcuts**: the page's keyboard shortcuts |
 | Explore | Opens the search as a panel to the left of the sheet, so the piece you're practicing stays where it is; choosing an entry loads it and the panel stays open. **✕** closes it. **Songs** lists your song lessons and the reference library; search matches every word in the file name. With an empty search it shows songs you practiced recently. Under the results, **Search bitmidi.com for “…”** looks for the song online (only when pressed). Rarer words count most, so *halloween theme* puts the Halloween files ahead of every other "… Theme". Clicking a result downloads it into `%USERPROFILE%\MidiCoach\references\bitmidi` and opens it; next time the library search finds it. A file's name there is only what its uploader called it, so check what you get. **Lessons** lists teaching material (the *Exercises* and *AI exercises* categories), most recently practiced first. Entries include take history. See [Lesson categories](#lesson-categories) |
 | Playing / Sheet / Maestro / Bar controls / Settings / Actions | Drop-downs in the same row as the mode buttons, one kind of setting each (one open at a time; a click elsewhere or Escape closes it). **Playing**: MIDI input, Parts, bar range and tempo. **Sheet**: show the sheet music, the falling notes (the visualizer's view; scroll on it to change how fast they fall) or both, plus labels, dynamics and layout. **Maestro**: coaching style, when it speaks in a run (**Hello at Start**, **After a pass**: every pass / when something's new / nothing, **Sum up at the end**), Maestro decides, reading replies aloud (voice and volume), and, under *This sheet*, Analysis (Add chords & lyrics), Two hands (Clean) and Cleanup (Auto clean) when the open sheet offers them. **Bar controls**: the bar timeline, with previous/next bar, restart, Loop and bookmarks. **Settings** and **Actions** hold what works in every mode. **Settings**: Sound out (the same as Parts' *Sound goes to*), **Keep the screen on** (stops the screen dimming or locking while the page is open; remembered in the browser), and shortcuts to Preferences' Connections, Mic & speakers and Shortcuts. **Actions**: back to the start, bookmark this bar, metronome on/off, play along with a video, change piece, ask the Maestro, save a copy, download the sheet file, full screen; an item is greyed out when it can't run (no sheet, no Maestro). The metronome sits beside them |
 | Learn / Rehearse / Listen | Hover over a mode button (or Start) to see what it does. **Listen** = you don't play: the keyboard plays the piece (with its sustain pedal) on the output under *Sound goes to*, at the tempo slider's speed, and the cursor follows; Bars and Loop apply, nothing is graded or saved. It plays every part whose Sound is on under **Playing → Parts** (all but the vocals at first), shown on the sheet or not, each at its own volume; mute a hand there to hear the other alone. Learn = the cursor waits on each chord for the right notes, then flows on at the tempo slider's speed (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`). Recording is its own mode, **Record a new idea** on Home: play over the metronome and get it back as sheet music (below) |
@@ -275,9 +275,11 @@ starting tier: the grade after an exam you've passed, otherwise reading plus the
 steps up to Grade 2). The tiers below are credited and the starting tier becomes a goal (the
 active one if you have none). **Start today's practice ▸** on the last screen opens the first
 part of Today. Answers are kept in `%USERPROFILE%\MidiCoach\atlas\welcome.json`, and the
-Maestro hears why you're learning and how long you practice. A flute profile is asked about the
-flute, reads a treble G instead of the bass-clef note, and checks the microphone before the end
-(see [Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone)).
+Maestro hears why you're learning and how long you practice. A flute or saxophone profile is
+asked about its instrument, reads a treble G instead of the bass-clef note, and checks the
+microphone before the end; a singer reads middle C and sings a note for the check (see
+[Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone) and
+[Alto saxophone and vocals](#alto-saxophone-and-vocals)).
 
 **Mock exams** (the link under Where to start, or Claude's `start_placement`) runs full mock exams from
 the grade you pick. Each pass moves up a grade until one isn't passed; if the first isn't, it
@@ -376,10 +378,10 @@ press **Looks right**; **Something's wrong** asks what, and notes it in
 4. Press **Start today's practice ▸**. Someone brand new starts with *Making a sound*, then
    the notes B, A and G. After that, the **Today** card on Home plans each day's practice.
 
-A profile can learn **piano**, **flute** or both, like courses: pick the first when you add a
-profile on the *Who is practicing?* screen. The buttons under Home's heading show the
-instrument you're on (**🎹 Piano** / **🎶 Flute**); press the other to switch, or **+ Learn …** to
-add one. Each instrument keeps its own Roadmap progress, goals and exams (the first in the
+A profile can learn **piano**, **flute**, **alto sax** and **vocals**, one or more, like courses:
+pick the first when you add a profile on the *Who is practicing?* screen. The buttons under
+Home's heading show the instrument you're on (**🎹 Piano** / **🎶 Flute** / **🎷 Alto sax** /
+**🎤 Vocals**); press another to switch, or **+ Learn …** to add one. Each instrument keeps its own Roadmap progress, goals and exams (the first in the
 profile's `atlas` folder, one added later in `atlas-<instrument>`), while takes, lessons and the
 Maestro's notes stay the person's. Switching to the flute changes four things:
 
@@ -445,6 +447,48 @@ latency Windows reports. **Reset to defaults** puts them all back.
 exercise"* or just *"Maestro"* (it answers *Yes?* and takes the next thing you say). Speech is
 transcribed on your PC; only what follows "Maestro" goes to Claude, and sounds that are mostly
 a steady flute pitch are ignored.
+
+## Alto saxophone and vocals
+
+The alto saxophone and the voice work like the flute: the microphone is the input, examples
+come from the coach page, the Maestro teaches that instrument (a sax teacher's words: reed,
+embouchure, octave key, tonguing with "tah"; a singing teacher's: breath, support, legato,
+sol-fa, and rest when the voice is tired), **write me…** gives one-line exercises, and the
+welcome checks the microphone hears you. Each has its own Roadmap.
+
+**Alto sax** music is in **written pitch**, as sax books print it: the alto sounds a major sixth
+lower, so the page moves every note it hears up 9 semitones (the tuner, the notes it sends and
+the welcome's check all name written notes) and plays its examples 9 lower, at the pitch an alto
+really sounds. The scores say they are for an E♭ instrument, so other music programs play them
+at concert pitch too. The Roadmap: *First notes* (the coach's own: making a sound on the
+mouthpiece, B A G, C and D, low D E F, F♯ and B♭, the octave key; long tones, tonguing, slurs;
+first tunes), then **ABRSM Saxophone Grades 1 and 2** (scales and arpeggios tongued and
+slurred, sight-reading, aural tests, theory including written and sounding pitch, and
+public-domain pieces). Its syllabus is drafted locally into
+`%USERPROFILE%\MidiCoach\atlas\sax\syllabus.json` from the Saxophone pages of the woodwind
+syllabus, never into git. Build it with:
+
+```bat
+.venv\Scripts\python -m midi_coach.atlas.sax
+```
+
+**Vocals** is the coach's own course (no exam board's): *First notes* (finding your voice, then
+matching pitches a few at a time from do re mi up to the top E, long notes, legato, leaps, first
+songs), then Grades 1 and 2 (scales and arpeggios learnt on "la", then in sol-fa, then legato,
+then at tempo from memory; sight-singing; theory; public-domain songs in
+`midi_coach/atlas/data/voice_songs.json`). Its aural tests come from the flute's local syllabus
+when there is one. A singer has a **high voice** (soprano, alto: the treble clef) or a **low
+voice** (tenor, baritone, bass: the same Roadmap an octave down, in the treble clef with an 8
+below). Pick it when you add the profile, or press **High voice** / **Low voice** beside the
+instrument buttons on Home; progress is shared between the two. Build both with:
+
+```bat
+.venv\Scripts\python -m midi_coach.atlas.voice
+```
+
+The microphone listens over each instrument's range (a low voice's from about 70 Hz) and is a
+little more forgiving of a voice's slides and vibrato; **Audio to MIDI** in Preferences still
+tunes it.
 
 ## Talk to the Maestro (voice chat, optional)
 

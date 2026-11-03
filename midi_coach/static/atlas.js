@@ -903,10 +903,12 @@ async function examStart(tier) {
 
 // Getting to know you (atlas/welcome.py), the side panel's "Where to start" tab: a few
 // questions about you, then some light music checks, one at a time, and the answers pick where
-// your path starts. No marks: a check you miss just shows the answer and moves on. A flute
-// profile then checks the microphone hears the flute, and the last screen starts Today.
+// your path starts. No marks: a check you miss just shows the answer and moves on. A flute,
+// sax or voice profile then checks the microphone hears it, and the last screen starts Today.
 const wl = {qs: null, i: 0, answers: {}, picked: [], audio: null, micChecked: false};
-const isFlute = () => document.body.dataset.instrument === 'flute';
+const isMic = () => ['flute', 'sax', 'voice'].includes(document.body.dataset.instrument);
+const isVoice = () => document.body.dataset.instrument === 'voice';
+const instWord = () => ({flute: 'flute', sax: 'saxophone'})[document.body.dataset.instrument] || 'instrument';
 
 async function atlasPlaceForm() {
   path.shown = false;  // a goals update mustn't redraw the Path over this
@@ -917,7 +919,8 @@ async function atlasPlaceForm() {
   side.innerHTML = `<h3>Getting to know you</h3>` +
     `<p>Hi! A few quick questions so your path starts in the right place: first about you, then a little music. ` +
     `No marks and no pressure; it takes about two minutes.</p>` +
-    (isFlute() ? `<p>Have your flute nearby: at the end, the coach checks that it can hear it through the microphone.</p>` : '') +
+    (isVoice() ? `<p>At the end, the coach checks that it can hear you sing through the microphone.</p>`
+      : isMic() ? `<p>Have your ${instWord()} nearby: at the end, the coach checks that it can hear it through the microphone.</p>` : '') +
     (last ? `<p class="a-muted">Last time: ${esc(last.summary)}</p>` : '') +
     `<p><button class="wl-go" id="wl-start">${last ? 'Answer again' : "Let's go"}</button></p>` +
     `<p class="a-muted">Rather show it in a full mock exam? <a href="#" id="wl-mock">Mock exams</a></p>`;
@@ -934,7 +937,7 @@ function welcomeQueue() {
 
 function welcomeAsk() {
   const qs = welcomeQueue(), q = qs[wl.i];
-  if (!q) { if (isFlute() && !wl.micChecked) welcomeMic(); else welcomeFinish(); return; }
+  if (!q) { if (isMic() && !wl.micChecked) welcomeMic(); else welcomeFinish(); return; }
   const side = $('atlas-detail');
   const opts = q.options.map((o, k) => `<button data-k="${k}"${q.multi && wl.picked.includes(k) ? ' class="on"' : ''}>${esc(o)}</button>`).join('');
   side.innerHTML = `<h3>Getting to know you</h3>` +
@@ -974,18 +977,22 @@ function welcomeAnswer(q, k) {
   setTimeout(() => { wl.i++; welcomeAsk(); }, right ? 800 : 2000);
 }
 
-// The flute is heard through the microphone, so before finishing: play a long note and see
-// Pan hear it. Anyone who can't make a sound yet carries on (Making a sound is the first lesson).
+// The flute, sax and voice are heard through the microphone, so before finishing: play (or
+// sing) a long note and see the coach hear it. Anyone who can't make a sound yet carries on
+// (the first lesson shows how). A sax's note is named in written pitch, as flute.js hears it.
 function welcomeMic() {
   const side = $('atlas-detail');
-  side.innerHTML = `<h3>Can the coach hear your flute?</h3>` +
-    `<p>The coach listens through the microphone. Pick up your flute and play a long, steady note: any note.</p>` +
+  const voice = isVoice(), yours = voice ? 'you' : `your ${instWord()}`;
+  side.innerHTML = `<h3>Can the coach hear ${voice ? 'you sing' : yours}?</h3>` +
+    (voice ? `<p>The coach listens through the microphone. Sing a long, steady note on "ah": any comfortable note.</p>`
+      : `<p>The coach listens through the microphone. Pick up your ${instWord()} and play a long, steady note: any note.</p>`) +
     `<div class="wl-bar" title="How loud the microphone hears it"><i id="wl-level" style="width:0%"></i></div>` +
     `<p class="wl-q" id="wl-heard" aria-live="polite">Listening…</p>` +
     `<p><button class="wl-go" id="wl-mic-next">Skip for now</button></p>` +
     `<p class="a-muted">Bar not moving? Pick your microphone under Preferences → Microphone &amp; speakers. A headset ` +
     `or USB mic works; the keyboard's audio input doesn't.</p>` +
-    `<p class="a-muted">Can't get a note out yet? That's fine: your first lesson, Making a sound, shows you how.</p>`;
+    (voice ? `<p class="a-muted">Not sure what to sing? Hum a note you'd use to say "mmm, yes". Your first lesson, Finding your voice, starts there.</p>`
+      : `<p class="a-muted">Can't get a note out yet? That's fine: your first lesson, Making a sound, shows you how.</p>`);
   let pitch = null, since = 0, heard = false;
   const stop = () => { flute.probe = null; fluteClose(); };
   $('wl-mic-next').onclick = () => { stop(); wl.micChecked = true; welcomeFinish(); };
@@ -997,14 +1004,14 @@ function welcomeMic() {
     const now = performance.now();
     if (m === null) {
       pitch = null;
-      $('wl-heard').textContent = rms > 0.03 ? 'I hear something, but no clear note yet. Keep the air narrow and steady.' : 'Listening…';
+      $('wl-heard').textContent = rms > 0.03 ? `I hear something, but no clear note yet. ${voice ? 'Hold one steady "ah".' : 'Keep the air steady.'}` : 'Listening…';
       return;
     }
     if (Math.round(m) !== pitch) { pitch = Math.round(m); since = now; }
     $('wl-heard').textContent = `Hearing ${fluteNoteName(pitch)}… hold it`;
     if (now - since > 700) {
       heard = true;
-      $('wl-heard').textContent = `✓ That's a ${fluteNoteName(pitch)}. The coach can hear your flute!`;
+      $('wl-heard').textContent = `✓ That's a ${fluteNoteName(pitch)}. The coach can hear ${yours}!`;
       $('wl-mic-next').textContent = 'Continue ▸';
     }
   };
@@ -1417,9 +1424,11 @@ async function atlasShow(open) {
     await atlasLoad();
     if (first) { atlasHome(); pathShow(); } else { atlasRefreshStates(); goalsLoad(); }
   } catch (err) {
-    $('atlas-detail').innerHTML = `<p>${esc(err.message)}</p><p class="a-muted">` + (document.body.dataset.instrument === 'flute'
-      ? 'The flute Roadmap is built from your local flute syllabus: <code>python -m midi_coach.atlas.pan</code>'
-      : 'The Roadmap is built from your local syllabus: <code>python -m midi_coach.atlas.build</code>') + `</p>`;
+    const build = {flute: 'The flute Roadmap is built from your local flute syllabus: <code>python -m midi_coach.atlas.pan</code>',
+                   sax: 'The saxophone Roadmap is built from your local saxophone syllabus: <code>python -m midi_coach.atlas.sax</code>',
+                   voice: 'The vocal Roadmap is built with <code>python -m midi_coach.atlas.voice</code>'};
+    $('atlas-detail').innerHTML = `<p>${esc(err.message)}</p><p class="a-muted">` + (build[document.body.dataset.instrument]
+      || 'The Roadmap is built from your local syllabus: <code>python -m midi_coach.atlas.build</code>') + `</p>`;
   }
 }
 

@@ -46,10 +46,11 @@ function todayRenderHome() {
     go.textContent = 'Open the Roadmap ▸';
     go.dataset.act = 'atlas';
   } else if (!s.goal) {  // a new profile: a few questions set the goal, then Today has a plan
-    const flute = document.body.dataset.instrument === 'flute';
-    $('today-title').textContent = flute ? 'New to the flute? Start here' : 'New here? Start here';
+    const inst = document.body.dataset.instrument;
+    const named = {flute: 'the flute', sax: 'the saxophone', voice: 'singing'}[inst];
+    $('today-title').textContent = named ? `New to ${named}? Start here` : 'New here? Start here';
     $('today-sub').textContent = 'A few quick questions (about two minutes) find where you start, then Today plans your practice.' +
-      (flute ? ' Have your flute and microphone ready.' : '');
+      (inst === 'voice' ? ' Have your microphone ready.' : named ? ` Have your ${named.slice(4)} and microphone ready.` : '');
     go.textContent = 'Find where I start ▸';
     go.dataset.act = 'place';
   } else if (!parts.length) {
