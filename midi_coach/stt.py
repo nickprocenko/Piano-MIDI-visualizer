@@ -17,6 +17,13 @@ HINT = ("Piano practice with the Maestro: Listen, Learn mode, Rehearse, bars fiv
         "left hand, right hand, hands together, F sharp, B flat, D major scale, arpeggio, metronome.")
 FLUTE_HINT = ("Maestro, flute practice: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, long tones, "
               "tonguing, slurred, F sharp, B flat, G major scale, E minor, arpeggio, a twelfth, metronome, Roadmap, write me.")
+SAX_HINT = ("Maestro, saxophone practice: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, long tones, "
+            "tonguing, slurred, octave key, reed, F sharp, B flat, G major scale, D minor, arpeggio, a twelfth, metronome, "
+            "Roadmap, write me.")
+VOICE_HINT = ("Maestro, singing practice: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, long notes, "
+              "legato, sol-fa, do re mi, F sharp, B flat, C major scale, A minor, arpeggio, sight-singing, metronome, "
+              "Roadmap, write me.")
+HINTS = {"flute": FLUTE_HINT, "sax": SAX_HINT, "voice": VOICE_HINT}
 
 _lock = threading.Lock()
 _model = None
@@ -70,7 +77,7 @@ def decode(audio: bytes):
 def _hint() -> str:
     from . import profiles
 
-    return FLUTE_HINT if profiles.instrument() == "flute" else HINT
+    return HINTS.get(profiles.instrument(), HINT)
 
 
 def transcribe(audio: bytes) -> str:

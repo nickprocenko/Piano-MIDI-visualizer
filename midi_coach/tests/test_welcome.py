@@ -15,7 +15,7 @@ PIANO_TIERS = [{"id": t, "order": k} for k, t in enumerate(["initial", "g1", "g2
 CHECKS_RIGHT = {q["id"]: q["answer"] for q in welcome.QUESTIONS if q["kind"] == "check"}
 
 
-@pytest.mark.parametrize("instrument", ["piano", "flute"])
+@pytest.mark.parametrize("instrument", ["piano", "flute", "sax", "voice"])
 def test_questions_are_well_formed(instrument):
     qs = welcome.questions(instrument)
     ids = [q["id"] for q in qs]

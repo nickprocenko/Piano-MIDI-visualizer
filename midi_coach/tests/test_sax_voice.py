@@ -108,3 +108,50 @@ def test_the_profile_picks_the_instruments_tree_and_the_voices_octave(home):
     assert profiles.active()["instruments"] == ["sax", "voice", "piano"]
     with pytest.raises(ValueError):
         profiles.set_voice(p["id"], "middle")
+
+
+# -- the welcome, the Maestro and the microphone ------------------------------------------------------
+
+
+@pytest.mark.parametrize("instrument, word, check", [("sax", "saxophone", "g4"), ("voice", "sing", "c4")])
+def test_the_welcome_asks_about_the_instrument(instrument, word, check):
+    from midi_coach.atlas import welcome
+
+    qs = {q["id"]: q for q in welcome.questions(instrument)}
+    assert word in qs["played"]["prompt"] + qs["why"]["prompt"] and "f3" not in qs and check in qs
+    right = {q["id"]: q["answer"] for q in qs.values() if q["kind"] == "check"}
+    assert welcome.correct(right) == len(welcome.CHECKS)
+
+
+def test_the_maestro_teaches_a_saxophonist_and_a_singer(home):
+    from types import SimpleNamespace as NS
+
+    from midi_coach import chat, stt
+
+    usage = NS(input_tokens=10, output_tokens=5, cache_creation_input_tokens=0, cache_read_input_tokens=0)
+    for instrument, system, player in [("sax", chat.SAX_SYSTEM, "saxophonist"), ("voice", chat.VOICE_SYSTEM, "singer")]:
+        calls = []
+
+        def create(**kw):
+            calls.append(kw)
+            return NS(stop_reason="end_turn", usage=usage, content=[NS(type="text", text="Lovely.")])
+
+        client = NS(messages=NS(create=create), beta=NS(messages=NS(create=create)))
+        voice_chat = chat.VoiceChat({}, lambda: "", client=client, instrument=lambda i=instrument: i)
+        assert voice_chat.ask("how was that")["reply"] == "Lovely."
+        assert calls[0]["system"] == system and f"[The {player} said]" in calls[0]["messages"][0]["content"]
+        assert chat.LESSON_SYSTEMS[instrument] and "Maestro" in stt.HINTS[instrument]
+    assert "written pitch" in chat.SAX_SYSTEM and "high or a low voice" in chat.VOICE_SYSTEM
+
+
+def test_a_singer_listens_on_the_microphone_and_picks_a_voice(home):
+    from midi_coach import server
+    from midi_coach.midi_io import MIC_PORT
+
+    sam = profiles.create("Sam", instrument="voice", voice="low")
+    assert server._cmd_ports({})["default"] == MIC_PORT
+    assert "low voice" in server._instrument_line()
+    view = server._cmd_profile_voice({"id": sam["id"], "voice": "high"})
+    assert view["instrument"] == {**view["instrument"], "id": "voice", "voice": "high", "transpose": 0}
+    profiles.set_instrument(sam["id"], "sax")
+    assert server._profile_view()["instrument"]["transpose"] == 9 and "written pitch" in server._instrument_line()

@@ -1,7 +1,7 @@
 """Live MIDI input recording and output playback via python-rtmidi.
 
-The input can also be the microphone (MIC_PORT): the coach page tracks a flute's pitch and
-posts each note as a note-on / note-off, which Recorder.feed passes on exactly as if a
+The input can also be the microphone (MIC_PORT): the coach page tracks a flute's, a
+saxophone's or a voice's pitch and posts each note as a note-on / note-off, which Recorder.feed passes on exactly as if a
 keyboard had sent it, so recording, Learn and Rehearse don't know the difference."""
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ PORT_HELP = (
 )
 
 
-MIC_PORT = "Microphone (flute)"
+MIC_PORT = "Microphone (flute)"  # the name predates the sax and voice; pages and tests use it
 
 
 class PortError(RuntimeError):

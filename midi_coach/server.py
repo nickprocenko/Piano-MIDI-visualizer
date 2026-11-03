@@ -21,7 +21,7 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import aids, analysis, autopilot, bugs, chat, deep, details, harmony, lessons, library, live, online, profiles, remarks, stt, synced, transcribe, web
+from . import aids, analysis, autopilot, bugs, chat, deep, details, harmony, instruments, lessons, library, live, online, profiles, remarks, stt, synced, transcribe, web
 from .atlas import runtime as atlas_runtime
 from .atlas import welcome as atlas_welcome
 from .display import DisplayHub, sheet_problem
@@ -560,8 +560,8 @@ def _gains(gains) -> dict[str, float]:
 
 def _start_input(port: str | None, *args) -> tuple[str, bool]:
     """Open the MIDI input; if the keyboard is busy (e.g. the visualizer has it), use 'Coach'.
-    A flute profile listens on the microphone unless a port is named."""
-    port = port or (MIC_PORT if profiles.instrument() == "flute" else None)
+    A flute, saxophone or voice profile listens on the microphone unless a port is named."""
+    port = port or (MIC_PORT if instruments.uses_mic() else None)
     if port == MIC_PORT:
         return recorder.start(port, *args), False
     try:
@@ -796,7 +796,7 @@ def _watch_listen(session) -> None:
 def _cmd_ports(_body: dict) -> dict:
     try:
         ports = list_ports()
-    except PortError:  # no MIDI at all: a flute still has the microphone
+    except PortError:  # no MIDI at all: a flute, sax or voice still has the microphone
         ports = {"inputs": [], "outputs": []}
     names, outputs = ports["inputs"], ports["outputs"]
     try:
@@ -804,7 +804,7 @@ def _cmd_ports(_body: dict) -> dict:
     except PortError:
         default = None
     names = names + [MIC_PORT]
-    if profiles.instrument() == "flute":
+    if instruments.uses_mic():
         default = MIC_PORT
     try:
         default_output = outputs[resolve_port(outputs, None, "MIDI_COACH_OUTPUT", "output")]
@@ -1394,8 +1394,8 @@ def _voice_context() -> str:
     hand = settings.get("hand") or "both"
     lines = [time.strftime("Local time: %A %I:%M %p.").replace(" 0", " "), f"Teaching style: {_coach.style}.",
              _talk_line()]
-    if profiles.instrument() == "flute":
-        lines.append("Instrument: flute, heard through the microphone (pitch only).")
+    if instruments.uses_mic():
+        lines.append(_instrument_line())
     about = atlas_welcome.about_line()
     if about:
         lines.append(about)
@@ -1629,9 +1629,19 @@ def _cmd_voice_status(_body: dict) -> dict:
     return status
 
 
+def _instrument_line() -> str:
+    """The Maestro's context line for an instrument heard through the microphone."""
+    inst = instruments.get()
+    if inst["id"] == "sax":
+        return "Instrument: alto saxophone, heard through the microphone (pitch only); notes are named in written pitch."
+    if inst["id"] == "voice":
+        return f"Instrument: voice ({profiles.active()['voice']} voice), heard through the microphone (pitch only)."
+    return f"Instrument: {inst['name'].lower()}, heard through the microphone (pitch only)."
+
+
 def _profile_view() -> dict:
     data = profiles.load()
-    return {"active": data["active"], "profiles": data["profiles"], "busy": _busy()}
+    return {"active": data["active"], "profiles": data["profiles"], "busy": _busy(), "instrument": instruments.page_config()}
 
 
 def _switched_profile() -> dict:
@@ -1667,7 +1677,8 @@ def _young_start() -> None:
 
 def _cmd_profile_new(body: dict) -> dict:
     young = bool(body.get("young"))
-    out = _profile_change(lambda name: profiles.create(name, instrument=body.get("instrument") or "piano", young=young),
+    out = _profile_change(lambda name: profiles.create(name, instrument=body.get("instrument") or "piano", young=young,
+                                                       voice=body.get("voice") or "high"),
                           body.get("name", ""))
     _young_start()
     return out
@@ -1688,6 +1699,11 @@ def _cmd_profile_instrument(body: dict) -> dict:
     if pid == profiles.load()["active"]:
         _young_start()
     return out
+
+
+def _cmd_profile_voice(body: dict) -> dict:
+    """A singer's high or low voice: the vocal Roadmap in that octave (progress is shared)."""
+    return _profile_change(profiles.set_voice, body.get("id") or profiles.load()["active"], body.get("voice", ""))
 
 
 def _cmd_profile_select(body: dict) -> dict:
@@ -1723,6 +1739,7 @@ PAGE_COMMANDS = {"ports": _cmd_ports, "mic_note": _cmd_mic_note, "lessons": _cmd
                  "profiles": lambda _body: _profile_view(), "profile_new": _cmd_profile_new,
                  "profile_select": _cmd_profile_select, "profile_rename": _cmd_profile_rename,
                  "profile_delete": _cmd_profile_delete, "profile_instrument": _cmd_profile_instrument,
+                 "profile_voice": _cmd_profile_voice,
                  "profile_young": _cmd_profile_young,
                  "set_parts": _cmd_set_parts, "cleanup": _cmd_cleanup, "playable": _cmd_playable, "details": _cmd_details,
                  "load": _cmd_load, "open_file": _cmd_open_file, "save_as": _cmd_save_as, "start": _cmd_start, "stop": _cmd_stop,
@@ -1747,9 +1764,9 @@ def _atlas_show(path: str) -> dict:
 
 
 def _atlas_listen(path: str, hand: str = "both", bars: str | None = None, tempo_percent: float = 100.0) -> dict:
-    """A lesson's Listen step as a Listen run: the cursor follows and Stop ends it. A flute
-    profile hears it from the page instead (it may have no MIDI output)."""
-    if profiles.instrument() == "flute":
+    """A lesson's Listen step as a Listen run: the cursor follows and Stop ends it. A profile on
+    the microphone (flute, sax, voice) hears it from the page instead (it may have no MIDI output)."""
+    if instruments.uses_mic():
         return asyncio.run(play(path, hand=hand, bars=bars, tempo_percent=tempo_percent))
     base = (hand or "both").partition("+")[0]
     return _begin_listen(path, roles=[base] if base in ("right", "left") else None, bars=bars,
@@ -2117,9 +2134,9 @@ async def create_lesson(
             ref_path = str(library.resolve_reference(from_reference))
             path, score = await asyncio.to_thread(lessons.excerpt_lesson, ref_path, bar_range, hand, title, category or lessons.EXERCISES)
         else:
-            flute = profiles.instrument() == "flute" and right and not left  # one line, named for the flute
+            line = instruments.uses_mic() and right and not left  # one line, named for the instrument
             path, score = await asyncio.to_thread(lessons.build_lesson, title, right, left, time_signature, key, tempo_bpm, musicxml,
-                                                  category or lessons.AI_EXERCISES, part_name="Flute" if flute else None)
+                                                  category or lessons.AI_EXERCISES, part_name=instruments.get()["part"] if line else None)
         if not score.notes:
             return {"error": "The lesson has no notes.", "path": path}
         side = analysis.side_resolver(score)
@@ -2641,8 +2658,8 @@ async def play(
     split_note: int = 60,
     parts: list[int] | None = None,
 ) -> dict:
-    """Play a reference or a take on the MIDI output (the JUNO by default; for a flute profile,
-    the coach page). Returns immediately.
+    """Play a reference or a take on the MIDI output (the JUNO by default; for a flute, sax or
+    voice profile, the coach page). Returns immediately.
 
     source: reference title/path, 'latest', or a take id.
     bars: '9-16'; hand: 'both'|'right'|'left'; tempo_percent: 70 = slower practice speed;
@@ -2732,11 +2749,12 @@ PAGE_SOUND = "the coach page"
 
 
 def _sound(segments: list, output_port: str | None, gap_sec: float) -> tuple[str, float]:
-    """Play labelled event lists (Player.play's) and return (where, seconds). A flute profile
-    hears them from the coach page instead of the MIDI output, unless a port is named: no
-    keyboard needed, and the page's microphone knows the sound is its own, so it isn't taken
-    for the flute. With no page open, the MIDI output plays them."""
-    if output_port is None and profiles.instrument() == "flute" and hub.clients:
+    """Play labelled event lists (Player.play's) and return (where, seconds). A profile on the
+    microphone hears them from the coach page instead of the MIDI output, unless a port is
+    named: no keyboard needed, and the page's microphone knows the sound is its own, so it
+    isn't taken for the instrument. With no page open, the MIDI output plays them. The page
+    takes a transposing instrument's written pitches down to how they sound."""
+    if output_port is None and instruments.uses_mic() and hub.clients:
         player.stop()
         notes, offset = [], 0.0
         for _, events in segments:

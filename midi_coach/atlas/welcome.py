@@ -8,9 +8,10 @@ and can play or draw. The answers pick a starting tier:
   - otherwise reading and the checks decide, from First steps up to Grade 2 (higher than
     that, the Mock exams link under Where to start is the way to show it).
 Every tier below the start is credited ('placement_credit' events, as placement.py does),
-and the start tier becomes the goal. A flute profile is asked about the flute, and reads a
-treble G (its first note) in place of the bass-clef check; Pan has no tiers below First notes,
-so someone brand new starts there. The answers are kept in <home>/atlas/welcome.json, so
+and the start tier becomes the goal. A flute or saxophone profile is asked about its
+instrument, and reads a treble G (its first note) in place of the bass-clef check; a singer
+reads middle C (do). Their Roadmaps have no tiers below First notes, so someone brand new
+starts there. The answers are kept in <home>/atlas/welcome.json, so
 the Maestro knows why you're learning and how long you like to practice.
 """
 
@@ -66,6 +67,21 @@ FLUTE_PROMPTS = {
 }
 FLUTE_CHECK = {"id": "g4", "kind": "check", "prompt": "Which note is this? It's the first one you'll play on the flute.",
                "staff": {"clef": "treble", "midi": 67}, "options": ["E", "B", "G", "D"], "answer": 2}
+SAX_PROMPTS = {
+    "played": "Have you played the saxophone before?",
+    "exams": "Have you passed a saxophone exam? Any exam board counts.",
+    "why": "What brings you to the saxophone? Pick as many as you like.",
+}
+SAX_CHECK = {**FLUTE_CHECK, "prompt": "Which note is this? It's the first one you'll play on the saxophone."}
+VOICE_PROMPTS = {
+    "played": "Have you had singing lessons or sung in a choir before?",
+    "exams": "Have you passed a singing exam? Any exam board counts.",
+    "why": "What brings you to singing? Pick as many as you like.",
+}
+VOICE_CHECK = {"id": "c4", "kind": "check", "prompt": "Which note is this? It's the first one you'll sing: do.",
+               "staff": {"clef": "treble", "midi": 60}, "options": ["C", "E", "A", "D"], "answer": 0}
+# Each microphone instrument: its wording of the questions, and the note check that replaces the bass clef's.
+WORDING = {"flute": (FLUTE_PROMPTS, FLUTE_CHECK), "sax": (SAX_PROMPTS, SAX_CHECK), "voice": (VOICE_PROMPTS, VOICE_CHECK)}
 
 # Where reading and the checks start you, by tier order (First steps -2 ... Grade 2).
 TARGET_ORDER = {"first": -2, "ready": -1, "initial": 0, "g1": 1, "g2": 2}
@@ -85,13 +101,16 @@ def load() -> dict | None:
 def questions(instrument: str | None = None) -> list[dict]:
     """For the page, answers included: a check shows the right answer straight away. Worded
     for the active profile's instrument."""
-    if (instrument or profiles.instrument()) != "flute":
+    wording = WORDING.get(instrument or profiles.instrument())
+    if not wording:
         return QUESTIONS
-    return [FLUTE_CHECK if q["id"] == "f3" else {**q, "prompt": FLUTE_PROMPTS.get(q["id"], q["prompt"])} for q in QUESTIONS]
+    prompts, check = wording
+    return [check if q["id"] == "f3" else {**q, "prompt": prompts.get(q["id"], q["prompt"])} for q in QUESTIONS]
 
 
 def correct(answers: dict) -> int:
-    return sum(1 for q in QUESTIONS + [FLUTE_CHECK] if q["kind"] == "check" and answers.get(q["id"]) == q["answer"])
+    checks = QUESTIONS + [FLUTE_CHECK, VOICE_CHECK]  # the sax's check is the flute's, reworded
+    return sum(1 for q in checks if q["kind"] == "check" and answers.get(q["id"]) == q["answer"])
 
 
 def skips_checks(answers: dict) -> bool:
