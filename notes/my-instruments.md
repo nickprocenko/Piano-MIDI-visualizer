@@ -27,3 +27,4 @@ Instruments I play:
 | California Dreamin' | The Mamas & the Papas | The classic flute solo, plus guitar, bass and keys. |
 | Smooth | Santana ft. Rob Thomas | Horn lines on sax, Latin piano montuno, guitar lead, bass. |
 | Bitter Sweet Symphony | The Verve | Violin hook, keys, guitar, bass. Flute/sax can double the string line. |
+| Home for a Rest | Spirit of the West | Celtic-rock jig: the main melody on flute and violin, accordion parts on keys, bass, and electric guitar on the strummed rhythm. Alto sax can join the melody on the last chorus. The original is strummed on acoustic, so it's worth revisiting once yours is back from repair. |
