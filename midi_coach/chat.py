@@ -566,6 +566,8 @@ TOOLS = [
                                                                  "refers to (page, lesson, bars, mode) spelled out from the context."},
                 "add_to_last": {"type": "boolean", "description": "Add a screenshot and this description to the "
                                                                  "report just made instead of starting a new one."},
+                "important": {"type": "boolean", "description": "They said it's important, urgent or a priority: "
+                                                               "it's worked on before the rest."},
             },
             "required": ["description"],
             "additionalProperties": False,
@@ -602,6 +604,8 @@ TOOLS = [
                                                                  "to (page, panel, button, mode) spelled out from the context."},
                 "add_to_last": {"type": "boolean", "description": "Add a screenshot and this description to the "
                                                                  "request just made instead of starting a new one."},
+                "important": {"type": "boolean", "description": "They said it's important, urgent or a priority: "
+                                                               "it's worked on before the rest."},
             },
             "required": ["description"],
             "additionalProperties": False,

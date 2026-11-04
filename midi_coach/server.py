@@ -1881,10 +1881,10 @@ def _report_state() -> dict:
         return {}
 
 
-def _voice_bug(description: str, add_to_last: bool = False, kind: str = "bug") -> dict:
+def _voice_bug(description: str, add_to_last: bool = False, kind: str = "bug", important: bool = False) -> dict:
     if add_to_last:
         return _bugs.add(description, kind=kind)
-    return _bugs.report(description, _voice_context(), kind=kind, state=_report_state())
+    return _bugs.report(description, _voice_context(), kind=kind, state=_report_state(), important=important)
 
 
 def _cmd_report(body: dict) -> dict:
@@ -1893,7 +1893,7 @@ def _cmd_report(body: dict) -> dict:
     kind = "request" if body.get("kind") == "request" else "bug"
     if not text:
         return {"error": "Say what's wrong (or what you'd like) first."}
-    out = _voice_bug(text, kind=kind)
+    out = _voice_bug(text, kind=kind, important=bool(body.get("important")))
     bugs.conversation_log(f"(typed, F9) {'Idea' if kind == 'request' else 'Bug'}: {text}", f"saved {out.get('saved')}")
     return {**out, "kind": kind}
 
@@ -2004,8 +2004,8 @@ def restarted_score() -> str | None:
     return score if score and time.time() - float(saved.get("at") or 0) < 120 and pathlib.Path(score).exists() else None
 
 
-def _voice_request(description: str, add_to_last: bool = False) -> dict:
-    return _voice_bug(description, add_to_last, kind="request")
+def _voice_request(description: str, add_to_last: bool = False, important: bool = False) -> dict:
+    return _voice_bug(description, add_to_last, kind="request", important=important)
 
 
 def _voice_open_song(name: str, artist: str = "") -> dict:
@@ -2102,10 +2102,13 @@ def _answer(heard: str) -> dict:
     command = bugs.heard_command(heard)
     if command:
         kind, rest = command
-        out = _voice_bug(rest, add_to_last=kind == "more", kind="request" if kind == "request" else "bug")
+        out = _voice_bug(rest, add_to_last=kind == "more", kind="request" if kind == "request" else "bug",
+                         important=bugs.said_important(heard)[0])
         n = out.get("screenshots", 0)
-        text = ({"more": "Added", "report": "Bug noted", "request": "Request noted"}[kind]
-                + (f", with {n} screenshot{'s' if n != 1 else ''}." if n else "."))
+        noted = ({"more": "Added", "report": "Bug noted", "request": "Request noted"}[kind]
+                 if kind == "more" or not bugs.said_important(heard)[0]
+                 else {"report": "Important bug noted", "request": "Important request noted"}[kind])
+        text = noted + (f", with {n} screenshot{'s' if n != 1 else ''}." if n else ".")
         _npc_say(lambda: text)
         return {"heard": heard, "reply": text, "actions": ["request_feature" if kind == "request" else "report_bug"], "cost": 0.0}
     try:

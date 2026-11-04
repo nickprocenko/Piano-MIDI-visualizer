@@ -40,6 +40,7 @@ PAGE_ERRORS = 20
 # Said to the Maestro, handled on the PC without an API call.
 REPORT_RE = re.compile(r"^(?:maestro\s+)?(?:bug report|report (?:a )?bug|(?:that's |that is |thats )?a bug|bug)\b\s*(.*)$")
 REQUEST_RE = re.compile(r"^(?:maestro\s+)?(?:feature request|app request|new feature|feature|idea|suggestion|wish list|wishlist|wish)\b\s*(.*)$")
+IMPORTANT_RE = re.compile(r"^(?:maestro\s+)?(?:important|urgent|priority|high priority)\s+(?=(?:bug|idea|feature|request|suggestion|wish))")
 MORE_RE = re.compile(r"^(?:maestro\s+)?(?:take )?(?:another|one more|more) screenshots?\b\s*(.*)$")
 
 FOLDERS = {"bug": "bug_reports", "request": "requests"}
@@ -220,12 +221,17 @@ class BugLog:
         self.logs = logs
         self.page = page
 
-    def report(self, said: str, context: str = "", kind: str = "bug", state: dict | None = None) -> dict:
+    def report(self, said: str, context: str = "", kind: str = "bug", state: dict | None = None,
+               important: bool = False) -> dict:
         """A new report ('bug' or 'request'): what was said, a screenshot now and the frames before it,
         and (state) where the page was, for the check step's Go there."""
         now = time.time()
-        folder = reports_dir(kind) / time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(now))
-        folder.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y-%m-%d_%H-%M-%S", time.localtime(now))
+        reports_dir(kind).mkdir(parents=True, exist_ok=True)
+        folder, n = reports_dir(kind) / stamp, 2
+        while find(folder.name) is not None or folder.exists():  # two reports in one second keep apart
+            folder, n = reports_dir(kind) / f"{stamp}-{n}", n + 1
+        folder.mkdir()
         if state:
             (folder / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
         shots = []
@@ -234,8 +240,10 @@ class BugLog:
             (folder / name).write_bytes(jpeg)
             shots.append(name)
         shots += self._shot_now(folder, "now.jpg")
-        lines = [f"# {TITLES[kind]} {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}", "",
-                 "## What was said", "", said.strip() or "(nothing more was said)", "",
+        lines = [f"# {TITLES[kind]} {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}", ""]
+        if important:
+            lines += ["## Priority", "", "Important (the user said so).", ""]
+        lines += ["## What was said", "", said.strip() or "(nothing more was said)", "",
                  "## Screenshots (window in front)", ""]
         lines += [f"- {name}" for name in shots] or ["- none (screen capture unavailable)"]
         if context:
@@ -287,10 +295,16 @@ class BugLog:
         return [name]
 
 
+def said_important(heard: str) -> tuple[bool, str]:
+    """("Important bug: …" → True, the words without "important"), lower-cased and tidied."""
+    text = " ".join(re.sub(r"[^a-z0-9' ]+", " ", (heard or "").lower()).split())
+    m = IMPORTANT_RE.match(text)
+    return (True, text[m.end():]) if m else (False, text)
+
+
 def heard_command(heard: str) -> tuple[str, str] | None:
     """('report' | 'request' | 'more', the rest of what was said) when speech is a bug or request command."""
-    text = re.sub(r"[^a-z0-9' ]+", " ", (heard or "").lower())
-    text = " ".join(text.split())
+    text = said_important(heard)[1]
     for kind, pattern in (("more", MORE_RE), ("report", REPORT_RE), ("request", REQUEST_RE)):
         m = pattern.match(text)
         if m:
@@ -463,6 +477,108 @@ def close(report_id: str, reason: str) -> dict:
     return {"closed": report_id, "kind": kind}
 
 
+# ---- Triage: what each open item touches, and batches of them to work on together ----------------
+#
+# An agent reads each open report and the code, then records (`python -m midi_coach.bugs triage`)
+# its area of the app, size, the files a fix would change, what's risky about it, and whether it
+# can be built as it stands ("build"), needs one answer from the user first ("question", with
+# choices) or needs a design session ("design"). The batching here is plain code: one batch per
+# area, so items that change the same part of the app are done together, ordered important first,
+# then bugs, then the smallest, then the oldest.
+
+SIZES = {"S": 1, "M": 3, "L": 8}
+NEEDS = ("build", "question", "design")
+SHARED = {"docs/notation.html": "the coach's sheet and the website's notation strip",
+          "midi_coach/live.py": "Learn and Rehearse runs", "midi_coach/midi_io.py": "MIDI in and out, the recorder",
+          "midi_coach/notes.py": "every score and part choice", "midi_coach/analysis.py": "grading of every take"}
+
+
+def is_important(folder: pathlib.Path) -> bool:
+    try:
+        return "\n## Priority\n" in "\n" + (folder / "report.md").read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def set_important(report_id: str, on: bool = True) -> dict:
+    """Mark a report important (or not) after it was made."""
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    report = found[2] / "report.md"
+    text = report.read_text(encoding="utf-8")
+    block = "## Priority\n\nImportant (the user said so).\n\n"
+    if on and not is_important(found[2]):
+        head, _, rest = text.partition("\n\n")
+        text = f"{head}\n\n{block}{rest}"
+    elif not on:
+        text = text.replace(block, "")
+    report.write_text(text, encoding="utf-8")
+    write_backlog()
+    return {"id": report_id, "important": on}
+
+
+def triage(report_id: str, area: str, size: str, files=(), needs: str = "build", risk: str = "",
+           question: str = "", choices=(), depends_on=()) -> dict:
+    """Record an agent's triage of an open item (triage.json next to its report)."""
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    size = (size or "").upper()[:1]
+    if size not in SIZES:
+        return {"error": "Size is S, M or L."}
+    if needs not in NEEDS:
+        return {"error": f"Needs is one of {', '.join(NEEDS)}."}
+    if needs == "question" and not (question.strip() and len([c for c in choices if c.strip()]) >= 2):
+        return {"error": "A question needs its text and at least two choices."}
+    files = sorted({f.strip().replace("\\", "/") for f in files if f.strip()})
+    shared = [f"{f}: {SHARED[f]}" for f in files if f in SHARED]
+    data = {"area": " ".join(area.lower().split()) or "other", "size": size, "files": files, "needs": needs,
+            "risk": risk.strip(), "shared": shared, "question": question.strip() if needs == "question" else "",
+            "choices": [c.strip() for c in choices if c.strip()] if needs == "question" else [],
+            "depends_on": [d for d in depends_on if d], "at": time.strftime("%Y-%m-%d %H:%M")}
+    (found[2] / "triage.json").write_text(json.dumps(data, indent=1, ensure_ascii=False), encoding="utf-8")
+    write_backlog()
+    return {"triaged": report_id, **data}
+
+
+def _triage_of(folder: pathlib.Path) -> dict | None:
+    try:
+        return json.loads((folder / "triage.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def batches() -> dict:
+    """The open items, sorted: {"batches": [{area, items, important, size}], "questions", "design",
+    "untriaged"}. A batch holds the buildable items of one area; batches go most urgent first."""
+    out = {"batches": [], "questions": [], "design": [], "untriaged": []}
+    areas: dict[str, list] = {}
+    for it in items("open"):
+        t = it["triage"]
+        if t is None:
+            out["untriaged"].append(it)
+        elif t["needs"] == "question":
+            out["questions"].append(it)
+        elif t["needs"] == "design":
+            out["design"].append(it)
+        else:
+            areas.setdefault(t["area"], []).append(it)
+
+    def item_key(it):
+        return (not it["important"], it["kind"] != "bug", SIZES[it["triage"]["size"]], it["id"])
+
+    for area, rows in areas.items():
+        rows.sort(key=item_key)
+        out["batches"].append({"area": area, "items": rows, "important": any(r["important"] for r in rows),
+                               "bugs": sum(r["kind"] == "bug" for r in rows),
+                               "size": sum(SIZES[r["triage"]["size"]] for r in rows)})
+    out["batches"].sort(key=lambda b: (not b["important"], not b["bugs"], b["size"], b["items"][0]["id"]))
+    for key in ("questions", "design", "untriaged"):
+        out[key].sort(key=lambda it: (not it["important"], it["id"]))
+    return out
+
+
 def _item(kind: str, folder: pathlib.Path) -> dict:
     report = folder / "report.md"
     text = report.read_text(encoding="utf-8")
@@ -470,6 +586,7 @@ def _item(kind: str, folder: pathlib.Path) -> dict:
     shot = folder / "now.jpg"
     return {"id": folder.name, "kind": kind, "said": _said(text, limit=2000), "where": _where(text),
             "fix": fixed, "log": build_log, "reopened": ": still wrong" in text,
+            "important": "\n## Priority\n" in "\n" + text, "triage": _triage_of(folder),
             "shot": shot if shot.exists() else None, "when": report.stat().st_mtime}
 
 
@@ -510,8 +627,16 @@ def vault() -> pathlib.Path | None:
 def _backlog_lines(it: dict, mark: str, shots: pathlib.Path) -> list[str]:
     tag = "Idea" if it["kind"] == "request" else "Bug"
     said = it["said"] if len(it["said"]) <= 160 else it["said"][:159].rstrip() + "…"
-    out = [f"- {mark} **{tag}:** {said}",
+    out = [f"- {mark} {'⭐ ' if it.get('important') else ''}**{tag}:** {said}",
            f"  *{it['where']}* · `{it['id']}`" if it["where"] else f"  `{it['id']}`"]
+    t = it.get("triage")
+    if t and mark not in ("✅",):
+        out.append(f"  Size {t['size']} · {', '.join(t['files']) or 'files not named'}"
+                   + (f" · ⚠️ {t['risk']}" if t["risk"] else "")
+                   + (f" · shared: {'; '.join(t['shared'])}" if t["shared"] else "")
+                   + (f" · after {', '.join(t['depends_on'])}" if t["depends_on"] else ""))
+        if t["needs"] == "question":
+            out.append(f"  ❓ **{t['question']}** " + " · ".join(f"[{c}]" for c in t["choices"]))
     if it["fix"]:
         out.append(f"  Fix: {it['fix']}" + (f" ([[{it['log']}]])" if it["log"] else ""))
     if it["shot"] is not None:
@@ -536,15 +661,29 @@ def write_backlog() -> pathlib.Path | None:
                  "> Written by MidiCoach from `~/MidiCoach/bug_reports` and `requests`, so edits here are "
                  "overwritten. Add to it by telling the Maestro “Bug: …” or “Idea: …”. Try fixes from the "
                  "coach page's 👀 button.", ""]
-        for title, rows, mark in (("👀 Ready to check", items("check"), "👀"), ("🆕 Open", items("open"), "🆕"),
-                                  (f"✅ Done (last {DONE_SHOWN_DAYS} days)", done, "✅")):
-            lines += [f"## {title}", ""]
-            if mark == "👀" and rows:
-                lines += ["[Try them on the coach page](http://127.0.0.1:8765/#checks) (on this PC, with the coach running)", ""]
+        def section(title: str, rows: list, mark: str, intro: str = "") -> None:
+            lines.extend([f"## {title}", ""] + ([intro, ""] if intro and rows else []))
             if not rows:
-                lines += ["*Nothing here.*", ""]
+                lines.extend(["*Nothing here.*", ""])
             for it in rows:
-                lines += _backlog_lines(it, "↩️" if mark == "🆕" and it["reopened"] else mark, shots) + [""]
+                lines.extend(_backlog_lines(it, "↩️" if mark == "🆕" and it["reopened"] else mark, shots) + [""])
+
+        section("👀 Ready to check", items("check"), "👀",
+                "[Try them on the coach page](http://127.0.0.1:8765/#checks) (on this PC, with the coach running)")
+        plan = batches()
+        section("❓ Needs you", plan["questions"], "❓", "One answer each, then they join a batch.")
+        lines += ["## 📦 Batches (worked in this order)", ""]
+        if not plan["batches"]:
+            lines += ["*Nothing triaged and ready to build.*", ""]
+        for n, b in enumerate(plan["batches"], 1):
+            sizes = "+".join(r["triage"]["size"] for r in b["items"])
+            lines += [f"### {n}. {b['area'].capitalize()}{' ⭐' if b['important'] else ''} ({len(b['items'])} · {sizes})", ""]
+            for it in b["items"]:
+                lines += _backlog_lines(it, "↩️" if it["reopened"] else "🔧", shots) + [""]
+        section("🧭 Needs a design session", plan["design"], "🧭",
+                "Never built overnight: talk it through first (a grilling session).")
+        section("🆕 Not triaged yet", plan["untriaged"], "🆕")
+        section(f"✅ Done (last {DONE_SHOWN_DAYS} days)", done, "✅")
         lines += ["## Related", "", "- [[index|MidiCoach index]]", ""]
         note = root / BACKLOG_NOTE
         text = "\n".join(lines)
@@ -570,8 +709,38 @@ def _main(argv=None) -> int:
     shut = sub.add_parser("close", help="done without a fix, on the user's word (not a bug, already works)")
     shut.add_argument("id")
     shut.add_argument("reason", help="why, in the user's terms")
+    tri = sub.add_parser("triage", help="record an open item's area, size, files and what it needs")
+    tri.add_argument("id")
+    tri.add_argument("--area", required=True, help="part of the app, e.g. 'top bar & layout', 'playback & metronome'")
+    tri.add_argument("--size", required=True, choices=["S", "M", "L"])
+    tri.add_argument("--files", default="", help="comma-separated repo paths a fix would change")
+    tri.add_argument("--needs", default="build", choices=NEEDS)
+    tri.add_argument("--risk", default="", help="what else this could break, in a few words")
+    tri.add_argument("--question", default="", help="with --needs question: the one thing to ask")
+    tri.add_argument("--choice", action="append", default=[], help="with --needs question: an answer (two or more)")
+    tri.add_argument("--after", default="", help="comma-separated ids this depends on")
+    sub.add_parser("batches", help="the open items as batches, in the order to work them")
+    imp = sub.add_parser("important", help="mark an item important (or --off)")
+    imp.add_argument("id")
+    imp.add_argument("--off", action="store_true")
     sub.add_parser("backlog", help="rewrite the vault's Backlog.md")
     args = p.parse_args(argv)
+    if args.what in ("triage", "important"):
+        out = (triage(args.id, args.area, args.size, args.files.split(","), args.needs, args.risk, args.question,
+                      args.choice, args.after.split(",")) if args.what == "triage" else set_important(args.id, not args.off))
+        print(out.get("error") or f"{args.id}: {args.what} saved")
+        return 1 if "error" in out else 0
+    if args.what == "batches":
+        plan = batches()
+        for n, b in enumerate(plan["batches"], 1):
+            print(f"batch {n}: {b['area']}{' (important)' if b['important'] else ''}")
+            for it in b["items"]:
+                t = it["triage"]
+                print(f"   {it['id']}  {it['kind']:7} {t['size']}  {it['said'][:70]}  [{', '.join(t['files'])}]")
+        for key, label in (("questions", "needs an answer"), ("design", "needs a design session"), ("untriaged", "not triaged")):
+            for it in plan[key]:
+                print(f"{label}: {it['id']}  {it['kind']:7} {it['said'][:80]}")
+        return 0
     if args.what == "close":
         out = close(args.id, args.reason)
         print(out.get("error") or f"{args.id}: closed")

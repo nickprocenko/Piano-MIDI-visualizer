@@ -162,7 +162,7 @@ def test_a_fix_waits_for_the_user_then_goes_to_fixed(home, vault):
     bug = reporter().report("the loop didn't go back at bar 63", CONTEXT)["saved"]
     backlog = vault / "Projects" / "MidiCoach" / "Backlog.md"
     text = backlog.read_text(encoding="utf-8")
-    assert "## 🆕 Open" in text and "the loop didn't go back at bar 63" in text
+    assert "## 🆕 Not triaged yet" in text and "the loop didn't go back at bar 63" in text
     assert "*Session · The moody blues nights in white satin · bar 63 · Learn mode*" in text
     assert f"![[bug-{bug}.jpg|320]]" in text and (vault / "attachments" / "backlog" / f"bug-{bug}.jpg").exists()
     assert bugs.to_check() == {"count": 0, "items": []}
@@ -173,14 +173,14 @@ def test_a_fix_waits_for_the_user_then_goes_to_fixed(home, vault):
     assert [r["id"] for r in rows] == [bug] and rows[0]["shot"].startswith("data:image/jpeg;base64,")
     assert rows[0]["fix"] == "The loop now restarts on the last bar's release." and rows[0]["log"] == "flute-loop-build"
     text = backlog.read_text(encoding="utf-8")
-    assert text.index("## 👀 Ready to check") < text.index(bug) < text.index("## 🆕 Open")
+    assert text.index("## 👀 Ready to check") < text.index(bug) < text.index("## 🆕 Not triaged yet")
     assert "Fix: The loop now restarts on the last bar's release. ([[flute-loop-build]])" in text
     assert bugs.mark_ready(bug, "again")["error"]
 
     assert bugs.verify(bug, works=True) == {"checked": bug, "works": True}
     report = (home / "bug_reports" / "fixed" / bug / "report.md").read_text(encoding="utf-8")
     assert ": works" in report and "restarts on the last bar's release" in report
-    assert "## ✅ Done" in backlog.read_text(encoding="utf-8").split("## 🆕 Open")[1] and bugs.to_check()["count"] == 0
+    assert "## ✅ Done" in backlog.read_text(encoding="utf-8").split("## 🆕 Not triaged yet")[1] and bugs.to_check()["count"] == 0
 
 
 def test_still_wrong_sends_a_fix_back_to_open_with_what_was_said(home, vault):
@@ -275,3 +275,89 @@ def test_close_moves_a_report_to_done_without_a_fix(home, vault):
     assert "no fix needed" in report and "it worked" in report
     assert bugs.close(bug, "again")["error"] and bugs._main(["close", "nope", "x"]) == 1
     assert "✅ **Bug:** check console" in (vault / "Projects" / "MidiCoach" / "Backlog.md").read_text(encoding="utf-8")
+
+
+def test_important_is_heard_and_kept_in_the_report(home):
+    assert bugs.said_important("Important bug: the cursor jumped") == (True, "bug the cursor jumped")
+    assert bugs.heard_command("Urgent idea, a bigger button") == ("request", "a bigger button")
+    assert bugs.said_important("an important bug") == (False, "an important bug")
+    saved = reporter().report("play does nothing", important=True)["saved"]
+    folder = home / "bug_reports" / "open" / saved
+    assert bugs.is_important(folder) and bugs.items("open")[0]["important"]
+    other = reporter().report("sound cuts out")["saved"]
+    assert not bugs.items("open")[1]["important"]
+    bugs.set_important(other)
+    assert bugs.is_important(home / "bug_reports" / "open" / other)
+    bugs.set_important(other, False)
+    assert not bugs.is_important(home / "bug_reports" / "open" / other)
+
+
+def test_triage_sorts_open_items_into_batches_questions_and_design(home, vault):
+    log = reporter()
+    video = log.report("move the video button to the top bar", kind="request")["saved"]
+    tiles = log.report("tiles overlap the top bar", kind="bug")["saved"]
+    metro = log.report("the metronome should fit midi logic", kind="request")["saved"]
+    modes = log.report("piano modes: classical, pop with singing", kind="request")["saved"]
+    late = log.report("count-in is late")["saved"]
+    fresh = log.report("not looked at yet")["saved"]
+    assert bugs.triage(video, "Top bar & layout", "S", ["midi_coach/static/coach.html"])["needs"] == "build"
+    bugs.triage(tiles, "top bar & layout", "M", ["midi_coach/static/coach.html"])
+    assert "error" in bugs.triage(metro, "playback & metronome", "M", needs="question", question="Follow what?", choices=["tempo"])
+    bugs.triage(metro, "playback & metronome", "M", ["midi_coach/live.py"], needs="question",
+                question="What should it follow?", choices=["The song's tempo changes", "The time signature", "Both"])
+    bugs.triage(modes, "roadmap", "L", needs="design")
+    out = bugs.triage(late, "playback & metronome", "S", [r"midi_coach\live.py", "docs/notation.html"], risk="Learn timing")
+    assert out["files"] == ["docs/notation.html", "midi_coach/live.py"] and len(out["shared"]) == 2
+    assert "error" in bugs.triage(late, "x", "XL") and "error" in bugs.triage(late, "x", "S", needs="maybe")
+
+    plan = bugs.batches()
+    # bugs before ideas: the count-in bug's batch first, then the top bar (a bug and an idea, the bug first)
+    assert [b["area"] for b in plan["batches"]] == ["playback & metronome", "top bar & layout"]
+    assert [it["id"] for it in plan["batches"][1]["items"]] == [tiles, video]
+    assert [it["id"] for it in plan["questions"]] == [metro] and [it["id"] for it in plan["design"]] == [modes]
+    assert [it["id"] for it in plan["untriaged"]] == [fresh]
+
+    bugs.set_important(video)  # important beats everything
+    assert bugs.batches()["batches"][0]["area"] == "top bar & layout"
+    assert [it["id"] for it in bugs.batches()["batches"][0]["items"]] == [video, tiles]
+
+    text = (vault / "Projects" / "MidiCoach" / "Backlog.md").read_text(encoding="utf-8")
+    order = [text.index(h) for h in ("## 👀 Ready to check", "## ❓ Needs you", "## 📦 Batches", "### 1. Top bar & layout ⭐ (2 · S+M)",
+                                      "### 2. Playback & metronome (1 · S)", "## 🧭 Needs a design session", "## 🆕 Not triaged yet")]
+    assert order == sorted(order)
+    assert "❓ **What should it follow?** [The song's tempo changes] · [The time signature] · [Both]" in text
+    assert "⚠️ Learn timing" in text and "shared: docs/notation.html" in text and "⭐ **Idea:** move the video" in text
+
+
+def test_two_reports_in_the_same_second_keep_apart(home, monkeypatch):
+    monkeypatch.setattr(bugs.time, "time", lambda: 1_800_000_000.0)
+    log = reporter()
+    first, second = log.report("one")["saved"], log.report("two")["saved"]
+    assert second == first + "-2"
+    assert "two" in (home / "bug_reports" / "open" / second / "report.md").read_text(encoding="utf-8")
+    assert "one" in (home / "bug_reports" / "open" / first / "report.md").read_text(encoding="utf-8")
+
+
+def test_the_cli_triages_and_prints_batches(home, capsys):
+    saved = reporter().report("move the video button")["saved"]
+    assert bugs._main(["triage", saved, "--area", "top bar", "--size", "S", "--files", "midi_coach/static/coach.html"]) == 0
+    assert bugs._main(["triage", saved, "--area", "x", "--size", "S", "--needs", "question"]) == 1
+    assert bugs._main(["important", saved]) == 0
+    capsys.readouterr()
+    bugs._main(["batches"])
+    out = capsys.readouterr().out
+    assert "batch 1: top bar (important)" in out and saved in out
+
+
+def test_saying_important_bug_marks_it_and_says_so(home, monkeypatch):
+    from midi_coach import display, server
+
+    hub = display.DisplayHub()
+    monkeypatch.setattr(server, "hub", hub)
+    monkeypatch.setattr(hub, "say", lambda text, interrupt=False, speaker="Claude": 0)
+    monkeypatch.setattr(server, "_bugs", reporter())
+    monkeypatch.setattr(server._voice, "ask", lambda heard: pytest.fail("no API for bug reports"))
+    assert server._voice_reply("Important bug: the metronome is late")["reply"].startswith("Important bug noted")
+    assert bugs.items("open")[0]["important"] and "the metronome is late" in bugs.items("open")[0]["said"]
+    out = server.PAGE_COMMANDS["report"]({"text": "move the video button", "kind": "request", "important": True})
+    assert bugs.is_important(home / "requests" / "open" / out["saved"])

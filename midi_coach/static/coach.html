@@ -3893,6 +3893,7 @@ connect();
     <div class="report-kind" role="radiogroup" aria-label="Bug or idea">
       <label><input type="radio" name="report-kind" value="bug" checked> 🐞 Bug</label>
       <label><input type="radio" name="report-kind" value="request"> 💡 Idea</label>
+      <label title="Worked on before the rest"><input type="checkbox" id="report-important"> ⭐ Important</label>
     </div>
     <textarea id="report-text" maxlength="2000" placeholder="What happened, or what you'd like…" aria-label="What happened"></textarea>
     <p class="dlg-hint">Saved with screenshots of the last few seconds and where you are (piece, bar, mode), like saying “Bug: …” to the Maestro. Enter saves, Shift+Enter starts a new line.</p>
@@ -3933,8 +3934,10 @@ connect();
     if (!said) return;
     await new Promise(r => setTimeout(r, 250));  // let the box disappear from the screen first
     try {
-      const out = await cmd('report', {text: said, kind});
+      const important = document.getElementById('report-important').checked;
+      const out = await cmd('report', {text: said, kind, important});
       text.value = '';
+      document.getElementById('report-important').checked = false;
       say(`${kind === 'request' ? 'Idea' : 'Bug'} saved, with ${out.screenshots} screenshot${out.screenshots === 1 ? '' : 's'}.`);
     } catch (e) {
       say('Not saved: ' + e.message);
