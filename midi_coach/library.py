@@ -11,7 +11,7 @@ import time
 
 import mido
 
-from .notes import HAND_ROLES, MIDI_SUFFIXES, MUSICXML_SUFFIXES, Note, Score, load_score
+from .notes import HAND_ROLES, MIDI_SUFFIXES, ROLES, MUSICXML_SUFFIXES, Note, Score, load_score
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 REF_SUFFIXES = MIDI_SUFFIXES | MUSICXML_SUFFIXES
@@ -64,18 +64,25 @@ def _read_config() -> dict:
 def song_sources() -> dict:
     """Where songs come from (the page's File → Song folders): the folders the user chose
     (config.json `search_folders`, shared with the desktop visualizer), the ones always
-    searched, and whether the Songs panel may also look on bitmidi.com."""
+    searched, whether the Songs panel may also look on bitmidi.com, and whether new songs in
+    Downloads are taken into the library as they arrive (songwatch.py)."""
+    from . import songfind
+
     data = _read_config()
     chosen = [str(f) for f in data.get("search_folders", [])]
     extra = os.environ.get("MIDI_COACH_REFERENCE_DIRS", "")
     fixed = [p for p in extra.split(os.pathsep) if p.strip()] + [str(home() / "references"), str(profile_home() / "lessons")]
     return {"folders": [{"path": f, "found": pathlib.Path(f).is_dir()} for f in chosen],
             "always": fixed, "online": bool(data.get("online_search", True)),
-            "downloads": str(home() / "references" / "bitmidi")}
+            "downloads": str(home() / "references" / "bitmidi"),
+            "watch_downloads": bool(data.get("watch_downloads", True)),
+            "downloads_folder": str(songfind.downloads_dir())}
 
 
-def set_song_sources(folders: list[str] | None = None, online: bool | None = None) -> dict:
-    """Save the chosen folders and the online switch into config.json, keeping its other settings."""
+def set_song_sources(folders: list[str] | None = None, online: bool | None = None,
+                     watch_downloads: bool | None = None) -> dict:
+    """Save the chosen folders and the online and Downloads switches into config.json, keeping
+    its other settings."""
     data = _read_config()
     if folders is not None:
         clean: list[str] = []
@@ -91,6 +98,8 @@ def set_song_sources(folders: list[str] | None = None, online: bool | None = Non
         data["search_folders"] = clean
     if online is not None:
         data["online_search"] = bool(online)
+    if watch_downloads is not None:
+        data["watch_downloads"] = bool(watch_downloads)
     path = _config_path()
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return song_sources()
@@ -186,6 +195,8 @@ def get_score(ref: str) -> Score:
             _score_cache[f"{path}|cleaned"] = (mtime, score)
     score.roles = load_roles(score)
     score.hands = {i: r for i, r in score.roles.items() if r in HAND_ROLES}
+    if score.playing not in score.roles.values():
+        score.playing = default_part(score)
     if path.suffix.lower() in MIDI_SUFFIXES and playable_chosen(score.path):
         from . import playable
 
@@ -290,6 +301,71 @@ def set_playable(path: str, on: bool) -> None:
 
 
 FLAGS = ("cleanup", "playable")  # per-file switches kept with the part choice
+# Per-file settings for playing a named part over the rest as backing, kept with the part choice:
+# lead_in (bars of backing before the part comes in, 0-8), lead_in_every_pass (on a loop),
+# gains ({part name: 0..1}, the backing's faders) and played ({named part: runs}, what's usually played).
+# practice: how the Session was last set up for the file ({from, to, tempo, loop, mode}; see practice_settings).
+SETTINGS = ("lead_in", "lead_in_every_pass", "gains", "played", "tracks", "play", "practice")  # gains: the old band faders (tracks.py)
+LEAD_IN_BARS = 2
+LEAD_IN_MAX = 8
+PRACTICE_MODES = ("learn", "rehearse", "listen")
+TEMPO_RANGE = (30, 150)  # the page's tempo slider
+
+
+def _clean_practice(value) -> dict | None:
+    """A practice entry with only what the page can show: bars from/to (1+, or None for the
+    start / the end), tempo % within the slider, loop, and Learn / Rehearse / Listen."""
+    if not isinstance(value, dict):
+        return None
+    out = {}
+    for key in ("from", "to"):
+        try:
+            bar = int(value.get(key) or 0)
+        except (TypeError, ValueError):
+            bar = 0
+        out[key] = bar if bar >= 1 else None
+    if out["from"] and out["to"] and out["to"] < out["from"]:
+        out["to"] = out["from"]
+    try:
+        out["tempo"] = max(TEMPO_RANGE[0], min(TEMPO_RANGE[1], int(round(float(value["tempo"])))))
+    except (KeyError, TypeError, ValueError):
+        pass
+    if "loop" in value:
+        out["loop"] = bool(value["loop"])
+    if value.get("mode") in PRACTICE_MODES:
+        out["mode"] = value["mode"]
+    return out
+
+
+def practice_settings(path: str | None) -> dict | None:
+    """How the Session was last set up for this file (bars, tempo, loop, mode), or None."""
+    if not path:
+        return None
+    try:
+        return _clean_practice(_load_choices().get(path, {}).get("practice"))
+    except Exception:  # an unreadable choices file mustn't stop a sheet showing
+        return None
+
+
+def song_settings(path: str) -> dict:
+    """The SETTINGS saved for a file, with the defaults filled in."""
+    saved = _load_choices().get(path, {})
+    return {"lead_in": LEAD_IN_BARS, "lead_in_every_pass": True, "gains": {}, "played": {}, "tracks": {}, "play": None,
+            "practice": None, **{k: v for k, v in saved.items() if k in SETTINGS}}
+
+
+def save_song_settings(path: str, **changes) -> dict:
+    """Change some of a file's SETTINGS (lead_in is kept to 0-LEAD_IN_MAX); returns them all."""
+    if "lead_in" in changes:
+        changes["lead_in"] = max(0, min(LEAD_IN_MAX, int(changes["lead_in"])))
+    if "practice" in changes:
+        changes["practice"] = _clean_practice(changes["practice"])
+    choices = _load_choices()
+    entry = choices.pop(path, {})
+    entry.update({k: v for k, v in changes.items() if k in SETTINGS})
+    choices[path] = entry
+    _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
+    return song_settings(path)
 
 
 def _set_flag(path: str, flag: str, on: bool) -> None:
@@ -325,7 +401,7 @@ def load_hands(score: Score) -> dict[int, str]:
 
 
 def load_roles(score: Score) -> dict[int, str]:
-    """The saved part -> role choice for a score (a hand, 'pedals' or 'vocals'); empty if
+    """The saved part -> role choice for a score (a hand, 'pedals', 'vocals' or a named part); empty if
     none, or if the file's parts changed."""
     saved = _load_choices().get(score.path)
     if not saved:
@@ -339,11 +415,43 @@ def load_roles(score: Score) -> dict[int, str]:
     return hands
 
 
+def default_part(score: Score) -> str | None:
+    """The named part to play when none is said: the one named for the profile's instrument,
+    else the one played most on this file, else the first. None without named parts, and on
+    a file whose hands are chosen too unless one is named for the instrument (a pianist plays
+    the hands unless they say otherwise)."""
+    from . import instruments
+
+    named = list(dict.fromkeys(r for _, r in sorted(score.roles.items()) if r not in ROLES))
+    if not named:
+        return None
+    mine = instruments.current()
+    words = {"voice": ("voice", "vocal"), "fiddle": ("fiddle", "violin"), "guitar": ("guitar",),
+             "bass": ("bass",)}.get(mine, (mine,))
+    match = next((r for r in named if any(w in r for w in words)), None)
+    if match or score.hands:
+        return match
+    played = song_settings(score.path)["played"]
+    return max(named, key=lambda r: (played.get(r, 0), -named.index(r)))
+
+
+def name_part(score: Score, name: str, index: int, keep_hands: bool) -> str:
+    """Save part `index` as the named part `name` ('flute', stored lower case), in place of any
+    part that had the name. Without keep_hands, the hand choices go (the parts they named
+    become backing). Returns the role."""
+    role = name.strip().lower()
+    roles = {i: r for i, r in score.roles.items() if r != role and i != index and (keep_hands or r not in HAND_ROLES)}
+    save_hands(score, {**roles, index: role})
+    score.playing = role
+    return role
+
+
 def save_hands(score: Score, hands: dict[int, str]) -> None:
     """Save (or with an empty dict, forget) the part -> role choice for a score: the hands
     ('right' / 'left' / 'both'), and the parts played with the feet ('pedals') or sung ('vocals')."""
     choices = _load_choices()
     keep = {flag: True for flag in FLAGS if choices.get(score.path, {}).get(flag)}
+    keep.update({k: v for k, v in choices.get(score.path, {}).items() if k in SETTINGS})
     if hands:
         names = {p.index: p.name for p in score.parts}
         choices[score.path] = {
@@ -358,6 +466,8 @@ def save_hands(score: Score, hands: dict[int, str]) -> None:
     _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
     score.roles = dict(hands)
     score.hands = {i: r for i, r in hands.items() if r in HAND_ROLES}
+    if score.playing not in score.roles.values():
+        score.playing = default_part(score)
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +481,7 @@ def save_take(events: list[tuple[float, list[int]]], meta: dict) -> dict:
     folder = profile_home() / "takes"
     while (folder / f"{take_id}.mid").exists():
         take_id += "b"
+    events = sorted(events, key=lambda e: e[0])  # a MIDI file can't step back in time (stable: same-time order kept)
     t0 = events[0][0] if events else 0.0
     mid = mido.MidiFile(ticks_per_beat=TAKE_PPQ)
     track = mido.MidiTrack()

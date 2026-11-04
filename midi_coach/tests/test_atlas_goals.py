@@ -192,3 +192,49 @@ def test_a_route_to_a_lesson_is_shown_then_quick_saved_once(content):
     assert [r["id"] for f in state["path"] for r in f["requirements"]] == order
     again = coach.cmd_goal_quick({"id": g1["id"]})
     assert len(again["goals"]) == 1 and again["active"] == state["active"]
+
+
+def test_see_in_the_song_finds_each_lesson_in_its_song(content, song):
+    """A song's sections open at their own bars, a bridge at the bars the planner gave, and a
+    syllabus requirement on the way at the start; the Session's sheet comes back after."""
+    path, score = song
+    c_scale = _req(content, "scale-c-major", tier="initial")["id"]
+    plan = {"title": "Piano Man", "kind": "song", "targets": [c_scale], "order_hints": [], "reasons": ["In C."],
+            "bridges": [{"title": "Walking bass in C", "brief": "Left-hand walking bass in C, crotchets, slowly at first.",
+                         "after": [c_scale], "before": [], "song_bars": "9-12"}]}
+    assert planner.validate(plan, atlas_pkg.load_atlas()) == []
+    goal = planner.build_goal(plan, "Play Piano Man", atlas_pkg.load_atlas(), {}, song_path=path, score=score)
+    merged = temporary.merged(atlas_pkg.load_atlas())
+    cap = merged["by_id"][goal["targets"][0]]
+    bridge = merged["by_id"][goal["bridges"][0]]
+    assert bridge["song_bars"] == "9-12"
+
+    from midi_coach.atlas.runtime import AtlasCoach
+
+    shown = []
+    hub = type("Hub", (), {"score_path": "session.mid", "atlas": lambda self, msg: None})()
+    coach = AtlasCoach(hub=hub, show=lambda p: (shown.append(p), setattr(hub, "score_path", p)))
+    assert coach.song_for(cap["stages"][0])["bars"] == "1-4"
+    assert coach.song_for(cap["stages"][-1]) == {"song": str(path), "title": "Piano Man", "bars": "", "why": "the whole song"}
+    assert coach.song_for(bridge["stages"][0])["bars"] == "9-12"
+    plain = coach.song_for(c_scale)  # on the way, but the planner didn't place it in the song
+    assert plain["bars"] == "" and "from the start" in plain["why"]
+
+    out = coach.cmd_stage_song({"node": bridge["stages"][0]})
+    assert out["bars"] == "9-12" and shown == [str(path)]
+    assert coach.cmd_stage_close({}) == {"restored": "session.mid"} and shown[-1] == "session.mid"
+    coach.cmd_stage_open({"node": cap["stages"][0]})  # Practise the whole song in the Session
+    coach.cmd_stage_song({"node": cap["stages"][0], "keep": True})
+    assert coach.cmd_stage_close({}) == {"restored": None} and hub.score_path == str(path)  # the song stays up
+
+
+def test_song_bars_must_be_bar_numbers(content):
+    plan = _plan(content)
+    plan["bridges"][0]["song_bars"] = "the chorus"
+    assert any("song_bars" in e for e in planner.validate(plan, atlas_pkg.load_atlas()))
+
+
+def test_see_in_the_song_without_a_song_goal(content):
+    from midi_coach.atlas.runtime import AtlasCoach
+
+    assert AtlasCoach().cmd_stage_song({"node": "nope"}) == {"error": "This lesson isn't part of a song goal."}

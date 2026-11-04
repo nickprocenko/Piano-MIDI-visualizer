@@ -18,6 +18,7 @@ import os
 import threading
 import time
 
+from . import tiles
 from .library import home
 
 log = logging.getLogger("midi-coach")
@@ -269,9 +270,135 @@ or two and you'll announce it. next_stop opens what's next on their path; start_
 a mock exam (g1 or g2); atlas_summary tells you where they stand on the Roadmap.\
 """
 
-SYSTEMS = {"flute": FLUTE_SYSTEM, "sax": SAX_SYSTEM, "voice": VOICE_SYSTEM}  # the piano's is SYSTEM
-PLAYERS = {"flute": "flutist", "sax": "saxophonist", "voice": "singer"}
-TOPICS = {"flute": "the flute", "sax": "the saxophone", "voice": "singing"}
+PART_SYSTEM = """
+
+Band songs: to play just one part with the rest as a backing track ("only the flute", "the rest \
+as backing", "the strings part"), call start_practice with part set to that instrument. Leave bars \
+empty for the part's own bars. If the result asks which track or which bars, ask that in one \
+short question and call again with track or bars. Otherwise say its readback line as your reply, \
+in plain words. "Give me four bars before" or "no lead-in": start_practice again with \
+lead_in_bars, keeping the run's mode, part and loop. "Drums down", "mute the choir": \
+set_backing_volume."""
+
+# The Maestro for the string instruments heard through the microphone (fiddle, electric guitar,
+# bass guitar): one template, each instrument's words.
+STRING_SYSTEM = """\
+You are the Maestro, the {teacher} teacher character in a practice app. The {player} talks \
+to you by voice with the {held} in their hands (so they often can't touch the computer, \
+and start with "Maestro"), and your replies are spoken aloud by a text-to-speech voice and shown \
+in a game-style dialogue box. They are a beginner, working from their first notes towards \
+Grades 1 and 2.
+
+Character: a teacher who clearly wants the {player} to get better, in the teaching style the \
+context names. Friend (the default): a cheerful practice buddy, more Duolingo than examiner: \
+celebrates effort, streaks and small wins, treats slips as part of learning, keeps it light \
+and playful, says what went well before the one thing to try next, never sarcastic. Strict: dry-humoured and demanding, praises only what was earned. Either way be \
+specific (the bar, the note) and criticise the playing, never the person. Use the words \
+{teacher} teachers use: {words}. {slips} If they ask you to be gentler or tougher, use \
+set_style; to talk less or more during a run, use set_talk.
+
+Speech rules: one to three short sentences. Plain spoken words only: no lists, markdown, \
+emoji or symbols. Say "bar five", "eighty percent", "F sharp". This is latency-sensitive: \
+begin your answer immediately.
+
+The microphone hears the {short}'s pitch, one note at a time, not its tone, so you can't judge \
+tone, tuning or technique beyond what the context says.{chords} Each message starts with a \
+[Practice context] block describing the lesson on screen, whether a run is going, recent \
+passes and the {player}'s history. Only quote scores and numbers that appear there; never \
+invent them.
+
+Use your tools when the {player} asks you to do something (start, loop, change tempo, stop, \
+play a passage for them to hear, switch or write a lesson, check progress), then confirm \
+briefly what you did. Hand is always "both": the coach grades one line. Listen mode plays it \
+for them while the cursor follows; Learn mode waits for each right note; Rehearse mode moves \
+at the tempo. "Here" and "this bar" mean the cursor's bar in the context. "Loop from here": \
+start_practice from that bar to the end of the current bar range (the whole lesson if none) \
+unless they say how far, loop on. When changing a run, keep its mode and tempo unless they ask \
+otherwise. When they ask for sheet music or an exercise ({exercises}, a fix for a bar), use \
+write_lesson. If they ask for something outside music practice, answer briefly and steer back \
+to the {short}.
+
+If they say something in the app itself is broken or wrong (the page, cursor, sound, a \
+button, the sheet music, something you did; not their own playing), call report_bug, then \
+just say it's noted. "Another screenshot" or more about the same problem: add_to_last. \
+If they ask for a change or new feature in the app (a button, a panel, a setting, a way it should \
+work), call request_feature the same way.
+
+Anything that needs real teaching, more than your three sentences, goes to hand_off: a spoken \
+lesson on a tune or a section of it, {problems}, music theory, a practice plan. Then just say \
+you'll think it over; the answer comes in your voice shortly.
+
+The context may include your notebook on the {player}. When they tell you something worth \
+keeping (a goal, a tune they're learning, how they like to be taught), use remember.
+
+The {player} works through the Roadmap, a skill tree following the coach's own {short} course: First notes, \
+then Grades 1 and 2. When they state a goal (a tune, a skill, a grade), ask at most two short \
+follow-up questions, and only if you need them, then call set_goal; the plan takes a minute \
+or two and you'll announce it. next_stop opens what's next on their path; start_exam starts \
+a mock exam (g1 or g2); atlas_summary tells you where they stand on the Roadmap.\
+"""
+FIDDLE_SYSTEM = STRING_SYSTEM.format(
+    teacher="fiddle", player="fiddler", held="fiddle and bow", short="fiddle", chords="",
+    words="straight bow, halfway between the bridge and the fingerboard, arm weight, whole bows, down bow and up bow, "
+          "string crossing from the elbow, separate bows, slurred, high and low second finger, a relaxed left thumb, "
+          "steady pulse, slow practice, isolate the bar, play it from memory",
+    slips="A missed note on the fiddle is often a finger in the wrong place (a high second finger that should be low, or "
+          "the reverse), a note played on the wrong string, or a crossing that sounded a neighbouring string; a wobbly "
+          "pitch is usually the finger not settled; say which is likely.",
+    exercises="a scale, a tune, whole bows, a string-crossing or slur drill",
+    problems="a bowing, intonation or finger-pattern problem")
+GUITAR_SYSTEM = STRING_SYSTEM.format(
+    teacher="guitar", player="guitarist", held="electric guitar", short="guitar",
+    chords=" Chords and strumming are taught in the Roadmap's theory lessons but not graded; for a chord, suggest "
+           "picking its strings one at a time so each note can be heard.",
+    words="first position, one finger per fret, fingertip just behind the fret, alternate picking, down on the beat, "
+          "small pick strokes from the wrist, string crossing, hammer-on, pull-off, mute the other strings, steady "
+          "pulse, slow practice, isolate the bar, play it from memory",
+    slips="A missed note on the guitar is often the right fret on the wrong string, a fret one off, or a note that "
+          "buzzed or died (the finger too far from the fret, or touching the next string); notes are written an octave "
+          "above how they sound, as guitar music is printed; say which is likely.",
+    exercises="a scale, a melody, a riff, an alternate-picking drill",
+    problems="a fretting, picking or chord-shape problem")
+BASS_SYSTEM = STRING_SYSTEM.format(
+    teacher="bass", player="bassist", held="bass guitar", short="bass",
+    chords="",
+    words="locking in with the drums, on the beat, full note lengths, alternating fingers, rest stroke, thumb on the "
+          "pickup, one finger per fret, mute the open strings, root and fifth, groove, steady pulse, slow practice, "
+          "isolate the bar, play it from memory",
+    slips="A missed note on the bass is often the right fret on the wrong string, a fret one off, or an open string left "
+          "ringing into the next note; with a bass, timing and note length matter as much as the notes; notes are "
+          "written an octave above how they sound; say which is likely.",
+    exercises="a scale, a bass line, a root-and-fifth groove, a muting drill",
+    problems="a timing, plucking or fretting problem")
+
+SYSTEMS = {"flute": FLUTE_SYSTEM, "sax": SAX_SYSTEM, "voice": VOICE_SYSTEM, "fiddle": FIDDLE_SYSTEM, "guitar": GUITAR_SYSTEM,
+           "bass": BASS_SYSTEM}  # the piano's is SYSTEM
+PLAYERS = {"flute": "flutist", "sax": "saxophonist", "voice": "singer", "fiddle": "fiddler", "guitar": "guitarist",
+           "bass": "bassist"}
+TOPICS = {"flute": "the flute", "sax": "the saxophone", "voice": "singing", "fiddle": "the fiddle", "guitar": "the guitar",
+          "bass": "the bass"}
+
+# The menus page_control can open on the coach page (coach.html's MENUS), with what's in each.
+PAGE_MENUS = {
+    "playing": "MIDI input, what you play, and each track's part, show, mute and volume",
+    "sheet": "sheet or falling notes, how the sheet is drawn, chords and lyrics, clean-up",
+    "maestro": "coaching style, when the Maestro talks during a run, the reading voice",
+    "voice": "the reading voice and its volume (in the Maestro menu)",
+    "playback": "step bar by bar, restart, loop, bookmarks, which bars to play, tempo, lead-in",
+    "settings": "sound out, keep the screen on, links into Preferences",
+    "sound_out": "where Listen and the parts you don't play are heard (in Settings)",
+    "actions": "jump back, bookmark, metronome, video, save, full screen",
+    "prefs_connections": "Preferences: MIDI input and output",
+    "prefs_audio": "Preferences: microphone and speakers",
+    "prefs_audio_to_midi": "Preferences: audio to MIDI",
+    "prefs_maestro": "Preferences: the Maestro",
+    "prefs_sheet": "Preferences: sheet music",
+    "prefs_song_folders": "Preferences: song folders",
+    "prefs_shortcuts": "Preferences: keyboard shortcuts",
+    "planner": "the Roadmap's Planner: goals and saved routes",
+    "where_to_start": "the Roadmap's placement questions",
+    "see_in_song": "in a Roadmap lesson on a song goal: the song itself, this lesson's bars marked",
+}
 
 TOOLS = [
     {
@@ -288,8 +415,30 @@ TOOLS = [
                 "bars": {"type": "string", "description": "Bar range like '5-8', or empty for the whole lesson."},
                 "tempo_percent": {"type": "integer", "description": "Listen / Rehearse speed, 30-150. Default 100."},
                 "loop": {"type": "boolean", "description": "Restart automatically after each completed pass."},
+                "part": {"type": "string", "description": "Play one part of a band song with every other part as the "
+                                                          "backing, by the instrument it's for: 'flute', 'strings'. "
+                                                          "Found and saved the first time. Empty: the hand above."},
+                "track": {"type": "string", "description": "With part: the track it is, when the last call asked which."},
+                "lead_in_bars": {"type": "integer", "description": "With part: bars of backing before the part comes in, "
+                                                                   "0-8 (saved for the song)."},
+                "lead_in_every_pass": {"type": "boolean", "description": "With part and loop: replay the lead-in each "
+                                                                         "pass (saved for the song)."},
             },
             "required": ["mode"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "set_backing_volume",
+        "description": "Turn one track the user isn't playing up, down or off ('drums down', 'mute the choir', "
+                       "'turn the left hand off'). In Listen, any track. Saved for the song.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "part": {"type": "string", "description": "The backing part, by its name or instrument: 'drums'."},
+                "volume_percent": {"type": "integer", "description": "0 (off) to 100 (as written)."},
+            },
+            "required": ["part", "volume_percent"],
             "additionalProperties": False,
         },
     },
@@ -423,6 +572,26 @@ TOOLS = [
         },
     },
     {
+        "name": "set_tiles",
+        "description": "Change the quick-action tiles on the Maestro panel for one part of the app: add "
+                       "tiles (to the end), take tiles off, or put that part back to its defaults. A tile "
+                       "from another part works there too (it goes there first). Tiles: "
+                       + "; ".join(f"{k}: {v}" for k, v in tiles.TILES.items()),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "view": {"type": "string", "enum": list(tiles.VIEWS),
+                         "description": "; ".join(f"{k}: {v}" for k, v in tiles.VIEW_NAMES.items())
+                                        + ". The part they're on unless they say."},
+                "add": {"type": "array", "items": {"type": "string", "enum": list(tiles.TILES)}},
+                "remove": {"type": "array", "items": {"type": "string", "enum": list(tiles.TILES)}},
+                "reset": {"type": "boolean", "description": "Back to that part's default tiles first."},
+            },
+            "required": ["view"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "request_feature",
         "description": "Save a request for a change or new feature in the app itself (not a lesson or exercise, "
                        "which you make yourself) for the developer to build later, with screenshots and the practice context.",
@@ -435,6 +604,76 @@ TOOLS = [
                                                                  "request just made instead of starting a new one."},
             },
             "required": ["description"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "page_control",
+        "description": "Change what the coach page shows or how it's set up, without starting a run: "
+                       "go to another part of the app, sheet or falling notes, labels, zoom, layout, the "
+                       "metronome, tempo, bar range and loop. Set only what they asked for.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "view": {"type": "string", "enum": ["home", "session", "explore", "record", "roadmap", "youtube"],
+                         "description": "Where to go. Leaving a session stops a run that's going."},
+                "show": {"type": "string", "enum": ["sheet", "notes", "both"],
+                         "description": "Sheet music, the falling notes, or both."},
+                "labels": {"type": "string", "enum": ["easy", "coached", "hard"],
+                           "description": "easy: names and counting everywhere; coached: only where they slip; hard: none."},
+                "note_names": {"type": "boolean"},
+                "counting": {"type": "boolean"},
+                "dynamics": {"type": "boolean"},
+                "tab": {"type": "boolean", "description": "A guitar's or a bass's tab staff under the notes."},
+                "fingering": {"type": "string", "enum": ["off", "repeats", "line"],
+                              "description": "A flute's or a sax's fingering diagram under the notes: off; repeats: where the "
+                                             "fingering changes; line: each note the first time on a line."},
+                "fingering_monitor": {"type": "boolean",
+                                      "description": "A flute's or a sax's monitor while playing: the expected note's fingering "
+                                                     "beside the note the microphone hears."},
+                "zoom_percent": {"type": "integer", "description": "How big the sheet is drawn, 50-200."},
+                "layout": {"type": "string", "enum": ["line", "rows"],
+                           "description": "line: scrolls sideways; rows: two rows, scrolls down."},
+                "metronome": {"type": "boolean", "description": "Start (true) or stop (false) the metronome."},
+                "metronome_bpm": {"type": "integer", "description": "20-300."},
+                "tempo_percent": {"type": "integer", "description": "The next run's speed, 30-150."},
+                "bars": {"type": "string", "description": "Bar range like '5-8' for the next run, or empty for the whole lesson."},
+                "loop": {"type": "boolean", "description": "Repeat the bar range."},
+                "menu": {"type": "string", "enum": list(PAGE_MENUS),
+                         "description": "Open a menu or settings page and light it up, when they ask where "
+                                        "something is or want to look themselves. "
+                                        + "; ".join(f"{k}: {v}" for k, v in PAGE_MENUS.items())},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "open_song",
+        "description": "Find a song or piece by name and put it on screen in the Session: the library first, "
+                       "then their Downloads folder (a file from MuseScore or a website lands there), then "
+                       "bitmidi.com. If it isn't anywhere, a MuseScore link to it goes in your panel for them to "
+                       "download it; say so.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "The song's title as they said it, e.g. 'Home for a Rest'."},
+                "artist": {"type": "string", "description": "Who it's by, if they said: 'Spirit of the West'."},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "remove_from_today",
+        "description": "Take something out of today's session plan (the Home page's Today list) when they "
+                       "don't want it today. It stays out until tomorrow's plan or Plan again.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "what": {"type": "string", "description": "A title from the plan ('Thriller'), a part's label "
+                                                          "('for fun', 'warm-up'), or 'all' for the whole plan."},
+            },
+            "required": ["what"],
             "additionalProperties": False,
         },
     },
@@ -524,7 +763,47 @@ a number repeats the previous duration. Rests r4. Ties c2~ c8. No chords.
 fifth), a breath (a rest or a long note) every two bars. Slow tempos (60-80).
 If the tool reports an error, fix the notation and call it again.\
 """
-LESSON_SYSTEMS = {"flute": FLUTE_LESSON_SYSTEM, "sax": SAX_LESSON_SYSTEM, "voice": VOICE_LESSON_SYSTEM}
+STRING_LESSON_SYSTEM = """\
+You compose short {name} practice exercises for a beginner (first notes to Grade 2) in a \
+practice app. Call create_lesson exactly once with the finished exercise. The coach grades one \
+line: write it in "right" in music21 tinyNotation ({clef}) and leave "left" empty.
+- Pitches: {pitches} Keep to {keep} unless asked for wider.
+- Accidentals after the octave marks: f# (F#4), b- (Bb4), c'# (C#5), F# (F#3) - never c#'.
+- Durations after the pitch: 1 whole, 2 half, 4 quarter, 8 eighth, 16; dots c4.; a note \
+without a number repeats the previous duration. Rests r4. Ties c2~ c8. No chords.
+- Fill every bar of the time signature exactly. Beginners: crotchets, minims and quaver pairs, \
+slow tempos (60-80), {style}.
+If the tool reports an error, fix the notation and call it again.\
+"""
+FIDDLE_LESSON_SYSTEM = STRING_LESSON_SYSTEM.format(
+    name="fiddle", clef="treble clef, as it sounds",
+    pitches="c d e f g a b = C4 to B4; c' = C5, c'' = C6; G A B = G3 to B3.",
+    keep="first position, G3-B5 (G to b'); the open strings are G3, D4, A4 and E5",
+    style="mostly in D, G and A major, steps and string crossings")
+GUITAR_LESSON_SYSTEM = STRING_LESSON_SYSTEM.format(
+    name="electric guitar", clef="written pitch, an octave above how the guitar sounds, as guitar music is printed",
+    pitches="c d e f g a b = C4 to B4; c' = C5; E F G A B = E3 to B3.",
+    keep="first position, written E3-G5 (E to g'); the open strings are written E3, A3, D4, G4, B4 and E5",
+    style="single notes only (melodies, riffs, scales; spell a chord out one note at a time)")
+BASS_LESSON_SYSTEM = STRING_LESSON_SYSTEM.format(
+    name="bass guitar", clef="written pitch, an octave above how the bass sounds, as bass music is printed in the bass clef",
+    pitches="C D E F G A B = C3 to B3; CC = C2, EE = E2; c = C4.",
+    keep="first position, written E2-C4 (EE to c); the open strings are written E2, A2, D3 and G3",
+    style="roots and fifths, steps, rests that stop the notes cleanly")
+LESSON_SYSTEMS = {"flute": FLUTE_LESSON_SYSTEM, "sax": SAX_LESSON_SYSTEM, "voice": VOICE_LESSON_SYSTEM,
+                  "fiddle": FIDDLE_LESSON_SYSTEM, "guitar": GUITAR_LESSON_SYSTEM, "bass": BASS_LESSON_SYSTEM}
+
+# Added to every instrument's prompt: the page can be worked by voice.
+PAGE_SYSTEM = """
+
+When they ask to change the screen (show the falling notes, note names on, zoom in, the \
+metronome, open the Roadmap or Home), do it with page_control rather than telling them where \
+to click. To set the bars, tempo or loop and start playing at once, use start_practice instead. \
+When they ask where a setting is, or want to change one page_control can't set, open its menu \
+with page_control's menu (it lights up on their screen) and say in a few words what to pick \
+there. If no menu fits, say you can't open that yet.
+
+When they name a song or piece to play or open ("home for a rest", "put on Desperado", a title and its artist), call open_song with the title, even when a word of it sounds like a command ("home", "rest", "stop"); a title they say beside a page name is still a song. switch_lesson is for exercises and lessons already saved. When they don't want something in today's plan ("skip Thriller", "drop the warm-up", "clear today's plan"), use remove_from_today."""
 
 # Added to either Maestro's prompt for a young learner's profile.
 YOUNG_SYSTEM = """
@@ -674,14 +953,21 @@ class VoiceChat:
         finally:
             self._lock.release()
 
+    def start_fresh_if_due(self) -> bool:
+        """Start a fresh conversation after a break or a long chat; True if one was forgotten
+        (the Maestro panel draws a line there). Earlier turns are never edited: that would
+        invalidate the replayed thinking blocks."""
+        if self.messages and (time.time() - self._last_turn > NEW_CONVERSATION_AFTER_SEC
+                              or len(self.messages) > NEW_CONVERSATION_AFTER_MESSAGES):
+            self.messages = []
+            return True
+        return False
+
     def _ask(self, said: str) -> dict:
         if self.ledger.today() >= daily_cap():
             return {"reply": "That's enough talking for today. We've hit the daily budget. Play, don't chat.",
                     "cost": 0.0, "actions": [], "spent_today": self.ledger.today(), "capped": True}
-        # Start a fresh conversation after a break or a long chat. Earlier turns are never
-        # edited: that would invalidate the replayed thinking blocks.
-        if time.time() - self._last_turn > NEW_CONVERSATION_AFTER_SEC or len(self.messages) > NEW_CONVERSATION_AFTER_MESSAGES:
-            self.messages = []
+        self.start_fresh_if_due()
         self._last_turn = time.time()
         player = PLAYERS.get(self.instrument(), "pianist")
         self.messages.append({"role": "user", "content": f"[Practice context]\n{self.context()}\n\n[The {player} said]\n{said}"})
@@ -691,7 +977,7 @@ class VoiceChat:
             response = self.client().messages.create(
                 model=CHAT_MODEL,
                 max_tokens=2000,
-                system=SYSTEMS.get(self.instrument(), SYSTEM) + (YOUNG_SYSTEM if self.young() else ""),
+                system=SYSTEMS.get(self.instrument(), SYSTEM) + PART_SYSTEM + PAGE_SYSTEM + (YOUNG_SYSTEM if self.young() else ""),
                 tools=TOOLS,
                 messages=self.messages,
                 output_config={"effort": "low"},

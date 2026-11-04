@@ -1,0 +1,24 @@
+{
+ "source": "The coach's own fiddle course (not any exam board's syllabus): a beginner's path in first position from the open strings to Grade 2-level scales, sight-reading and tunes, in the fiddle's home keys first (D, G and A major), then C and F major, A and E minor. The aural tests are added from the local flute syllabus when there is one.",
+ "version": 1,
+ "instrument": "fiddle",
+ "speeds": {"scale": {"g1": 50, "g2": 56}, "arpeggio": {"g1": 72, "g2": 84}},
+ "grades": [
+  {"id": "g1", "title": "Grade 1", "order": 1,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["D", "G"], "range": "octave"},
+    {"type": "scale", "quality": "major", "keys": ["A"], "range": "octave", "start_octave": 4},
+    {"type": "arpeggio", "quality": "major", "keys": ["D", "G"], "range": "octave"},
+    {"type": "arpeggio", "quality": "major", "keys": ["A"], "range": "octave", "start_octave": 4}],
+   "sight": {"bars": 4, "times": ["4/4", "3/4"], "keys": ["D", "G"], "range": ["D4", "B4"],
+             "features": ["minims, crotchets and steps", "crossing to the next string"]}},
+  {"id": "g2", "title": "Grade 2", "order": 2,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["C", "F"], "range": "octave"},
+    {"type": "scale", "quality": "minor", "keys": ["A", "E"], "range": "octave"},
+    {"type": "arpeggio", "quality": "major", "keys": ["C", "F"], "range": "octave"},
+    {"type": "arpeggio", "quality": "minor", "keys": ["A", "E"], "range": "octave"}],
+   "sight": {"bars": 6, "times": ["2/4"], "keys": ["C", "Em"], "range": ["A3", "E5"],
+             "features": ["quaver pairs", "two notes slurred in one bow", "f and p"]}}
+ ]
+}

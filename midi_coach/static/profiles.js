@@ -7,7 +7,9 @@
 
   const initial = p => (p.name.trim()[0] || '?').toUpperCase();
   const INSTRUMENTS = [{id: 'piano', name: 'Piano', glyph: '🎹'}, {id: 'flute', name: 'Flute', glyph: '🎶'},
-                       {id: 'sax', name: 'Alto sax', glyph: '🎷'}, {id: 'voice', name: 'Vocals', glyph: '🎤'}];
+                       {id: 'sax', name: 'Alto sax', glyph: '🎷'}, {id: 'voice', name: 'Vocals', glyph: '🎤'},
+                       {id: 'fiddle', name: 'Fiddle', glyph: '🎻'}, {id: 'guitar', name: 'Electric guitar', glyph: '🎸'},
+                       {id: 'bass', name: 'Bass guitar', glyph: '🎸'}];
   const instName = id => (INSTRUMENTS.find(i => i.id === id) || INSTRUMENTS[0]).name;
 
   function renderChip() {
@@ -203,9 +205,15 @@
     $('lib-search').focus();
   }
 
-  async function go(which) {
+  // Returns false when it stayed put: going elsewhere would stop a run and the answer was no.
+  // Asked whoever wants to go (a click or the Maestro), except: unguarded (the Maestro bringing up
+  // the Session for a run it was asked to start), and up from a lesson, which asks for itself.
+  async function go(which, {unguarded = false} = {}) {
     const from = document.body.dataset.view === 'lesson' ? 'progress' : document.body.dataset.view;
-    if (running && VIEW[which] && VIEW[which] !== from) cmd('stop').catch(() => {});
+    const stops = running && VIEW[which] && VIEW[which] !== from;
+    const ownAsk = document.body.dataset.view === 'lesson' && VIEW[which] === 'progress';
+    if (stops && !unguarded && !ownAsk && !(await askSwitch(which))) return false;
+    if (stops && !ownAsk) cmd('stop').catch(() => {});
     if (which !== 'explore' && which !== 'songs' && which !== 'lessons') libraryFull(false);
     if (which === 'home') {
       atlasShow(false);
@@ -245,6 +253,8 @@
       await atlasShow(true);
       mark('progress');
       (which === 'place' ? atlasPlaceForm : pathShow)();
+      const last = store.get('atlasLastLesson', '');  // left for the Session from See in the song
+      if (last && which === 'progress') { store.set('atlasLastLesson', ''); atlasActivate(last); }
       return;
     }
     if (which === 'youtube') {
@@ -261,7 +271,8 @@
     }
   }
   tabs.forEach(t => t.addEventListener('click', () => go(t.dataset.dash)));
-  window.addEventListener('coach:navigate', e => go(e.detail.view));
+  window.addEventListener('coach:navigate', e => go(e.detail.view, e.detail));
+  window.coachGo = go;  // the same, awaited (the Maestro opening a menu on another view)
   // A lesson is part of the Atlas: its label stays Roadmap.
   window.addEventListener('coach:viewchange', () => {
     const v = document.body.dataset.view;
@@ -276,16 +287,10 @@
   $('home-record').addEventListener('click', () => go('record'));
   $('home-progress').addEventListener('click', () => go('progress'));
   $('home-youtube').addEventListener('click', () => go('youtube'));
-  $('home-ask').addEventListener('click', () => {
-    go('practice');
-    if (!$('ask').disabled) $('ask').focus();
-  });
-  // The bar's Ask Maestro: where the ask box is on screen (a Session, Record, a lesson) it just
-  // focuses it, so nothing running stops; elsewhere it opens the Session first, as Home's does.
-  $('dash-ask').addEventListener('click', () => {
-    if (!$('ask').offsetParent) go('practice');
-    if (!$('ask').disabled) $('ask').focus();
-  });
+  // Ask Maestro (Home's and the bar's): opens the Maestro panel where you are, so nothing
+  // running stops and the view stays put.
+  $('home-ask').addEventListener('click', openMaestro);
+  $('dash-ask').addEventListener('click', openMaestro);
 
   const syncHomePiece = () => {
     const title = $('title').textContent.trim();

@@ -34,7 +34,7 @@ def wanted(score: Score) -> bool:
     or that Clean made playable (the file itself still has the notes it took out)."""
     if pathlib.Path(score.path).suffix.lower() not in MIDI_SUFFIXES:
         return False
-    return (score.clean is not None or not is_plain_piano(score) or score.beat_map is not None or score.played_live
+    return (score.clean is not None or score.playing is not None or not is_plain_piano(score) or score.beat_map is not None or score.played_live
             or len(playable_parts(score)) == 1 or any(r in OTHER_ROLES for r in score.roles.values())
             or len(dynamic_marks(score, [(Fraction(n.beat).limit_denominator(48), n.velocity) for n in score.notes])) > 1)
 
@@ -134,9 +134,41 @@ def dynamic_marks(score: Score, onsets: list[tuple[Fraction, int]]) -> list[tupl
     return marks
 
 
+def shown_backing(score: Score) -> list[int]:
+    """The backing tracks the user ticked Show for (tracks.py), drums aside (no pitched staff
+    for them): each gets a staff of its own above the user's, role 'track:<index>'."""
+    from . import tracks
+
+    mix = tracks.mix(score)
+    parts = {p.index: p for p in score.parts}
+    return [i for i, m in mix.items() if m["show"] and not parts[i].drums and tracks.part_of(score, i) == tracks.BACKING]
+
+
+def _extra_staves(score: Score) -> tuple[list[tuple[str, list]], list[str]]:
+    """The shown backing tracks as grand_staff's `extra` (each on its own grid) and their roles."""
+    from . import tracks
+
+    names = tracks.names(score)
+    extra, roles = [], []
+    for i in shown_backing(score):
+        notes = [n for n in score.notes if n.part == i]
+        grids = grids_for([n.beat for n in notes])
+        written = []
+        for n in notes:
+            on = _beat(n.beat, grids)
+            written.append((on, _end(score.beat_of(n.end), on, grids), n.pitch))
+        if written:
+            extra.append((names[i], written))
+            roles.append(f"track:{i}")
+    return extra, roles
+
+
 def build(score: Score, split_note: int = 60) -> dict:
     """{xml, bars, notes, key, parts, staves} for the parts the user plays, plus the vocal
-    line and the bass pedals; staves is the role of each staff, top to bottom."""
+    line, the bass pedals and any backing track shown; staves is the role of each staff, top
+    to bottom."""
+    if score.playing:
+        return _named_sheet(score)
     notes, info = select_notes(score, "both", split_note=split_note)
     roles = set(effective_roles(score).values())
     pedals = select_notes(score, "pedals")[0] if "pedals" in roles else []
@@ -158,21 +190,46 @@ def build(score: Score, split_note: int = 60) -> dict:
         tune.append((on, _end(score.beat_of(n.end), on, tune_grids), n.pitch, None))
     title = pathlib.Path(score.path).stem
     source = f"{pathlib.Path(score.path).name}, cleaned for two hands: {score.clean['summary']}" if score.clean else None
+    extra, extra_roles = _extra_staves(score)
     out = grand_staff(events, title, time_signatures(score), _tempo_marks(score), melody=tune or None,
-                      dynamics=dynamic_marks(score, onsets), source=source)
-    staves = ["vocals"] * bool(tune) + ["right", "left"] + ["pedals"] * bool(pedals)
+                      dynamics=dynamic_marks(score, onsets), source=source, extra=extra)
+    staves = extra_roles + ["vocals"] * bool(tune) + ["right", "left"] + ["pedals"] * bool(pedals)
     return {**out, "parts": info.get("method"), "staves": staves}
+
+
+def _named_sheet(score: Score) -> dict:
+    """The named part being played (score.playing), alone on one staff: what you play and
+    nothing of the backing."""
+    notes, info = select_notes(score, score.playing)
+    if not notes:
+        raise ValueError(f"No notes in the {score.playing} part.")
+    grids = grids_for([n.beat for n in notes])
+    ons = [_beat(n.beat, grids) for n in notes]
+    for k in range(len(ons) - 1, 0, -1):  # a quick ornament snapped onto the note after it steps back a grid line
+        if ons[k - 1] >= ons[k]:
+            ons[k - 1] = ons[k] - grids.get(int(ons[k] - Fraction(1, 8)), Fraction(1, 4))
+    tune = []
+    for k, (n, on) in enumerate(zip(notes, ons)):
+        end = _end(score.beat_of(n.end), on, grids)
+        tune.append((on, min(end, ons[k + 1]) if k + 1 < len(ons) else end, n.pitch, None))
+    extra, extra_roles = _extra_staves(score)
+    out = grand_staff([], pathlib.Path(score.path).stem, time_signatures(score), _tempo_marks(score), melody=tune,
+                      melody_name=score.playing.capitalize(), piano=False, extra=extra,
+                      source=f"{pathlib.Path(score.path).name}, the {score.playing} part on its own")
+    return {**out, "parts": info.get("method"), "staves": extra_roles + [score.playing]}
 
 
 def staves(score: Score) -> list[str]:
     """The role of each staff drawn for a score, top to bottom (a role from notes.ROLES, or
-    'other' for a part without one), so the page can show and hide them by role. Matches
-    build() for the sheets written here, and the file's parts in order otherwise."""
+    'track:<index>' for a part without one), so the page can show and hide them by role.
+    Matches build() for the sheets written here, and the file's parts in order otherwise."""
+    if score.playing:
+        return _extra_staves(score)[1] + [score.playing]
     roles = effective_roles(score)
     has = lambda role: any(r == role and score.parts[i].note_count for i, r in roles.items())  # noqa: E731
     if wanted(score):
-        return ["vocals"] * has("vocals") + ["right", "left"] + ["pedals"] * has("pedals")
-    return [roles.get(p.index, "other") for p in score.parts if p.note_count]
+        return _extra_staves(score)[1] + ["vocals"] * has("vocals") + ["right", "left"] + ["pedals"] * has("pedals")
+    return [roles.get(p.index, f"track:{p.index}") for p in score.parts if p.note_count]
 
 
 def time_signatures(score: Score) -> list[tuple[Fraction, str]]:
@@ -190,6 +247,11 @@ def piano_xml(score: Score, split_note: int = 60) -> str:
     from . import hand_model
 
     choice = ",".join(f"{i}{h[0]}" for i, h in sorted(score.roles.items())) or "suggested"
+    if score.playing:
+        choice += f"|{score.playing}"  # one sheet per named part
+    shown = shown_backing(score)
+    if shown:
+        choice += "|shown " + ",".join(map(str, shown))  # backing tracks drawn too
     hands = f"{hand_model.splitter()}-v{SPLIT_VERSION}"  # a sheet split by the old search is rebuilt once the model is installed
     grid = json.dumps(score.beat_map.to_json()) if score.beat_map else ""  # a recovered grid that changes gives a new sheet
     clean = f"|clean-v{score.clean['version']}" if score.clean else ""

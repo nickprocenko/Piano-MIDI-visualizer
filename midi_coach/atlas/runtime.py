@@ -133,7 +133,7 @@ class AtlasCoach:
         return {"atlas": self.cmd_atlas, "node": self.cmd_node, "search": self.cmd_search,
                 "step_start": self.cmd_step_start, "step_done": self.cmd_step_done,
                 "quiz_answer": self.cmd_quiz_answer, "progress_rebuild": self.cmd_progress_rebuild,
-                "stage_open": self.cmd_stage_open, "stage_close": self.cmd_stage_close, "step_play": self.cmd_step_play, "step_show": self.cmd_step_show, "sing_result": self.cmd_sing_result,
+                "stage_open": self.cmd_stage_open, "stage_close": self.cmd_stage_close, "stage_song": self.cmd_stage_song, "step_play": self.cmd_step_play, "step_show": self.cmd_step_show, "sing_result": self.cmd_sing_result,
                 "exam_start": self.cmd_exam_start, "exam_state": self.cmd_exam_state, "exam_next": self.cmd_exam_next,
                 "exam_skip": self.cmd_exam_skip, "exam_abort": self.cmd_exam_abort, "exam_report": self.cmd_exam_report,
                 "placement_start": self.cmd_placement_start, "placement_continue": self.cmd_placement_continue,
@@ -142,7 +142,8 @@ class AtlasCoach:
                 "lesson_feedback": self.cmd_lesson_feedback,
                 "goals": self.cmd_goals, "route": self.cmd_route, "goal_quick": self.cmd_goal_quick, "goal_plan": self.cmd_goal_plan, "goal_activate": self.cmd_goal_activate,
                 "goal_archive": self.cmd_goal_archive, "path_next": self.cmd_path_next,
-                "today": self.cmd_today, "today_more": self.cmd_today_more}
+                "today": self.cmd_today, "today_more": self.cmd_today_more,
+                "today_remove": self.cmd_today_remove}
 
     def cmd_atlas(self, _body: dict) -> dict:
         """The whole tree for the Atlas view: slim nodes, layout, bundled edges, and states."""
@@ -210,7 +211,47 @@ class AtlasCoach:
             shown = str(self.file(first))
             self.show(shown)
         self.publish()
-        return {"node": node_id, "steps": len(lesson["steps"]), "shown": shown}
+        return {"node": node_id, "steps": len(lesson["steps"]), "shown": shown, "song": bool(self.song_for(node_id).get("song"))}
+
+    def song_for(self, node_id: str) -> dict:
+        """Where a lesson sits in its goal's song: {song, title, bars, why}. The goal is the one
+        the node was made for (a song's sections, a bridge), else the active goal. bars: a
+        section's own bars, a bridge's song_bars from the planner, or '' (the whole song)."""
+        tree = self.tree()
+        node = tree["by_id"].get(node_id) or {}
+        req = tree["by_id"].get(node.get("requirement") or node.get("parent") or "", {}) if node.get("level") == "stage" else node
+        data = store.load_goals()
+        goal = next((g for g in data["goals"] if g["id"] == (node.get("goal") or req.get("goal"))), None)             or next((g for g in data["goals"] if g["id"] == data.get("active") and g["status"] == "active"), None)
+        if not goal or not goal.get("song"):
+            return {}
+        if req.get("kind") == "song":
+            bars = (node.get("stage") or {}).get("bars") or ""
+            why = f"bars {bars}" if bars else "the whole song"
+        elif req.get("kind") == "bridge" and req.get("song_bars"):
+            bars = req["song_bars"]
+            why = f"where this comes up: bars {bars}"
+        else:
+            bars = ""
+            why = "the planner didn't say where this comes up, so here's the song from the start"
+        return {"song": goal["song"], "title": goal.get("title") or "", "bars": bars, "why": why}
+
+    def cmd_stage_song(self, body: dict) -> dict:
+        """See in the song: the goal's song on the sheet in place of the lesson's music, the
+        lesson view staying open (stage_open puts the exercise back; stage_close the Session's)."""
+        node_id = body.get("node", "")
+        out = self.song_for(node_id)
+        if not out:
+            return {"error": "This lesson isn't part of a song goal."}
+        if self._freeplay is None:
+            self._freeplay = getattr(self.hub, "score_path", None) or ""
+        try:
+            if self.show:
+                self.show(out["song"])
+        except Exception as exc:  # the song file went away
+            return {"error": f"Couldn't open the song: {exc}"}
+        if body.get("keep"):  # going on to the Session with it: closing the lesson leaves it up
+            self._freeplay = out["song"]
+        return {"node": node_id, **out}
 
     def cmd_stage_close(self, _body: dict) -> dict:
         """Out of the lesson view: Freeplay gets back the sheet it had before the lesson opened."""
@@ -855,6 +896,23 @@ class AtlasCoach:
         today.save(plan)
         return self.today_state()
 
+    def cmd_today_remove(self, body: dict) -> dict:
+        """Take parts out of today's plan: {index} (the page's ×) or {what} (the Maestro: "all", a
+        label like "for fun", or words of a title)."""
+        plan = today.load()
+        if not plan or plan.get("day") != today.day():
+            return {**self.today_state(), "error": "There's no plan for today yet."}
+        if body.get("index") is not None:
+            which = [int(body["index"])] if 0 <= int(body["index"]) < len(plan["parts"]) else []
+        else:
+            which = today.match(plan, str(body.get("what") or ""))
+        if not which:
+            names = "; ".join(f"{p['label']}: {p['title']}" for p in plan["parts"]) or "nothing"
+            return {**self.today_state(), "error": f"Nothing in today's plan matches that. It has: {names}."}
+        gone = today.remove(plan, which)
+        today.save(plan)
+        return {**self.today_state(), "removed_now": [p["title"] for p in gone]}
+
     def context_lines(self) -> list[str]:
         """What the Maestro knows about the Atlas: the goal and its next stop, drills, exams, placement."""
         lines = []
@@ -871,7 +929,9 @@ class AtlasCoach:
         if plan and plan.get("day") == today.day():
             t = today.state(plan, store.graded_steps(self.tree()))
             lines.append(f"Today's session ({t['minutes']} min planned, {t['practiced_min']:g} practiced so far): "
-                         + "; ".join(f"{p['label']}: {p['title']}{' (done)' if p['done'] else ''}" for p in t["parts"]) + ".")
+                         + ("; ".join(f"{p['label']}: {p['title']}{' (done)' if p['done'] else ''}" for p in t["parts"])
+                            or "nothing left, all taken out today") + "."
+                         + (f" ({t['removed']} taken out today.)" if t["removed"] and t["parts"] else ""))
         made = drills.active()
         if made:
             lines.append("Drills for bars that keep slipping: "

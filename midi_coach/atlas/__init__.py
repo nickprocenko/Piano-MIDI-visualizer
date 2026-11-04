@@ -17,7 +17,9 @@ A flute profile gets Pan instead: the same kind of tree for the flute (a First n
 then ABRSM Flute Grades 1-2), built by atlas.pan into <home>/atlas/pan with the same
 engine, page and progress store. An alto saxophone profile gets atlas.sax (First notes, then
 ABRSM Saxophone Grades 1-2, in written pitch) in <home>/atlas/sax, and a singer atlas.voice
-(the coach's own vocal course) in <home>/atlas/voice-high or voice-low.
+(the coach's own vocal course) in <home>/atlas/voice-high or voice-low. A fiddle, electric guitar
+or bass guitar profile gets the coach's own course for it (atlas.fiddle, atlas.guitar,
+atlas.bass) in <home>/atlas/fiddle, guitar or bass.
 """
 
 from __future__ import annotations

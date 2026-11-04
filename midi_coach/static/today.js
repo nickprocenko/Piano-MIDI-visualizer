@@ -24,7 +24,8 @@ function todayPart(p, k, cur) {
          `<span class="td-mark" aria-hidden="true">${mark}</span>` +
          `<span class="td-text"><span class="td-label">${esc(p.label)}</span> <b>${esc(p.title)}</b>` +
          (where ? `<span class="td-where">${where}</span>` : '') + `</span>` +
-         `<span class="td-min">${p.done ? 'done' : '~' + p.minutes + ' min'}</span></button></li>`;
+         `<span class="td-min">${p.done ? 'done' : '~' + p.minutes + ' min'}</span></button>` +
+         `<button class="td-drop" data-drop="${k}" title="Take ${esc(p.title)} out of today's plan" aria-label="Remove ${esc(p.title)} from today">×</button></li>`;
 }
 
 function todayRender() {
@@ -47,12 +48,18 @@ function todayRenderHome() {
     go.dataset.act = 'atlas';
   } else if (!s.goal) {  // a new profile: a few questions set the goal, then Today has a plan
     const inst = document.body.dataset.instrument;
-    const named = {flute: 'the flute', sax: 'the saxophone', voice: 'singing'}[inst];
+    const named = {flute: 'the flute', sax: 'the saxophone', voice: 'singing', fiddle: 'the fiddle', guitar: 'the guitar',
+                   bass: 'the bass'}[inst];
     $('today-title').textContent = named ? `New to ${named}? Start here` : 'New here? Start here';
     $('today-sub').textContent = 'A few quick questions (about two minutes) find where you start, then Today plans your practice.' +
       (inst === 'voice' ? ' Have your microphone ready.' : named ? ` Have your ${named.slice(4)} and microphone ready.` : '');
     go.textContent = 'Find where I start ▸';
     go.dataset.act = 'place';
+  } else if (!parts.length && s.removed) {
+    $('today-title').textContent = 'Today';
+    $('today-sub').textContent = `You've taken everything out of today's plan. ${todayMinutes(s.practiced_min)} practiced today.`;
+    go.textContent = 'Plan again ▸';
+    go.dataset.act = 'replan';
   } else if (!parts.length) {
     $('today-title').textContent = 'Today';
     $('today-sub').textContent = `Nothing on your Path has a lesson ready yet. Open the Roadmap to see what's there.`;
@@ -73,6 +80,20 @@ function todayRenderHome() {
   }
   $('today-parts').innerHTML = parts.map((p, k) => todayPart(p, k, s.next)).join('');
   $('today-parts').querySelectorAll('[data-part]').forEach(b => b.onclick = () => todayOpen(+b.dataset.part));
+  $('today-parts').querySelectorAll('[data-drop]').forEach(b => b.onclick = () => todayDrop(+b.dataset.drop));
+}
+
+// × on a part: out of today's plan until tomorrow (or Plan again).
+async function todayDrop(k) {
+  if (today.busy) return;
+  today.busy = true;
+  try {
+    const out = await cmd('today_remove', {index: k});
+    today.state = out;
+    todayRender();
+    if (out.error) statusEl.textContent = out.error;
+  } catch (err) { statusEl.textContent = err.message; }
+  finally { today.busy = false; }
 }
 
 // Beside a lesson: today's list, the part you're on lit, and what's next once it's done.

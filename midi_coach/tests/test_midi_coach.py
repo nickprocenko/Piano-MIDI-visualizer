@@ -463,8 +463,8 @@ class RecordingHub:
     def session(self, active, mode=None):
         self.events.append(("session", active, mode))
 
-    def flash(self, text):
-        self.events.append(("flash", text))
+    def flash(self, text, hint=None):
+        self.events.append(("flash", text) if hint is None else ("flash", text, hint))
 
     def status(self, text):
         self.events.append(("status", text))
@@ -481,6 +481,20 @@ class RecordingHub:
 
 def _on(pitch):
     return [0x90, pitch, 80]
+
+
+def test_live_wait_mode_names_the_right_key_after_the_same_wrong_one(ref):
+    from midi_coach import live
+
+    notes, _ = select_notes(ref, "right", bars=(1, 1))
+    hub = RecordingHub()
+    sess = live.LiveSession("wait", ref, notes, hub)
+    sess.start()
+    sess.on_message(0.0, _on(61))
+    sess.on_message(0.1, _on(63))  # a different wrong key: no hint yet
+    sess.on_message(0.2, _on(63))  # the same one again: the flash names C5
+    flashes = [e for e in hub.events if e[0] == "flash"]
+    assert flashes == [("flash", "C#4"), ("flash", "Eb4"), ("flash", "Eb4", "C5")]
 
 
 def test_live_wait_mode(ref):
@@ -1363,7 +1377,7 @@ def test_deleted_sheet_file_is_not_searched_by_title(ref, monkeypatch, tmp_path)
     with pytest.raises(FileNotFoundError, match="moved or deleted"):  # not 'ambiguous', not another file
         library.get_score(str(gone))
     server.hub.score_path = str(gone)  # the page's sheet, deleted while it was open
-    assert server._cmd_parts({}) == {"path": None, "parts": [], "roles": []}
+    assert server._cmd_parts({}) == {"path": None, "tracks": [], "choices": [], "play": None}
 
 
 def test_page_seek_restarts_learn_at_requested_bar_without_saving_partial_take(ref, fake_rtmidi, monkeypatch):
@@ -1456,16 +1470,19 @@ def test_page_listen_plays_each_part_at_its_fader(ref, fake_rtmidi, monkeypatch)
     right = {n.pitch for n in ref.notes if n.part == 0 and n.start < ref.bars[1].start}
     try:
         _post(url + "load", {"lesson": "etude"})
-        muted = _post(url + "start", {"mode": "listen", "roles": ["right", "left"], "gains": {"right": 0, "left": 0}})
+        muted = _post(url + "start", {"mode": "listen", "gains": {"0": 0, "1": 0}})  # a lane per track
         assert "muted" in muted["error"]
-        started = _post(url + "start", {"mode": "listen", "bars": "1", "roles": ["right", "left"],
-                                        "gains": {"right": 0.5, "left": 0}})
+        _post(url + "track", {"index": 1, "listen_mute": True})  # Listen's own mix, saved for the file
+        _post(url + "track", {"index": 0, "listen_vol": 50})
+        started = _post(url + "start", {"mode": "listen", "bars": "1"})
         assert started["mode"] == "listen", started
         session = server._live["session"]
-        assert set(session.lanes) == {"right", "left"}  # the muted part is there to turn up mid-run
-        assert _post(url + "mix", {"gains": {"right": 0.25}}) == {"gains": {"right": 0.25}, "live": True}
-        assert session.accompanist.gains == {"right": 0.25, "left": 0.0}
-        assert server._practice["settings"]["gains"] == {"right": 0.25, "left": 0.0}  # kept for the next pass
+        assert set(session.lanes) == {"0", "1"}  # the muted track is there to turn up mid-run
+        assert session.accompanist.gains == {"0": 0.5, "1": 0.0}
+        assert _post(url + "track", {"index": 0, "listen_vol": 25})["tracks"][0]["listen_vol"] == 25  # heard live
+        assert session.accompanist.gains == {"0": 0.25, "1": 0.0}
+        assert _post(url + "mix", {"gains": {"0": 0.2}}) == {"gains": {"0": 0.2}, "live": True}
+        assert server._practice["settings"]["gains"] == {"0": 0.2}  # kept for the next pass
         _until(lambda: any(m[0] & 0xF0 == 0x90 and m[2] and m[1] in right for _, m in FakeOut.sent), timeout=8)
         _post(url + "stop")
         _until(lambda: not server._practice["running"])
@@ -2851,12 +2868,16 @@ def test_backing_is_what_you_dont_play(ref, tmp_path):
     _write_organ(tmp_path / "songs" / "Organ Hymn.mid")
     score = library.get_score("organ hymn")
     ix = {p.name: p.index for p in score.parts}
-    lanes = server._backing_notes(score, "right+pedals", ["right", "left", "pedals", "vocals"], "2-3", 60)
-    assert set(lanes) == {"left", "vocals"}
-    assert {n.part for n in lanes["left"]} == {ix["Lower"]} and {n.part for n in lanes["vocals"]} == {ix["Choir Vocals"]}
+    mine = server._selection(score, "right+pedals", "2-3", 60)[0]
+    lanes, _, gains = server._track_lanes(score, "2-3", mine=mine)
+    lower, choir = str(ix["Lower"]), str(ix["Choir Vocals"])
+    assert set(lanes) == {lower, choir}  # one lane per track you don't play
+    assert {n.part for n in lanes[lower]} == {ix["Lower"]} and {n.part for n in lanes[choir]} == {ix["Choir Vocals"]}
+    assert gains == {lower: 1.0, choir: 1.0}  # every track sounds unless muted
     t0, t1 = score.bar_range_times(2, 3)
     assert all(t0 - 1e-6 <= n.start < t1 for part in lanes.values() for n in part)
-    assert server._backing_notes(score, "both", None, None, 60) == {}
+    both, _, _ = server._track_lanes(score, None, mine=server._selection(score, "both", None, 60)[0])
+    assert set(both) == {str(ix["Pedal"]), choir}  # the feet's part and the singing sound when you play the hands
 
 
 def test_accompanist_plays_each_lane_at_its_volume(fake_rtmidi):
@@ -2886,6 +2907,26 @@ def test_accompanist_sends_notes_only_and_lets_go(fake_rtmidi):
     acc.close()
     sent = [m for _, m in FakeOut.sent]
     assert sent == [[0x90, 60, 80], [0x90, 64, 80], [0x80, 60, 0], [0x80, 64, 0]]  # 64 let go on close; no pedal, no 67
+
+
+def test_accompanist_never_leaves_a_restruck_key_hanging(fake_rtmidi):
+    # Learn schedules a chord window at a time: a held note's off (window end + 0.5 s) can come
+    # after the next window strikes the same key. On, on, off used to leave a voice stuck.
+    acc = midi_io.Accompanist()
+    acc.voices({"band": (3, None)})
+    now = time.perf_counter()
+    acc.schedule([(0.0, [0x90, 67, 80]), (0.3, [0x80, 67, 0])], now, "band")
+    acc.schedule([(0.1, [0x90, 67, 90]), (0.2, [0x80, 67, 0])], now, "band")
+    _until(lambda: len(FakeOut.sent) >= 4)
+    acc.close()
+    assert [m for _, m in FakeOut.sent] == [[0x93, 67, 80], [0x83, 67, 0], [0x93, 67, 90], [0x83, 67, 0]]
+    FakeOut.sent = []
+    acc = midi_io.Accompanist()
+    acc.schedule([(0.0, [0x90, 60, 80]), (0.05, [0x90, 60, 80]), (0.1, [0x80, 60, 0]), (9.0, [0x80, 60, 0])],
+                 time.perf_counter())
+    _until(lambda: len(FakeOut.sent) >= 3)
+    acc.close()  # the second strike still holds the key: close lets it go
+    assert [m for _, m in FakeOut.sent] == [[0x90, 60, 80], [0x80, 60, 0], [0x90, 60, 80], [0x80, 60, 0]]
 
 
 class FakeAccompanist:
@@ -2979,21 +3020,29 @@ def test_page_songs_lessons_and_parts(ref, tmp_path, fake_rtmidi, monkeypatch):
         assert listed["Scale"]["kind"] == "lesson" and listed["Scale"]["history"]["runs"] == 1
         assert listed["Nocturne"]["kind"] == "song" and listed["Nocturne"]["history"] is None
 
-        assert _post(url + "parts")["parts"] == []
+        assert _post(url + "parts")["tracks"] == []
         _post(url + "load", {"lesson": "organ hymn"})
         parts = _post(url + "parts")
-        assert not parts["confirmed"] and parts["roles"] == ["right", "left", "pedals", "vocals"]
-        assert {p["name"]: p["role"] for p in parts["parts"]} == {
+        assert not parts["confirmed"] and parts["play"] == "both"
+        assert parts["choices"] == ["both", "right", "left", "both+pedals", "right+pedals", "left+pedals", "pedals"]
+        assert {t["name"]: t["part"] for t in parts["tracks"]} == {
             "Upper": "right", "Lower": "left", "Pedal": "pedals", "Choir Vocals": "vocals"}
         payload = server.hub._score_payload
         assert payload["staves"] == ["vocals", "right", "left", "pedals"] and payload["path"].endswith("Organ Hymn.mid")
 
-        by_name = {p["name"]: str(p["index"]) for p in parts["parts"]}
-        assert "error" in _post(url + "set_parts", {"roles": {by_name["Pedal"]: "pedals"}})  # nothing for the hands
-        saved = _post(url + "set_parts", {"roles": {by_name["Upper"]: "both", by_name["Lower"]: "off",
-                                                    by_name["Pedal"]: "pedals", by_name["Choir Vocals"]: "off"}})
-        assert saved["confirmed"] and saved["roles"] == ["right", "left", "pedals"]
+        by_name = {t["name"]: t["index"] for t in parts["tracks"]}
+        assert _post(url + "confirm_parts")["confirmed"]
+        _post(url + "track", {"index": by_name["Upper"], "part": "both"})
+        saved = _post(url + "track", {"index": by_name["Lower"], "part": "backing"})
+        assert {t["name"]: t["part"] for t in saved["tracks"]}["Lower"] == "backing"
+        _post(url + "track", {"index": by_name["Choir Vocals"], "part": "backing"})
         assert server.hub._score_payload["staves"] == ["right", "left", "pedals"]  # redrawn for the new parts
+        assert _post(url + "parts")["choices"] == ["both", "right", "left", "both+pedals", "right+pedals", "left+pedals", "pedals"]
+        _post(url + "track", {"index": by_name["Upper"], "part": "right"})  # no track for the left hand now
+        assert _post(url + "parts")["choices"] == ["right", "right+pedals", "pedals"]
+        assert "yours to play" in _post(url + "track", {"index": by_name["Upper"], "part": "backing"})["error"]
+        out = _post(url + "song_settings", {"play": "right+pedals"})
+        assert out["play"] == "right+pedals" and out["playing"] is None  # a hand and the feet, not a named part
     finally:
         server.hub.shutdown()
 

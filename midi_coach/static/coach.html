@@ -86,38 +86,44 @@
                                                padding: 0 max(0px, (100% - 760px) / 2); }
   .tabs #lib-size { flex: none; padding: 10px 10px 8px; font-weight: 400; }
   .tabs #lib-size:hover { color: var(--text); }
-  /* Parts: what you play, what's shown, what sounds; and what each part of the file is */
-  #parts-wrap { position: relative; display: inline-flex; }
-  #parts-btn { padding: 4px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
-  #parts-btn[aria-expanded=true] { border-color: var(--accent); }
-  #parts { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: 440px; max-width: calc(100vw - 40px); max-height: 70vh; overflow-y: auto;
-           padding: 12px 14px; background: var(--panel); border: 1px solid rgba(255,255,255,.15); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.55); }
-  #parts.open { display: block; }
-  #parts h2 { margin: 2px 0 6px; color: var(--muted); font: 700 11px 'Segoe UI', Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
-  #parts h2:not(:first-child) { margin-top: 14px; }
-  #mix { width: 100%; border-collapse: collapse; }
-  #mix th, #mix td { padding: 4px 6px; text-align: center; font-weight: normal; }
-  #mix thead th { color: var(--muted); font-size: 11.5px; }
-  #mix tbody th { text-align: left; color: var(--text); }
-  #mix .na { color: var(--muted); }
-  .snd { width: 34px; padding: 2px 0; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
-  .snd[aria-pressed=true] { border-color: var(--accent); background: rgba(0,180,180,.15); }
-  .snd:disabled { opacity: .3; cursor: default; }
-  #mix .c-snd { text-align: left; }
-  .snd-cell { display: flex; align-items: center; gap: 6px; }
-  .vol { width: 110px; accent-color: var(--accent); }
-  .vol:disabled { opacity: .3; }
-  .vol-val { min-width: 32px; color: var(--muted); font-size: 11.5px; text-align: right; }
-  #menu.listen #mix .c-play { display: none; }
-  #menu.running #part-roles, #menu.running #parts-save, #menu.running #out-port { opacity: .5; pointer-events: none; }  /* the faders stay live */
-  #parts .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
-  #parts select { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 3px 5px; font: inherit; }
-  #part-roles { max-height: 240px; overflow-y: auto; }
-  .part-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid rgba(255,255,255,.05); }
-  .part-row span { flex: 1; min-width: 0; }
-  .part-row small { display: block; color: var(--muted); font-size: 11.5px; }
-  #parts-save { margin-top: 8px; padding: 5px 14px; border: 0; border-radius: 5px; background: var(--accent); color: #031414; font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
-  #parts-save:disabled { opacity: .4; cursor: default; }
+  /* Playing: what you play, and each track's part, show, mute and volume. One panel, one scroll. */
+  #playing-settings .menu-panel { width: min(640px, calc(100vw - 40px)); max-height: 70vh; gap: 10px; }
+  .pp-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+  #menu.listen .pp-top { display: none; }  /* MIDI input and You play are for playing */
+  #tracks-box { align-self: stretch; min-height: 0; overflow-y: auto; }  /* the one scroll: the top row and the header stay put */
+  .pp-top select { max-width: 220px; }
+  #tracks-note { align-self: stretch; display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px;
+                 background: rgba(0,180,180,.1); color: var(--text); font-size: 12.5px; }
+  #tracks-note[hidden] { display: none; }
+  #parts-ok { margin-left: auto; padding: 3px 14px; border: 0; border-radius: 5px; background: var(--accent); color: #031414; font: 600 12.5px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #tracks { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+  #tracks col.c-part { width: 150px; } #tracks col.c-show { width: 46px; } #tracks col.c-mute { width: 42px; } #tracks col.c-vol { width: 150px; }
+  #tracks thead th { position: sticky; top: 0; z-index: 1; padding: 4px 6px; background: var(--panel); color: var(--muted);
+                     font: 11.5px 'Segoe UI', Arial, sans-serif; text-align: left; border-bottom: 1px solid rgba(255,255,255,.08); }
+  #tracks thead th.c-show, #tracks thead th.c-mute { text-align: center; }
+  #tracks td, #tracks tbody th { padding: 5px 6px; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
+  #tracks tbody th { font-weight: normal; text-align: left; overflow: hidden; }
+  #tracks .t-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  #tracks small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+  #tracks tr.yours .t-name { color: var(--accent); }
+  #tracks .t-part { width: 100%; }
+  #tracks td.c-show, #tracks td.c-mute { text-align: center; }
+  #tracks .c-vol { white-space: nowrap; }
+  .t-mute { width: 30px; padding: 2px 0; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .t-mute[aria-pressed=true] { border-color: var(--accent); background: rgba(0,180,180,.15); }
+  .t-vol { width: 96px; vertical-align: middle; accent-color: var(--accent); }
+  .t-vol:disabled { opacity: .3; }
+  .vol-val { display: inline-block; min-width: 34px; color: var(--muted); font-size: 11.5px; text-align: right; }
+  .t-you { color: var(--muted); font-size: 12px; }
+  #tracks select { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 3px 5px; font: inherit; }
+  #tracks select:disabled, #tracks input:disabled { cursor: default; }
+  #tracks-empty { color: var(--muted); font-size: 12.5px; }
+  .pp-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+  #menu.running #out-port { opacity: .5; pointer-events: none; }  /* the mute and volume stay live */
+  @media (max-width: 760px) {
+    #tracks col.c-part { width: 112px; } #tracks col.c-vol { width: 64px; }
+    .t-vol { width: 60px; } .vol-val { display: none; }
+  }
   #port { max-width: 180px; }
   #voice-name { max-width: 170px; }
   #voice-vol { width: 80px; }
@@ -169,7 +175,21 @@
   #sheet-warn[hidden] { display: none; }
   #sheet-warn span { flex: 1; }
   #cleanup-open { flex: none; padding: 4px 12px; border: 1px solid #e8c46a; border-radius: 5px; background: transparent; color: #e8c46a; font: 600 12.5px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
-  /* This sheet, under Maestro: Analysis (chords, Roman numerals, lyrics and sections written
+  #sheet-warn-x { flex: none; padding: 2px 8px; border: 0; border-radius: 4px; background: transparent; color: #e8c46a; font: 15px/1 'Segoe UI', Arial, sans-serif; cursor: pointer; opacity: .75; }
+  #sheet-warn-x:hover { opacity: 1; background: rgba(232,180,60,.15); }
+  /* The sheet maximized: the bars around it fold away (the Start row stays); ⤡ or Esc restores */
+  #strip { position: relative; }
+  #sheet-max { position: absolute; top: 6px; right: 8px; z-index: 2; width: 30px; height: 28px; padding: 0; border: 1px solid rgba(255,255,255,.18);
+               border-radius: 5px; background: rgba(14,17,26,.85); color: var(--muted); font: 16px/1 'Segoe UI Symbol', 'Segoe UI', sans-serif; cursor: pointer; opacity: .6; }
+  #sheet-max:hover, #sheet-max:focus-visible { opacity: 1; color: var(--text); border-color: var(--accent); }
+  body.sheet-max[data-view=practice] > header, body.sheet-max[data-view=practice] > #dock,
+  body.sheet-max[data-view=practice] #library, body.sheet-max[data-view=practice] #video-panel,
+  body.sheet-max[data-view=practice] #sheet-warn, body.sheet-max[data-view=practice] #last,
+  body.sheet-max[data-view=practice] #heard { display: none; }
+  body.sheet-max[data-view=practice] main { padding: 0; }
+  body.sheet-max[data-view=practice] #strip { height: 100%; }
+  body.sheet-max[data-view=practice][data-show=both] #strip { height: 60%; }
+  /* This sheet, under Sheet: Analysis (chords, Roman numerals, lyrics and sections written
      over the sheet) and Cleanup (Auto clean) */
   #sheet-tools { display: flex; flex-direction: column; gap: 10px; align-self: stretch; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.08); }
   #sheet-tools[hidden], .tool-row[hidden], #sheet-details label[hidden] { display: none; }
@@ -226,6 +246,12 @@
   #npc.claude #npc-name { color: #e8956f; }
   #npc-name { color: var(--accent); font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 3px; }
   #npc-text { font-size: 15.5px; line-height: 1.45; min-height: 1.45em; }
+  /* Stop the Maestro mid-sentence: shown only while it speaks */
+  .hush { display: none; padding: 4px 10px; border: 1px solid var(--miss); border-radius: 5px; background: transparent; color: var(--miss);
+          font: 600 12px 'Segoe UI', Arial, sans-serif; cursor: pointer; white-space: nowrap; }
+  .hush:hover { background: var(--miss); color: #fff; }
+  body.speaking .hush { display: inline-block; }
+  #npc-hush { flex: none; align-self: center; }
   #npc.done #npc-text::after { content: ' ▼'; font-size: 11px; color: var(--muted); animation: blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   .heat { display: inline-block; width: 60px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: middle; background: linear-gradient(90deg, hsl(120,85%,55%), hsl(60,85%,55%), hsl(0,85%,55%)); }
@@ -371,6 +397,20 @@
   .sp-body p { margin-bottom: 6px; }
   .sp-text { font-size: 15px; }
   .sp-options { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* Fingering charts (fingering.js): white cards, like a printed chart, in both themes */
+  .fing-charts { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 10px; }
+  .fing-charts figure, .fing-quiz { margin: 0; padding: 8px 10px 4px; background: #fff; border-radius: 8px; text-align: center; }
+  .fing-charts figcaption { color: #1b1f2a; font: 600 15px 'Segoe UI', Arial, sans-serif; }
+  .fing-quiz { display: inline-block; margin-bottom: 10px; padding-bottom: 8px; }
+  #fing-monitor { position: fixed; right: 18px; bottom: 96px; z-index: 40; display: flex; gap: 8px; pointer-events: none; }
+  #fing-monitor[hidden] { display: none; }
+  #fing-monitor figure { margin: 0; padding: 6px 10px 4px; min-width: 64px; background: #fff; border: 3px solid transparent; border-radius: 10px;
+                         text-align: center; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+  #fing-monitor figcaption { color: #1b1f2a; font: 600 13px 'Segoe UI', Arial, sans-serif; white-space: nowrap; }
+  #fing-monitor figcaption small { display: block; color: #6b7080; font-weight: 400; font-size: 11px; }
+  #fing-monitor .fm-empty { width: 54px; height: 140px; display: flex; align-items: center; justify-content: center; color: #9aa; font-size: 24px; }
+  #fing-monitor .right { border-color: #1a9f5c; }
+  #fing-monitor .wrong { border-color: #d93a3a; }
   /* Getting to know you (the Atlas's Where to start tab) */
   .wl-bar { height: 8px; margin: 8px 0 12px; border-radius: 4px; background: rgba(255,255,255,.1); overflow: hidden; }
   .wl-bar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width .3s; }
@@ -485,6 +525,7 @@
   dialog.file-dlg label.check input { margin: 2px 0 0; padding: 0; }
   dialog.file-dlg label.check .dlg-hint { display: block; margin-top: 2px; overflow-wrap: anywhere; }
   #folders-always { overflow-wrap: anywhere; }
+  #status .status-open { margin-left: 4px; padding: 1px 8px; border: 1px solid var(--accent, #0bb); border-radius: 4px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   #conn-server { display: flex; align-items: center; gap: 8px; font-size: 13px; }
   #conn-server i { width: 9px; height: 9px; border-radius: 50%; background: var(--miss); }
   #conn-server.live i { background: var(--hit); }
@@ -618,6 +659,12 @@
   .td-label { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
   .td-where { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .td-min { flex: none; color: var(--muted); font-size: 12px; }
+  .td-parts li { position: relative; }
+  .td-parts li .td-part { padding-right: 34px; }
+  .td-drop { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: 700 15px/1 'Segoe UI', Arial, sans-serif; cursor: pointer; opacity: .55; }
+  .td-drop:hover, .td-drop:focus-visible { opacity: 1; color: var(--text); background: rgba(255,255,255,.08); outline: none; }
+  #lesson-today .td-drop { display: none; }
+  .mp-link { color: var(--accent); word-break: break-all; }
   .today-replan { align-self: flex-end; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; text-decoration: underline; }
   .today-replan:hover { color: var(--text); }
   #lesson-today { margin-top: auto; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; gap: 8px; }
@@ -690,20 +737,53 @@
     .ytv-row > div { flex-basis: calc(100% - 76px); }
   }
   #menu { display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 0 20px; }
-  /* One row: what to do (modes), how (Settings, Bar controls), and Start; each mode's hover says what it does */
+  /* One row: what to do (modes), how (Settings, Playback), and Start; each mode's hover says what it does */
   #session-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 0; }
-  #mode { width: max-content; }
+  #mode-wrap { white-space: nowrap; }
   #mode-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  #mode button { padding: 7px 14px; }
+  #mode { padding: 6px 8px; }
   #video-btn { padding: 7px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
   #video-btn:hover { border-color: var(--accent); color: var(--text); }
   #video-btn[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
   /* Record a new idea: its own mode, the same stage with only the metronome and ● Record */
-  body[data-view=record] #mode, body[data-view=record] #video-btn, body[data-view=record] #video-panel,
+  body[data-view=record] #mode-wrap, body[data-view=record] #video-btn, body[data-view=record] #video-panel,
   body[data-view=record] #library, body[data-view=record] #pick-piece { display: none; }
   #pick-piece { padding: 5px 11px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
   #pick-piece:hover { border-color: var(--accent); color: var(--text); }
   body:not([data-view=practice]) #pick-piece { display: none; }
+  #checks-btn { padding: 5px 11px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+  #checks-btn:hover { background: rgba(255,255,255,.06); }
+  #checks-btn[hidden] { display: none; }
+  #update-bar { display: flex; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; border: 1px solid var(--accent); border-radius: 5px; font-size: 12.5px; white-space: nowrap; }
+  #update-bar[hidden] { display: none; }
+  #update-bar button { padding: 3px 10px; border: 0; border-radius: 4px; background: var(--accent); color: #031414; font: inherit; font-weight: 600; cursor: pointer; }
+  #update-bar button:disabled { opacity: .5; cursor: default; }
+  #update-bar button[hidden] { display: none; }
+  #checks-dlg { width: min(760px, calc(100vw - 32px)); }
+  #report-dlg { width: min(480px, calc(100vw - 32px)); }
+  #report-dlg textarea { min-height: 64px; padding: 6px 8px; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: var(--bg); color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; resize: vertical; }
+  .report-kind { display: flex; gap: 6px; }
+  .report-kind label { flex-direction: row; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; color: var(--text); font-size: 13px; cursor: pointer; }
+  .report-kind label:has(input:checked) { border-color: var(--accent); background: rgba(255,255,255,.06); }
+  #report-toast { position: fixed; right: 16px; bottom: 16px; z-index: 20; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  #report-toast[hidden] { display: none; }
+  #checks-list { display: flex; flex-direction: column; gap: 12px; max-height: min(70vh, 640px); overflow-y: auto; }
+  .chk-item { display: grid; grid-template-columns: 220px 1fr; gap: 12px; padding: 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; }
+  .chk-item img { width: 100%; border-radius: 4px; cursor: zoom-in; }
+  .chk-item img.big { position: fixed; inset: 4vh 4vw; width: 92vw; height: 92vh; object-fit: contain; background: rgba(0,0,0,.85); z-index: 10; cursor: zoom-out; }
+  .chk-item .noshot { color: var(--muted); font-size: 12px; }
+  .chk-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13px; }
+  .chk-said { font-weight: 600; }
+  .chk-where, .chk-id { color: var(--muted); font-size: 12px; }
+  .chk-fix { padding: 6px 8px; border-left: 3px solid var(--accent); background: rgba(255,255,255,.04); }
+  .chk-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+  .chk-btns button { padding: 5px 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .chk-btns button.ok { border-color: var(--hit); }
+  .chk-btns button.no { border-color: var(--miss); }
+  .chk-note { display: flex; gap: 6px; }
+  .chk-note[hidden] { display: none; }
+  .chk-note input { flex: 1; min-width: 0; }
+  @media (max-width: 560px) { .chk-item { grid-template-columns: 1fr; } }
   #go { margin: 0 0 0 auto; min-width: 110px; padding: 8px 18px; }
   /* Too narrow for one row: Start stays up beside the modes and the drop-downs take the row under them */
   @media (min-width: 761px) and (max-width: 1260px) {
@@ -728,7 +808,10 @@
   .act-item:hover:not(:disabled), .act-item:focus-visible { background: rgba(0,180,180,.14); outline: none; }
   .act-item:disabled { color: var(--muted); opacity: .55; cursor: default; }
   #actions-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid rgba(255,255,255,.1); }
-  #transport-controls { display: grid; gap: 8px; width: min(640px, calc(100vw - 40px)); }
+  #transport-controls { display: grid; gap: 10px; width: min(640px, calc(100vw - 40px)); }
+  .pb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; font-size: 12.5px; }
+  .pb-row[hidden] { display: none; }
+  .pb-row input[type=number] { width: 4.2em; }
   #transport-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
   .t-btn { display: inline-flex; align-items: center; gap: 4px; height: 26px; min-width: 26px; padding: 0 7px; justify-content: center; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   .t-btn:hover:not(:disabled) { border-color: var(--accent); }
@@ -752,9 +835,68 @@
   #timeline::-webkit-slider-thumb { width: 16px; height: 16px; appearance: none; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   #timeline::-moz-range-thumb { width: 12px; height: 12px; border: 2px solid var(--panel); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   #timeline:disabled { opacity: .4; cursor: default; }
-  #maestro-panel { flex: 1 1 520px; min-width: 0; display: flex; align-items: center; gap: 10px; }
+  /* The Maestro panel: floats over every view at --mp-left/--mp-bottom (dragged, remembered) */
+  #maestro-panel { position: fixed; left: var(--mp-left, 16px); bottom: var(--mp-bottom, 16px); z-index: 35;  /* over the Roadmap (26) and library (25), under menus (40+) */
+                   width: min(400px, calc(100vw - 32px)); display: flex; flex-direction: column;
+                   background: var(--panel); border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
+                   box-shadow: 0 10px 34px rgba(0,0,0,.45); }
+  #mp-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; cursor: grab; user-select: none; touch-action: none; }
+  #maestro-panel.dragging #mp-head { cursor: grabbing; }
+  #mp-name { color: var(--accent); font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: .1em; text-transform: uppercase; margin-right: auto; }
+  #mp-unread { width: 8px; height: 8px; border-radius: 50%; background: #f2b84b; }
+  #mp-toggle { padding: 2px 9px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  #mp-toggle:hover { border-color: var(--accent); }
+  #mp-close { padding: 2px 6px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+  #mp-close:hover { color: var(--text); }
+  #maestro-panel.closed { display: none; }  /* off the screen until Ask Maestro */
+  #mp-log { list-style: none; margin: 0; padding: 4px 12px 8px; height: min(45vh, 420px); overflow-y: auto;
+            border-top: 1px solid rgba(255,255,255,.08); display: flex; flex-direction: column; gap: 8px; }
+  #mp-log:empty::before { content: 'Nothing said yet today. Ask below, or hold Space to talk.'; color: var(--muted); font-size: 13px; margin: auto 0; }
+  .mp-line { max-width: 88%; align-self: flex-start; }
+  .mp-line .mp-meta { color: var(--muted); font-size: 11px; margin-bottom: 1px; }
+  .mp-line .mp-who { color: var(--accent); font-weight: 600; }
+  .mp-line p { margin: 0; font-size: 14px; line-height: 1.4; white-space: pre-wrap; }
+  .mp-line.you { align-self: flex-end; text-align: right; }
+  .mp-line.you p { padding: 5px 9px; border-radius: 8px; background: rgba(0,180,180,.14); }
+  .mp-line.you .mp-who { color: var(--muted); }
+  .mp-line.claude .mp-who { color: #e8956f; }
+  .mp-line.remark p { color: var(--muted); }
+  .mp-line.error p { color: var(--miss); }
+  .mp-line.pending p { color: var(--muted); }
+  .lit { animation: lit 2.6s ease-out; border-radius: 6px; }
+  @keyframes lit { 0%, 60% { box-shadow: 0 0 0 3px #f2b84b; } 100% { box-shadow: 0 0 0 3px transparent; } }
+  .mp-say { margin-left: 4px; padding: 0 3px; border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; opacity: .6; }
+  .mp-say:hover { opacity: 1; color: var(--text); }
+  .mp-divider { align-self: stretch; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; text-align: center; }
+  .mp-divider::before, .mp-divider::after { content: ''; flex: 1; border-top: 1px dashed rgba(255,255,255,.2); }
+  #mp-clear { padding: 2px 8px; border: 0; background: transparent; color: var(--muted); font: 12px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #mp-clear:hover { color: var(--text); }
+  #mp-grip { position: absolute; top: -1px; right: -1px; width: 14px; height: 14px; cursor: nesw-resize;
+             border-top: 2px solid rgba(255,255,255,.25); border-right: 2px solid rgba(255,255,255,.25); border-top-right-radius: 10px; }
+  #mp-grip:hover { border-color: var(--accent); }
+  /* Quick-action tiles (tiles.py): under the bar, folded or open; the pencil edits this view's set */
+  #mp-tiles { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px 8px; }
+  #mp-tiles:empty { display: none; }
+  .mp-tile { flex: none; padding: 5px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 6px; background: transparent; color: var(--text); font: 12.5px 'Segoe UI', Arial, sans-serif; white-space: nowrap; cursor: pointer; }
+  .mp-tile:hover:not(:disabled) { border-color: var(--accent); }
+  .mp-tile[aria-pressed="true"] { border-color: var(--accent); background: rgba(0,180,180,.18); }
+  .mp-tile:disabled { opacity: .4; cursor: default; }
+  .mp-tile.away { border-style: dashed; }  /* goes to another part of the app first */
+  .mp-tile .x { margin-left: 6px; color: var(--muted); }
+  .mp-tile.dragover { box-shadow: -3px 0 0 var(--accent); }
+  #mp-edit { flex: none; margin-left: auto; padding: 5px 8px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+  #mp-edit:hover, #maestro-panel.editing #mp-edit { color: var(--accent); }
+  #mp-tray { display: none; flex-wrap: wrap; gap: 6px; padding: 0 8px 8px; }
+  #maestro-panel.editing #mp-tray { display: flex; }
+  #maestro-panel.editing .mp-tile { cursor: grab; opacity: 1; }
+  #mp-tray .mp-tile { color: var(--muted); }
+  #mp-tray:empty::before { content: 'Every tile is on this view.'; color: var(--muted); font-size: 12px; }
+  #maestro-panel.folded #mp-log, #maestro-panel.folded #coach-composer,
+  #maestro-panel.folded #mp-clear, #maestro-panel.folded #mp-grip { display: none; }
   .maestro-avatar { width: 30px; height: 30px; font-size: 18px; }
-  #coach-composer { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+  #mp-head .maestro-avatar { width: 24px; height: 24px; font-size: 15px; }
+  #coach-composer { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid rgba(255,255,255,.08); min-width: 0; }
+  body[data-view=lesson] > #dock { display: none; }  /* only the colour key was left there, and a lesson hides it */
   #talk { padding: 5px 12px; }
   #ask { flex: 1; width: auto; min-width: 80px; padding: 6px 10px; }
   #ai-spend { white-space: nowrap; }
@@ -779,6 +921,15 @@
   body[data-view=lesson]:not(.running) > #menu { display: none; }
   body[data-view=lesson] #session-row > :not(#go) { display: none; }
   @media (max-width: 760px) { #lesson-nav { width: 180px; } }
+  /* See in the song (atlas.js): the song on the sheet instead of the exercise, its bars marked */
+  #lesson-song { display: flex; flex-direction: column; gap: 6px; }
+  #lesson-song[hidden], #lesson-song-on, body.in-song #lesson-song-btn { display: none; }
+  body.in-song #lesson-song-on { display: flex; flex-direction: column; gap: 6px; }
+  body.in-song #step-panel { display: none !important; }
+  #lesson-song button { align-self: flex-start; padding: 5px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+  #lesson-song button:hover { border-color: var(--accent); }
+  #lesson-song-btn { border-color: var(--accent) !important; color: var(--accent) !important; }
+  #lesson-song-note { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.4; }
   #mainmenu { padding: 24px 16px; overflow-y: auto; }
   #mainmenu .mm-box { width: min(560px, 100%); margin: auto; }
   #mm-new { width: 100%; flex-wrap: wrap; }
@@ -790,10 +941,13 @@
     .td-folded .today-card { flex-direction: row; justify-content: space-between; padding: 10px 14px; }
     .td-folded .today-spine { order: -1; writing-mode: horizontal-tb; }
     #mode-picker { width: 100%; flex-wrap: wrap; }
-    #mode { flex: 1 1 180px; width: auto; min-width: 0; }
-    #mode button { flex: 1 1 0; min-width: 0; padding: 8px 4px; }
     #dock { padding: 7px 12px; }
-    #maestro-panel { flex-basis: 100%; }
+    /* A bottom sheet: full width, not dragged; the arrow pulls it up and down */
+    #maestro-panel { left: 0; right: 0; bottom: 0; width: auto; border-radius: 10px 10px 0 0; }
+    #mp-head { cursor: default; }
+    #maestro-panel #mp-log { height: 50vh !important; }
+    #maestro-panel { width: auto !important; }
+    #mp-grip { display: none; }
     footer { display: none; }
     #voice-wrap { max-width: 100%; flex-wrap: wrap; }
     #ai-spend { display: none; }
@@ -810,7 +964,6 @@
     .home-coach { align-items: flex-start; flex-wrap: wrap; padding: 15px; }
     .home-coach > div { flex: 1; min-width: 180px; }
     .home-coach-action { margin-left: 58px; }
-    #mode button { font-size: 12px; }
   }
 </style>
 </head>
@@ -823,6 +976,7 @@
       <button role="menuitem" data-file="open" title="Open a MIDI or MusicXML file from your computer. A copy is kept with your lessons (Unsorted).">Open file… <kbd>Ctrl+O</kbd></button>
       <button role="menuitem" data-file="save-as" class="needs-score" title="Save a copy of this sheet under a new name, in a category of your Songs / Lessons">Save as… <kbd>Ctrl+Shift+S</kbd></button>
       <button role="menuitem" data-file="download" class="needs-score" title="Save the file this sheet comes from onto your computer (Downloads)">Download sheet file</button>
+      <button role="menuitem" data-file="folders" title="Choose the folders where your songs are found, and whether new downloads are picked up">Song folders…</button>
       <hr>
       <button role="menuitem" data-file="profile" title="Switch to another profile, or add one">Switch profile…</button>
     </div>
@@ -830,7 +984,7 @@
   <button id="prefs-btn" aria-haspopup="dialog" aria-expanded="false" aria-controls="prefs-dlg" title="Connections, microphone and speakers, the Maestro's voice, the sheet, song folders and shortcuts (Ctrl+,)">Preferences</button>
   <input type="file" id="file-pick" accept=".mid,.midi,.musicxml,.xml,.mxl" hidden>
   <button class="dtab" data-dash="home">Home</button>
-  <button id="dash-ask" disabled title="Ask the Maestro (needs an Anthropic API key)"><span class="maestro-avatar" aria-hidden="true">𝄞</span>Ask Maestro</button>
+  <button id="dash-ask" title="Ask the Maestro"><span class="maestro-avatar" aria-hidden="true">𝄞</span>Ask Maestro</button>
   <span id="dash-where" title="The mode you're in. To change modes, go back to Home: that stops what's running"></span>
   <span class="spacer"></span>
   <button id="profile-chip" title="Switch profile"><span class="avatar" id="chip-avatar">?</span><span id="chip-name">Profile</span></button>
@@ -951,45 +1105,49 @@
     <button id="pl-next" title="The next piece in this playlist">▶</button>
   </span>
   <button id="pick-piece" title="Search your songs and lessons for another piece (the sheet stays until you choose one)">Change piece</button>
-  <div id="status">Ask Claude to show a score or start a practice run.</div>
+  <div id="update-bar" hidden role="status"><span id="update-text"></span><button id="update-go" type="button"></button></div>
+  <button id="checks-btn" hidden title="Bugs and ideas that have been fixed: try each one and say whether it works">👀 <span id="checks-n"></span></button>
+  <div id="status">Pick a song or lesson to begin.</div>
   <div id="conn" class="down">connecting…</div>
 </header>
 <div id="menu">
   <div id="session-row">
     <div id="mode-picker">
-      <span class="seg setting" id="mode" aria-label="Choose a practice mode">
-        <button data-mode="learn" title="The cursor waits on each chord until you play the right notes">Learn</button>
-        <button data-mode="rehearse" title="The cursor moves at tempo; notes are graded as they pass">Rehearse</button>
-        <button data-mode="listen" title="Hear the piece while the cursor follows. Nothing to play, nothing graded">Listen</button>
-      </span>
+      <label class="setting" id="mode-wrap">Play mode
+        <select id="mode" aria-label="Choose a practice mode">
+          <option value="learn">Learn</option>
+          <option value="rehearse">Rehearse</option>
+          <option value="listen">Listen</option>
+        </select>
+      </label>
       <button id="video-btn" aria-pressed="false" aria-controls="video-panel" title="Play along with a recording: a YouTube video plays and the sheet follows it">▶ Video</button>
     </div>
   <div id="control-tabs">
     <details id="playing-settings">
-      <summary title="MIDI input, which parts you play, which bars, and the tempo">Playing ▾</summary>
+      <summary id="playing-sum" title="MIDI input, what you play, and each track's part, show, mute and volume">Playing ▾</summary>
       <div class="menu-panel">
-  <label class="setting not-listen">MIDI input <select id="port"></select></label>
-  <span id="parts-wrap" class="play-only">
-    <button id="parts-btn" aria-haspopup="true" aria-expanded="false" aria-controls="parts" title="What you play, what's shown and what the keyboard plays along">Play: both hands ▾</button>
-    <div id="parts" role="dialog" aria-label="Parts">
-      <h2>This piece</h2>
-      <table id="mix">
-        <thead><tr><th></th><th class="c-play" title="You play it: graded, and Learn waits for it">You play</th><th title="Drawn on the sheet">Show</th><th class="c-snd" title="Played on the MIDI output, shown or not: Listen plays every part you leave on; when you play, the parts you don't play sound along with you if you turn them on">Sound</th></tr></thead>
-        <tbody id="mix-rows"></tbody>
-      </table>
-      <label class="hint">Sound goes to <select id="out-port" title="MIDI output the parts you don't play are sent to"></select></label>
-      <h2>What each part is</h2>
-      <div id="part-roles"></div>
-      <div class="hint" id="roles-note"></div>
-      <button id="parts-save" disabled>Save parts</button>
-    </div>
-  </span>
-  <label class="setting play-only">Bars <input type="number" id="from" min="1" placeholder="1"> – <input type="number" id="to" min="1" placeholder="end"></label>
-  <label class="setting" id="tempo-wrap">Tempo <input type="range" id="tempo" min="30" max="150" step="5" value="100"> <span id="tempo-val">100%</span></label>
+        <div class="pp-top">
+          <label class="setting not-listen">MIDI input <select id="port"></select></label>
+          <label class="play-only not-listen" id="you-play-wrap" title="Which of your parts you play this run: it's graded, and Learn waits for it. Every other track is the backing.">You play <select id="you-play"></select></label>
+        </div>
+        <div id="tracks-note" class="play-only" hidden>Suggested parts for this file: check them. <button id="parts-ok" title="These parts are right: keep them for this file">OK</button></div>
+        <div id="tracks-box" class="play-only"><table id="tracks">
+          <colgroup><col><col class="c-part"><col class="c-show"><col class="c-mute"><col class="c-vol"></colgroup>
+          <thead><tr><th>Track</th>
+            <th class="c-part" title="What the track is for you: a hand, both hands (split by register), the pedals, the sung line, an instrument part, or the backing">Part</th>
+            <th class="c-show" title="Drawn on the sheet and the falling notes">Show</th>
+            <th class="c-mute" title="Mute a track you don't play (Listen has its own)">Mute</th>
+            <th class="c-vol" title="How loud a track you don't play sounds (Listen has its own)">Volume</th></tr></thead>
+          <tbody id="track-rows"></tbody>
+        </table></div>
+        <div id="tracks-empty" class="play-only" hidden>Pick a song or lesson to see its tracks.</div>
+        <div class="pp-foot">
+          <label class="play-only" title="MIDI output the tracks you don't play (and Listen) are sent to">Sound goes to <select id="out-port"></select></label>
+        </div>
       </div>
     </details>
     <details id="sheet-settings">
-      <summary title="Sheet music, falling notes or both, and how the sheet is drawn">Sheet ▾</summary>
+      <summary title="Sheet music, falling notes or both, how the sheet is drawn, and chords, lyrics and clean-up for this sheet">Sheet ▾</summary>
       <div class="menu-panel">
   <span class="menu-row">Show <span class="seg" id="view" aria-label="What to show">
     <button data-show="sheet" title="Sheet music">Sheet</button>
@@ -1006,23 +1164,17 @@
     <label title="The beats under each bar (1 & 2 &), faint where you hold or rest"><input type="checkbox" id="aid-counts"> Counting</label>
   </span>
   <label title="Show dynamics (pp to ff, hairpins) on the sheet. For MIDI files they're worked out from how hard each passage was played."><input type="checkbox" id="dynamics"> Dynamics</label>
+  <span id="fing-wrap" class="menu-row" hidden>
+    <label title="A key diagram under each note: blue the left hand, red the right, filled a key that's down. It makes the sheet taller and the notes further apart.">Fingering <select id="fingering">
+      <option value="">Off</option><option value="repeats">Where it changes</option><option value="line">First time on each line</option>
+    </select></label>
+    <label title="While you play: the fingering of the note the music is waiting for, next to the note the microphone hears (green when they match)"><input type="checkbox" id="fing-monitor-on"> Monitor</label>
+  </span>
+  <label id="tab-wrap" hidden title="Add a tab staff under the notes: a line for each string, the number on it the fret to press (0: the open string). For the guitar and the bass; the notes above stay the music you're graded on."><input type="checkbox" id="tab"> Tab</label>
   <label title="Sideways: one long line moving past a fixed cursor. Two rows: the sheet as rows across the page, the row you're playing on top and the next one under it, scrolling down.">Layout <select id="layout">
     <option value="line">Scrolls sideways</option><option value="rows">Two rows, scrolls down</option>
   </select></label>
   <label title="How big the sheet is drawn. Smaller shows more bars at once; larger makes the notes easier to read.">Zoom <input type="range" id="zoom" min="50" max="200" step="10" value="100"> <span id="zoom-val">100%</span></label>
-      </div>
-    </details>
-    <details id="maestro-settings">
-      <summary title="How the Maestro coaches you, when it speaks during a run, and whether it reads replies aloud">Maestro ▾</summary>
-      <div class="menu-panel">
-  <label class="setting" title="How the Maestro coaches you: Warm is encouraging, Strict is dry and demanding">Style <select id="style">
-    <option value="friend">Friend</option><option value="strict">Strict</option></select></label>
-  <label class="setting" title="When you press Start, the Maestro says hello: the piece, its key signature, your best score on it"><input type="checkbox" id="talk-greet" checked> Hello at Start</label>
-  <label class="setting" title="What the Maestro says when a pass ends. Every pass: always a remark. When something’s new: only when the playing changed or a slip shows up (a word otherwise). Nothing: stays quiet; the pass line still shows above the sheet.">After a pass <select id="talk-passes">
-    <option value="every">Every pass</option><option value="news">When something’s new</option><option value="off">Nothing</option></select></label>
-  <label class="setting" title="When a run of two or more passes ends, the Maestro sums it up: your best pass and the bar to work on"><input type="checkbox" id="talk-signoff" checked> Sum up at the end</label>
-  <label class="setting play-only not-listen" title="With Loop on, the Maestro changes the bars, hand, tempo or mode between passes the way a teacher would, and says what it did. Say “no” or “undo” to put it back."><input type="checkbox" id="autopilot"> Maestro decides</label>
-  <label class="setting" id="voice-wrap" title="Read the Maestro's and Claude's comments aloud"><input type="checkbox" id="voice"> Read replies aloud <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
   <div id="sheet-tools" hidden>
     <h3>This sheet</h3>
     <div id="sheet-details" class="tool-row" hidden>
@@ -1055,8 +1207,21 @@
   </div>
       </div>
     </details>
+    <details id="maestro-settings">
+      <summary title="How the Maestro coaches you, when it speaks during a run, and whether it reads replies aloud">Maestro ▾</summary>
+      <div class="menu-panel">
+  <label class="setting" title="How the Maestro coaches you: Warm is encouraging, Strict is dry and demanding">Style <select id="style">
+    <option value="friend">Friend</option><option value="strict">Strict</option></select></label>
+  <label class="setting" title="When you press Start, the Maestro says hello: the piece, its key signature, your best score on it"><input type="checkbox" id="talk-greet" checked> Hello at Start</label>
+  <label class="setting" title="What the Maestro says when a pass ends. Every pass: always a remark. When something’s new: only when the playing changed or a slip shows up (a word otherwise). Nothing: stays quiet; the pass line still shows above the sheet.">After a pass <select id="talk-passes">
+    <option value="every">Every pass</option><option value="news">When something’s new</option><option value="off">Nothing</option></select></label>
+  <label class="setting" title="When a run of two or more passes ends, the Maestro sums it up: your best pass and the bar to work on"><input type="checkbox" id="talk-signoff" checked> Sum up at the end</label>
+  <label class="setting play-only not-listen" title="With Loop on, the Maestro changes the bars, hand, tempo or mode between passes the way a teacher would, and says what it did. Say “no” or “undo” to put it back."><input type="checkbox" id="autopilot"> Maestro decides</label>
+  <label class="setting" id="voice-wrap" title="Read the Maestro's and Claude's comments aloud"><input type="checkbox" id="voice"> Read replies aloud <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
+      </div>
+    </details>
     <details id="screen-controls" class="play-only">
-      <summary title="Step bar by bar, restart, repeat a range, bookmark bars, or drag the bar timeline. Double-click a bar on the sheet to jump there">Bar controls ▾</summary>
+      <summary title="Step bar by bar, restart, loop, bookmark bars, drag the bar timeline; which bars, the tempo and the lead-in. Double-click a bar on the sheet to jump there">Playback ▾</summary>
       <div id="transport-controls" class="menu-panel">
         <div id="transport-row">
           <button type="button" id="timeline-back" class="t-btn" title="Previous bar" aria-label="Previous bar">◀</button>
@@ -1068,8 +1233,16 @@
             <input type="range" id="timeline" min="0" max="0" step="1" value="0" aria-label="Score bar">
           </div>
           <span id="timeline-total">/ 0</span>
-          <label class="t-btn t-toggle setting" title="Repeat the selected bars (Playing → Bars)"><input type="checkbox" id="loop"> 🔁 Loop</label>
+          <label class="t-btn t-toggle setting" title="Repeat the selected bars (Bars, below)"><input type="checkbox" id="loop"> 🔁 Loop</label>
           <button type="button" id="bm-add" class="t-btn" aria-pressed="false" title="Bookmark this bar">🔖</button>
+        </div>
+        <div class="pb-row">
+          <label class="setting" title="Play only these bars (empty: the whole piece)">Bars <input type="number" id="from" min="1" placeholder="1"> – <input type="number" id="to" min="1" placeholder="end"></label>
+          <label class="setting" id="tempo-wrap" title="Listen and Rehearse play at this speed; Learn flows on at it">Tempo <input type="range" id="tempo" min="30" max="150" step="5" value="100"> <span id="tempo-val">100%</span></label>
+        </div>
+        <div class="pb-row not-listen" id="lead-in-row" hidden>
+          <label class="setting" title="Bars of the backing played before your first bar, to bring you in (when tracks play along and the bars start after bar 1)">Lead-in <input type="number" id="lead-in" min="0" max="8"> bars</label>
+          <label class="setting" title="Play the lead-in before every loop pass, not just the first"><input type="checkbox" id="lead-every"> every loop pass</label>
         </div>
         <div id="bookmarks" hidden></div>
       </div>
@@ -1144,6 +1317,14 @@
   <aside id="lesson-nav" aria-label="This lesson's exercises">
     <button id="lesson-back" title="Back to the map (your finished steps are saved)">← Roadmap</button>
     <h2 id="lesson-name"></h2>
+    <div id="lesson-song" hidden>
+      <button id="lesson-song-btn" title="The goal's song, with this lesson's bars marked. Nothing played there is graded">See in the song</button>
+      <div id="lesson-song-on">
+        <p id="lesson-song-note"></p>
+        <button id="lesson-song-back">← Back to exercise</button>
+        <button id="lesson-song-session" title="Take the song to the Session to practise it there; the Roadmap keeps this lesson">Practise the whole song in the Session</button>
+      </div>
+    </div>
     <ol id="lesson-stages"></ol>
     <section id="lesson-today" aria-label="Today's practice" hidden></section>
   </aside>
@@ -1176,8 +1357,8 @@
         <p id="video-note" aria-live="polite"></p>
       </div>
     </section>
-    <div id="sheet-warn" role="note" hidden><span id="sheet-warn-text"></span><button id="cleanup-open" data-opens="maestro-settings" title="Under Maestro → This sheet" hidden></button></div>
-    <main><div id="strip"><iframe id="sheet" src="notation.html?grow=2.5" title="Sheet music"></iframe><p id="sheet-notice" hidden></p></div>
+    <div id="sheet-warn" role="note" hidden><span id="sheet-warn-text"></span><button id="cleanup-open" data-opens="sheet-settings" title="Under Sheet → This sheet" hidden></button><button id="sheet-warn-x" title="Ignore: don't show this note again for this sheet (Clean stays under Sheet → This sheet)" aria-label="Ignore this note">✕</button></div>
+    <main><div id="strip"><button id="sheet-max" title="Maximize the sheet (Esc restores)" aria-label="Maximize the sheet" aria-pressed="false">⤢</button><iframe id="sheet" src="notation.html?grow=2.5" title="Sheet music"></iframe><p id="sheet-notice" hidden></p></div>
       <div id="roll-wrap"><canvas id="roll" aria-label="Falling notes"></canvas></div></main>
   </div>
   <section id="atlas-view" aria-label="Progress and learning path" hidden>
@@ -1214,18 +1395,33 @@
 <div id="npc" role="status" aria-live="polite" title="Click to skip / close">
   <div id="npc-face" aria-hidden="true">𝄞</div>
   <div><div id="npc-name">Maestro</div><div id="npc-text"></div></div>
+  <button id="npc-hush" class="hush" title="Stop speaking">■ Stop</button>
 </div>
-<div id="dock">
-  <section id="maestro-panel" aria-label="Ask the Maestro">
+<!-- The Maestro panel: every view, draggable by its top bar, folded to that bar or open on
+     today's transcript. Folded, a new line shows in the dialogue box (#npc) and lights the dot. -->
+<section id="maestro-panel" aria-label="Maestro" class="folded">
+  <div id="mp-head" title="Drag to move · click the arrow to open or fold">
     <span class="maestro-avatar" aria-hidden="true">𝄞</span>
-    <div id="coach-composer">
-      <button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
-      <span id="level" aria-hidden="true"><i></i></span>
-      <select id="mic" title="Microphone" hidden></select>
-      <input id="ask" type="text" placeholder="Ask Maestro about your practice…" aria-label="Message Maestro" disabled>
-      <span id="ai-spend"></span>
-    </div>
-  </section>
+    <span id="mp-name">Maestro</span>
+    <span id="mp-unread" title="New since you last looked" hidden></span>
+    <button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
+    <button id="mp-hush" class="hush" title="Stop the Maestro speaking">■ Stop</button>
+    <span id="level" aria-hidden="true"><i></i></span>
+    <button id="mp-clear" title="Empty the panel (today's log stays on disk)">Clear</button>
+    <button id="mp-toggle" aria-expanded="false" title="Open the conversation">▴</button>
+    <button id="mp-close" title="Close (Ask Maestro brings it back)" aria-label="Close the Maestro">✕</button>
+  </div>
+  <span id="mp-grip" title="Drag to resize" aria-hidden="true"></span>
+  <div id="mp-tiles" role="toolbar" aria-label="Quick actions"></div>
+  <div id="mp-tray" aria-label="Tiles you can add"></div>
+  <ol id="mp-log" aria-live="polite" aria-label="Today's conversation"></ol>
+  <div id="coach-composer">
+    <select id="mic" title="Microphone" hidden></select>
+    <input id="ask" type="text" placeholder="Ask Maestro about your practice…" aria-label="Message Maestro" disabled>
+    <span id="ai-spend"></span>
+  </div>
+</section>
+<div id="dock">
   <footer title="Drag, scroll or ← → to look around the sheet · Home = back to the cursor">
     <span><i class="sw" style="background:#00a6b8"></i>Play next</span>
     <span><i class="sw" style="background:var(--hit)"></i>Hit</span>
@@ -1388,7 +1584,8 @@ function drawTimelineMarks(low, high) {
 }
 
 // -- bookmarks: bars marked in this piece (remembered in this browser) ---------------
-const bookmarkKey = () => mixPath ? 'bookmarks.' + mixPath : null;
+let scorePath = null;  // the piece on screen: its bookmarks are kept under it
+const bookmarkKey = () => scorePath ? 'bookmarks.' + scorePath : null;
 function bookmarks() {
   const key = bookmarkKey();
   if (!key) return [];
@@ -1412,6 +1609,39 @@ function drawBookmarks() {
     `<span class="x" data-remove="${n}" title="Remove this bookmark" aria-label="Remove the bookmark on bar ${n}">✕</span></button>`).join('');
 }
 
+// -- per piece: the Session's bars, tempo, Loop and mode, as you last had them ----------------
+// Saved on the server with the file (library.practice_settings) and put back whenever another
+// piece opens, from anywhere (Explore, Today, the Roadmap, a playlist, the Maestro). A piece
+// with nothing saved opens on the whole piece and keeps the tempo, Loop and mode you had.
+let practicePath = null, practiceTimer = null, practicePending = null;
+function restorePractice(path, p) {
+  if (path === practicePath) return;  // the same piece redrawn (Clean, chords...): leave it be
+  if (practicePending) practicePending();  // a change still waiting is the last piece's: save it now, before the controls change
+  practicePath = path;
+  if (running) return;  // the run sets them
+  $('from').value = p && p.from || '';
+  $('to').value = p && p.to || '';
+  if (p && p.tempo) { $('tempo').value = p.tempo; $('tempo-val').textContent = p.tempo + '%'; store.set('tempo', String(p.tempo)); }
+  if (p && 'loop' in p) { $('loop').checked = !!p.loop; store.set('loop', p.loop ? '1' : ''); }
+  if (p && p.mode && mode !== 'record') setMode(p.mode);
+  updateTimeline();
+}
+// Remember this piece's setup. Not while the Roadmap has its bars marked on a song ("See in
+// the song"): those are the lesson's, not yours.
+function savePractice(now) {
+  const path = practicePath;
+  if (!path || document.body.classList.contains('in-song')) return;
+  const send = () => {
+    clearTimeout(practiceTimer);
+    practicePending = null;
+    cmd('practice_settings', {path, from: $('from').value, to: $('to').value, tempo: +$('tempo').value,
+                              loop: $('loop').checked, ...(mode !== 'record' ? {mode} : {})}).catch(() => {});
+  };
+  clearTimeout(practiceTimer);
+  practicePending = send;
+  if (now) send(); else practiceTimer = setTimeout(send, 500);  // a tempo drag saves once, when it settles
+}
+
 // A bookmark or a double-click on the sheet: go to that bar. Outside the selected bars, the
 // selection is let go first (it can't be while a run is going: the run plays those bars).
 function jumpToBar(number) {
@@ -1424,6 +1654,7 @@ function jumpToBar(number) {
       return;
     }
     $('from').value = $('to').value = '';
+    savePractice();
   }
   seekTimeline(index);
 }
@@ -1489,7 +1720,8 @@ async function loadScore(version) {
     readScoreTempo(payload);
     setTimelineBars(payload.bars || []);
     coachRoll.score(payload);  // the falling notes are drawn even when the file is too big for a sheet
-    loadMix(payload.path);
+    scorePath = payload.path || null;
+    updateTimeline();  // this piece's bookmarks
     // A huge file comes without sheet music, with the reason instead.
     sheetShown = !!payload.xml;
     $('sheet-notice').textContent = payload.notice || '';
@@ -1500,6 +1732,7 @@ async function loadScore(version) {
     showPlaylist(payload.playlist);
     if (sheetShown) frame.contentWindow.postMessage({type: 'loadScore', xml: payload.xml, staves: payload.staves, hidden: hiddenRoles(),
                                                      dynamics: $('dynamics').checked, details: detailsShown(), aids: aidSettings(), layout: $('layout').value,
+                                                     tab: tabSpec(), fingering: fingeringSpec(),
                                                      zoom: $('zoom').value / 100}, '*');
     rangeSent = null;  // the bars chosen, on this sheet
     showRange();
@@ -1523,20 +1756,26 @@ function syncPlaylistButtons() {
   $('pl-next').disabled = running || !playlistAt?.next;
 }
 
-// Maestro → This sheet shows only what this sheet offers.
+// Sheet → This sheet shows only what this sheet offers.
 function syncSheetTools() {
   $('sheet-tools').hidden = $('sheet-details').hidden && $('cleanup-row').hidden && $('playable-row').hidden;
 }
 
 // A file with no reliable beat still gets its sheet, as a rough draft: say so above it. Auto
-// clean (Maestro → This sheet) redraws it on a beat followed from the playing, and back to the
+// clean (Sheet → This sheet) redraws it on a beat followed from the playing, and back to the
 // original; the warning has a button that opens it there. A MIDI sheet that asks a hand for
 // more than it can play says so the same way, pointing to Clean.
+// ✕ ignores the note for that sheet (remembered in this browser); a different note comes back.
+let sheetWarnKey = '';
+function warnIgnored() {
+  try { return JSON.parse(store.get('warnIgnored', '[]')); } catch (e) { return []; }
+}
 function showSheetWarning(payload) {
   const btn = $('cleanup-btn');
   const playable = payload.playable;
   const warning = payload.warning || (playable && playable.warning);
-  $('sheet-warn').hidden = !warning;
+  sheetWarnKey = warning ? (payload.path || '') + '|' + warning : '';
+  $('sheet-warn').hidden = !warning || warnIgnored().includes(sheetWarnKey);
   $('sheet-warn-text').textContent = warning || '';
   $('cleanup-row').hidden = !payload.cleanup;
   btn.dataset.on = payload.cleanup === 'on' ? '1' : '';
@@ -1548,7 +1787,7 @@ function showSheetWarning(payload) {
   syncSheetTools();
 }
 
-// Clean (Maestro → This sheet): makes the parts you play fit two hands, and back to the file's
+// Clean (Sheet → This sheet): makes the parts you play fit two hands, and back to the file's
 // own notes. What it changed stays beside the button, and the sheet check after a clean (it
 // comes back with the button's answer, the redrawn score separately, in either order).
 let playablePath = null, playableCheck = null;
@@ -1596,12 +1835,13 @@ function showDetails(info) {
 function connect() {
   const es = new EventSource('events');
   es.onopen = () => { connEl.textContent = 'connected'; connEl.className = 'live'; };
-  es.onerror = () => { connEl.textContent = 'reconnecting… (is Claude Desktop running?)'; connEl.className = 'down'; };
+  es.onerror = () => { connEl.textContent = 'reconnecting… (is the coach still running?)'; connEl.className = 'down'; };
   es.onmessage = ev => {
-    const msg = JSON.parse(ev.data);
+    let msg = JSON.parse(ev.data);
     if (msg.type === 'score') {
       titleEl.textContent = msg.title;
       document.title = 'Piano Coach · ' + msg.title;
+      if (msg.path) restorePractice(msg.path, msg.practice);  // before anything else sets the bars
       if (msg.version !== scoreVersion) { scoreVersion = msg.version; loadScore(msg.version); loadParts(); loadLessons(); if (typeof videoScoreChanged === 'function') videoScoreChanged(); }
       return;
     }
@@ -1609,15 +1849,20 @@ function connect() {
     if (msg.type === 'practice') { showPractice(msg); return; }
     if (msg.type === 'cursorBeat') updateTimelineFromBeat(msg.beat);
     if (msg.type === 'atlas') { atlasEvent(msg); return; }
-    if (msg.type === 'say') { showNpc(msg.text, msg.speaker); speak(msg.text, msg.interrupt); return; }
+    if (msg.type === 'say') { if (!mpOpen()) showNpc(msg.text, msg.speaker); speak(msg.text, msg.interrupt); return; }
+    if (msg.type === 'line') { mpServerLine(msg); return; }
     if (msg.type === 'metronome') { metroFollow(msg); return; }
+    if (msg.type === 'page') { pageControl(msg); return; }
+    if (msg.type === 'songs_added') { songsAdded(msg.songs || []); return; }
     if (msg.type === 'sound') { if (typeof fluteExample === 'function') fluteExample(msg); return; }  // a flute's examples
+    if (msg.type === 'marks' && typeof fingeringMarks === 'function') fingeringMarks(msg);  // the monitor's expected note
     if (msg.type === 'lesson') return;  // the visualizer's Learn Mode push; this page uses its own menu
+    if (msg.type === 'flash' && msg.hint && aidSettings().level !== 'all') msg = {...msg, hint: null};  // the right key is named on Easy only
     coachRoll.event(msg);
     if (msg.type === 'keys') return;  // only the falling notes light the keys
     forward(msg);
   };
-  es.addEventListener('open', () => { loadPorts(); loadLessons(); loadParts(); loadVoices(); loadVoiceStatus(); loadStyle(); });
+  es.addEventListener('open', () => { loadPorts(); loadLessons(); loadParts(); loadVoices(); loadVoiceStatus(); loadStyle(); loadTranscript(); loadTiles(); viewChanged(); });
 }
 
 // -- practice menu -----------------------------------------------------------
@@ -1644,7 +1889,7 @@ function setSpeaker(id) {
     if (ctx.state === 'closed') audioSinks.delete(ctx); else routeAudio(ctx);
   }
 }
-let running = false, mode = store.get('mode', 'learn');
+let running = false, runMode = '', mode = store.get('mode', 'learn');
 $('pl-prev').addEventListener('click', () => playlistAt?.previous && loadPiece(playlistAt.previous));
 $('pl-next').addEventListener('click', () => playlistAt?.next && loadPiece(playlistAt.next));
 
@@ -1661,6 +1906,26 @@ $('cleanup-btn').addEventListener('click', async () => {
     btn.textContent = label;
     btn.disabled = false;
   }
+});
+
+$('sheet-warn-x').addEventListener('click', () => {
+  if (sheetWarnKey) store.set('warnIgnored', JSON.stringify([...warnIgnored().filter(k => k !== sheetWarnKey), sheetWarnKey].slice(-200)));
+  $('sheet-warn').hidden = true;
+});
+
+// ⤢ maximizes the sheet: the title bar, the search, the video, the notes above the sheet and the
+// colour key fold away; the Start row stays so a run can begin. ⤡ or Esc puts them back.
+function sheetMax(on) {
+  document.body.classList.toggle('sheet-max', on);
+  const b = $('sheet-max');
+  b.textContent = on ? '⤡' : '⤢';
+  b.title = on ? 'Restore the sheet (Esc)' : 'Maximize the sheet (Esc restores)';
+  b.setAttribute('aria-label', on ? 'Restore the sheet' : 'Maximize the sheet');
+  b.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+$('sheet-max').addEventListener('click', () => sheetMax(!document.body.classList.contains('sheet-max')));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('sheet-max') && !document.querySelector('details[open]')) sheetMax(false);
 });
 
 $('playable-btn').addEventListener('click', async () => {
@@ -1700,34 +1965,33 @@ $('details-btn').addEventListener('click', async () => {
   }
 });
 
-// The drop-downs beside the mode buttons (Playing, Sheet, Maestro, Bar controls): one open at
+// The drop-downs beside the mode buttons (Playing, Sheet, Maestro, Playback): one open at
 // a time, closed by a click elsewhere (or on the sheet's iframe, which blurs the window) or Escape.
 const controlMenus = [...document.querySelectorAll('#control-tabs > details')];
 controlMenus.forEach(details => {
   details.addEventListener('toggle', () => {
-    if (!details.open) { if (details.contains($('parts'))) partsMenu(false); return; }  // not still open next time
+    if (!details.open) return;
     controlMenus.forEach(other => { if (other !== details) other.open = false; });
     positionControlPanel(details);
   });
 });
 // A button elsewhere can open one (data-opens="<its id>"), like Auto clean on the sheet warning.
 document.querySelectorAll('[data-opens]').forEach(b => b.addEventListener('click', () => { $(b.dataset.opens).open = true; }));
-// The path as clicked: a Sound button in Parts is redrawn while its click is still on its way up.
+// The path as clicked: a Mute button in Playing is redrawn while its click is still on its way up.
 document.addEventListener('click', e => {
   const opens = e.target.closest && e.target.closest('[data-opens]')?.dataset.opens;
   controlMenus.forEach(d => { if (d.open && d.id !== opens && !e.composedPath().includes(d)) d.open = false; });
 });
 window.addEventListener('blur', () => controlMenus.forEach(d => { d.open = false; }));
-// Escape closes a pop-up inside a drop-down (Parts) first. Parts' own Escape handler is added
-// later, so it's still open when this one runs.
+// Escape closes the open drop-down.
 document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape' || $('parts').classList.contains('open')) return;
+  if (e.key !== 'Escape') return;
   const open = controlMenus.find(d => d.open);
   if (open) { open.open = false; open.querySelector('summary').focus(); }
 });
 window.addEventListener('resize', () => controlMenus.forEach(positionControlPanel));
 
-// Settings and Actions: what holds or works in every mode. Sound out is a copy of Parts'
+// Settings and Actions: what holds or works in every mode. Sound out is a copy of Playing's
 // "Sound goes to", refreshed each time the menu opens.
 $('settings-menu').addEventListener('toggle', e => {
   if (!e.target.open) return;
@@ -1766,7 +2030,7 @@ if ('wakeLock' in navigator) {
 const ACTS = {
   'save-as': () => document.querySelector('#file-menu [data-file=save-as]').click(),
   download: () => document.querySelector('#file-menu [data-file=download]').click(),
-  ask: () => $('ask').focus(),
+  ask: () => openMaestro(),
   fullscreen: () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(),
 };
 const actItems = [...document.querySelectorAll('#actions-menu .act-item')];
@@ -1806,17 +2070,17 @@ const MODE_HINTS = {
   rehearse: 'Play it in time: the cursor keeps going and grades notes as they pass.',
   record: 'Play anything over the metronome (after a count-in); it’s written out as sheet music.',
 };
-document.querySelectorAll('#mode button').forEach(b => { b.title = MODE_HINTS[b.dataset.mode]; });
+document.querySelectorAll('#mode option').forEach(o => { o.title = MODE_HINTS[o.value]; });
 
 function setMode(m) {
   if (!MODE_HINTS[m]) m = 'learn';
   mode = m;
-  document.querySelectorAll('#mode button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  if (m !== 'record') { $('mode').value = m; $('mode').title = MODE_HINTS[m]; }
   $('tempo-wrap').style.display = m === 'record' ? 'none' : '';  // Learn flows at it too
   go.title = MODE_HINTS[m];
   menu.classList.toggle('record', m === 'record');
   menu.classList.toggle('listen', m === 'listen');
-  drawMixer();
+  drawTracks();
   if (!running) showGo();
   if (m !== 'record') store.set('mode', m);  // Record is its own mode from Home; a Session opens on the last of these
 }
@@ -1865,6 +2129,20 @@ async function searchSongs() {
     Object.assign(lib, {songs: out.songs, matches: out.matches, total: out.total});
     renderLibrary();
   } catch (err) { statusEl.textContent = 'Could not search the library: ' + err.message; }
+}
+
+// songwatch.py noticed new files in a song folder or Downloads: refresh the list, offer to open one.
+function songsAdded(songs) {
+  if (!songs.length) return;
+  searchSongs();
+  const first = songs[0];
+  statusEl.textContent = songs.length > 1 ? `${songs.length} new songs found, ${first.title} among them. ` : `New song found: ${first.title}. `;
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'status-open';
+  open.textContent = 'Open it';
+  open.addEventListener('click', () => loadPiece(first.path));
+  statusEl.appendChild(open);
 }
 
 // bitmidi.com, only when asked (a button under the library's results); Preferences → Song folders turns it off.
@@ -1993,7 +2271,7 @@ function renderLibrary() {
     }
   }
   if (kind === 'lesson') {
-    if (!mine.length) libText(list, 'lib-note', words.length ? 'No lesson matches.' : 'No lessons yet. Ask Claude or the Maestro for an exercise.');
+    if (!mine.length) libText(list, 'lib-note', words.length ? 'No lesson matches.' : 'No lessons yet. Ask the Maestro for an exercise.');
     return;
   }
   libText(list, 'lib-group', words.length ? 'Library' : 'Library · recently practiced');
@@ -2009,7 +2287,6 @@ async function loadPiece(path) {
     // A full-screen search shrinks to its panel first, so the new sheet draws on a visible stage.
     libraryFull(false);
     await cmd('load', {lesson: path});
-    $('from').value = ''; $('to').value = '';
     // The search stays open beside the new sheet; on a narrow screen it covers the sheet, so it closes.
     if (matchMedia('(max-width: 760px)').matches) showLibrary(false);
   } catch (err) { statusEl.textContent = err.message; }
@@ -2043,193 +2320,190 @@ $('lib-search').addEventListener('input', e => {
   lib.timer = setTimeout(searchSongs, 200);
 });
 
-// -- parts: what you play, what's shown, what sounds ------------------------------
-// Per piece (remembered in this browser): You play (graded; Learn waits for it), Show (drawn
-// on the sheet) and Sound, with a volume each, shown or not. When you play, Sound is a part
-// you don't play sent to the MIDI output along with you (muted until you turn it on); Listen
-// has its own Sound, on for every part but the vocals. Moving them mid-run is heard straight
-// away. What each part of the file is (a hand, both hands, pedals, vocals) is saved on the
-// server, like the part choice Claude makes.
+// -- Playing: the file's tracks, what you play, what's shown, what sounds -----------------
+// Each track (the file's instruments) is a part for you (a hand, both hands split, the pedals,
+// the vocals, a named part like the flute) or the backing. You play picks which of your parts
+// you play this run; every track you don't play sounds along unless muted. Listen has its own
+// mute and volume. All of it is saved per file on the server (cmd/track, tracks.py) at once;
+// the mix is heard mid-run, the rest waits for Stop.
 
 const ROLES = ['right', 'left', 'pedals', 'vocals'];
-const ROLE_LABELS = {right: 'Right hand', left: 'Left hand', pedals: 'Pedals (feet)', vocals: 'Vocals'};
-const ROLE_CHOICES = [['right', 'Right hand'], ['left', 'Left hand'], ['both', 'Both hands (split)'],
-                      ['pedals', 'Pedals (feet)'], ['vocals', 'Vocals'], ['off', 'Off']];
-const parts = {roles: ['right', 'left'], list: [], confirmed: false};
-let mix = null, mixPath;
+const PART_CHOICES = [['backing', 'Backing'], ['right', 'Right hand'], ['left', 'Left hand'], ['both', 'Both hands (split)'],
+                      ['pedals', 'Pedals (feet)'], ['vocals', 'Vocals (sung)']];
+const trk = {path: null, tracks: [], choices: [], play: 'both', confirmed: true, named: [], playing: null, song: null};
+const cap = s => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
 
-function loadMix(path) {
-  if (mix && path === mixPath) return;
-  mixPath = path || null;
-  let saved = {};
-  try { saved = JSON.parse(store.get('mix.' + path, '{}')) || {}; } catch (e) {}
-  mix = {play: {right: true, left: true, pedals: false, ...saved.play}, show: {...saved.show}, sound: {...saved.sound},
-         hear: {...saved.hear}, vol: {...saved.vol}};
-  drawMixer();
-  updateTimeline();  // this piece's bookmarks
+// 'right+pedals' -> "Right hand + pedals"; a named part by its name.
+function playLabel(play) {
+  const [base, extra] = String(play || 'both').split('+');
+  const name = {both: 'Both hands', right: 'Right hand', left: 'Left hand', pedals: 'Pedals'}[base] || cap(base);
+  return extra ? `${name} + ${extra}` : name;
 }
 
-function saveMix() { if (mixPath) store.set('mix.' + mixPath, JSON.stringify(mix)); }
-const played = r => r !== 'vocals' && !!mix.play[r];
-const shown = r => mix.show[r] !== false;
-const sounding = r => !played(r) && mix.sound[r] === true;
-const hearing = r => mix.hear[r] ?? r !== 'vocals';  // Listen
-const volume = r => Number.isFinite(mix.vol[r]) ? mix.vol[r] : 100;
-const hiddenRoles = () => ROLES.filter(r => !shown(r));
-
-// {role: 0..1} for the server: 0 for a part that's muted in this mode.
-function gains() {
-  const on = mode === 'listen' ? hearing : sounding;
-  return Object.fromEntries(parts.roles.map(r => [r, on(r) ? volume(r) / 100 : 0]));
+// Is all of a track with this part yours when you play `play`? (A split track is only all
+// yours when you play both hands; its other hand sounds as the backing.)
+function covers(play, part) {
+  const [base, extra] = String(play || 'both').split('+');
+  if (part === 'both') return base === 'both';
+  if (base === 'both' && (part === 'right' || part === 'left')) return true;
+  return part === base || part === extra;
 }
 
-// A fader moved or a part muted while a run is going: the run hears it from the next note.
-let mixTimer = null;
-function sendMix() {
-  if (!running) return;
-  clearTimeout(mixTimer);
-  mixTimer = setTimeout(() => cmd('mix', {gains: gains()}).catch(() => {}), 60);
+// The staves and falling notes hidden: a role (right, left, pedals, vocals, a named part) when
+// every track that is it is hidden, and each backing track not shown ('track:<index>').
+function hiddenRoles() {
+  const shown = {}, any = {}, tracks = [];
+  for (const t of trk.tracks) {
+    const roles = t.part === 'both' ? ['right', 'left'] : t.part === 'backing' ? [] : [t.part];
+    for (const r of roles) { any[r] = true; shown[r] = shown[r] || t.show; }
+    if (!t.show) tracks.push('track:' + t.index);
+  }
+  return [...Object.keys(any).filter(r => !shown[r]), ...tracks];
 }
 
-// The hand the server grades: 'both' / 'right' / 'left', plus '+pedals' when you play the pedals.
-function handValue() {
-  const r = played('right'), l = played('left'), feet = played('pedals') && parts.roles.includes('pedals');
-  const base = r && l ? 'both' : r ? 'right' : l ? 'left' : '';
-  return feet ? (base ? base + '+pedals' : 'pedals') : base || 'both';
+function handValue() { return trk.play || 'both'; }
+
+function playedRoles() {
+  if (mode === 'listen') return [...ROLES, ...trk.named];
+  const [base, extra] = handValue().split('+');
+  return [...(base === 'both' ? ['right', 'left'] : [base]), ...(extra ? [extra] : [])];
 }
 
-// A run's hand, as the Maestro or Claude set it.
+// A run's hand, as the Maestro or Claude set it: shown, not saved (the run already has it).
 function setHand(hand) {
-  const [base, extra] = String(hand || 'both').split('+');
-  mix.play.right = base === 'both' || base === 'right';
-  mix.play.left = base === 'both' || base === 'left';
-  mix.play.pedals = base === 'pedals' || extra === 'pedals';
-  saveMix();
-  drawMixer();
+  if (!hand || hand === trk.play) return;
+  trk.play = hand;
+  drawTracks();
 }
 
-function drawMixer() {
-  if (!mix) return;
-  const rows = $('mix-rows');
-  rows.innerHTML = '';
-  const listen = mode === 'listen';
-  for (const r of parts.roles) {
-    const name = ROLE_LABELS[r], lower = name.toLowerCase();
-    const mutable = listen || !played(r), on = listen ? hearing(r) : sounding(r), vol = volume(r);
-    const play = r === 'vocals' ? '<span class="na" title="Vocals are shown and heard, never graded">–</span>'
-      : `<input type="checkbox" data-k="play" data-r="${r}" ${played(r) ? 'checked' : ''} ${running ? 'disabled title="Stop to change what you play"' : ''} aria-label="You play the ${lower}">`;
-    const tip = !mutable ? 'You play this part'
-      : listen ? (on ? 'Listen plays it: click to mute' : 'Muted: click to hear it')
-      : on ? 'Plays along on the MIDI output: click to mute' : 'Muted: click to have the keyboard play it along with you';
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<th scope="row">${name}</th><td class="c-play">${play}</td>` +
-      `<td><input type="checkbox" data-k="show" data-r="${r}" ${shown(r) ? 'checked' : ''} aria-label="Show the ${lower}"></td>` +
-      `<td class="c-snd"><span class="snd-cell"><button class="snd" data-r="${r}" aria-pressed="${on}" ${mutable ? '' : 'disabled'} aria-label="Sound the ${lower}" title="${tip}">${on ? '🔊' : '🔇'}</button>` +
-      `<input type="range" class="vol" data-r="${r}" min="0" max="100" step="5" value="${vol}" ${mutable && on ? '' : 'disabled'} aria-label="${name} volume" title="${name} volume">` +
-      `<span class="vol-val">${mutable && on ? vol + '%' : ''}</span></span></td>`;
-    rows.appendChild(tr);
+const listening = () => mode === 'listen';
+const muteKey = () => listening() ? 'listen_mute' : 'mute';
+const volKey = () => listening() ? 'listen_vol' : 'vol';
+
+function partOptions(current) {
+  const named = [...new Set([...trk.named, ...(PART_CHOICES.some(([v]) => v === current) ? [] : [current])])];
+  return [...PART_CHOICES, ...named.map(n => [n, cap(n) + ' part']), ['+new', 'An instrument part…']]
+    .map(([v, text]) => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(text)}</option>`).join('');
+}
+
+function drawTracks() {
+  const listen = listening(), rows = $('track-rows');
+  const you = $('you-play');
+  you.innerHTML = trk.choices.map(c => `<option value="${esc(c)}" ${c === trk.play ? 'selected' : ''}>${esc(playLabel(c))}</option>`).join('');
+  you.disabled = running || trk.choices.length < 2;
+  $('you-play-wrap').hidden = !trk.choices.length;
+  rows.innerHTML = trk.tracks.map(t => {
+    const mine = !listen && covers(trk.play, t.part);
+    const muted = t[muteKey()], vol = t[volKey()];
+    const sound = mine ? `<td class="c-mute"></td><td class="c-vol"><span class="t-you">you play it</span></td>`
+      : `<td class="c-mute"><button class="t-mute" aria-pressed="${!muted}" aria-label="${muted ? 'Unmute' : 'Mute'} ${esc(t.name)}"
+           title="${muted ? 'Muted: click to hear it' : listen ? 'Listen plays it: click to mute' : 'Plays along with you: click to mute'}">${muted ? '🔇' : '🔊'}</button></td>` +
+        `<td class="c-vol"><input type="range" class="t-vol" min="0" max="100" step="5" value="${vol}" ${muted ? 'disabled' : ''} aria-label="${esc(t.name)} volume">` +
+        `<span class="vol-val">${muted ? '' : vol + '%'}</span></td>`;
+    const lock = running ? 'disabled title="Stop to change"' : '';
+    return `<tr data-i="${t.index}" class="${t.yours && !listen ? 'yours' : ''}">` +
+      `<th scope="row"><span class="t-name">${esc(t.name)}</span><small>${esc(t.instrument)} · ${t.notes.toLocaleString()} notes · ${esc(t.range)}</small></th>` +
+      `<td class="c-part"><select class="t-part" ${lock} aria-label="${esc(t.name)}: part">${partOptions(t.part)}</select></td>` +
+      `<td class="c-show"><input type="checkbox" class="t-show" ${t.show ? 'checked' : ''} ${lock} aria-label="Show ${esc(t.name)}"></td>` +
+      sound + '</tr>';
+  }).join('');
+  $('tracks-empty').hidden = !!trk.tracks.length;
+  $('tracks-note').hidden = trk.confirmed || !trk.tracks.length;
+  $('parts-ok').disabled = running;
+  // The tab says what you're set to: "Playing: Both hands", "Listening: 3 of 20".
+  const sum = $('playing-sum');
+  if (mode === 'record' || !trk.tracks.length) sum.textContent = 'Playing ▾';
+  else if (listen) {
+    const on = trk.tracks.filter(t => !t.listen_mute).length;
+    sum.textContent = `Listening: ${on === trk.tracks.length ? 'every track' : `${on} of ${trk.tracks.length}`} ▾`;
+  } else {
+    const along = trk.tracks.some(t => !covers(trk.play, t.part) && !t.mute);
+    sum.textContent = `Playing: ${playLabel(trk.play)}${along ? ' · 🔊' : ''} ▾`;
   }
-  const mine = listen ? listenRoles() : ['right', 'left', 'pedals'].filter(r => played(r) && parts.roles.includes(r));
-  const label = mine.join(' + ') === 'right + left' ? 'both hands'
-    : mine.length === 1 && ['right', 'left'].includes(mine[0]) ? mine[0] + ' hand' : mine.join(' + ').replace('right + left', 'both hands');
-  $('parts-btn').textContent = listen ? `Hear: ${label || 'nothing'} ▾`
-    : `Play: ${label || 'both hands'}${parts.roles.some(sounding) ? ' · 🔊' : ''} ▾`;
-  coachRoll.parts(hiddenRoles(), listen ? ROLES : ROLES.filter(played));  // parts you don't play fall faint
+  sum.title = `${sum.textContent.replace(' ▾', '')}. MIDI input, what you play, and each track's part, show, mute and volume`;
+  coachRoll.parts(hiddenRoles(), playedRoles());  // parts you don't play fall faint
+  showLeadIn();
 }
 
-// The parts Listen plays, shown or not.
-const listenRoles = () => parts.roles.filter(hearing);
-
-function drawRoles() {
-  const box = $('part-roles');
-  box.innerHTML = '';
-  for (const p of parts.list) {
-    const row = document.createElement('label');
-    row.className = 'part-row';
-    row.innerHTML = `<span>${esc(p.name || 'Part ' + p.index)}<small>${esc(p.instrument)} · ${p.notes.toLocaleString()} notes · ${esc(p.range)}</small></span>`;
-    const sel = document.createElement('select');
-    sel.dataset.index = p.index;
-    for (const [value, text] of ROLE_CHOICES) sel.add(new Option(text, value));
-    sel.value = p.role;
-    sel.addEventListener('change', () => { $('parts-save').disabled = false; });
-    row.appendChild(sel);
-    box.appendChild(row);
-  }
-  $('roles-note').textContent = !parts.list.length ? 'Pick a song or lesson first.'
-    : parts.confirmed ? 'Your choice for this file.' : 'Suggested: check it and save.';
-  $('parts-save').disabled = parts.confirmed || !parts.list.length;
+// Playback's Lead-in: bars of backing before your first bar, when some track you don't play sounds.
+function showLeadIn() {
+  const along = mode !== 'listen' && mode !== 'record' && trk.tracks.some(t => !covers(trk.play, t.part) && !t.mute);
+  $('lead-in-row').hidden = !along || !trk.song;
+  if (!trk.song) return;
+  if (document.activeElement !== $('lead-in')) $('lead-in').value = trk.song.lead_in;
+  $('lead-every').checked = !!trk.song.lead_in_every_pass;
 }
+$('lead-in').addEventListener('change', async e => {
+  const bars = Math.max(0, Math.min(8, Math.round(Number(e.target.value) || 0)));
+  try { showParts(await cmd('song_settings', {lead_in: bars})); } catch (err) { statusEl.textContent = err.message; }
+});
+$('lead-every').addEventListener('change', async e => {
+  try { showParts(await cmd('song_settings', {lead_in_every_pass: e.target.checked})); } catch (err) { statusEl.textContent = err.message; }
+});
 
 function showParts(out) {
-  Object.assign(parts, {roles: out.roles, list: out.parts, confirmed: out.confirmed});
-  loadMix(out.path);
-  drawMixer();
-  drawRoles();
+  if (!out || out.error) { if (out && out.error) statusEl.textContent = out.error; return; }
+  const hiddenBefore = hiddenRoles().join();
+  Object.assign(trk, {path: out.path, tracks: out.tracks || [], choices: out.choices || [], play: out.play || 'both',
+                      confirmed: out.confirmed !== false, named: out.named || [], playing: out.playing || null, song: out.song || null});
+  drawTracks();
+  if (hiddenRoles().join() !== hiddenBefore) forward({type: 'visibility', hidden: hiddenRoles()});
 }
 
 async function loadParts() {
-  try { showParts(await cmd('parts')); } catch (err) { statusEl.textContent = 'Could not read the parts: ' + err.message; }
+  try { showParts(await cmd('parts')); } catch (err) { statusEl.textContent = 'Could not read the tracks: ' + err.message; }
 }
 
-$('mix-rows').addEventListener('change', e => {
-  const {k, r} = e.target.dataset;
-  if (!k) return;
-  if (k === 'play' && !e.target.checked && !['right', 'left', 'pedals'].some(x => x !== r && played(x) && parts.roles.includes(x))) {
-    e.target.checked = true;  // something has to be yours to play
-    statusEl.textContent = 'Play at least one part.';
-    return;
+async function trackChange(index, changes) {
+  try { showParts(await cmd('track', {index, ...changes})); } catch (err) { statusEl.textContent = err.message; drawTracks(); }
+}
+
+$('you-play').addEventListener('change', async e => {
+  try { showParts(await cmd('song_settings', {play: e.target.value})); } catch (err) { statusEl.textContent = err.message; drawTracks(); }
+});
+$('parts-ok').addEventListener('click', async () => {
+  try { showParts(await cmd('confirm_parts')); } catch (err) { statusEl.textContent = err.message; }
+});
+$('track-rows').addEventListener('change', e => {
+  const row = e.target.closest('tr[data-i]');
+  if (!row) return;
+  const index = Number(row.dataset.i);
+  if (e.target.classList.contains('t-part')) {
+    let part = e.target.value;
+    if (part === '+new') {  // name the part for what you play it on: flute, strings...
+      const t = trk.tracks.find(x => x.index === index);
+      part = (prompt('Which instrument do you play this track on? (flute, strings, sax...)',
+                     String(t?.instrument || '').split(' ')[0].toLowerCase()) || '').trim().toLowerCase();
+      if (!part || ['right', 'left', 'both', 'pedals', 'vocals', 'off', 'backing'].includes(part)) return drawTracks();
+    }
+    return trackChange(index, {part});
   }
-  mix[k][r] = e.target.checked;
-  saveMix();
-  drawMixer();
-  if (k === 'show') forward({type: 'visibility', hidden: hiddenRoles()});
+  if (e.target.classList.contains('t-show')) return trackChange(index, {show: e.target.checked});
+  if (e.target.classList.contains('t-vol')) return trackChange(index, {[volKey()]: Number(e.target.value)});  // let go: saved
 });
-$('mix-rows').addEventListener('click', e => {
-  const b = e.target.closest('.snd');
-  if (!b || b.disabled) return;
-  const r = b.dataset.r;
-  if (mode === 'listen') mix.hear[r] = !hearing(r);
-  else mix.sound[r] = !sounding(r);
-  saveMix();
-  drawMixer();
-  sendMix();
+$('track-rows').addEventListener('click', e => {
+  const b = e.target.closest('.t-mute');
+  if (!b) return;
+  const t = trk.tracks.find(x => x.index === Number(b.closest('tr').dataset.i));
+  if (t) trackChange(t.index, {[muteKey()]: !t[muteKey()]});
 });
-$('mix-rows').addEventListener('input', e => {
-  if (!e.target.classList.contains('vol')) return;
-  mix.vol[e.target.dataset.r] = Number(e.target.value);
-  e.target.nextElementSibling.textContent = e.target.value + '%';  // not redrawn: that would end the drag
-  saveMix();
-  sendMix();
+// A fader moved: heard at once in a run going now (not redrawn, which would end the drag).
+let volTimer = null;
+$('track-rows').addEventListener('input', e => {
+  if (!e.target.classList.contains('t-vol')) return;
+  e.target.nextElementSibling.textContent = e.target.value + '%';
+  if (!running) return;
+  const lane = e.target.closest('tr').dataset.i;
+  clearTimeout(volTimer);
+  volTimer = setTimeout(() => cmd('mix', {gains: {[lane]: Number(e.target.value) / 100}}).catch(() => {}), 60);
 });
 outSel.addEventListener('change', () => store.set('output', outSel.value));
-$('parts-save').addEventListener('click', async () => {
-  const roles = {};
-  document.querySelectorAll('#part-roles select').forEach(sel => { roles[sel.dataset.index] = sel.value; });
-  $('parts-save').disabled = true;
-  try { showParts(await cmd('set_parts', {roles})); }
-  catch (err) { $('parts-save').disabled = false; $('roles-note').textContent = err.message; }
-});
-
-function partsMenu(open) {
-  const panel = $('parts');
-  panel.classList.toggle('open', open);
-  $('parts-btn').setAttribute('aria-expanded', open);
-  if (!open) return;
-  panel.style.left = '0px';  // keep it on screen when the menu bar has wrapped it near the right edge
-  const over = panel.getBoundingClientRect().right - (window.innerWidth - 16);
-  if (over > 0) panel.style.left = `${-over}px`;
-}
-$('parts-btn').addEventListener('click', () => partsMenu(!$('parts').classList.contains('open')));
-// The path as clicked: a Sound button is redrawn while its click is still on its way up.
-document.addEventListener('click', e => { if (!e.composedPath().includes($('parts-wrap'))) partsMenu(false); });
-window.addEventListener('blur', () => partsMenu(false));  // a click on the sheet goes to its iframe
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('parts').classList.contains('open')) { partsMenu(false); $('parts-btn').focus(); } });
 
 // The run's settings, as the Maestro (autopilot, voice) or Claude last set them: the menu
 // shows where things stand, and Start picks up from there.
 function showRunSettings(s) {
   setMode({wait: 'learn', rehearsal: 'rehearse', listen: 'listen'}[s.mode]);
-  if (mix && s.mode !== 'listen') setHand(s.hand);
+  if (s.mode !== 'listen') setHand(s.hand);
   const [from, to] = (s.bars || '').split('-');
   $('from').value = from || '';
   $('to').value = s.bars ? (to || from) : '';
@@ -2261,14 +2535,21 @@ function showPractice(p) {
   if (p.style) $('style').value = p.style;  // also changed by voice ("be gentler")
   showTalk(p.talk);  // and "don't greet me"
   if (running && !p.running) loadLessons();  // the run's result shows in the history
+  const wasRunning = running;
   running = !!p.running;
+  runMode = running ? (p.settings || {}).mode || '' : '';
   menu.classList.toggle('running', running);
   document.body.classList.toggle('running', running);
-  drawMixer();  // what you play is fixed for the run; what sounds isn't
+  drawTracks();  // what you play is fixed for the run; what sounds isn't
   syncPlaylistButtons();
   if (typeof stepRunning === 'function') stepRunning();  // a lesson step's Start is Stop while it runs
   const s = p.settings || {};
-  if (['wait', 'rehearsal', 'listen'].includes(s.mode)) showRunSettings(s);
+  // A run's settings show while it goes and as it stops; a past run (on connecting, or when the
+  // Maestro's style changes) leaves the controls as the piece was restored or you since set them.
+  if (['wait', 'rehearsal', 'listen'].includes(s.mode) && (running || wasRunning)) {
+    showRunSettings(s);
+    if (running && !s.atlas && s.reference === practicePath) savePractice(true);
+  }
   // A recording's grid is fixed when it starts, so its tempo can't change mid-take.
   $('metro').classList.toggle('running', running && s.mode === 'record');
   showGo();
@@ -2330,9 +2611,15 @@ function speak(text, interrupt, force) {  // force: asked for (a 🔊 button), e
   if (!speaking) playNext();
 }
 
+// While the Maestro speaks, ■ Stop shows (in its panel and its dialogue box).
+function speechState() {
+  document.body.classList.toggle('speaking', !!(speaking || pending.length || (synth && (synth.speaking || synth.pending))));
+}
+
 async function playNext() {
   const item = pending.shift();
   speaking = item || null;
+  speechState();
   if (!item) return;
   try {
     const blob = await item.ready;
@@ -2354,14 +2641,20 @@ function speakWeb(text, name) {
   const u = new SpeechSynthesisUtterance(text);
   u.voice = synth.getVoices().find(v => v.name === name) || null;
   u.volume = voiceVol.value / 100;
+  u.onend = u.onerror = () => setTimeout(speechState);
   synth.speak(u);
+  speechState();
 }
 
 function stopSpeaking() {
   pending.length = 0;
-  if (speaking && speaking.audio) speaking.audio.pause();
+  if (speaking && speaking.audio) { speaking.audio.pause(); URL.revokeObjectURL(speaking.audio.src); }
   speaking = null;
   if (synth) synth.cancel();
+  speechState();
+}
+for (const id of ['mp-hush', 'npc-hush']) {
+  $(id).addEventListener('click', e => { e.stopPropagation(); stopSpeaking(); });
 }
 
 // -- NPC dialogue box: typewriter text; click once to finish the line, again to close --
@@ -2403,6 +2696,336 @@ function hideNpc() {
 }
 
 npc.addEventListener('click', () => (npc.classList.contains('done') ? hideNpc() : finishNpc()));
+
+// -- The Maestro panel: today's conversation (transcript.py), on every view -------------
+// Open, a line goes only in the panel; folded, it shows in the dialogue box as before and
+// lights the dot. Where it sits and whether it's open are remembered in this browser.
+
+const mp = $('maestro-panel'), mpLog = $('mp-log');
+const mpOpen = () => !mp.classList.contains('folded');
+
+function mpSetOpen(open) {
+  mp.classList.toggle('folded', !open);
+  $('mp-toggle').textContent = open ? '▾' : '▴';
+  $('mp-toggle').title = open ? 'Fold to the bar' : 'Open the conversation';
+  $('mp-toggle').setAttribute('aria-expanded', open);
+  store.set('mpOpen', open ? '1' : '');
+  if (open) {
+    $('mp-unread').hidden = true;
+    hideNpc();
+    mpLog.scrollTop = mpLog.scrollHeight;
+  }
+  mpClamp();
+}
+
+// ✕ takes the panel off the screen; lines then show in the dialogue box, as when folded.
+function mpSetClosed(closed) {
+  mp.classList.toggle('closed', closed);
+  store.set('mpClosed', closed ? '1' : '');
+}
+
+function openMaestro() {
+  mpSetClosed(false);
+  mpSetOpen(true);
+  if (!$('ask').disabled) $('ask').focus();
+}
+
+function mpLine(line) {
+  mpLog.querySelector('.pending')?.remove();
+  const atEnd = mpLog.scrollHeight - mpLog.scrollTop - mpLog.clientHeight < 40;
+  const li = document.createElement('li');
+  if (line.kind === 'divider') {
+    li.className = 'mp-divider';
+    li.textContent = line.text;
+    mpLog.append(li);
+    if (atEnd) mpLog.scrollTop = mpLog.scrollHeight;
+    return;
+  }
+  li.className = `mp-line ${line.kind || ''}` + (line.who === 'Claude' ? ' claude' : '');
+  const meta = document.createElement('div');
+  meta.className = 'mp-meta';
+  const who = document.createElement('span');
+  who.className = 'mp-who';
+  who.textContent = line.who;
+  meta.append(who, ` · ${(line.t || '').slice(0, 5)}` + (line.kind === 'remark' ? ' · unasked' : ''));
+  if (line.kind === 'reply' || line.kind === 'remark') {  // hear it again, even with the voice off
+    const again = document.createElement('button');
+    again.className = 'mp-say';
+    again.textContent = '🔊';
+    again.title = 'Say it again';
+    again.addEventListener('click', () => speak(line.text, true, true));
+    meta.append(again);
+  }
+  const p = document.createElement('p');
+  p.textContent = line.text;
+  if (/^https?:\/\//.test(line.link || '')) {  // open_song's MuseScore link, opened in the browser
+    const a = document.createElement('a');
+    a.className = 'mp-link';
+    a.href = line.link;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = line.link.replace(/^https?:\/\//, '');
+    p.append(document.createElement('br'), a);
+  }
+  li.append(...(line.kind === 'pending' ? [] : [meta]), p);
+  mpLog.append(li);
+  if (atEnd || line.kind === 'you') mpLog.scrollTop = mpLog.scrollHeight;
+  if (!mpOpen() && line.kind !== 'you' && line.kind !== 'pending') $('mp-unread').hidden = false;
+}
+
+// Waiting on an answer: a '…' in the panel (gone when the next line comes), or in the box when folded.
+function mpThinking() {
+  if (!mpOpen()) { showNpc('…', 'Maestro'); return; }
+  mpLine({who: 'Maestro', kind: 'pending', text: '…'});
+}
+
+// A line the server never saw (the page lost it), shown here only.
+function mpLocal(text) {
+  mpLine({who: 'Maestro', kind: 'error', t: new Date().toTimeString(), text});
+  if (!mpOpen()) showNpc(text, 'Maestro');
+}
+
+// Clear empties the panel, not the log: it remembers (for today) how many of the server's
+// lines it has hidden, so a reload doesn't bring them back.
+const mpDay = () => new Date().toLocaleDateString('sv');  // YYYY-MM-DD, local, as the log files
+let mpSeen = 0;
+function mpHidden() {
+  try { const [day, n] = JSON.parse(store.get('mpCleared', 'null')) || []; return day === mpDay() ? n : 0; } catch (e) { return 0; }
+}
+function mpServerLine(line) {
+  if (++mpSeen > mpHidden()) mpLine(line);
+}
+$('mp-clear').addEventListener('click', () => {
+  store.set('mpCleared', JSON.stringify([mpDay(), mpSeen]));
+  mpLog.replaceChildren();
+});
+
+async function loadTranscript() {
+  try {
+    const {lines} = await cmd('transcript');
+    mpLog.replaceChildren();
+    mpSeen = 0;
+    (lines || []).forEach(mpServerLine);
+    $('mp-unread').hidden = true;  // already said: nothing new
+    mpLog.scrollTop = mpLog.scrollHeight;
+  } catch (err) {}
+}
+
+// Dragging by the top bar (not on a narrow screen, where it's a bottom sheet). The panel is
+// placed by its left and bottom edges, so opening it grows upwards from where it sits.
+const mpNarrow = matchMedia('(max-width: 760px)');
+function mpPlace(left, bottom) {
+  mp.style.setProperty('--mp-left', left + 'px');
+  mp.style.setProperty('--mp-bottom', bottom + 'px');
+}
+function mpClamp() {
+  if (mpNarrow.matches || mp.classList.contains('closed')) return;
+  const r = mp.getBoundingClientRect();
+  const left = Math.max(0, Math.min(r.left, innerWidth - r.width));
+  const bottom = Math.max(0, Math.min(innerHeight - r.bottom, innerHeight - r.height));
+  mpPlace(left, bottom);
+}
+$('mp-head').addEventListener('pointerdown', e => {
+  if (mpNarrow.matches || e.button !== 0 || e.target.closest('button, select, input')) return;
+  const r = mp.getBoundingClientRect(), dx = e.clientX - r.left, dy = r.bottom - e.clientY;
+  mp.classList.add('dragging');
+  $('mp-head').setPointerCapture(e.pointerId);
+  const move = ev => mpPlace(ev.clientX - dx, innerHeight - ev.clientY - dy);
+  const up = () => {
+    mp.classList.remove('dragging');
+    $('mp-head').removeEventListener('pointermove', move);
+    mpClamp();
+    const r2 = mp.getBoundingClientRect();
+    store.set('mpPos', JSON.stringify([Math.round(r2.left), Math.round(innerHeight - r2.bottom)]));
+  };
+  $('mp-head').addEventListener('pointermove', move);
+  $('mp-head').addEventListener('pointerup', up, {once: true});
+  $('mp-head').addEventListener('pointercancel', up, {once: true});
+});
+$('mp-toggle').addEventListener('click', () => mpSetOpen(!mpOpen()));
+$('mp-close').addEventListener('click', () => { mpSetOpen(false); mpSetClosed(true); });
+
+// The corner grip resizes it: right for wider, up for a taller conversation. Remembered.
+function mpSize(w, h) {
+  mp.style.width = Math.max(280, Math.min(w, innerWidth - 16)) + 'px';
+  mpLog.style.height = Math.max(120, Math.min(h, innerHeight * 0.8)) + 'px';
+}
+$('mp-grip').addEventListener('pointerdown', e => {
+  if (mpNarrow.matches || e.button !== 0) return;
+  e.preventDefault();
+  const grip = $('mp-grip'), w0 = mp.offsetWidth, h0 = mpLog.offsetHeight, x0 = e.clientX, y0 = e.clientY;
+  grip.setPointerCapture(e.pointerId);
+  const move = ev => mpSize(w0 + ev.clientX - x0, h0 - (ev.clientY - y0));
+  const up = () => {
+    grip.removeEventListener('pointermove', move);
+    mpClamp();
+    store.set('mpSize', JSON.stringify([mp.offsetWidth, mpLog.offsetHeight]));
+  };
+  grip.addEventListener('pointermove', move);
+  grip.addEventListener('pointerup', up, {once: true});
+});
+try { const [w, h] = JSON.parse(store.get('mpSize', 'null')) || []; if (w) mpSize(w, h); } catch (e) {}
+try { const [l, b] = JSON.parse(store.get('mpPos', 'null')) || []; if (l !== undefined) mpPlace(l, b); } catch (e) {}
+mpSetOpen(store.get('mpOpen', '') === '1');
+mpSetClosed(store.get('mpClosed', '') === '1');
+addEventListener('resize', mpClamp);
+
+// -- Quick-action tiles (tiles.py has the ids, defaults and each profile's layouts) ----------
+// Each tile does what its button on the page does. where(): the view it has to go to first
+// (through go(), so a run gets asked about), or null to act here. ok(): '' or why it can't now.
+const goShown = () => !!$('go').offsetParent;
+const hasPiece = () => !['', 'no score yet'].includes($('title').textContent.trim());
+const TILES = {
+  play: {label: () => running ? '■ Stop' : document.body.dataset.view === 'record' ? '● Record' : '▶ Play',
+         where: () => goShown() ? null : 'practice',
+         ok: () => running || hasPiece() || document.body.dataset.view === 'record' ? '' : 'Open a piece first',
+         act: () => $('go').click()},
+  start: {label: () => '⏮ Start', where: () => goShown() ? null : 'practice',
+          ok: () => $('timeline').disabled ? 'No sheet yet' : '', act: () => $('timeline-restart').click()},
+  loop: {label: () => '🔁 Loop', on: () => $('loop').checked,
+         act: () => { $('loop').checked = !$('loop').checked; $('loop').dispatchEvent(new Event('change')); }},
+  metronome: {label: () => '♩ Metronome', on: () => !!metro.timer, act: () => mGo.click()},
+  slower: {label: () => 'Tempo −', ok: () => $('tempo').disabled ? 'Not while a run is going' : '',
+           act: () => tileTempo(-10)},
+  faster: {label: () => 'Tempo +', ok: () => $('tempo').disabled ? 'Not while a run is going' : '', act: () => tileTempo(10)},
+  record: {label: () => '● Record…', on: () => document.body.dataset.view === 'record', act: () => window.coachGo('record')},
+  today: {label: () => '☀ Today', ok: () => $('today-go').disabled ? 'Nothing planned yet' : '', act: () => $('today-go').click()},
+  next: {label: () => '➜ Next stop', where: () => 'progress',
+         ok: () => typeof path !== 'undefined' && path.state && path.state.goal ? '' : 'Set a goal in the Planner first',
+         act: async () => {
+           const n = await cmd('path_next');
+           if (n.error) mpLocal(n.error); else stepOpen(n.stage);
+         }},
+  planner: {label: () => '🗺 Planner', on: () => document.body.dataset.view === 'progress', act: () => window.coachGo('progress')},
+  exam: {label: () => '🎓 Mock exam', where: () => 'progress', act: () => atlasMockForm()},
+  continue: {label: () => '↩ Continue', ok: () => hasPiece() ? '' : 'No piece yet', act: () => $('home-practice').click()},
+};
+const TILE_VIEW = {home: 'home', practice: 'practice', record: 'record', progress: 'progress', lesson: 'progress', youtube: 'youtube'};
+const tiles = {layouts: null, about: {}};
+const tileView = () => TILE_VIEW[document.body.dataset.view] || 'practice';
+
+function tileTempo(step) {
+  const t = $('tempo');
+  t.value = Math.max(30, Math.min(150, Number(t.value) + step));
+  t.dispatchEvent(new Event('input'));
+}
+
+async function tileRun(id) {
+  const t = TILES[id];
+  const where = t.where && t.where();
+  if (where && TILE_VIEW[document.body.dataset.view] !== where && await window.coachGo(where) === false) return;
+  try { await t.act(); } catch (err) { mpLocal(err.message); }
+}
+
+function tileButton(id, inTray) {
+  const b = document.createElement('button');
+  b.className = 'mp-tile';
+  b.dataset.tile = id;
+  b.append((inTray ? '+ ' : '') + TILES[id].label());
+  b.title = tiles.about[id] || '';
+  return b;
+}
+
+function mpTilesRender() {
+  const row = $('mp-tiles'), tray = $('mp-tray'), editing = mp.classList.contains('editing');
+  row.replaceChildren();
+  tray.replaceChildren();
+  if (!tiles.layouts) return;
+  const mine = tiles.layouts[tileView()] || [];
+  mine.filter(id => TILES[id]).forEach(id => {
+    const b = tileButton(id);
+    if (editing) {
+      b.draggable = true;
+      const x = document.createElement('span');
+      x.className = 'x';
+      x.textContent = '×';
+      x.title = 'Take it off';
+      b.append(x);
+    }
+    row.append(b);
+  });
+  const edit = document.createElement('button');
+  edit.id = 'mp-edit';
+  edit.textContent = editing ? 'Done' : '✎';
+  edit.title = editing ? 'Finish editing' : 'Choose the tiles for this part of the app';
+  row.append(edit);
+  if (editing) Object.keys(TILES).filter(id => !mine.includes(id)).forEach(id => tray.append(tileButton(id, true)));
+  mpTilesRefresh();
+}
+
+// Labels, on/off and why a tile can't act, kept current (a run starting, a piece loading).
+function mpTilesRefresh() {
+  if (mp.classList.contains('editing')) return;
+  $('mp-tiles').querySelectorAll('.mp-tile').forEach(b => {
+    const t = TILES[b.dataset.tile], where = t.where && t.where();
+    const why = t.ok ? t.ok() : '';
+    const away = !!where && TILE_VIEW[document.body.dataset.view] !== where;
+    b.firstChild.textContent = t.label();
+    b.disabled = !!why;
+    b.title = why || (tiles.about[b.dataset.tile] || '') + (away ? ` (goes to ${VIEW_NAMES[where]} first)` : '')
+      + (['slower', 'faster'].includes(b.dataset.tile) ? ` · now ${$('tempo').value}%` : '');
+    b.classList.toggle('away', away);
+    if (t.on) b.setAttribute('aria-pressed', t.on()); else b.removeAttribute('aria-pressed');
+  });
+}
+setInterval(mpTilesRefresh, 700);
+
+function tilesSave(view, list) {
+  tiles.layouts[view] = list;
+  mpTilesRender();
+  cmd('tiles_set', {view, tiles: list}).catch(err => mpLocal(err.message));
+}
+
+$('mp-tiles').addEventListener('click', e => {
+  if (e.target.id === 'mp-edit') { mp.classList.toggle('editing'); mpTilesRender(); return; }
+  const b = e.target.closest('.mp-tile');
+  if (!b) return;
+  if (mp.classList.contains('editing')) {
+    if (e.target.classList.contains('x')) tilesSave(tileView(), tiles.layouts[tileView()].filter(id => id !== b.dataset.tile));
+    return;
+  }
+  tileRun(b.dataset.tile);
+});
+$('mp-tray').addEventListener('click', e => {
+  const b = e.target.closest('.mp-tile');
+  if (b) tilesSave(tileView(), [...tiles.layouts[tileView()], b.dataset.tile]);
+});
+// Dragging a tile onto another puts it in front of that one.
+let tileDragged = null;
+$('mp-tiles').addEventListener('dragstart', e => { tileDragged = e.target.closest('.mp-tile')?.dataset.tile; });
+$('mp-tiles').addEventListener('dragover', e => {
+  const b = e.target.closest('.mp-tile');
+  if (!tileDragged || !b) return;
+  e.preventDefault();
+  $('mp-tiles').querySelectorAll('.dragover').forEach(x => x.classList.remove('dragover'));
+  b.classList.add('dragover');
+});
+$('mp-tiles').addEventListener('drop', e => {
+  e.preventDefault();
+  const b = e.target.closest('.mp-tile'), moved = tileDragged;
+  tileDragged = null;
+  if (!moved || !b || b.dataset.tile === moved) { mpTilesRender(); return; }
+  const list = tiles.layouts[tileView()].filter(id => id !== moved);
+  list.splice(list.indexOf(b.dataset.tile), 0, moved);
+  tilesSave(tileView(), list);
+});
+
+async function loadTiles() {
+  try {
+    const out = await cmd('tiles');
+    tiles.layouts = out.layouts;
+    tiles.about = out.tiles;
+    mpTilesRender();
+  } catch (err) {}
+}
+
+// The server keeps which part of the app the page is on (the Maestro's "here"), and the tiles follow.
+function viewChanged() {
+  cmd('view', {view: document.body.dataset.view}).catch(() => {});
+  mp.classList.remove('editing');
+  mpTilesRender();
+}
+new MutationObserver(viewChanged).observe(document.body, {attributes: true, attributeFilter: ['data-view']});
 
 // -- talk to the Maestro: hold the button (or Space), speak, let go -------------
 // The recording goes to the coach server, which transcribes it locally (Whisper) and
@@ -2473,8 +3096,9 @@ async function loadVoiceStatus() {
     voiceReady = s.available;
     voiceCap = s.cap;
     talkBtn.disabled = $('ask').disabled = !s.available;
-    $('home-ask').disabled = $('dash-ask').disabled = !s.available;
-    $('home-ask').title = $('dash-ask').title = s.available ? 'Ask the Maestro for help' : 'Maestro chat needs an Anthropic API key';
+    $('home-ask').disabled = !s.available;  // the top-bar one stays on: it brings back a closed panel and its tiles
+    $('home-ask').title = s.available ? 'Ask the Maestro for help' : 'Maestro chat needs an Anthropic API key';
+    $('dash-ask').title = s.available ? 'Ask the Maestro for help' : 'Open the Maestro panel (chat needs an Anthropic API key)';
     $('home-ask-label').textContent = s.available ? 'Ask Maestro' : 'Chat unavailable';
     $('home-coach-copy').textContent = s.available
       ? 'Not sure where to start? Ask for a piece, a practice plan, or help with a tricky passage.'
@@ -2488,8 +3112,9 @@ async function loadVoiceStatus() {
   } catch (err) {
     voiceReady = false;
     talkBtn.disabled = $('ask').disabled = true;
-    $('home-ask').disabled = $('dash-ask').disabled = true;
-    $('home-ask').title = $('dash-ask').title = 'Maestro chat is unavailable';
+    $('home-ask').disabled = true;
+    $('home-ask').title = 'Maestro chat is unavailable';
+    $('dash-ask').title = 'Open the Maestro panel (chat is unavailable right now)';
     $('home-ask-label').textContent = 'Chat unavailable';
     $('home-coach-copy').textContent = 'Practice coaching still works. Maestro chat is unavailable right now.';
     $('ask').placeholder = 'Practice feedback works; Maestro chat is unavailable right now';
@@ -2498,7 +3123,7 @@ async function loadVoiceStatus() {
 
 function showAnswer(out) {
   $('heard').textContent = out.heard ? `You: “${out.heard}”` : '';
-  if (out.error) showNpc(out.error, 'Maestro');  // the reply itself arrives as a 'say' event
+  if (out.error && !mpOpen()) showNpc(out.error, 'Maestro');  // the panel gets it as a 'line'; the reply arrives as a 'say' event
   if (out.spent_today !== undefined) showSpend(out.spent_today);
 }
 
@@ -2508,12 +3133,12 @@ $('ask').addEventListener('keydown', async e => {
   e.target.value = '';
   e.target.disabled = true;
   stopSpeaking();
-  showNpc('…', 'Maestro');
+  mpThinking();
   try {
     const res = await fetch('cmd/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text})});
     showAnswer(await res.json());
   } catch (err) {
-    showNpc('I lost you there. ' + err.message, 'Maestro');
+    mpLocal('I lost you there. ' + err.message);
   } finally {
     e.target.disabled = !voiceReady;
     e.target.focus();
@@ -2572,13 +3197,13 @@ async function sendTalk() {
   }
   talkBtn.disabled = true;
   $('heard').textContent = 'Transcribing…';
-  showNpc('…', 'Maestro');
+  mpThinking();
   try {
     const res = await fetch('voice', {method: 'POST', headers: {'Content-Type': blob.type}, body: blob});
     showAnswer(await res.json());
   } catch (err) {
     $('heard').textContent = '';
-    showNpc('I lost you there. ' + err.message, 'Maestro');
+    mpLocal('I lost you there. ' + err.message);
   } finally {
     talkBtn.disabled = !voiceReady;
   }
@@ -2940,8 +3565,8 @@ loadMetro();
 
 function esc(t) { return String(t).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'})[c]); }
 
-document.querySelectorAll('#mode button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
-$('tempo').addEventListener('input', e => { $('tempo-val').textContent = e.target.value + '%'; store.set('tempo', e.target.value); });
+$('mode').addEventListener('change', e => { setMode(e.target.value); savePractice(); });
+$('tempo').addEventListener('input', e => { $('tempo-val').textContent = e.target.value + '%'; store.set('tempo', e.target.value); savePractice(); });
 portSel.addEventListener('change', () => store.set('port', portSel.value));
 $('style').addEventListener('change', async e => {
   try { await cmd('maestro', {style: e.target.value}); } catch (err) { statusEl.textContent = err.message; loadStyle(); }
@@ -2952,7 +3577,45 @@ for (const [id, key] of [['talk-greet', 'greet'], ['talk-passes', 'passes'], ['t
     try { await cmd('maestro', {talk: {[key]: value}}); } catch (err) { statusEl.textContent = err.message; loadStyle(); }
   });
 }
-$('loop').addEventListener('change', e => { store.set('loop', e.target.checked ? '1' : ''); updateTimeline(); });
+$('loop').addEventListener('change', e => { store.set('loop', e.target.checked ? '1' : ''); updateTimeline(); savePractice(); });
+// Sheet ▸ Tab: a guitar's or a bass's tab staff under its notes, drawn by the sheet from the open
+// strings (instruments.py's `strings`, in the profile view). On by default; only for an instrument with strings.
+function tabSpec() {
+  const inst = window.coachInstrument;
+  return $('tab').checked && inst && inst.strings ? {strings: inst.strings, frets: inst.frets || 22, match: inst.id} : null;
+}
+$('tab').checked = !!store.get('tab', '1');
+$('tab').addEventListener('change', e => {
+  store.set('tab', e.target.checked ? '1' : '');
+  forward({type: 'tab', tab: tabSpec()});
+});
+window.addEventListener('coach:instrument', () => {
+  $('tab-wrap').hidden = !(window.coachInstrument && window.coachInstrument.strings);
+  forward({type: 'tab', tab: tabSpec()});
+  $('fing-wrap').hidden = !fingeredInstrument();
+  forward({type: 'fingering', fingering: fingeringSpec()});
+});
+// Sheet ▸ Fingering: a flute's or a saxophone's key diagram under its notes (fingering.js, drawn by
+// the sheet), where the fingering changes or the first time each note comes on a line. Off by
+// default: it takes room. Monitor (on by default): the expected and heard notes' diagrams while playing.
+function fingeredInstrument() {
+  const inst = window.coachInstrument;
+  return inst && typeof Fingering !== 'undefined' && Fingering.has(inst.id) ? inst.id : null;
+}
+function fingeringSpec() {
+  const inst = fingeredInstrument(), mode = $('fingering').value;
+  return inst && mode ? {instrument: inst, mode} : null;
+}
+$('fingering').value = store.get('fingering', '');
+$('fingering').addEventListener('change', e => {
+  store.set('fingering', e.target.value);
+  forward({type: 'fingering', fingering: fingeringSpec()});
+});
+$('fing-monitor-on').checked = !!store.get('fingMonitor', '1');
+$('fing-monitor-on').addEventListener('change', e => {
+  store.set('fingMonitor', e.target.checked ? '1' : '');
+  if (typeof fingeringMonitor === 'function') fingeringMonitor();
+});
 $('dynamics').checked = !!store.get('dynamics', '');
 $('dynamics').addEventListener('change', e => {
   store.set('dynamics', e.target.checked ? '1' : '');
@@ -2972,7 +3635,15 @@ function syncAids() {
   $('aid-counts').checked = s.counts;
   forward({type: 'aidSettings', ...s});  // the sheet shows or hides them in place
 }
-document.querySelectorAll('#aid-level button').forEach(b => b.addEventListener('click', () => { store.set('aids', b.dataset.aid); syncAids(); }));
+document.querySelectorAll('#aid-level button').forEach(b => b.addEventListener('click', () => {
+  store.set('aids', b.dataset.aid);
+  // Easy or Coached with every kind of label unticked would show nothing at all: tick them again.
+  if (b.dataset.aid !== 'off' && store.get('aids.names', '1') !== '1' && store.get('aids.counts', '1') !== '1') {
+    store.set('aids.names', '1');
+    store.set('aids.counts', '1');
+  }
+  syncAids();
+}));
 $('aid-names').addEventListener('change', e => { store.set('aids.names', e.target.checked ? '1' : ''); syncAids(); });
 $('aid-counts').addEventListener('change', e => { store.set('aids.counts', e.target.checked ? '1' : ''); syncAids(); });
 syncAids();
@@ -2998,6 +3669,109 @@ function setView(v) {
 }
 document.querySelectorAll('#view button').forEach(b => b.addEventListener('click', () => setView(b.dataset.show)));
 setView(store.get('show', 'sheet'));
+
+// The Maestro's page_control: the controls are set as if clicked, so their own handlers run.
+function pageControl(msg) {
+  const set = (id, value, event) => { const el = $(id); el[el.type === 'checkbox' ? 'checked' : 'value'] = value; el.dispatchEvent(new Event(event)); };
+  if (msg.view) {
+    const view = {session: 'practice', roadmap: 'progress'}[msg.view] || msg.view;
+    if (!(view === 'practice' && document.body.dataset.view === 'practice'))  // already there: leave the library as it is
+      window.dispatchEvent(new CustomEvent('coach:navigate', {detail: {view, unguarded: !!msg.unguarded}}));
+  }
+  if (msg.show) setView(msg.show);
+  if (msg.mode && MODE_HINTS[msg.mode] && msg.mode !== 'record') set('mode', msg.mode, 'change');
+  if (msg.labels) document.querySelector(`#aid-level [data-aid="${{easy: 'all', coached: 'coach', hard: 'off'}[msg.labels]}"]`)?.click();
+  if ('note_names' in msg) set('aid-names', msg.note_names, 'change');
+  if ('counting' in msg) set('aid-counts', msg.counting, 'change');
+  if ('dynamics' in msg) set('dynamics', msg.dynamics, 'change');
+  if ('tab' in msg) set('tab', msg.tab, 'change');
+  if ('fingering' in msg) set('fingering', msg.fingering === 'off' ? '' : msg.fingering, 'change');
+  if ('fingering_monitor' in msg) set('fing-monitor-on', msg.fingering_monitor, 'change');
+  if (msg.layout) set('layout', msg.layout, 'change');
+  if (msg.zoom_percent) set('zoom', msg.zoom_percent, 'input');
+  if (msg.tempo_percent) set('tempo', msg.tempo_percent, 'input');
+  if ('bars' in msg) {
+    const [from, to] = msg.bars ? msg.bars.split('-') : ['', ''];
+    $('from').value = from; set('to', to, 'change');
+  }
+  if ('loop' in msg) set('loop', msg.loop, 'change');
+  if (msg.metronome_bpm) {
+    set('m-bpm', msg.metronome_bpm, 'change');
+    if (metro.timer && msg.metronome !== false) { metroStop(); metroStart(); }  // ticking: at the new speed now
+  }
+  if ('metronome' in msg && !!metro.timer !== msg.metronome) mGo.click();
+  if (msg.menu) openMenu(msg.menu);
+  if (msg.today && typeof todayLoad === 'function') todayLoad();  // the Maestro took something out of today's plan
+  if (msg.tiles && tiles.layouts) { tiles.layouts[msg.tiles.view] = msg.tiles.tiles; mpTilesRender(); }  // set_tiles, or another page's edit
+}
+
+// Before a view change would stop something (profiles.js go): a run, a lesson step or exam task,
+// or a recording. Resolves true to switch. A recording is always kept: stopping saves the take.
+const VIEW_NAMES = {home: 'Home', practice: 'the Session', explore: 'Explore', songs: 'Explore', lessons: 'Explore',
+                    record: 'Record', progress: 'the Roadmap', place: 'the Roadmap', youtube: 'YouTube'};
+function askSwitch(to) {
+  const where = VIEW_NAMES[to] || to, rec = runMode === 'record';
+  $('switch-title').textContent = rec ? 'Stop recording?' : 'Stop this run?';
+  $('switch-text').textContent = rec
+    ? `Going to ${where} stops the recording. What you've played so far is kept as a take and written out as a lesson.`
+    : `Going to ${where} stops the run that's going. A pass stopped halfway isn't graded.`;
+  $('switch-go').textContent = rec ? 'Stop, keep it and go' : 'Stop and go';
+  const dlg = $('switch-dlg');
+  dlg.returnValue = '';
+  return new Promise(resolve => {
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'go'), {once: true});
+    dlg.showModal();
+    $('switch-go').focus();
+  });
+}
+
+// The menus the Maestro can open (chat.PAGE_MENUS, page_control's menu): open it, going to the
+// view it lives on first if it isn't on screen, and light up the part asked about.
+const MENUS = {
+  playing: {open: 'playing-settings'}, sheet: {open: 'sheet-settings'}, maestro: {open: 'maestro-settings'},
+  voice: {open: 'maestro-settings', light: '#voice-wrap'}, playback: {open: 'screen-controls'},
+  settings: {open: 'settings-menu'}, sound_out: {open: 'settings-menu', light: '#set-out'}, actions: {open: 'actions-menu'},
+  prefs_connections: {prefs: 'connections'}, prefs_audio: {prefs: 'audio'}, prefs_audio_to_midi: {prefs: 'audiomidi'},
+  prefs_maestro: {prefs: 'maestro'}, prefs_sheet: {prefs: 'sheet'}, prefs_song_folders: {prefs: 'library'},
+  prefs_shortcuts: {prefs: 'keys'},
+  planner: {view: 'progress', light: '#atlas-tabs [data-tab=path]'},
+  where_to_start: {view: 'place', light: '#atlas-tabs [data-tab=place]'},
+  see_in_song: {song: true},
+};
+
+function lightUp(el) {
+  if (!el) return;
+  el.scrollIntoView({block: 'nearest'});
+  el.classList.remove('lit');
+  void el.offsetWidth;  // restart the animation if it's already lit
+  el.classList.add('lit');
+  setTimeout(() => el.classList.remove('lit'), 2600);
+}
+
+async function openMenu(name) {
+  const m = MENUS[name];
+  if (!m) return;
+  if (m.song) {  // the lesson view's See in the song (atlas.js)
+    if (document.body.dataset.view === 'lesson' && !$('lesson-song').hidden) await songOpen();
+    lightUp($('lesson-song-note'));
+    return;
+  }
+  if (m.prefs) {
+    await window.openPreferences(m.prefs);
+    lightUp(document.querySelector(`#prefs-nav [data-pane="${m.prefs}"]`));
+    return;
+  }
+  if (m.view) {
+    if (await window.coachGo(m.view) === false) return;  // stayed put: a run is going
+    lightUp(document.querySelector(m.light));
+    return;
+  }
+  const menu = $(m.open);
+  if (!menu.offsetParent && await window.coachGo('practice') === false) return;  // the drop-downs live on the Session's row
+  menu.open = true;
+  const target = m.light ? document.querySelector(m.light) : menu.querySelector('summary');
+  lightUp(target.closest('label') || target);
+}
 $('timeline').addEventListener('input', updateTimeline);
 $('timeline').addEventListener('change', e => seekTimeline(e.target.value));
 $('timeline-back').addEventListener('click', () => seekTimeline(Number($('timeline').value) - 1));
@@ -3017,10 +3791,11 @@ $('bookmarks').addEventListener('click', e => {
 });
 [$('from'), $('to')].forEach(el => el.addEventListener('change', () => {
   updateTimeline();
+  savePractice();
 }));
 $('autopilot').addEventListener('change', e => {
   store.set('autopilot', e.target.checked ? '1' : '');
-  if (e.target.checked) $('loop').checked = true, store.set('loop', '1'), showRange();  // it acts between loop passes
+  if (e.target.checked) $('loop').checked = true, store.set('loop', '1'), showRange(), savePractice();  // it acts between loop passes
 });
 portSel.addEventListener('focus', loadPorts);
 
@@ -3036,16 +3811,15 @@ go.addEventListener('click', async () => {
     }
     const from = $('from').value, to = $('to').value;
     const bars = from || to ? `${from || 1}-${to || from || 9999}` : '';
-    if (mode === 'listen') {
-      // Every part, muted ones at 0, so a part turned on mid-run is heard.
-      if (!listenRoles().length) throw new Error('Every part is muted: turn one on under Playing → Hear.');
-      await cmd('start', {mode, roles: parts.roles, gains: gains(), bars, tempo: +$('tempo').value, loop: $('loop').checked,
-                          output: outSel.value, start_bar: timelineBars[Number($('timeline').value)]?.number});
+    if (mode === 'listen') {  // every track at Listen's mix (the server's), muted ones there to turn up mid-run
+      const out = await cmd('start', {mode, bars, tempo: +$('tempo').value, loop: $('loop').checked,
+                                      output: outSel.value, start_bar: timelineBars[Number($('timeline').value)]?.number});
+      if (out.error) throw new Error(out.error);
       return;
     }
     await cmd('start', {mode, hand: handValue(), bars, tempo: +$('tempo').value, loop: $('loop').checked,
                         autopilot: $('autopilot').checked, port: portSel.value,
-                        backing: parts.roles.filter(sounding), gains: gains(), output: outSel.value,
+                        output: outSel.value,
                         start_bar: timelineBars[Number($('timeline').value)]?.number,
                         count_in: mode === 'rehearse' && $('m-follow').checked && !$('m-follow').disabled});
   } catch (err) {
@@ -3056,7 +3830,6 @@ go.addEventListener('click', async () => {
 });
 
 setMode(mode);
-loadMix(null);
 setTab(lib.tab);
 showLibrary(store.get('library', '') !== 'closed' && !matchMedia('(max-width: 760px)').matches);
 searchSongs();
@@ -3067,6 +3840,7 @@ $('loop').checked = !!store.get('loop', '');
 $('autopilot').checked = !!store.get('autopilot', '');
 connect();
 </script>
+<script src="fingering.js"></script>
 <script src="atlas.js"></script>
 <script src="today.js"></script>
 <script src="flute.js"></script>
@@ -3079,8 +3853,9 @@ connect();
     <div id="mm-list"></div>
     <form id="mm-new">
       <input id="mm-name" type="text" maxlength="30" placeholder="New profile name" aria-label="New profile name" autocomplete="off">
-      <select id="mm-instrument" aria-label="Instrument" title="The first instrument to learn (add another later on Home). Piano: the keyboard over MIDI. Flute, alto sax and vocals: the microphone. Each has its own Roadmap.">
+      <select id="mm-instrument" aria-label="Instrument" title="The first instrument to learn (add another later on Home). Piano: the keyboard over MIDI. Flute, alto sax, vocals, fiddle, guitar and bass: the microphone. Each has its own Roadmap.">
         <option value="piano">Piano</option><option value="flute">Flute</option><option value="sax">Alto sax</option><option value="voice">Vocals</option>
+        <option value="fiddle">Fiddle</option><option value="guitar">Electric guitar</option><option value="bass">Bass guitar</option>
       </select>
       <select id="mm-voice" aria-label="Voice" title="High voice (soprano, alto): the vocal Roadmap in the treble clef. Low voice (tenor, baritone, bass): the same an octave lower. You can switch later on Home." hidden>
         <option value="high">High voice</option><option value="low">Low voice</option>
@@ -3096,6 +3871,226 @@ connect();
     <p id="mm-msg" role="alert"></p>
   </div>
 </div>
+<dialog id="switch-dlg" class="file-dlg" aria-labelledby="switch-title">
+  <form method="dialog">
+    <h2 id="switch-title"></h2>
+    <p class="dlg-hint" id="switch-text"></p>
+    <div class="dlg-row"><button value="">Cancel</button><button value="go" id="switch-go"></button></div>
+  </form>
+</dialog>
+<dialog id="checks-dlg" class="file-dlg" aria-labelledby="checks-title">
+  <form method="dialog">
+    <h2 id="checks-title">Fixes to try</h2>
+    <p class="dlg-hint">Each of these was fixed after you reported it. Try it, then say whether it works. “Still wrong” sends it back to be fixed again, with what you write.</p>
+    <div id="checks-list"></div>
+    <p class="dlg-msg" id="checks-msg" role="alert"></p>
+    <div class="dlg-row"><button value="close">Done</button></div>
+  </form>
+</dialog>
+<dialog id="report-dlg" class="file-dlg" aria-labelledby="report-title">
+  <form method="dialog">
+    <h2 id="report-title">Report (F9)</h2>
+    <div class="report-kind" role="radiogroup" aria-label="Bug or idea">
+      <label><input type="radio" name="report-kind" value="bug" checked> 🐞 Bug</label>
+      <label><input type="radio" name="report-kind" value="request"> 💡 Idea</label>
+    </div>
+    <textarea id="report-text" maxlength="2000" placeholder="What happened, or what you'd like…" aria-label="What happened"></textarea>
+    <p class="dlg-hint">Saved with screenshots of the last few seconds and where you are (piece, bar, mode), like saying “Bug: …” to the Maestro. Enter saves, Shift+Enter starts a new line.</p>
+    <p class="dlg-msg" id="report-msg" role="alert"></p>
+    <div class="dlg-row"><button value="cancel" formnovalidate>Cancel</button><button value="save" id="report-go">Save</button></div>
+  </form>
+</dialog>
+<div id="report-toast" hidden role="status"></div>
+<script>
+// F9: report a bug or an idea by typing (bugs.py, cmd/report). The box closes before the screenshot.
+(function () {
+  const dlg = document.getElementById('report-dlg'), text = document.getElementById('report-text');
+  const msg = document.getElementById('report-msg'), toast = document.getElementById('report-toast');
+  let hideToast = 0;
+  function say(line) {
+    toast.textContent = line;
+    toast.hidden = false;
+    clearTimeout(hideToast);
+    hideToast = setTimeout(() => { toast.hidden = true; }, 4000);
+  }
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'F9' || e.repeat) return;
+    e.preventDefault();
+    if (dlg.open) { dlg.close(); return; }
+    if (document.querySelector('dialog[open]')) return;  // another box is up
+    msg.textContent = '';
+    dlg.returnValue = '';  // Escape keeps the last value: a cancel must not save again
+    dlg.showModal();
+    text.focus();
+  });
+  text.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('report-go').click(); }
+  });
+  dlg.addEventListener('close', async () => {
+    if (dlg.returnValue !== 'save') return;
+    const said = text.value.trim();
+    const kind = dlg.querySelector('input[name=report-kind]:checked').value;
+    if (!said) return;
+    await new Promise(r => setTimeout(r, 250));  // let the box disappear from the screen first
+    try {
+      const out = await cmd('report', {text: said, kind});
+      text.value = '';
+      say(`${kind === 'request' ? 'Idea' : 'Bug'} saved, with ${out.screenshots} screenshot${out.screenshots === 1 ? '' : 's'}.`);
+    } catch (e) {
+      say('Not saved: ' + e.message);
+    }
+  });
+})();
+</script>
+<script>
+// Fixes waiting for the user (bugs.py: bug_reports/check, requests/check). An agent puts them
+// there from another process, so the count is fetched every half minute and when the tab returns.
+(function () {
+  const btn = document.getElementById('checks-btn'), dlg = document.getElementById('checks-dlg');
+  const list = document.getElementById('checks-list'), msg = document.getElementById('checks-msg');
+  function show(count) {
+    btn.hidden = !count;
+    document.getElementById('checks-n').textContent = count === 1 ? '1 fix to try' : `${count} fixes to try`;
+  }
+  async function refresh() {
+    try { show((await cmd('checks')).count); } catch (e) { /* the coach is restarting */ }
+  }
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text) e.textContent = text;
+    return e;
+  }
+  function row(it) {
+    const item = el('div', 'chk-item');
+    if (it.shot) {
+      const img = el('img');
+      img.src = it.shot;
+      img.alt = 'The screen when it was reported';
+      img.title = 'The screen when you reported it (click to enlarge)';
+      img.addEventListener('click', () => img.classList.toggle('big'));
+      item.append(img);
+    } else item.append(el('div', 'noshot', 'No screenshot'));
+    const body = el('div', 'chk-body');
+    body.append(el('div', 'chk-said', (it.kind === 'request' ? 'Idea: ' : 'Bug: ') + it.said));
+    if (it.where) body.append(el('div', 'chk-where', it.where));
+    body.append(el('div', 'chk-fix', it.fix ? 'Fixed: ' + it.fix : 'Fixed (no note on what changed).'));
+    const note = el('div', 'chk-note');
+    note.hidden = true;
+    const input = el('input');
+    input.type = 'text';
+    input.placeholder = 'What’s still wrong?';
+    input.setAttribute('aria-label', 'What’s still wrong');
+    const send = el('button', 'no', 'Send back');
+    send.type = 'button';
+    note.append(input, send);
+    const btns = el('div', 'chk-btns');
+    const ok = el('button', 'ok', '✅ Works'), no = el('button', 'no', '↩️ Still wrong');
+    const there = el('button', '', '↗ Go there');
+    ok.type = no.type = there.type = 'button';
+    there.title = 'Open the piece, view and bar you reported this from, set up as it was, to try the fix';
+    btns.append(there, ok, no);
+    there.addEventListener('click', async () => {
+      there.disabled = true;
+      try {
+        const out = await cmd('goto_report', {id: it.id});
+        dlg.close();
+        // A piece just opened applies its own saved settings as it arrives: set ours after that.
+        await new Promise(r => setTimeout(r, out.loaded ? 1800 : 0));
+        if (Object.keys(out.page).length) pageControl({...out.page, unguarded: true});
+        if (out.bar) setTimeout(() => cmd('seek', {bar: out.bar}).catch(() => {}), 400);
+        there.disabled = false;
+      } catch (e) {
+        msg.textContent = e.message;
+        there.disabled = false;
+      }
+    });
+    body.append(btns, note, el('div', 'chk-id', it.id));
+    item.append(body);
+    async function answer(works) {
+      ok.disabled = no.disabled = send.disabled = true;
+      try {
+        const out = await cmd('check', {id: it.id, works, note: input.value});
+        item.remove();
+        show(out.count);
+        if (!out.count) list.append(el('p', 'dlg-hint', 'All checked. Thanks!'));
+        msg.textContent = '';
+      } catch (e) {
+        msg.textContent = e.message;
+        ok.disabled = no.disabled = send.disabled = false;
+      }
+    }
+    ok.addEventListener('click', () => answer(true));
+    no.addEventListener('click', () => { note.hidden = false; input.focus(); });
+    send.addEventListener('click', () => answer(false));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); answer(false); } });
+    return item;
+  }
+  async function open() {
+    list.replaceChildren(el('p', 'dlg-hint', 'Loading…'));
+    msg.textContent = '';
+    dlg.showModal();
+    try {
+      const out = await cmd('checks', {full: true});
+      show(out.count);
+      list.replaceChildren(...(out.items.length ? out.items.map(row) : [el('p', 'dlg-hint', 'Nothing to try right now.')]));
+    } catch (e) { msg.textContent = e.message; }
+  }
+  btn.addEventListener('click', open);
+  // The backlog note links to …/#checks: open the list straight away.
+  function fromHash() { if (location.hash === '#checks') { history.replaceState(null, '', location.pathname + location.search); open(); } }
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+  refresh();
+  setInterval(refresh, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+})();
+
+// The update bar: the page's own files changed (Reload), or the coach's code did (Restart; the
+// launcher starts it again in its window). A coach that restarted means this page is stale: reload.
+(function () {
+  const bar = document.getElementById('update-bar'), text = document.getElementById('update-text');
+  const go = document.getElementById('update-go');
+  let first = null, restarting = false;
+  function offer(message, label, title, disabled) {
+    text.textContent = message;
+    go.hidden = !label;
+    go.textContent = label || '';
+    go.title = title || '';
+    go.disabled = !!disabled;
+    go.dataset.what = label ? (label.startsWith('Restart') ? 'restart' : 'reload') : '';
+    bar.hidden = false;
+  }
+  async function poll() {
+    let s;
+    try { s = await cmd('code_status'); } catch (e) { return; }  // restarting, or the coach was closed
+    if (!first) first = s;
+    if (s.started !== first.started) { location.reload(); return; }
+    if (restarting) return;
+    if (s.code > s.started) {
+      if (s.restartable) offer('The coach was updated.', 'Restart coach',
+        s.busy ? 'Stop the run first' : 'Takes a few seconds; the same piece comes back', s.busy);
+      else offer('The coach was updated: quit Claude Desktop (File › Exit) and open it again to use it.');
+    } else if (s.page > first.page) {
+      offer('This page was updated.', 'Reload', 'Load the new version of the page');
+    } else bar.hidden = true;
+  }
+  go.addEventListener('click', async () => {
+    if (go.dataset.what === 'reload') { location.reload(); return; }
+    go.disabled = true;
+    try {
+      await cmd('restart');
+      restarting = true;
+      offer('Restarting the coach…');
+      const wait = setInterval(poll, 1500);
+      setTimeout(() => { clearInterval(wait); if (restarting) offer('The coach hasn’t come back: check its window.'); }, 60000);
+    } catch (e) { offer(e.message, 'Restart coach'); }
+  });
+  poll();
+  setInterval(poll, 20000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+})();
+</script>
 <dialog id="save-as-dlg" class="file-dlg" aria-labelledby="save-as-title">
   <form method="dialog">
     <h2 id="save-as-title">Save a copy</h2>
@@ -3118,9 +4113,10 @@ connect();
       <button type="button" id="folders-add">Add</button>
     </div>
     <p class="dlg-hint" id="folders-always"></p>
+    <label class="check"><input type="checkbox" id="folders-watch"><span>Pick up new songs from Downloads as they arrive<span class="dlg-hint" id="folders-watch-hint"></span></span></label>
     <label class="check"><input type="checkbox" id="folders-online"><span>Also offer to search bitmidi.com when a song isn't in these folders<span class="dlg-hint" id="folders-downloads"></span></span></label>
     <p class="dlg-msg" id="folders-msg" role="alert"></p>
-    <div class="dlg-row"><button value="close">Done</button></div>
+    <div class="dlg-row"><button type="button" id="folders-rescan" title="Look through every folder again now (new files are noticed by themselves within a few seconds)">Rescan now</button><button value="close">Done</button></div>
   </form>
 </dialog>
 <dialog id="prefs-dlg" class="file-dlg" aria-labelledby="prefs-title">

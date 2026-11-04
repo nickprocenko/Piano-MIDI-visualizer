@@ -10,7 +10,7 @@ import heapq
 import os
 import threading
 import time
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 
 from .notes import Note
@@ -197,7 +197,12 @@ class Recorder:
         if status not in (0x80, 0x90, 0xB0):
             return
         with self._lock:
-            st.events.append((now, list(message)))
+            if st.events and now < st.events[-1][0]:
+                # A microphone note is timed from when it began, so it can land before one
+                # already heard; keep the take in time order (a MIDI file can't step back).
+                st.events.insert(bisect_right([t for t, _ in st.events], now), (now, list(message)))
+            else:
+                st.events.append((now, list(message)))
             if status == 0x90 and len(message) >= 3 and message[2] > 0:
                 st.held.add(message[1])
                 st.note_ons += 1
@@ -451,12 +456,25 @@ class Accompanist:
         self._queue: list[tuple[float, int, list[int], str | None]] = []  # (perf_counter time, order, message, lane)
         self._order = 0
         self.gains: dict[str, float] = {}
-        self._sounding: set[tuple[int, int]] = set()
+        self._channels: dict[str, int] = {}
+        # (channel, pitch) -> how many scheduled notes hold it. The synth only ever has one
+        # voice per key from here: a key struck again while held is re-struck, and let go
+        # when the last note holding it ends (else on, on, off leaves a voice stuck).
+        self._sounding: dict[tuple[int, int], int] = {}
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+
+    def voices(self, lanes: dict[str, tuple[int, int | None]]) -> None:
+        """Give each lane its own MIDI channel and General MIDI instrument, {lane: (channel,
+        program or None)}, so a band backing sounds as its instruments (channel 9: drums)."""
+        with self._lock:
+            for lane, (channel, program) in lanes.items():
+                self._channels[lane] = channel & 0x0F
+                if program is not None and channel != 9:
+                    self._out.send_message([0xC0 | (channel & 0x0F), program & 0x7F])
 
     def schedule(self, events: list[tuple[float, list[int]]], start: float, lane: str | None = None) -> None:
         """Queue build_events output to begin at perf_counter time `start` (events already
@@ -479,6 +497,8 @@ class Accompanist:
                 due = self._queue[0][0] - time.perf_counter() if self._queue else None
                 while self._queue and self._queue[0][0] <= time.perf_counter():
                     _, _, msg, lane = heapq.heappop(self._queue)
+                    if lane in self._channels:
+                        msg = [(msg[0] & 0xF0) | self._channels[lane], *msg[1:]]
                     key = (msg[0] & 0x0F, msg[1])
                     if msg[0] & 0xF0 == 0xB0:
                         pass  # the sustain pedal
@@ -488,11 +508,17 @@ class Accompanist:
                             continue  # muted: its note-off is skipped too
                         if gain != 1.0:
                             msg = [msg[0], msg[1], max(1, min(127, round(msg[2] * gain)))]
-                        self._sounding.add(key)
-                    elif key not in self._sounding:
+                        held = self._sounding.get(key, 0)
+                        if held:  # re-strike the key rather than stack a second voice on it
+                            self._out.send_message([0x80 | key[0], key[1], 0])
+                        self._sounding[key] = held + 1
+                    elif not self._sounding.get(key):
                         continue  # its note-on was dropped
+                    elif self._sounding[key] > 1:
+                        self._sounding[key] -= 1
+                        continue  # a later note on this key still holds it
                     else:
-                        self._sounding.discard(key)
+                        del self._sounding[key]
                     self._out.send_message(msg)
             self._wake.wait(0.02 if due is None else max(0.0, min(due, 0.02)))
             self._wake.clear()

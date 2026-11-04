@@ -39,9 +39,12 @@ RULES = {
     "dangling-hyphen": "a lyric hyphen leading to a note with no syllable",
     "busy-octave-marks": "more than two 8va/8vb marks starting within eight bars of one staff (write the passage with ledger lines or one mark)",
     "needless-octave-mark": "an 8va/8vb over notes that would sit within three ledger lines without it",
+    "chord-in-line": "a chord on the staff of an instrument that sounds one note at a time (a flute part): notes snapped onto one beat",
     "octave-mark-wrong-way": "a note under an 8vb that sits above the staff's middle line without it, or under an 8va below it: the mark moved a chord reaching across the staff (or another voice's notes), pushing them off it",
 }
 TUNE_WORDS = ("vocal", "voice", "melody", "tune", "lead", "sing")
+LINE_WORDS = ("flute", "piccolo", "recorder", "oboe", "clarinet", "bassoon", "sax", "trumpet", "trombone", "horn", "whistle",
+              "fiddle", "violin", "bass guitar")
 STAFF_LINES = {"treble": (31, 38), "bass": (19, 26)}  # diatonic note numbers of the bottom / top line: E4-F5, G2-A3
 
 
@@ -135,6 +138,10 @@ def lint(score, profile: str = "full") -> dict:
 
     for part in score.parts:
         tune = _in_tune(part)
+        if any(w in (part.partName or "").lower() for w in LINE_WORDS):
+            for c in part.recurse().getElementsByClass("Chord"):
+                m_ = c.getContextByClass("Measure")
+                add("chord-in-line", part, m_.number if m_ else 0, " + ".join(p.nameWithOctave for p in c.pitches))
         last_key_bar = None
         four_run = 0  # notes in a row on four ledger lines
         marks = sorted(min(x.getContextByClass("Measure").number for x in sp.getSpannedElements())

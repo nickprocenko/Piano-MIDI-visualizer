@@ -136,3 +136,45 @@ def test_the_plan_is_kept_for_the_day_and_ticks_off(coach):
     plan["day"] = "2000-01-01"
     today.save(plan)
     assert len(coach.cmd_today({})["parts"]) == 1
+
+
+def _plan():
+    return {"day": "2026-11-03", "made": "2026-11-03 16:00:00", "minutes": 15, "parts": [
+        {"kind": "new", "label": "New", "title": "Making a sound"},
+        {"kind": "fun", "label": "For fun", "title": "Michael Jackson - Thriller [660]", "file": "t.mid"}]}
+
+
+def test_match_finds_parts_by_title_label_or_all():
+    plan = _plan()
+    assert today.match(plan, "Thriller") == [1]
+    assert today.match(plan, "michael jackson thriller") == [1]
+    assert today.match(plan, "for fun") == [1]
+    assert today.match(plan, "the new") == [] and today.match(plan, "new") == [0]
+    assert today.match(plan, "all") == [0, 1]
+    assert today.match(plan, "desperado") == [] and today.match(plan, "") == []
+
+
+def test_remove_takes_parts_out_and_counts_them():
+    plan = _plan()
+    gone = today.remove(plan, [1])
+    assert [p["title"] for p in gone] == ["Michael Jackson - Thriller [660]"]
+    assert [p["title"] for p in plan["parts"]] == ["Making a sound"] and plan["removed"] == 1
+    today.remove(plan, [0])
+    assert plan["parts"] == [] and plan["removed"] == 2
+
+
+def test_removing_from_today_keeps_it_out_for_the_day(coach):
+    first = coach.cmd_today({})
+    title = first["parts"][0]["title"]
+    out = coach.cmd_today_remove({"what": title})
+    assert out["removed_now"] == [title] and out["parts"] == [] and out["removed"] == 1
+    assert coach.cmd_today({})["parts"] == []  # not planned again on the next look
+    assert any("nothing left" in line for line in coach.context_lines())
+    assert "error" in coach.cmd_today_remove({"what": "thriller"})
+    assert len(coach.cmd_today({"fresh": True})["parts"]) == 1  # Plan again brings a plan back
+
+
+def test_the_pages_x_removes_by_position(coach):
+    coach.cmd_today({})
+    assert "error" in coach.cmd_today_remove({"index": 5})
+    assert coach.cmd_today_remove({"index": 0})["parts"] == []

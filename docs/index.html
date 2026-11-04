@@ -2756,7 +2756,7 @@ ${slider('Reverb','reverb')}
 </div></div></div>
 </div>
 <div class="section"><h2>Practice Coach (Claude)</h2>
-<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Mirror the midi-coach live score in the sheet-music strip: the cursor, hit / missed notes, wrong keys and the bar heat map. Requires Claude Desktop running the midi-coach server.</p>
+<p style="font-size:12px;color:var(--muted);margin-bottom:10px">Mirror the midi-coach live score in the sheet-music strip: the cursor, hit / missed notes, wrong keys and the bar heat map. Requires the midi-coach running (in Claude Desktop, or <code>python -m midi_coach.practice</code>).</p>
 <div class="row"><label>Coach URL</label><input type="text" id="coach-url" value="${(Config.coach&&Config.coach.url)||'http://127.0.0.1:8765/'}" style="flex:1;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
 <div class="row"><label>Status</label><span id="coach-status">Off</span></div>
 <div class="row"><label></label><button class="action-btn" id="btn-coach-connect">Connect</button><button class="action-btn" id="btn-coach-disconnect" style="margin-left:6px">Disconnect</button></div>

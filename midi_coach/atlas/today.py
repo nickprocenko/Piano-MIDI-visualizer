@@ -27,6 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import pathlib
+import re
 import time
 
 from .. import library
@@ -234,6 +235,35 @@ def save(plan: dict) -> None:
     path().write_text(json.dumps(plan, indent=1, ensure_ascii=False), encoding="utf-8")
 
 
+def remove(plan: dict, which: list[int]) -> list[dict]:
+    """Take the parts at these positions out of the plan (kept for the day: it isn't remade until
+    tomorrow or Plan again). Returns the parts removed; plan["removed"] counts them all."""
+    gone = [p for k, p in enumerate(plan["parts"]) if k in set(which)]
+    plan["parts"] = [p for k, p in enumerate(plan["parts"]) if k not in set(which)]
+    plan["removed"] = int(plan.get("removed") or 0) + len(gone)
+    return gone
+
+
+def match(plan: dict, said: str) -> list[int]:
+    """Positions of the parts `said` names: "all", a part's label ("for fun", "warm-up") or words
+    of its title ("thriller"). Empty when nothing matches."""
+    words = " ".join(re.sub(r"[^a-z0-9]+", " ", (said or "").lower()).split())
+    if not words:
+        return []
+    parts = plan["parts"]
+    if words in ("all", "everything", "the whole plan", "whole plan", "plan"):
+        return list(range(len(parts)))
+
+    def norm(text: str) -> str:
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).split())
+
+    by_label = [k for k, p in enumerate(parts) if norm(p.get("label")) == words or p.get("kind") == words.replace(" ", "")]
+    if by_label:
+        return by_label
+    said_words = set(words.split())
+    return [k for k, p in enumerate(parts) if said_words <= set(norm(p.get("title")).split())]
+
+
 def state(plan: dict, graded: dict[str, list[str]], takes: list[dict] | None = None, events: list[dict] | None = None) -> dict:
     """The plan with each part's done flag, the next part to do, and the minutes practiced today."""
     takes = library.list_takes() if takes is None else takes
@@ -242,5 +272,5 @@ def state(plan: dict, graded: dict[str, list[str]], takes: list[dict] | None = N
     parts = [{**p, "done": part_done(p, plan["made"], attempts, events, takes, graded)} for p in plan["parts"]]
     nxt = next((k for k, p in enumerate(parts) if not p["done"]), None)
     return {"day": plan["day"], "minutes": plan["minutes"], "parts": parts, "next": nxt,
-            "all_done": bool(parts) and nxt is None,
+            "all_done": bool(parts) and nxt is None, "removed": int(plan.get("removed") or 0),
             "practiced_min": round(practice_seconds(takes, events, plan["day"]) / 60, 1)}

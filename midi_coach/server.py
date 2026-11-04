@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import pathlib
 import os
@@ -21,12 +22,12 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import aids, analysis, autopilot, bugs, chat, deep, details, harmony, instruments, lessons, library, live, online, profiles, remarks, stt, synced, transcribe, web
+from . import aids, analysis, autopilot, bugs, chat, deep, details, harmony, instruments, lessons, library, live, online, profiles, remarks, sheet, songfind, songwatch, stt, synced, tiles, tracks, transcribe, transcript, web
 from .atlas import runtime as atlas_runtime
 from .atlas import welcome as atlas_welcome
 from .display import DisplayHub, sheet_problem
 from .midi_io import MIC_PORT, Accompanist, Player, PortError, Recorder, RestProfile, build_events, list_ports, resolve_port
-from .notes import ROLES, MIDI_SUFFIXES, MUSICXML_SUFFIXES, effective_roles, is_plain_piano, note_name, notes_from_events, parse_bars, select_notes, split_hands, suggest_hands
+from .notes import ROLES, MIDI_SUFFIXES, MUSICXML_SUFFIXES, effective_roles, find_part, is_named, is_plain_piano, named_roles, note_name, notes_from_events, parse_bars, select_notes, split_hands, suggest_hands
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s midi-coach %(message)s")
 log = logging.getLogger("midi-coach")
@@ -204,15 +205,16 @@ def _save_parts(score, chosen: dict[str, list[int] | None]) -> dict[int, str]:
     """Check and save a part -> role choice given as {role: [part indexes]}; returns it."""
     roles: dict[int, str] = {}
     valid = {p.index for p in score.parts if p.note_count}
-    for role in ROLES:
+    named = [r for r in chosen if r not in ROLES and r.strip()]
+    for role in list(ROLES) + named:
         for i in chosen.get(role) or []:
             if i not in valid:
                 raise ValueError(f"Part {i} doesn't exist or has no notes. Parts: {sorted(valid)}")
             if i in roles:
                 raise ValueError(f"Part {i} is listed for both {roles[i]} and {role}; use both=[{i}] to share it between the hands.")
-            roles[i] = role
-    if not any(r in ("right", "left", "both") for r in roles.values()):
-        raise ValueError("Give at least one part to the hands (right, left or both), or clear=True.")
+            roles[i] = role if role in ROLES else role.strip().lower()
+    if not any(r in ("right", "left", "both") or is_named(r) for r in roles.values()):
+        raise ValueError("Give at least one part to the hands (right, left or both) or name the part you play, or clear=True.")
     library.save_hands(score, roles)
     return roles
 
@@ -225,6 +227,7 @@ async def set_parts(
     both: list[int] | None = None,
     pedals: list[int] | None = None,
     vocals: list[int] | None = None,
+    named: dict[str, list[int]] | None = None,
     clear: bool = False,
 ) -> dict:
     """Save which parts of a reference the user plays (part indexes from inspect_reference).
@@ -232,7 +235,9 @@ async def set_parts(
     right / left: parts played by that hand; both: parts shared between the hands, split by
     pitch (e.g. a single piano track). pedals: a bass line played with the feet (graded when
     the user practices with hand='<hand>+pedals' or 'pedals'). vocals: the sung line, drawn
-    above the piano and never graded. Parts not listed are left out of recording, comparison,
+    above the piano and never graded. named: parts named for what the user plays them on,
+    {"flute": [4]}: played on their own (hand='flute') with every other part as the backing.
+    Parts not listed are left out of recording, comparison,
     playback and the score. The choice is remembered for this file. clear=True forgets it.
     """
     try:
@@ -241,7 +246,7 @@ async def set_parts(
             library.save_hands(score, {})
             return {"reference": score.path, "cleared": True, **_part_choice(score)}
         valid = {p.index for p in score.parts if p.note_count}
-        hands = _save_parts(score, {"right": right, "left": left, "both": both, "pedals": pedals, "vocals": vocals})
+        hands = _save_parts(score, {"right": right, "left": left, "both": both, "pedals": pedals, "vocals": vocals, **(named or {})})
     except Exception as exc:
         return _err(exc)
     names = {p.index: f"{p.index} {p.name} ({p.instrument})" for p in score.parts}
@@ -249,7 +254,7 @@ async def set_parts(
         await asyncio.to_thread(_show, library.get_score(score.path), [])  # redraw the sheet for the new parts
     return {
         "reference": score.path,
-        "saved": {h: [names[i] for i, v in sorted(hands.items()) if v == h] for h in ROLES},
+        "saved": {h: [names[i] for i, v in sorted(hands.items()) if v == h] for h in dict.fromkeys([*ROLES, *hands.values()])},
         "left_out": [names[i] for i in sorted(valid - set(hands))],
     }
 
@@ -276,14 +281,20 @@ def _on_recording_finished(meta_base: dict, session: live.LiveSession | None = N
             _end_pass(state.stop_reason, None, None)
             return
         notes, _ = notes_from_events(state.events)
-        meta = library.save_take(state.events, {
-            **meta_base,
-            "port": state.port_name,
-            "stop_reason": state.stop_reason,
-            "notes": len(notes),
-            "duration_sec": round(max(n.end for n in notes) - notes[0].start, 2),
-            **({"t0_perf": state.events[0][0]} if meta_base.get("atlas") else {}),  # the take's zero on the live clock (tap grading)
-        })
+        try:
+            meta = library.save_take(state.events, {
+                **meta_base,
+                "port": state.port_name,
+                "stop_reason": state.stop_reason,
+                "notes": len(notes),
+                "duration_sec": round(max(n.end for n in notes) - notes[0].start, 2),
+                **({"t0_perf": state.events[0][0]} if meta_base.get("atlas") else {}),  # the take's zero on the live clock (tap grading)
+            })
+        except Exception as exc:  # the pass still ends (and a loop goes on); only its take is lost
+            log.warning("saving the take failed: %s", exc)
+            hub.flash(f"Couldn't save that pass ({exc})")
+            _end_pass(state.stop_reason, meta_base.get("live"), None)
+            return
         _last_take.clear()
         _last_take.update(meta)
         log.info("saved take %s (%d notes, %s)", meta["id"], len(notes), state.stop_reason)
@@ -538,13 +549,64 @@ def _next_pass() -> None:
         _publish_practice(running=False)
 
 
-def _backing_notes(score, hand: str, backing: list[str] | None, bars: str | None, split_note: int) -> dict[str, list]:
-    """The notes to sound on the MIDI output during a run, by role: the roles in `backing`
-    ('right', 'left', 'pedals', 'vocals') that the user isn't playing (`hand`, e.g. 'right+pedals')."""
-    base, _, extra = (hand or "both").partition("+")
-    played = {"both": {"right", "left"}, "right": {"right"}, "left": {"left"}}.get(base, set()) | {base, extra}
-    return {role: _selection(score, role, bars, split_note)[0] for role in dict.fromkeys(backing or [])
-            if role in ("right", "left", "pedals", "vocals") and role not in played}
+def _track_lanes(score, bars: str | None, *, mine: list | None = None, skip_part: str | None = None,
+                 only: set[int] | None = None, listen: bool = False, voice_all: bool = False,
+                 keyboard: bool = False) -> tuple[dict[str, list], dict[str, tuple[int, int | None]], dict[str, float]]:
+    """Every track as its own lane for the Accompanist (tracks.py): {lane: notes} within `bars`,
+    leaving out the notes the user plays (`mine`) and any track of `skip_part` (a named part),
+    or keeping only the notes in `only` (ids). Returns the lanes, each lane's (channel, program)
+    and its gain from the track's mix (Listen's mix with `listen`). Drums always sound on
+    channel 10 and other instruments as themselves; piano tracks keep the output's own sound
+    unless `voice_all` (a band). With a keyboard as the input, nothing is sent on channel 1,
+    the one it plays on (a program change there would change its sound)."""
+    bar_range = parse_bars(bars)
+    t0, t1 = score.bar_range_times(*bar_range) if bar_range else (float("-inf"), float("inf"))
+    skip = {id(n) for n in mine or []}
+    entries = tracks.mix(score)
+    used = {p.channel for p in score.parts}
+    spare = [c for c in range(1, 16) if c != 9 and c not in used]
+    lanes, voices, gains = {}, {}, {}
+    for p in score.parts:
+        if p.index not in entries or (skip_part and score.roles.get(p.index) == skip_part):
+            continue
+        notes = [n for n in score.notes if n.part == p.index and t0 - 1e-6 <= n.start < t1 - 1e-6
+                 and id(n) not in skip and (only is None or id(n) in only)]
+        if not notes:
+            continue
+        lane, mix = tracks.key(p.index), entries[p.index]
+        lanes[lane] = notes
+        gains[lane] = 0.0 if mix["listen_mute" if listen else "mute"] else mix["listen_vol" if listen else "vol"] / 100
+        if voice_all or not p.is_piano:
+            channel = 9 if p.drums else p.channel
+            if keyboard and channel == 0:
+                channel = spare.pop(0) if spare else 15
+            voices[lane] = (channel, p.program)
+    return lanes, voices, gains
+
+
+SECTION_GAP_BARS = 8  # bars without a note of a part that split it into sections
+
+
+def part_sections(score, role: str) -> list[tuple[int, int]]:
+    """The stretches a named part plays, as (first bar, last bar): a gap of SECTION_GAP_BARS
+    or more bars without its notes starts a new one."""
+    bars = sorted({score.position(n.start)[0] for n in select_notes(score, role)[0]})
+    out: list[tuple[int, int]] = []
+    for b in bars:
+        if out and b - out[-1][1] <= SECTION_GAP_BARS:
+            out[-1] = (out[-1][0], b)
+        else:
+            out.append((b, b))
+    return out
+
+
+def _lead_in_start(score, first: int, pass_no: int) -> int | None:
+    """The bar the backing starts from, before the user's first bar `first`: the file's lead-in
+    setting (bars), on the first pass or every pass as set; None for no lead-in."""
+    settings = library.song_settings(score.path)
+    if not settings["lead_in"] or (pass_no > 1 and not settings["lead_in_every_pass"]):
+        return None
+    return max(1, first - settings["lead_in"]) if first > 1 else None
 
 
 def _gains(gains) -> dict[str, float]:
@@ -593,7 +655,6 @@ def _begin(
     parts: list[int] | None = None,
     count_in: bool = False,
     autopilot: bool = False,
-    backing: list[str] | None = None,
     output_port: str | None = None,
     atlas: dict | None = None,
     start_bar: int | None = None,
@@ -615,7 +676,7 @@ def _begin(
         settings = {"reference": reference, "hand": hand, "bars": bars, "mode": mode, "tempo_percent": tempo_percent,
                     "input_port": input_port, "split_note": split_note, "silence_sec": silence_sec,
                     "max_minutes": max_minutes, "show_score": show_score, "loop": loop, "source": source,
-                    "parts": parts, "count_in": count_in, "autopilot": autopilot, "backing": backing,
+                    "parts": parts, "count_in": count_in, "autopilot": autopilot,
                     "output_port": output_port, "atlas": atlas, "start_bar": start_bar, "gains": gains}
         meta = {"reference": None, "hand": hand, "bars": bars, "split_note": split_note, "mode": mode, "source": source,
                 "parts": parts}
@@ -628,14 +689,22 @@ def _begin(
         session = None
         display_url = None
         score = None
+        voices, level = {}, {}
         if reference:
             score = library.get_score(reference)
+            if hand == "both" and not parts and named_roles(score) and not score.hands:
+                hand = settings["hand"] = meta["hand"] = library.default_part(score)
+            score.playing = hand if is_named(hand) else None if score.hands else score.playing
+            if is_named(hand) and not bars and start_bar is None:
+                sections = part_sections(score, hand)
+                if len(sections) == 1:
+                    bars = settings["bars"] = meta["bars"] = f"{sections[0][0]}-{sections[0][1]}"
             if count_in and score.played_live:
                 count_in = False  # no beat grid to click along with
                 if show_score:
                     hub.flash("Recorded live: no steady beat, so no count-in")
-            notes, selection, _ = _selection(score, hand, bars, split_note, parts)
-            notes = _from_bar(score, notes, start_bar)
+            picked, selection, _ = _selection(score, hand, bars, split_note, parts)
+            notes = _from_bar(score, picked, start_bar)
             if not notes:
                 return {"error": f"No reference notes for hand={hand} bars={bars}."}
             rests = RestProfile.from_notes(notes)
@@ -648,10 +717,24 @@ def _begin(
                     _aids.begin_pass(score, {score.position(n.start)[0] for n in notes})
                 elif show_score:
                     hub.aids([], off=True)
-                lanes = {role: _from_bar(score, part, start_bar)
-                         for role, part in _backing_notes(score, hand, backing, bars, split_note).items()}
+                bar_range = parse_bars(bars)
+                first = bar_range[0] if bar_range else score.position(min(n.start for n in picked))[0]
+                lead_bar = None if start_bar is not None else _lead_in_start(score, first, pass_no)
+                last = (bar_range or (1, len(score.bars)))[1]
+                band, voices, level = _track_lanes(score, f"{lead_bar}-{last}" if lead_bar else bars, mine=picked,
+                                                   skip_part=hand if is_named(hand) else None, voice_all=bool(named_roles(score)),
+                                                   keyboard=not instruments.uses_mic())
+                level.update(_gains(gains))
+                if lead_bar and not any(level.get(k, 1.0) > 0 for k in band):
+                    lead_bar = None  # every backing track muted: nothing to lead in with
+                    band = {k: [n for n in v if n.start >= score.bars[first - 1].start - 1e-6] for k, v in band.items()}
+                lead_in = score.bars[lead_bar - 1].start if lead_bar else None
+                if is_named(hand) and pass_no == 1:
+                    played = library.song_settings(score.path)["played"]
+                    library.save_song_settings(score.path, played={**played, hand: played.get(hand, 0) + 1})
+                lanes = {role: _from_bar(score, part, start_bar) for role, part in band.items()}
                 session = live.LiveSession(mode, score, notes, hub if show_score else None, tempo_percent, count_in=count_in,
-                                           backing=lanes, on_slip=_aids.slip if labeled else None)
+                                           backing=lanes, on_slip=_aids.slip if labeled else None, lead_in=lead_in)
                 meta["tempo_percent"] = tempo_percent if mode == "rehearsal" else None
                 silence_sec, rests = 300.0, None  # the session decides when the piece is over
             elif show_score:
@@ -663,7 +746,8 @@ def _begin(
         if session and session.backing:
             try:
                 session.accompanist = Accompanist(output_port)
-                session.accompanist.gains.update(_gains(gains))
+                session.accompanist.voices(voices)
+                session.accompanist.gains.update(level)
             except PortError as exc:
                 hub.flash("No accompaniment: MIDI output unavailable")
                 log.warning("accompaniment off: %s", exc)
@@ -717,7 +801,7 @@ def _listen_lanes(score, roles: list[str], bars: str | None, split_note: int) ->
     """Listen's notes by role, each note in the first role that has it (so it sounds once)."""
     seen, lanes = set(), {}
     for role in dict.fromkeys(roles):
-        if role in ("right", "left", "pedals", "vocals"):
+        if role in ROLES or is_named(role):
             lanes[role] = [n for n in _selection(score, role, bars, split_note)[0] if id(n) not in seen]
             seen.update(id(n) for n in lanes[role])
     return lanes
@@ -737,9 +821,9 @@ def _begin_listen(
     start_bar: int | None = None,
     gains: dict[str, float] | None = None,
 ) -> dict:
-    """Listen: the MIDI output plays the piece (the roles in `roles`, default both hands and
-    any pedal part, whether or not they're shown) at their `gains`, and the cursor follows.
-    Nothing is played, graded or saved."""
+    """Listen: the MIDI output plays the piece, every track at its Listen mix (tracks.py; `gains`,
+    {lane: 0..1}, overrides it), or only the notes of `roles` when given (a lesson's Listen step:
+    ['right']), and the cursor follows what sounds. Nothing is played, graded or saved."""
     if not _begin_lock.acquire(blocking=False):
         return {"error": "A practice run is already starting."}
     try:
@@ -747,19 +831,21 @@ def _begin_listen(
             return {"error": "A practice run is already going. Stop it first."}
         _quiet()
         score = library.get_score(reference)
-        if not roles:
-            roles = ["right", "left"] + (["pedals"] if "pedals" in effective_roles(score).values() else [])
-        level = _gains(gains)
-        if roles and all(level.get(r, 1.0) <= 0 for r in roles):
-            return {"error": "Every part is muted: turn one up to hear it."}
-        lanes = {role: _from_bar(score, part, start_bar) for role, part in _listen_lanes(score, roles, bars, split_note).items()}
-        notes = sorted((n for part in lanes.values() for n in part), key=lambda n: (n.start, n.pitch))
+        only = {id(n) for n in _listen_notes(score, roles, bars, split_note)} if roles else None
+        band, voices, level = _track_lanes(score, bars, only=only, listen=True, voice_all=bool(named_roles(score)),
+                                           keyboard=not instruments.uses_mic())
+        level.update(_gains(gains))
+        if band and all(level.get(k, 1.0) <= 0 for k in band):
+            return {"error": "Every track is muted: unmute one to hear it."}
+        lanes = {k: _from_bar(score, v, start_bar) for k, v in band.items()}  # a muted track is there to turn up mid-run
+        notes = sorted((n for k, part in lanes.items() if level.get(k, 1.0) > 0 for n in part), key=lambda n: (n.start, n.pitch))
         if not notes:
             return {"error": "Nothing to hear there."}
         try:
             accompanist = Accompanist(output_port, pedal=True)
         except PortError as exc:
             return {"error": f"Listen plays the piece on your keyboard's MIDI output: {exc}"}
+        accompanist.voices(voices)
         accompanist.gains.update(level)
         settings = {"reference": reference, "roles": roles, "bars": bars, "tempo_percent": tempo_percent, "loop": loop,
                     "output_port": output_port, "split_note": split_note, "source": source, "mode": live.LISTEN,
@@ -875,9 +961,23 @@ SONG_SCAN_SEC = 300.0  # the reference library is scanned again after this long
 _song_files: dict = {"at": -SONG_SCAN_SEC, "files": []}
 
 
+def _songs_arrived(songs: list[dict]) -> None:
+    """songwatch.py found new songs (a download, a file dropped into a song folder): the next
+    search sees them, and the page says so."""
+    _song_files["at"] = -SONG_SCAN_SEC
+    hub.songs_added(songs)
+
+
+def _cmd_rescan(_body: dict) -> dict:
+    """File → Song folders → Rescan now: forget the cached list of songs."""
+    _song_files["at"] = -SONG_SCAN_SEC
+    return {"total": _cmd_songs({})["total"]}
+
+
 def _cmd_songs(body: dict) -> dict:
     """Search the reference library (not the saved lessons) by title: every word of `query`
     in the file name. No query: the files practiced most recently."""
+    songwatch.start(_songs_arrived)  # the page asks for songs as it opens: from then on, new ones are noticed
     now = time.monotonic()
     if now - _song_files["at"] > SONG_SCAN_SEC:
         root = _path_key(str(lessons.lessons_dir())) + os.sep
@@ -920,7 +1020,7 @@ def _cmd_fetch_online(body: dict) -> dict:
 
 def _cmd_set_song_sources(body: dict) -> dict:
     """File → Song folders: save the folders searched for songs and the online switch."""
-    sources = library.set_song_sources(body.get("folders"), body.get("online"))
+    sources = library.set_song_sources(body.get("folders"), body.get("online"), body.get("watch_downloads"))
     _song_files["at"] = -SONG_SCAN_SEC
     return sources
 
@@ -942,18 +1042,127 @@ def _cmd_pick_folder(_body: dict) -> dict:
     return {"folder": os.path.normpath(folder) if folder else ""}
 
 
+def _play_choices(score) -> list[str]:
+    """What the user can pick to play on this file (the Playing menu's You play): the hands
+    (with the pedals when a part is for the feet), then each named part."""
+    roles = set(effective_roles(score).values())
+    right, left = bool(roles & {"right", "both"}), bool(roles & {"left", "both"})
+    hands = (["both"] if right and left else []) + (["right"] if right else []) + (["left"] if left else [])
+    if "pedals" in roles:
+        hands = hands + [f"{h}+pedals" for h in hands] + ["pedals"]
+    return hands + named_roles(score)
+
+
+def _play_choice(score) -> str:
+    """What the user plays on this file unless told otherwise: the last pick, else the part
+    the file opens on, else the first choice."""
+    choices = _play_choices(score)
+    saved = library.song_settings(score.path)["play"]
+    if saved in choices:
+        return saved
+    if score.playing in choices:
+        return score.playing
+    return choices[0] if choices else "both"
+
+
 def _cmd_parts(_body: dict) -> dict:
-    """The current score's parts with their roles, and which roles it has (the page's Parts menu)."""
+    """The current score's tracks for the Playing menu: each with its part and mix (tracks.py),
+    what can be played (choices) and what is (play), and the song's lead-in."""
     if not hub.score_path or not os.path.isfile(hub.score_path):  # none yet, or its file was deleted since
-        return {"path": None, "parts": [], "roles": []}
+        return {"path": None, "tracks": [], "choices": [], "play": None}
     score = library.get_score(hub.score_path)
-    roles = effective_roles(score)
-    parts = [{"index": p.index, "name": p.name, "instrument": p.instrument, "notes": p.note_count,
-              "range": f"{note_name(p.low)}-{note_name(p.high)}", "role": roles.get(p.index, "off")}
-             for p in score.parts if p.note_count]
-    present = set(roles.values())
-    return {"path": score.path, "confirmed": bool(score.roles), "parts": parts,
-            "roles": ["right", "left"] + [r for r in ("pedals", "vocals") if r in present]}
+    play = _play_choice(score)
+    song = library.song_settings(score.path)
+    return {"path": score.path, "confirmed": bool(score.roles), "tracks": tracks.describe(score, play),
+            "choices": _play_choices(score), "play": play, "named": named_roles(score), "playing": score.playing,
+            "song": {"lead_in": song["lead_in"], "lead_in_every_pass": song["lead_in_every_pass"]}}
+
+
+def _cmd_song_settings(body: dict) -> dict:
+    """The Playing / Playback menus' per-song settings: {"play": what you play ('both',
+    'right+pedals', 'flute'...), "lead_in": bars, "lead_in_every_pass": bool} (any of them)."""
+    if not hub.score_path:
+        return {"error": "Pick a song or lesson first."}
+    score = library.get_score(hub.score_path)
+    play = body.get("play", body.get("playing"))
+    if play is not None:
+        if _busy():
+            return {"error": "Stop the current run before changing what you play."}
+        if play not in _play_choices(score):
+            return {"error": f"Nothing called {play!r} to play in this piece."}
+        library.save_song_settings(score.path, play=play)
+        if is_named(play) or score.playing:
+            score.playing = play if is_named(play) else None
+            _show(score, [])  # redraw the sheet for that part
+    changes = {k: body[k] for k in ("lead_in", "lead_in_every_pass") if k in body}
+    if changes:
+        library.save_song_settings(score.path, **changes)
+    return _cmd_parts({})
+
+
+def _cmd_practice_settings(body: dict) -> dict:
+    """The Session's bars, tempo, loop and mode for a piece, {"path", "from", "to", "tempo",
+    "loop", "mode"}, saved so the piece opens that way next time (library.practice_settings).
+    The page names the piece, so a change saved just as another piece opens lands on the right one."""
+    path = body.get("path") or hub.score_path
+    if not path or not os.path.isfile(path):
+        return {"error": "Pick a song or lesson first."}
+    library.save_song_settings(path, practice={k: body[k] for k in ("from", "to", "tempo", "loop", "mode") if k in body})
+    return {"path": path, "practice": library.practice_settings(path)}
+
+
+def _live_gain(index: int, mix: dict) -> None:
+    """A track's mix changed: a run going now hears it from its next note (Listen from the
+    Listen mix), and an override it started with gives way."""
+    session = _live.get("session")
+    accompanist = session and session.accompanist
+    lane = tracks.key(index)
+    listen = bool(session) and session.mode == live.LISTEN
+    gain = 0.0 if mix["listen_mute" if listen else "mute"] else mix["listen_vol" if listen else "vol"] / 100
+    if accompanist and lane in session.lanes:
+        accompanist.gains[lane] = gain
+    settings = _practice.get("settings")
+    if settings and lane in (settings.get("gains") or {}):
+        settings["gains"][lane] = gain
+
+
+def _cmd_track(body: dict) -> dict:
+    """One track changed in the Playing menu: {"index": track, "part": a part or 'backing',
+    "show", "mute", "vol", "listen_mute", "listen_vol"} (any of them). Saved for the file at
+    once. The mix is heard live; the part and Show wait for the run to stop."""
+    if not hub.score_path:
+        return {"error": "Pick a song or lesson first."}
+    try:
+        index = int(body["index"])
+    except (KeyError, TypeError, ValueError):
+        return {"error": "Which track?"}
+    score = library.get_score(hub.score_path)
+    changes = {k: body[k] for k in tracks.MIX_KEYS if k in body}
+    if ("part" in body or "show" in changes) and _busy():
+        return {"error": "Stop the run to change that."}
+    try:
+        if "part" in body:
+            tracks.set_part(score, index, str(body["part"]))
+            if score.playing and score.playing not in named_roles(score):
+                score.playing = None
+        if changes:
+            _live_gain(index, tracks.set_mix(score, index, **changes))
+    except ValueError as exc:
+        return {"error": str(exc)}
+    if "part" in body or ("show" in changes and tracks.part_of(score, index) == tracks.BACKING and sheet.wanted(score)):
+        _show(score, [])  # redraw the sheet: new parts, or a backing track's staff written in or out
+        # (any other Show is the page's: it hides a staff that's there)
+    return _cmd_parts({})
+
+
+def _cmd_confirm_parts(_body: dict) -> dict:
+    """The suggested parts are right: save them as the user's own."""
+    if not hub.score_path:
+        return {"error": "Pick a song or lesson first."}
+    if _busy():
+        return {"error": "Stop the current run before changing the parts."}
+    tracks.confirm(library.get_score(hub.score_path))
+    return _cmd_parts({})
 
 
 def _cmd_set_parts(body: dict) -> dict:
@@ -1157,7 +1366,6 @@ def _cmd_start(body: dict) -> dict:
         source="page",
         count_in=bool(body.get("count_in")),
         autopilot=bool(body.get("autopilot")) and bool(body.get("loop")),
-        backing=[str(r) for r in body.get("backing") or []] or None,
         output_port=body.get("output") or None,
         start_bar=int(body["start_bar"]) if body.get("start_bar") is not None else None,
         gains=_gains(body.get("gains")) or None,
@@ -1167,8 +1375,9 @@ def _cmd_start(body: dict) -> dict:
 
 
 def _cmd_mix(body: dict) -> dict:
-    """The page's part faders moved: {"gains": {role: 0..1}}. Heard from the next note of a
-    run going now, and kept for its next pass."""
+    """Gains for the run going now, {"gains": {lane: 0..1}} (a lane is a track, tracks.key):
+    heard from the next note and kept for its next pass, not saved (the Playing menu saves a
+    track's mix through cmd/track)."""
     gains = _gains(body.get("gains"))
     session = _live.get("session")
     accompanist = session and session.accompanist
@@ -1394,6 +1603,9 @@ def _voice_context() -> str:
     hand = settings.get("hand") or "both"
     lines = [time.strftime("Local time: %A %I:%M %p.").replace(" 0", " "), f"Teaching style: {_coach.style}.",
              _talk_line()]
+    view = _page_view.get("view")
+    if view in tiles.VIEWS:
+        lines.append(f"The page is on {tiles.VIEW_NAMES[view]} ({view}); its panel tiles: {', '.join(tiles.layouts()[view]) or 'none'}.")
     if instruments.uses_mic():
         lines.append(_instrument_line())
     about = atlas_welcome.about_line()
@@ -1451,17 +1663,78 @@ def _voice_context() -> str:
     return "\n".join(lines)
 
 
-def _voice_start(mode: str, hand: str = "both", bars: str = "", tempo_percent: int = 100, loop: bool = False) -> dict:
+def _voice_part(score, part: str, track: str = "") -> dict:
+    """The Maestro's named part: {"part": role}, found and saved the first time it's asked for
+    (by track name, then instrument, or the `track` the user picked), or {"ask": ...} with
+    the tracks to choose from. On an instrument heard through the microphone, naming a part
+    clears the hand choices (the parts they named become backing)."""
+    role = part.strip().lower()
+    if role in named_roles(score):
+        return {"part": role}
+    parts = [p for p in score.parts if p.note_count and not p.drums]
+    if track:
+        wanted = track.strip().lower()
+        found = [p for p in parts if p.name.strip().lower() == wanted or str(p.index + 1) == wanted] \
+            or [p for p in parts if wanted in p.name.lower()]
+    else:
+        found = find_part(score, role)
+    if len(found) != 1:
+        return {"ask": f"Which track is the {role} part?", "tracks": [p.name.strip() for p in (found or parts)]}
+    return {"part": library.name_part(score, role, found[0].index, keep_hands=not instruments.uses_mic())}
+
+
+def _readback(score, role: str, mode: str, bars: str | None, loop: bool) -> str:
+    """One line saying what a named-part run was set up as, for the Maestro to say back."""
+    settings = library.song_settings(score.path)
+    lead = settings["lead_in"]
+    words = [f"{role.capitalize()} part", f"bars {bars}" if bars else "the whole song",
+             f"{lead}-bar lead-in" if lead else "no lead-in"]
+    if loop:
+        words.append("looping" + ("" if settings["lead_in_every_pass"] or not lead else ", lead-in on the first pass only"))
+    if mode == "learn":
+        words.append("the band waits for you")
+    return ", ".join(words) + "."
+
+
+def _voice_start(mode: str, hand: str = "both", bars: str = "", tempo_percent: int = 100, loop: bool = False,
+                 part: str = "", track: str = "", lead_in_bars: int | None = None, lead_in_every_pass: bool | None = None) -> dict:
+    """The Maestro's start_practice. Asked from another part of the app (the Roadmap, Home), it
+    brings the Session up first, so the run is on screen; a Roadmap lesson runs where it is."""
+    if not hub.score_path:
+        return {"error": "No lesson is open in the Session. Ask which one, then switch_lesson to it."}
+    if not _atlas.current:
+        hub.page({"view": "session", "unguarded": True})  # they asked for this run: no "stop the last one?"
     if _busy():
         _cmd_stop({})
         deadline = time.time() + 3
         while _busy() and time.time() < deadline:
             time.sleep(0.05)
     last = _practice.get("settings") or {}
+    score = None
+    if part:
+        score = library.get_score(hub.score_path)
+        found = _voice_part(score, part, track)
+        if "ask" in found:
+            return found
+        hand = found["part"]
+        if lead_in_bars is not None:
+            library.save_song_settings(score.path, lead_in=lead_in_bars)
+        if lead_in_every_pass is not None:
+            library.save_song_settings(score.path, lead_in_every_pass=lead_in_every_pass)
+        sections = part_sections(score, hand)
+        if not bars and len(sections) > 1:
+            return {"ask": f"Which bars of the {hand} part?", "sections": [f"{a}-{b}" for a, b in sections]}
+    out = _voice_start_run(mode, hand, bars, tempo_percent, loop, last)
+    if score is not None and "error" not in out:
+        out["readback"] = _readback(score, hand, mode, (out.get("selection") or {}).get("bars"), loop)
+    return out
+
+
+def _voice_start_run(mode: str, hand: str, bars: str, tempo_percent: int, loop: bool, last: dict) -> dict:
     return _cmd_start({"mode": mode, "hand": hand, "bars": bars or None, "tempo": tempo_percent, "loop": loop,
                        "port": last.get("input_port"), "count_in": last.get("count_in"), "autopilot": last.get("autopilot"),
-                       "roles": [hand] if hand in ("right", "left") else last.get("roles"), "output": last.get("output_port"),
-                       "gains": None if hand in ("right", "left") else last.get("gains")})  # a hand asked for is heard
+                       "roles": [hand] if hand in ("right", "left") else last.get("roles"),
+                       "output": last.get("output_port")})
 
 
 def _voice_play(bars: str = "", hand: str = "both", tempo_percent: int = 100) -> dict:
@@ -1525,6 +1798,54 @@ def _voice_next_stop() -> dict:
     return nxt
 
 
+_PAGE_RANGES = {"zoom_percent": (50, 200), "metronome_bpm": (20, 300), "tempo_percent": (30, 150)}
+
+
+def _voice_page(**changes) -> dict:
+    """The Maestro's page_control: the open coach page sets its own controls, as if clicked."""
+    changes = {k: v for k, v in changes.items() if v is not None}
+    for key, (low, high) in _PAGE_RANGES.items():
+        if key in changes:
+            changes[key] = max(low, min(high, int(changes[key])))
+    if "bars" in changes:
+        bars = str(changes["bars"]).strip()
+        match = re.fullmatch(r"(\d+)\s*(?:[-–]\s*(\d+))?", bars)
+        if bars and not match:
+            return {"error": f"Bars should look like '5-8', not {bars!r}."}
+        changes["bars"] = f"{match[1]}-{match[2] or match[1]}" if bars else ""
+    if "menu" in changes and changes["menu"] not in chat.PAGE_MENUS:
+        return {"error": f"I can't open {changes['menu']!r} yet. I can open: {', '.join(chat.PAGE_MENUS)}."}
+    if changes.get("menu") == "see_in_song" and not (_atlas.current and _atlas.song_for(_atlas.current["node"])):
+        return {"error": "That works from a Roadmap lesson on a song goal; none is open."}
+    if not changes:
+        return {"error": "Nothing to change."}
+    if not hub.clients:
+        return {"error": "No coach page is open."}
+    hub.page(changes)
+    return {"done": changes}
+
+
+def _voice_backing_volume(part: str, volume_percent: int) -> dict:
+    """The Maestro's set_backing_volume: one track you aren't playing, by its name or instrument,
+    turned up, down or off (0 mutes it), for the run going now and saved for the song (Listen's
+    mix while Listen runs)."""
+    if not hub.score_path:
+        return {"error": "No lesson on screen."}
+    settings = _practice.get("settings") or {}
+    score = library.get_score(hub.score_path)
+    play = settings.get("hand") if _busy() and settings.get("hand") else _play_choice(score)
+    rows = [r for r in tracks.describe(score, play) if _listening() or not r["yours"]]
+    wanted = part.strip().lower().rstrip("s")
+    found = [r for r in rows if wanted in r["name"].lower()] or [r for r in rows if wanted in r["instrument"].lower()]
+    if len(found) != 1:
+        return {"error": f"Which part? The backing is: {', '.join(r['name'] for r in rows)}."}
+    volume = max(0, min(100, int(volume_percent)))
+    prefix = "listen_" if _listening() else ""
+    changes = {f"{prefix}mute": True} if volume == 0 else {f"{prefix}mute": False, f"{prefix}vol": volume}
+    _live_gain(found[0]["index"], tracks.set_mix(score, found[0]["index"], **changes))
+    return {"part": found[0]["name"], "volume_percent": volume}
+
+
 def _voice_start_exam(grade: str) -> dict:
     out = _atlas.cmd_exam_start({"tier": grade})
     state = out.get("exam") or {}
@@ -1543,19 +1864,192 @@ def _cmd_page_error(body: dict) -> dict:
     return {"ok": True}
 
 
+def _report_state() -> dict:
+    """Where the page is, saved with a bug report for the check step's Go there."""
+    try:
+        settings = _practice.get("settings") or {}
+        state = {"score": hub.score_path, "view": _page_view.get("view")}
+        if hub.score_path:
+            state["bar"] = _cursor_bar(library.get_score(hub.score_path))
+        if settings:
+            state.update(mode=bugs.PAGE_MODES.get(settings.get("mode")), hand=settings.get("hand"),
+                         bars=settings.get("bars") or "", tempo_percent=settings.get("tempo_percent"),
+                         loop=bool(settings.get("loop")))
+        return {k: v for k, v in state.items() if v is not None}
+    except Exception as exc:  # a report must never fail for this
+        log.info("report state: %s", exc)
+        return {}
+
+
 def _voice_bug(description: str, add_to_last: bool = False, kind: str = "bug") -> dict:
     if add_to_last:
         return _bugs.add(description, kind=kind)
-    return _bugs.report(description, _voice_context(), kind=kind)
+    return _bugs.report(description, _voice_context(), kind=kind, state=_report_state())
+
+
+def _cmd_report(body: dict) -> dict:
+    """The page's F9: a bug report or a request typed instead of said, saved the same way."""
+    text = str(body.get("text") or "").strip()
+    kind = "request" if body.get("kind") == "request" else "bug"
+    if not text:
+        return {"error": "Say what's wrong (or what you'd like) first."}
+    out = _voice_bug(text, kind=kind)
+    bugs.conversation_log(f"(typed, F9) {'Idea' if kind == 'request' else 'Bug'}: {text}", f"saved {out.get('saved')}")
+    return {**out, "kind": kind}
+
+
+def _find_piece(place: dict) -> str | None:
+    """The file a report was made on: its saved path, else the file whose name is the title shown
+    in the report (lessons, files with saved parts, the song folders), else the closest song."""
+    score = place.get("score")
+    if score and os.path.isfile(score):
+        return score
+    title = place.get("title")
+    if not title:
+        return None
+    want = re.sub(r"[^a-z0-9]+", "", title.lower())
+    candidates = [row["path"] for row in _cmd_lessons({}).get("lessons", [])]
+    candidates += list(library._load_choices()) + [str(p) for p in library.scan_references()]
+    for path in candidates:
+        if re.sub(r"[^a-z0-9]+", "", pathlib.Path(path).stem.lower()) == want and os.path.isfile(path):
+            return path
+    try:
+        return str(library.resolve_reference(title))
+    except FileNotFoundError:
+        return None
+
+
+def _cmd_goto_report(body: dict) -> dict:
+    """The check step's Go there: open the piece a report was made on. The page then sets its
+    controls (view, mode, bars, tempo, loop) and the cursor's bar from what this returns."""
+    place = bugs.place(str(body.get("id") or ""))
+    if "error" in place:
+        return place
+    if _busy():
+        return {"error": "Stop the run first."}
+    path = _find_piece(place)
+    loaded = False
+    if path and path != hub.score_path:
+        out = _cmd_load({"lesson": path})
+        if "error" in out:
+            return out
+        loaded = True
+    elif not path and place.get("title"):
+        return {"error": f"Couldn't find “{place['title']}” any more."}
+    page = {k: place[k] for k in ("view", "mode", "bars", "tempo_percent", "loop") if place.get(k) not in (None, "")}
+    return {"path": path, "loaded": loaded, "page": page, "bar": place.get("bar")}
+
+
+def _cmd_checks(body: dict) -> dict:
+    """Fixes waiting for the user to try (the page's 👀 button); with screenshots when it opens."""
+    return bugs.to_check(with_shots=bool(body.get("full")))
+
+
+def _cmd_check(body: dict) -> dict:
+    """The user tried a fix: it works (→ fixed) or it's still wrong (→ open, with what they said)."""
+    out = bugs.verify(str(body.get("id") or ""), bool(body.get("works")), str(body.get("note") or ""))
+    return out if "error" in out else {**out, **bugs.to_check()}
+
+
+RESTART_NOTE = "restart.json"  # the piece on the page when Restart was pressed, for the fresh copy
+_code_cache: dict = {"at": 0.0, "times": {}}
+
+
+def _cmd_code_status(_body: dict) -> dict:
+    """For the page's update bar: when this coach started, when its code and the page's files last
+    changed (launch.code_times), and whether Restart can bring it back by itself."""
+    from . import launch
+
+    now = time.time()
+    if now - _code_cache["at"] > 5:
+        _code_cache.update(at=now, times=launch.code_times())
+    return {"started": hub.started, **_code_cache["times"], "busy": _busy(),
+            "restartable": bool(os.environ.get("MIDI_COACH_RESTARTABLE"))}
+
+
+def _cmd_restart(_body: dict) -> dict:
+    """The page's Restart: this practice copy exits and the launcher starts it again on the new
+    code, with the same piece. Claude Desktop's midi-coach can't restart itself."""
+    from . import launch
+
+    if not os.environ.get("MIDI_COACH_RESTARTABLE"):
+        return {"error": "This coach can't restart itself: quit Claude Desktop (File > Exit) and open it again."}
+    if _busy():
+        return {"error": "Stop the run first, then restart."}
+    try:
+        (library.home() / RESTART_NOTE).write_text(json.dumps({"score": hub.score_path, "at": time.time()}), encoding="utf-8")
+    except OSError as exc:
+        log.info("restart note: %s", exc)
+
+    def go() -> None:
+        time.sleep(0.5)  # let the page have its answer
+        _practice["stopping"] = True
+        recorder.stop()
+        hub.shutdown()
+        os._exit(launch.RESTART_EXIT)
+
+    threading.Thread(target=go, name="restart", daemon=True).start()
+    return {"restarting": True}
+
+
+def restarted_score() -> str | None:
+    """The piece that was on the page when Restart was pressed (once, and only just after)."""
+    note = library.home() / RESTART_NOTE
+    try:
+        saved = json.loads(note.read_text(encoding="utf-8"))
+        note.unlink()
+    except (OSError, ValueError):
+        return None
+    score = saved.get("score")
+    return score if score and time.time() - float(saved.get("at") or 0) < 120 and pathlib.Path(score).exists() else None
 
 
 def _voice_request(description: str, add_to_last: bool = False) -> dict:
     return _voice_bug(description, add_to_last, kind="request")
 
 
+def _voice_open_song(name: str, artist: str = "") -> dict:
+    """The Maestro's open_song (songfind.py): the library, then Downloads, then bitmidi.com; else a
+    MuseScore link goes in the Maestro panel for the pianist to fetch it."""
+    if _busy():
+        return {"error": "Stop the current run before opening another song."}
+    found = songfind.find(name, artist)
+    if found.get("path"):
+        _song_files["at"] = -SONG_SCAN_SEC  # a file copied or downloaded just now
+        out = _cmd_load({"lesson": found["path"]})
+        hub.page({"view": "session"})
+        return {**out, "title": pathlib.Path(found["path"]).stem, "where": found["where"],
+                **({"note": "From bitmidi.com: someone's upload, its name is only what they called it."}
+                   if found["where"] == "bitmidi" else {})}
+    if found.get("ask"):
+        return {"ask_which": found["ask"]}
+    if found.get("link"):
+        hub.line("Maestro", f"Couldn't find “{name}” here. Get it on MuseScore, save it to Downloads, then ask again:",
+                 "remark", link=found["link"])
+        return {"not_found": True, "link_sent_to_panel": True, "searched": "library, Downloads"
+                + (", bitmidi.com" if library.song_sources()["online"] else ""), "online": found.get("tried_online")}
+    return found
+
+
+def _voice_today_remove(what: str) -> dict:
+    out = _atlas.cmd_today_remove({"what": what})
+    if "error" not in out:
+        hub.page({"today": True})  # the page fetches the plan again
+    return {**{k: out[k] for k in ("error", "removed_now") if k in out},
+            "left_in_plan": [f"{p['label']}: {p['title']}" for p in out.get("parts", [])]}
+
+
+def _voice_tiles(view: str, add=(), remove=(), reset: bool = False) -> dict:
+    out = tiles.change(view, add or (), remove or (), reset)
+    if "error" not in out:
+        hub.page({"tiles": out})
+    return out
+
+
 _voice = chat.VoiceChat(
     actions={
         "start_practice": _voice_start,
+        "set_backing_volume": _voice_backing_volume,
         "stop_practice": lambda: _cmd_stop({}),
         "play_passage": _voice_play,
         "progress": _voice_progress,
@@ -1563,6 +2057,7 @@ _voice = chat.VoiceChat(
         "create_lesson": _voice_create,
         "hand_off": _voice_hand_off,
         "remember": deep.remember,
+        "page_control": _voice_page,
         "set_style": lambda style: _cmd_maestro({"style": style}),
         "set_talk": lambda **talk: _cmd_maestro({"talk": talk}),
         "set_goal": _voice_set_goal,
@@ -1571,6 +2066,9 @@ _voice = chat.VoiceChat(
         "atlas_summary": _atlas_summary,
         "report_bug": _voice_bug,
         "request_feature": _voice_request,
+        "set_tiles": _voice_tiles,
+        "open_song": _voice_open_song,
+        "remove_from_today": _voice_today_remove,
     },
     context=_voice_context,
     instrument=profiles.instrument,
@@ -1580,8 +2078,15 @@ _voice = chat.VoiceChat(
 
 def _voice_reply(heard: str) -> dict:
     """Answer what was said; the reply is spoken and shown by the Maestro on every open page.
-    Both go in today's conversation log."""
-    out = _answer(heard)
+    Both go in today's conversation log, and in the Maestro panel's transcript, under a line
+    when the Maestro starts a fresh conversation (it no longer remembers what's above it)."""
+    if (heard or "").strip() and _voice.start_fresh_if_due():
+        hub.line("Maestro", "New conversation: the Maestro doesn't remember what's above this line.", "divider")
+    hub.line("You", heard, "you")
+    with transcript.answering():
+        out = _answer(heard)
+    if out.get("error"):
+        hub.line("Maestro", out["error"], "error")
     bugs.conversation_log(heard, out.get("reply", ""), out.get("actions") or (), out.get("error", ""))
     return out
 
@@ -1627,11 +2132,38 @@ def _voice_audio(audio: bytes) -> dict:
         _talk.clear()  # a typed message later means the cursor as it is then
 
 
+_page_view: dict = {}  # the part of the app the page is on (it says so on every change)
+
+
+def _cmd_view(body: dict) -> dict:
+    view = body.get("view")
+    _page_view["view"] = {"lesson": "progress"}.get(view, view)
+    return {}
+
+
+def _cmd_tiles(_body: dict) -> dict:
+    return {"layouts": tiles.layouts(), "tiles": tiles.TILES, "defaults": tiles.DEFAULTS}
+
+
+def _cmd_tiles_set(body: dict) -> dict:
+    """The panel's edit mode: one view's tiles, in order. Every open page follows."""
+    out = tiles.save(body.get("view", ""), list(body.get("tiles") or []))
+    if "error" not in out:
+        hub.page({"tiles": out})
+    return out
+
+
+def _cmd_transcript(_body: dict) -> dict:
+    """Today's lines for the Maestro panel, when a page opens."""
+    return {"lines": transcript.today()}
+
+
 def _cmd_voice_status(_body: dict) -> dict:
     status = _voice.status()
     if status["available"]:
         stt.warm_up()
     _bugs.ring.start()  # a page is open: keep the last few seconds of screen for bug reports
+    threading.Thread(target=bugs.write_backlog, name="backlog", daemon=True).start()  # fixes made while closed
     status["deep_available"], status["deep_reason"] = _deep.available()
     return status
 
@@ -1643,6 +2175,9 @@ def _instrument_line() -> str:
         return "Instrument: alto saxophone, heard through the microphone (pitch only); notes are named in written pitch."
     if inst["id"] == "voice":
         return f"Instrument: voice ({profiles.active()['voice']} voice), heard through the microphone (pitch only)."
+    if inst.get("strings"):
+        return (f"Instrument: {inst['name'].lower()}, heard through the microphone (pitch only, one note at a time); notes "
+                "are named in written pitch, an octave above how it sounds.")
     return f"Instrument: {inst['name'].lower()}, heard through the microphone (pitch only)."
 
 
@@ -1742,18 +2277,20 @@ def _cmd_mic_note(body: dict) -> dict:
 PAGE_COMMANDS = {"ports": _cmd_ports, "mic_note": _cmd_mic_note, "lessons": _cmd_lessons, "songs": _cmd_songs, "parts": _cmd_parts,
                  "songs_online": _cmd_songs_online, "fetch_online": _cmd_fetch_online,
                  "song_sources": lambda _body: library.song_sources(), "set_song_sources": _cmd_set_song_sources,
-                 "pick_folder": _cmd_pick_folder,
+                 "pick_folder": _cmd_pick_folder, "rescan": _cmd_rescan,
                  "profiles": lambda _body: _profile_view(), "profile_new": _cmd_profile_new,
                  "profile_select": _cmd_profile_select, "profile_rename": _cmd_profile_rename,
                  "profile_delete": _cmd_profile_delete, "profile_instrument": _cmd_profile_instrument,
                  "profile_voice": _cmd_profile_voice,
                  "profile_young": _cmd_profile_young,
-                 "set_parts": _cmd_set_parts, "cleanup": _cmd_cleanup, "playable": _cmd_playable, "details": _cmd_details,
+                 "set_parts": _cmd_set_parts, "song_settings": _cmd_song_settings, "practice_settings": _cmd_practice_settings, "track": _cmd_track, "confirm_parts": _cmd_confirm_parts, "cleanup": _cmd_cleanup, "playable": _cmd_playable, "details": _cmd_details,
                  "load": _cmd_load, "open_file": _cmd_open_file, "save_as": _cmd_save_as, "start": _cmd_start, "stop": _cmd_stop,
                  "seek": _cmd_seek, "mix": _cmd_mix, "synced": _cmd_synced, "synced_cursor": _cmd_synced_cursor,
                  "youtube": _cmd_youtube,
                  "record": _cmd_record, "maestro": _cmd_maestro, "stop_playback": lambda _body: _quiet(),
-                 "voice_status": _cmd_voice_status, "talk": _cmd_talk, "page_error": _cmd_page_error,"chat": lambda body: _voice_reply(body.get("text", ""))}
+                 "voice_status": _cmd_voice_status, "talk": _cmd_talk, "page_error": _cmd_page_error,
+                 "checks": _cmd_checks, "check": _cmd_check, "code_status": _cmd_code_status, "restart": _cmd_restart, "goto_report": _cmd_goto_report, "report": _cmd_report, "chat": lambda body: _voice_reply(body.get("text", "")),
+                 "transcript": _cmd_transcript, "view": _cmd_view, "tiles": _cmd_tiles, "tiles_set": _cmd_tiles_set}
 def _atlas_show(path: str) -> dict:
     """A lesson's music on the sheet. Opening a lesson means leaving whatever was running
     (a Freeplay Listen or Learn run): stop it, as Stop would, so the lesson can load."""
@@ -1811,7 +2348,6 @@ async def start_recording(
     show_score: bool = True,
     parts: list[int] | None = None,
     loop: bool = False,
-    backing: list[str] | None = None,
 ) -> dict:
     """Start recording the user's playing from the MIDI input.
 
@@ -1828,9 +2364,9 @@ async def start_recording(
     bars: e.g. '9-16' to practice a section.
     parts: part indexes to practice for this take only (overrides hand and the saved choice).
     loop: wait/rehearsal only - restart after each completed pass, saving each pass as its own take.
-    backing: wait/rehearsal only - roles the user isn't playing to sound on the MIDI output
-      along with them ('right', 'left', 'pedals', 'vocals'): in time in rehearsal, the stretch
-      up to the next chord each time one is played in wait mode.
+    In wait/rehearsal, every track the user isn't playing sounds on the MIDI output as its mix
+      says (the coach page's Playing menu: mute / volume per track): in time in rehearsal, the
+      stretch up to the next chord each time one is played in wait mode.
     silence_sec: stop after this much silence (no keys held). With a reference the
       timeout is stretched to cover the longest written rest still ahead.
     If the keyboard's port is busy, the 'Coach' loopMIDI port is used instead.
@@ -1840,7 +2376,7 @@ async def start_recording(
         started = await asyncio.to_thread(
             _begin, reference, hand, bars, mode, tempo_percent, input_port, split_note,
             silence_sec, max_minutes, show_score, loop and (mode or "").lower() != "free",
-            parts=parts, backing=backing,
+            parts=parts,
         )
     except Exception as exc:
         return _err(exc)
@@ -2143,7 +2679,8 @@ async def create_lesson(
         else:
             line = instruments.uses_mic() and right and not left  # one line, named for the instrument
             path, score = await asyncio.to_thread(lessons.build_lesson, title, right, left, time_signature, key, tempo_bpm, musicxml,
-                                                  category or lessons.AI_EXERCISES, part_name=instruments.get()["part"] if line else None)
+                                                  category or lessons.AI_EXERCISES, part_name=instruments.get()["part"] if line else None,
+                                                  **(instruments.score_look() if line else {}))
         if not score.notes:
             return {"error": "The lesson has no notes.", "path": path}
         side = analysis.side_resolver(score)

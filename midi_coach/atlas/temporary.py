@@ -85,9 +85,10 @@ def _stage_nodes(req: dict, stages: list[dict]) -> list[dict]:
     return out
 
 
-def add_bridge(base: dict, goal: str, title: str, brief: str, after: list[str], before: list[str]) -> dict:
+def add_bridge(base: dict, goal: str, title: str, brief: str, after: list[str], before: list[str], song_bars: str = "") -> dict:
     """A bridge requirement (and its two stages), placed in the tier of its first prerequisite
-    (or of what it leads to). Returns the requirement node."""
+    (or of what it leads to). song_bars: where a song goal's song uses it ("9-12, 25-28"), for
+    See in the song. Returns the requirement node."""
     nodes = load()
     after = [a for a in after if a in base["by_id"]]
     before = [b for b in before if b in base["by_id"]]
@@ -95,6 +96,8 @@ def add_bridge(base: dict, goal: str, title: str, brief: str, after: list[str], 
     req = {"id": _new_id(nodes, goal, title), "level": "requirement", "parent": f"{tier}.goals", "tier": tier,
            "strand": _strand_of(base, after + before), "family": f"{tier}.goals", "kind": "bridge", "title": title,
            "brief": brief, "prereqs": after, "before": before, "covers": [], "temporary": True, "goal": goal, "status": "active"}
+    if song_bars:
+        req["song_bars"] = song_bars
     nodes += [req] + _stage_nodes(req, theory_stages())
     save(nodes)
     return req

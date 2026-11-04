@@ -127,6 +127,7 @@ class Score:
     _sides: dict = field(default_factory=dict, repr=False)  # split_resolver's cache
     # Set when Clean made the hands' parts playable (playable.py): what it changed.
     clean: dict | None = field(default=None, repr=False)
+    playing: str | None = None  # the named part drawn and played (library.default_part, or the run's)
 
     def beat_of(self, t: float) -> float:
         """Beat (quarter notes from the start) at a time in seconds."""
@@ -510,6 +511,27 @@ ROLES = HAND_ROLES + OTHER_ROLES
 _SUNG = re.compile(r"\b(vocal|voice|vox|sing)", re.I)  # a part named as the sung line
 
 
+def is_named(role: str | None) -> bool:
+    """A part the user named for what they play it on ('flute'): any role but a hand, the
+    pedals or the vocals (nor a hand plus the pedals, 'right+pedals'). Playing it makes every
+    other part of the file the backing."""
+    return bool(role) and role.partition("+")[0] not in ROLES
+
+
+def named_roles(score: Score) -> list[str]:
+    """The named parts saved for a score, in part order."""
+    return list(dict.fromkeys(r for _, r in sorted(score.roles.items()) if is_named(r)))
+
+
+def find_part(score: Score, name: str) -> list[Part]:
+    """The parts that could be the one called `name` ('flute'): those whose track name has
+    the word, else those whose General MIDI instrument does. One match is the part; none or
+    several, and the user is asked."""
+    word = re.compile(rf"\b{re.escape(name.strip().rstrip('sS') or name)}", re.I)  # 'strings' finds 'String Ensemble'
+    parts = [p for p in score.parts if p.note_count and not p.drums]
+    return [p for p in parts if word.search(p.name)] or [p for p in parts if p.program is not None and word.search(GM_PROGRAMS[p.program])]
+
+
 def playable_parts(score: Score) -> list[Part]:
     """Parts that could be played on a keyboard: they have notes and aren't drums."""
     return [p for p in score.parts if p.note_count > 0 and not p.drums]
@@ -739,6 +761,8 @@ def select_notes(
     """
     hand = (hand or "both").lower()
     base, plus, extra = hand.partition("+")
+    if not parts and is_named(base) and not plus:
+        return _select_named(score, base, bars)
     if not parts and (base in OTHER_ROLES or plus):
         return _select_role(score, hand, base, extra, bars, split_note)
     if score.clean and not parts and hand in ("right", "left"):
@@ -821,6 +845,41 @@ def _select_role(score: Score, hand: str, base: str, extra: str, bars: tuple[int
     if raised:
         info["octave_up"] = raised
     return notes, info
+
+
+def _select_named(score: Score, role: str, bars: tuple[int, int] | None) -> tuple[list[Note], dict]:
+    """select_notes for a named part ('flute'): its notes as written, made one line (one_line)
+    when the instrument sounds one note at a time (heard through the microphone)."""
+    from . import instruments
+
+    own = sorted(i for i, r in score.roles.items() if r == role)
+    if not own:
+        raise ValueError(f"No part called {role!r} in this piece.")
+    notes = [n for n in score.notes if n.part in set(own)]
+    if instruments.uses_mic():
+        notes = one_line(notes)
+    info: dict = {"hand": role, "method": f"{role} part {own}"}
+    if bars:
+        t0, t1 = score.bar_range_times(*bars)
+        notes = [n for n in notes if t0 - 1e-6 <= n.start < t1 - 1e-6]
+        info["bars"] = f"{bars[0]}-{bars[1]}"
+    return notes, info
+
+
+def one_line(notes: list[Note]) -> list[Note]:
+    """A part for an instrument that sounds one note at a time: of notes starting together
+    (CHORD_GAP) only the top one is kept, and a note still sounding when the next one starts
+    ends there (legato played into the file), so it reads and is graded as single notes."""
+    kept: list[Note] = []
+    starts: list[float] = []  # when each kept note's group of notes starting together began
+    for n in sorted(notes, key=lambda n: n.start):
+        if kept and n.start - starts[-1] < CHORD_GAP:
+            if n.pitch > kept[-1].pitch:
+                kept[-1] = n
+        else:
+            kept.append(n)
+            starts.append(n.start)
+    return [replace(n, end=nxt) if nxt < n.end else n for n, nxt in zip(kept, starts[1:])] + kept[-1:]
 
 
 OCTAVE_UP_BELOW = 48  # a bass part averaging below C3 is played an octave up
@@ -1033,7 +1092,7 @@ def effective_hands(score: Score) -> dict[int, str]:
     """Part -> 'right' | 'left' | 'both' for the parts the user plays: their confirmed
     choice, else the suggestion for a band arrangement (so the sheet music and the grading
     agree before anyone confirms). Empty for a plain piano file: every note counts."""
-    if score.hands:
+    if score.hands or any(is_named(r) for r in score.roles.values()):
         return score.hands
     if is_plain_piano(score):
         return {}

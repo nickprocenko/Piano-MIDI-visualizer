@@ -5,9 +5,11 @@ the user's MidiCoach folder)."""
 from __future__ import annotations
 
 import json
+import pathlib
 import time
 from types import SimpleNamespace as NS
 
+import mido
 import pytest
 
 from midi_coach import library, profiles
@@ -125,6 +127,39 @@ def test_recorder_takes_notes_from_the_microphone():
     assert not rec.feed([0x90, 72, 80])
 
 
+def test_a_microphone_note_heard_late_keeps_the_take_in_time_order(home):
+    # The page times a note from when it began, so it can arrive after a later one: the take
+    # must stay in order, or the MIDI file can't be written and a looped run stops.
+    from midi_coach import library
+
+    rec = Recorder()
+    rec.start(MIC_PORT, silence_sec=30)
+    now = time.perf_counter()
+    rec.feed([0x90, 71, 80], at=now)
+    rec.feed([0x80, 71, 0], at=now + 0.30)
+    rec.feed([0x90, 72, 80], at=now + 0.25)  # began before the last off arrived
+    times = [t for t, _ in rec._state.events]
+    assert times == sorted(times)
+    events = list(rec._state.events)
+    rec.stop()
+    meta = library.save_take([events[0], events[2], events[1]], {})  # out of order is saved too
+    assert pathlib.Path(meta["file"]).with_suffix(".json").is_file()
+    played = [(m.type, m.note) for m in mido.MidiFile(meta["file"]).tracks[0] if not m.is_meta]
+    assert played == [("note_on", 71), ("note_on", 72), ("note_off", 71)]
+
+
+def test_a_take_that_fails_to_save_still_ends_the_pass(home, monkeypatch):
+    from midi_coach import library, server
+
+    ended = []
+    monkeypatch.setattr(server, "_end_pass", lambda reason, summary, report: ended.append(reason))
+    monkeypatch.setattr(library, "save_take", lambda events, meta: (_ for _ in ()).throw(ValueError("disk full")))
+    state = type("S", (), {"stop_reason": "finished the piece", "events": [(0.0, [0x90, 60, 80]), (0.5, [0x80, 60, 0])],
+                           "note_ons": 1, "port_name": MIC_PORT})()
+    server._on_recording_finished({})(state)
+    assert ended == ["finished the piece"]  # so a loop goes on to its next pass
+
+
 def test_a_flute_profile_listens_on_the_microphone(home):
     from midi_coach import server
 
@@ -167,7 +202,7 @@ def test_the_maestro_teaches_the_flute(monkeypatch, tmp_path):
     voice = chat.VoiceChat({"create_lesson": lambda **kw: {"path": "long.musicxml", "bars": 3}}, lambda: "",
                            client=_fake_claude(replies, calls), instrument=lambda: "flute")
     assert voice.ask("give me some long tones")["reply"] == "Long tones are on your screen."
-    assert calls[0]["system"] == chat.FLUTE_SYSTEM and "[The flutist said]" in calls[0]["messages"][0]["content"]
+    assert calls[0]["system"] == chat.FLUTE_SYSTEM + chat.PART_SYSTEM + chat.PAGE_SYSTEM and "[The flutist said]" in calls[0]["messages"][0]["content"]
     assert calls[1]["system"] == chat.FLUTE_LESSON_SYSTEM  # the composer writes one line for the flute
 
     profiles.create("Flute", instrument="flute")

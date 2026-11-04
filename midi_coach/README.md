@@ -23,35 +23,39 @@ Home; in a Session, **Change piece** opens it beside the sheet, and **⇤** / **
 them), **Record a new idea** to play over the metronome and get your take back as sheet music,
 the **Roadmap** for the learning map, goals, and where to start, and **Play along on YouTube**. **Today** at the top of Home
 plans your practice for the day ([Today](#today-one-button-practice)). The bar at the top only
-has **Home** and the name of the mode you're in: to change modes you go back to Home, and leaving
-a mode stops whatever was running (the Roadmap's **← Home** and Esc do the same). In a Session, the piece's
-title and status sit above one row of controls; the Maestro's chat box is in the bar along
-the bottom, next to the colour key:
+has **Home** and the name of the mode you're in: to change modes you go back to Home (the Roadmap's
+**← Home** and Esc do the same). If leaving would stop a run or a recording, it asks first,
+whether you clicked or the Maestro asked: **Stop and go** or **Cancel** (a recording stopped
+this way is kept, as Stop always does). Asked to start a run from elsewhere, the Maestro brings
+the Session up for it. In a Session, the piece's title and status sit above one row of
+controls; the Maestro has its own floating panel ([below](#talk-to-the-maestro-voice-chat-optional))
+and the colour key is in the bar along the bottom:
 
 | Control | What it does |
 |---------|--------------|
 | Home / Practice / Explore / Roadmap | Start with a clear task, then use the top navigation to return to the score, search for music, or view your learning map and goals |
 | YouTube | Play along with a song's video on youtube.com: whether the extension is connected (or needs a reload), the song open now with its video, the extension's setup steps, and every song you've synced to a video. See [Videos that only play on YouTube](#videos-that-only-play-on-youtube) |
-| File | The menu left of Home. **Open file…** (Ctrl+O): a MIDI or MusicXML file from your computer; a copy is kept in your lessons (*Unsorted*) and shown, and opening the same file again reuses it. **Save as…** (Ctrl+Shift+S): a copy of the sheet on the page under a new name, in any category (or a new one); it keeps the sheet's parts, starts with no practice history, and becomes the sheet you're on. **Download sheet file**: the file the sheet comes from, to your Downloads. **Switch profile…** opens the profile menu |
-| Preferences | Beside File (Ctrl+,). Its settings are remembered in this browser. **Connections**: whether the page is connected to the coach, and the MIDI input and output (the same choices as under **Playing** and **Parts**), with **Refresh** after plugging a keyboard in. **Microphone & speakers**: the microphone everything that listens uses (talking to the Maestro, singing and spoken answers in lessons, the flute, sax or voice), with a level bar to check it hears you. A USB microphone or headset plugged in later is added to the list straight away, and the header says so. **Allow the microphone** appears until Windows has let the page use one, since device names stay hidden until then. **Speakers** picks where the page's own sounds go (the Kokoro voice, the metronome, lesson tones), with **Test**. **Audio to MIDI**: how the microphone turns the flute, sax or voice into notes (buffer size, noise gate, pitch clarity, note timings, input latency), with a live graph of what it hears and a list of the notes it sends (see [Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone)). Windows voices always use the default speakers, and the keyboard's sound follows Sound out. **Maestro**: coaching style, when it speaks in a run (the same three as the **Maestro** menu), read replies aloud, voice and volume. **Sheet**: sheet / falling notes / both, layout, zoom, dynamics (the same as the **Maestro** and **Sheet** menus). **Song folders**: the folders the Songs search looks in (and every folder inside them). **Change folders…**: paste a path or press **Browse…** for Windows' folder picker, then **Add**; **Remove** stops searching a folder without touching its files. Saved in `config.json` → `search_folders`, so the desktop visualizer uses the same list. The tick box below turns the bitmidi.com search on or off. **Shortcuts**: the page's keyboard shortcuts |
+| File | The menu left of Home. **Open file…** (Ctrl+O): a MIDI or MusicXML file from your computer; a copy is kept in your lessons (*Unsorted*) and shown, and opening the same file again reuses it. **Save as…** (Ctrl+Shift+S): a copy of the sheet on the page under a new name, in any category (or a new one); it keeps the sheet's parts, starts with no practice history, and becomes the sheet you're on. **Download sheet file**: the file the sheet comes from, to your Downloads. **Switch profile…** opens the profile menu **Song folders…**: where songs are found (the same dialog as Preferences → Song folders → Change folders…). New songs are noticed by themselves: a MIDI or MusicXML file added to a song folder, or (with **Pick up new songs from Downloads**, on by default) saved into Downloads, shows up in the Songs search within a few seconds, a download copied into `references/downloads`, and the status line offers **Open it**. **Rescan now** looks through every folder again at once. |
+| Preferences | Beside File (Ctrl+,). Its settings are remembered in this browser. **Connections**: whether the page is connected to the coach, and the MIDI input and output (the same choices as under **Playing**: MIDI input and *Sound goes to*), with **Refresh** after plugging a keyboard in. **Microphone & speakers**: the microphone everything that listens uses (talking to the Maestro, singing and spoken answers in lessons, the flute, sax or voice), with a level bar to check it hears you. A USB microphone or headset plugged in later is added to the list straight away, and the header says so. **Allow the microphone** appears until Windows has let the page use one, since device names stay hidden until then. **Speakers** picks where the page's own sounds go (the Kokoro voice, the metronome, lesson tones), with **Test**. **Audio to MIDI**: how the microphone turns the flute, sax or voice into notes (buffer size, noise gate, pitch clarity, note timings, input latency), with a live graph of what it hears and a list of the notes it sends (see [Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone)). Windows voices always use the default speakers, and the keyboard's sound follows Sound out. **Maestro**: coaching style, when it speaks in a run (the same three as the **Maestro** menu), read replies aloud, voice and volume. **Sheet**: sheet / falling notes / both, layout, zoom, dynamics (the same as the **Maestro** and **Sheet** menus). **Song folders**: the folders the Songs search looks in (and every folder inside them). **Change folders…**: paste a path or press **Browse…** for Windows' folder picker, then **Add**; **Remove** stops searching a folder without touching its files. Saved in `config.json` → `search_folders`, so the desktop visualizer uses the same list. The tick box below turns the bitmidi.com search on or off. **Shortcuts**: the page's keyboard shortcuts |
 | Explore | Opens the search as a panel to the left of the sheet, so the piece you're practicing stays where it is; choosing an entry loads it and the panel stays open. **✕** closes it. **Songs** lists your song lessons and the reference library; search matches every word in the file name. With an empty search it shows songs you practiced recently. Under the results, **Search bitmidi.com for “…”** looks for the song online (only when pressed). Rarer words count most, so *halloween theme* puts the Halloween files ahead of every other "… Theme". Clicking a result downloads it into `%USERPROFILE%\MidiCoach\references\bitmidi` and opens it; next time the library search finds it. A file's name there is only what its uploader called it, so check what you get. **Lessons** lists teaching material (the *Exercises* and *AI exercises* categories), most recently practiced first. Entries include take history. See [Lesson categories](#lesson-categories) |
-| Playing / Sheet / Maestro / Bar controls / Settings / Actions | Drop-downs in the same row as the mode buttons, one kind of setting each (one open at a time; a click elsewhere or Escape closes it). **Playing**: MIDI input, Parts, bar range and tempo. **Sheet**: show the sheet music, the falling notes (the visualizer's view; scroll on it to change how fast they fall) or both, plus labels, dynamics and layout. **Maestro**: coaching style, when it speaks in a run (**Hello at Start**, **After a pass**: every pass / when something's new / nothing, **Sum up at the end**), Maestro decides, reading replies aloud (voice and volume), and, under *This sheet*, Analysis (Add chords & lyrics), Two hands (Clean) and Cleanup (Auto clean) when the open sheet offers them. **Bar controls**: the bar timeline, with previous/next bar, restart, Loop and bookmarks. **Settings** and **Actions** hold what works in every mode. **Settings**: Sound out (the same as Parts' *Sound goes to*), **Keep the screen on** (stops the screen dimming or locking while the page is open; remembered in the browser), and shortcuts to Preferences' Connections, Mic & speakers and Shortcuts. **Actions**: back to the start, bookmark this bar, metronome on/off, play along with a video, change piece, ask the Maestro, save a copy, download the sheet file, full screen; an item is greyed out when it can't run (no sheet, no Maestro). The metronome sits beside them |
-| Learn / Rehearse / Listen | Hover over a mode button (or Start) to see what it does. **Listen** = you don't play: the keyboard plays the piece (with its sustain pedal) on the output under *Sound goes to*, at the tempo slider's speed, and the cursor follows; Bars and Loop apply, nothing is graded or saved. It plays every part whose Sound is on under **Playing → Parts** (all but the vocals at first), shown on the sheet or not, each at its own volume; mute a hand there to hear the other alone. Learn = the cursor waits on each chord for the right notes, then flows on at the tempo slider's speed (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`). Recording is its own mode, **Record a new idea** on Home: play over the metronome and get it back as sheet music (below) |
+| Playing / Sheet / Maestro / Playback / Settings / Actions | Drop-downs in the same row as the mode buttons, one kind of setting each (one open at a time; a click elsewhere or Escape closes it). **Playing**: MIDI input, what you play and the file's tracks (below); its label says what you're set to (*Playing: Both hands*, *Listening: 3 of 20*), with 🔊 when tracks play along. **Sheet**: show the sheet music, the falling notes (the visualizer's view; scroll on it to change how fast they fall) or both, plus labels, dynamics and layout, and, under *This sheet*, Analysis (Add chords & lyrics), Two hands (Clean) and Cleanup (Auto clean) when the open sheet offers them. **Maestro**: coaching style, when it speaks in a run (**Hello at Start**, **After a pass**: every pass / when something's new / nothing, **Sum up at the end**), Maestro decides, reading replies aloud (voice and volume). **Playback**: the bar timeline, with previous/next bar, restart, Loop and bookmarks; then **Bars** (from–to), **Tempo**, and the **Lead-in** (bars of backing before your first bar, and whether every loop pass gets one) when tracks play along. **Settings** and **Actions** hold what works in every mode. **Settings**: Sound out (the same as Playing's *Sound goes to*), **Keep the screen on** (stops the screen dimming or locking while the page is open; remembered in the browser), and shortcuts to Preferences' Connections, Mic & speakers and Shortcuts. **Actions**: back to the start, bookmark this bar, metronome on/off, play along with a video, change piece, ask the Maestro, save a copy, download the sheet file, full screen; an item is greyed out when it can't run (no sheet, no Maestro). The metronome sits beside them |
+| Learn / Rehearse / Listen | Hover over a mode button (or Start) to see what it does. **Listen** = you don't play: the keyboard plays the piece (with its sustain pedal) on the output under *Sound goes to*, at the tempo slider's speed, and the cursor follows; Bars and Loop apply, nothing is graded or saved. It plays every track that isn't muted under **Playing** (Listen has its own Mute and Volume, every track on at first), shown on the sheet or not, each at its own volume, and the cursor follows what sounds; mute a track there to hear the rest without it. Learn = the cursor waits on each chord for the right notes, then flows on at the tempo slider's speed (`wait`); Rehearse = it moves at the tempo slider's speed (`rehearsal`). Recording is its own mode, **Record a new idea** on Home: play over the metronome and get it back as sheet music (below) |
 | ▶ Video | Play along with a recording: a YouTube video of the song plays above the sheet and the sheet's cursor follows it. See [Play along with a video](#play-along-with-a-video) |
-| Parts | Under **Playing**, choose which parts you play, see, or hear. Per piece, remembered in the browser. For the right hand, left hand, pedals (feet) and vocals: **You play** (graded; Learn waits for it), **Show** (drawn on the sheet, or hidden) and **Sound**, a mute button and a volume slider, which work whether the part is shown or not. In Learn and Rehearse a part you don't play is muted until you turn it on, then the keyboard plays it along with you on the MIDI output chosen under *Sound goes to*: in time in Rehearse, and in Learn the stretch up to the next chord each time you play one (so it waits for you too). Listen has its own Sound settings, every part on but the vocals. The parts menu stays open to you during a run: a volume moved or a part muted is heard from the next note (a part turned on in Learn or Rehearse joins at the next Start). Only notes are sent — no sustain pedal or all-notes-off that would catch the notes you hold. **What each part is**: each part of the file as Right hand, Left hand, Both hands (split by register), Pedals (a bass line played with your feet), Vocals (shown and heard, never graded) or Off; **Save parts** remembers it for the file, like `set_parts` |
-| Bars | Practice a bar range |
-| Labels | Under **Sheet**: note names and counting drawn on the sheet, at a level like a game's difficulty. **Easy**: on every bar. **Coached** (the default): only on the bars you slip on. Two wrong keys in a bar, or a long hunt for a chord in Learn, puts note names on it; two right keys played off the beat in Rehearse, or a bar whose timing comes out loose, puts counting under it. They appear mid-pass, and come off once you finish two passes without that slip in the bar; the Maestro says when it adds or removes them (unless After a pass is Nothing). **Hard**: none. **Note names** puts the letter on each notehead (filled or hollow like the note; a sharp or flat beside it, the key signature's included). **Counting** puts the beats between the hands' staves (under a single staff): 1 2 3 4, with & e a or trip let where notes start between beats, and a held or rested beat fainter. Coached labels belong to the piece you're on and reset when you open another. A mock exam shows none |
+| Tracks | Under **Playing**, one row per track of the file (its instruments: name, instrument, notes, range), the ones you play first. **Part**: what the track is for you: Right hand, Left hand, Both hands (split by register), Pedals (a bass line played with your feet), Vocals (sung: shown and heard, never graded), an instrument part (*An instrument part…*: name what you play it on, like flute), or **Backing**. **Show**: drawn on the sheet and the falling notes; a backing track you show gets its own staff, named for it, above yours, and falls faint (drums aren't drawn). Backing tracks start hidden. **Mute** and **Volume**: how a track you don't play sounds on the MIDI output under *Sound goes to*. **You play** (above the table) picks which of your parts you play this run (graded; Learn waits for it): both hands, one hand, with the pedals, or an instrument part. Every track you don't play is the backing and plays along unless muted: in time in Rehearse, and in Learn the stretch up to the next chord each time you play one (so it waits for you too). Listen has its own Mute and Volume. Everything is saved for the file the moment you change it (no Save button); a file whose parts were only suggested says so, with **OK** to keep them. During a run Mute and Volume are heard from the next note; Part, Show and You play wait for Stop. Only notes are sent — no sustain pedal or all-notes-off that would catch the notes you hold. A file whose parts were chosen before tracks had their own mix keeps its unused tracks hidden and muted. **Band songs**: set a track's Part to *An instrument part…*, or tell the Maestro *"the flute solo, Learn, loop, just the flute, the rest as backing"* (it finds the track by name, then by instrument, and asks if it can't tell). Then only that part is drawn, on its own staff and in the falling notes, and every other track sounds as its own instrument (*"drums down"*, *"mute the choir"* work on any track you don't play). Learn waits for each of your notes, and the band plays in time up to your next one, then goes quiet until you play it. With no bars set, the run takes the bars your part plays (the Maestro asks which if it plays in sections far apart). A **Lead-in** of backing bars (2 at first, 0-8, *"give me four bars before"*) brings you in when some backing sounds and the bars start after bar 1, on every loop pass or the first only. On a flute, sax or voice profile, naming a part clears the hand choices, and the part becomes one line: notes starting together keep the top one, and notes overlapping the next are cut where it starts |
+| Bars | Practice a bar range. Each piece remembers how you last had it: its **Bars**, **Tempo**, **Loop** and Learn / Rehearse / Listen come back whenever you open it again, from Explore, Today, the Roadmap, a playlist or the Maestro (saved with the file in `part_choices.json`, so they survive a different browser too). A piece you haven't set up opens on the whole piece and keeps the tempo, loop and mode you had. Zoom, layout, labels and the rest of the Sheet menu stay the same for every piece. Bars the Roadmap marks on a song (*See in the song*) aren't kept |
+| Labels | Under **Sheet**: note names and counting drawn on the sheet, at a level like a game's difficulty. **Easy**: on every bar, and when you press the same wrong key twice on one chord, the red flash also names the key to play. **Coached** (the default): only on the bars you slip on. Two wrong keys in a bar, or a long hunt for a chord in Learn, puts note names on it; two right keys played off the beat in Rehearse, or a bar whose timing comes out loose, puts counting under it. They appear mid-pass, and come off once you finish two passes without that slip in the bar; the Maestro says when it adds or removes them (unless After a pass is Nothing). **Hard**: none. **Note names** puts the letter on each notehead (filled or hollow like the note; a sharp or flat beside it, the key signature's included). **Counting** puts the beats between the hands' staves (under a single staff): 1 2 3 4, with & e a or trip let where notes start between beats, and a held or rested beat fainter. Coached labels belong to the piece you're on and reset when you open another. A mock exam shows none |
 | Dynamics | Under **Sheet**: show or hide dynamics (pp to ff, hairpins) on the sheet. Off by default, remembered in the browser. A MIDI file played with changing dynamics gets them marked from how hard each passage was played (a new mark only where the level changes for two bars or more, so one accented bar isn't a new dynamic); a file at one velocity throughout gets none. MusicXML lessons show their own |
-| Add chords & lyrics | Under **Maestro → This sheet → Analysis**: adds **chord names** over the right hand, **Roman numerals** under the left hand, **lyrics** under the tune and **section names** (Verse, Chorus…). See [Chords, lyrics and sections](#chords-lyrics-and-sections). The boxes under it show and hide each kind (remembered in the browser); **Look again** looks the song up afresh |
-| Clean | Under **Maestro → This sheet → Two hands**, for MIDI files: makes the parts you play fit two hands and checks the sheet for anything hard to read. See [Parts no two hands can play](#parts-no-two-hands-can-play). **Show original** undoes it |
+| Add chords & lyrics | Under **Sheet → This sheet → Analysis**: adds **chord names** over the right hand, **Roman numerals** under the left hand, **lyrics** under the tune and **section names** (Verse, Chorus…). See [Chords, lyrics and sections](#chords-lyrics-and-sections). The boxes under it show and hide each kind (remembered in the browser); **Look again** looks the song up afresh |
+| Clean | Under **Sheet → This sheet → Two hands**, for MIDI files: makes the parts you play fit two hands and checks the sheet for anything hard to read. See [Parts no two hands can play](#parts-no-two-hands-can-play). **Show original** undoes it |
 | Sheet | Under **Sheet → Layout**: **Scrolls sideways** (one long line moving past a fixed cursor, the default) or **Two rows, scrolls down** (the sheet as rows across the page: the row you're playing on top, the next one under it, and the sheet scrolls down a row as the cursor reaches it). Remembered in the browser. In two rows, drag or scroll up and down to look around |
+| ⤢ Maximize | The button at the sheet's top-right corner: the sheet fills the window, with only the Start row left above it (the title bar, the search, the video and the colour key fold away). **⤡** or **Esc** restores it |
 | Zoom | Under **Sheet → Zoom** (50–200%, remembered in the browser): how big the sheet is drawn on top of its fit to the strip. Smaller shows more bars along the line, or more rows in two-row layout; larger makes the strip taller where there's room, and past that crops the top and bottom of the line (or shows less of the next row) |
-| Bar timeline / Loop / Bookmarks | **Bar controls** shows the whole piece on one slider. Drag it or use ◀ / ▶ to jump, ↺ to go back to the start of the selected bars; while Learn, Rehearse or Listen is running, the coach restarts at that bar (Learn waits at its first chord). When **Bars** are chosen they show as a band on the slider (in the accent colour with **Loop** on), and the slider stays inside them. With **Loop** on, the selected bars repeat; jumping within them doesn't change their endpoints. Each completed pass is saved and graded as its own take. The sheet flags where the bars start and end (*Loop start* / *Loop end* while repeating). **🔖** bookmarks the bar you're on (again to remove it): each bookmark is a tick on the slider and a chip under it that jumps there (✕ removes it). Bookmarks are per piece, remembered in the browser. **Double-click a bar on the sheet** to jump to it. A bookmark or double-click outside the selected bars clears them first when nothing is running; during a run it says the bar is outside them |
+| Bar timeline / Loop / Bookmarks | **Playback** shows the whole piece on one slider. Drag it or use ◀ / ▶ to jump, ↺ to go back to the start of the selected bars; while Learn, Rehearse or Listen is running, the coach restarts at that bar (Learn waits at its first chord). When **Bars** are chosen they show as a band on the slider (in the accent colour with **Loop** on), and the slider stays inside them. With **Loop** on, the selected bars repeat; jumping within them doesn't change their endpoints. Each completed pass is saved and graded as its own take. The sheet flags where the bars start and end (*Loop start* / *Loop end* while repeating). **🔖** bookmarks the bar you're on (again to remove it): each bookmark is a tick on the slider and a chip under it that jumps there (✕ removes it). Bookmarks are per piece, remembered in the browser. **Double-click a bar on the sheet** to jump to it. A bookmark or double-click outside the selected bars clears them first when nothing is running; during a run it says the bar is outside them |
 | Maestro decides | With **Loop** on, the Maestro changes the practice between passes the way a teacher would, says what it did, and the menu follows: the same problem bar in two passes → loop it with a bar either side (back to your section after three clean passes); a rough pass in Rehearse → 10% slower (not below 50%); two rough passes with both hands → right hand alone, then left, then both (two clean passes each); three clean passes in Learn → Rehearse at 70%; three clean in Rehearse → 5% faster (up to 100%). Say or type *"no"* / *"undo"* to put the last change back (handled on your PC, no API call) |
 | Maestro: Friend / Strict | How the Maestro coaches, remembered between sessions (also by voice: *"be a bit gentler"*). **Friend** (default) is a cheerful practice buddy, more Duolingo than examiner: it celebrates effort and streaks, treats slips as part of learning, and says what went well before the one thing to try next; **Strict** is dry and demanding. Either way it names the exact bar and note |
 | Start / ▶ Listen / Stop | One session at a time, shared with Claude. Stop freezes the sheet cursor at its current position |
 | Metronome | In the control row, **♩ Metronome** starts it and the **BPM ▾** button opens its settings — BPM (type it, **Tap** it, or **Match score**), beats per bar, subdivision (quarters to sextuplets), six sounds, accent on beat 1, volume and a separate volume for the subdivisions. **M** starts/stops it. **Follow score**: Rehearse runs start with a count-in and the clicks follow the score — its tempo changes, time signatures and pickup bars, at your Tempo % — instead of waiting for your first note. Runs in the browser: no lag, no cost |
-| Maestro | Ask by text or microphone in the dedicated Maestro panel. The Maestro also speaks coaching feedback in a dialogue box (click to skip, click again to close). When you press Start it greets you with what it knows: the piece, its key signature, your best score on it, how long you've been away. When a looped run ends it sums up passes, your best one, and your weak bar. After a pass it says at most two sentences, and only when there's something new: how it went or how it compares with the last pass, then the one thing to know. The first time a slip shows up it's named ("Bar 3: that's F sharp, not F"); the second time comes how to fix it ("Bar 3 again; take it on its own, slowly"); after that just a word ("Same spot."). Clean passes in a row stay quiet except at three and five. Wording never repeats the last half of its choices, even across sessions (`%USERPROFILE%\MidiCoach\maestro.json`). Claude's comments (`say`) are spoken too. Each of these can be switched off under **Maestro** (or by asking it, *"don't greet me"*, *"only talk when something changes"*): **Hello at Start**, **After a pass** (*Every pass* always says something, *When something's new* is the behaviour above, *Nothing* stays quiet and leaves just the pass line), and **Sum up at the end**. With **Maestro decides** on, it still says what it changed. These and the Friend / Strict style are kept per profile in `maestro.json`; the voice and volume are remembered in this browser. Browsers only let a page speak after you've clicked it once |
+| Maestro | Ask by text or microphone in the dedicated Maestro panel. The Maestro also speaks coaching feedback in a dialogue box (click to skip, click again to close). While it speaks, **■ Stop** in its panel and in the dialogue box cuts it off mid-sentence (talking to it does too). When you press Start it greets you with what it knows: the piece, its key signature, your best score on it, how long you've been away. When a looped run ends it sums up passes, your best one, and your weak bar. After a pass it says at most two sentences, and only when there's something new: how it went or how it compares with the last pass, then the one thing to know. The first time a slip shows up it's named ("Bar 3: that's F sharp, not F"); the second time comes how to fix it ("Bar 3 again; take it on its own, slowly"); after that just a word ("Same spot."). Clean passes in a row stay quiet except at three and five. Wording never repeats the last half of its choices, even across sessions (`%USERPROFILE%\MidiCoach\maestro.json`). Claude's comments (`say`) are spoken too. Each of these can be switched off under **Maestro** (or by asking it, *"don't greet me"*, *"only talk when something changes"*): **Hello at Start**, **After a pass** (*Every pass* always says something, *When something's new* is the behaviour above, *Nothing* stays quiet and leaves just the pass line), and **Sum up at the end**. With **Maestro decides** on, it still says what it changed. These and the Friend / Strict style are kept per profile in `maestro.json`; the voice and volume are remembered in this browser. Browsers only let a page speak after you've clicked it once |
 
 Learn-mode note scores use the live cursor's hits, unfinished notes, and wrong presses; they do not infer accuracy from performance timing because the cursor waits for each note.
 
@@ -98,7 +102,15 @@ coach logo) in the Start menu, so Windows search finds it, and on the Desktop. B
 `Launch Music Coach.bat`, which goes through `midi_coach.launch`: if a coach is already
 running and current it just opens the page; if that copy started before the code changed, a
 practice copy is restarted, and for Claude Desktop's midi-coach it tells you to restart
-Claude Desktop. The logo is drawn by `python -m midi_coach.icon` (`static/coach.ico`,
+Claude Desktop.
+
+**Updates while it's open.** When the code changes (say, after a fix in Claude Code), a bar at
+the top of the coach page tells you, once the files have stopped changing for 15 seconds:
+*This page was updated* → **Reload**, or *The coach was updated* → **Restart coach**. Restart
+is off while a run is going. It takes a few seconds: the coach comes back in the same window
+with the same piece, and the page reloads by itself. A coach started by the shortcut or by
+`python -m midi_coach.launch` can restart this way. For Claude Desktop's midi-coach the bar says
+to quit Claude Desktop and open it again. The logo is drawn by `python -m midi_coach.icon` (`static/coach.ico`,
 `coach.png`; it's also the page's tab icon).
 
 ## Today: one-button practice
@@ -277,9 +289,11 @@ active one if you have none). **Start today's practice ▸** on the last screen 
 part of Today. Answers are kept in `%USERPROFILE%\MidiCoach\atlas\welcome.json`, and the
 Maestro hears why you're learning and how long you practice. A flute or saxophone profile is
 asked about its instrument, reads a treble G instead of the bass-clef note, and checks the
-microphone before the end; a singer reads middle C and sings a note for the check (see
-[Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone) and
-[Alto saxophone and vocals](#alto-saxophone-and-vocals)).
+microphone before the end; a singer reads middle C and sings a note for the check; a fiddler
+reads the open A, a guitarist the open top E and a bassist the open A in the bass clef (see
+[Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone),
+[Alto saxophone and vocals](#alto-saxophone-and-vocals) and
+[Fiddle, electric guitar and bass guitar](#fiddle-electric-guitar-and-bass-guitar)).
 
 **Mock exams** (the link under Where to start, or Claude's `start_placement`) runs full mock exams from
 the grade you pick. Each pass moves up a grade until one isn't passed; if the first isn't, it
@@ -324,7 +338,13 @@ exercises down the left (its stages, each with its progress dot; click one to sw
 step panel with just the lesson's name, and the sheet. **← Roadmap**, the Roadmap tab or the
 browser's Back goes up to the map; finished steps are already saved, and if a step is still
 running it asks first, since a step stopped halfway isn't graded. Leaving the lesson view
-puts back the sheet the Session had before. A step's **Start** / **▶ Listen** turns into **■ Stop**
+puts back the sheet the Session had before. On a song goal, **See in the song** (under the
+lesson's name, or ask the Maestro) shows the song itself in the lesson view, scrolled to this
+lesson's bars and marked with Start/End: a section's own bars, a bridge's bars as the planner
+placed it in the song, or the start when it didn't. Nothing played there is graded against the
+lesson. **← Back to exercise** puts the lesson's music back; **Practise the whole song in the
+Session** takes the song there (the marked bars stay chosen) and the Roadmap reselects this
+lesson when you come back. A step's **Start** / **▶ Listen** turns into **■ Stop**
 while it runs (Listen steps play like a Session's Listen, with the cursor following); a play
 step says its pass mark in words (*play to the end and get 80% of the notes right*), and every
 run ends with a line under the step, also when it wasn't graded and why. Everything
@@ -422,6 +442,19 @@ It writes `atlas\pan\atlas.json`, a lesson for every stage and the music (single
 parts, each checked against the engraving rules and read back note for note); the tunes are
 in `midi_coach/atlas/data/pan_tunes.json`.
 
+**Fingering.** For the flute and the alto sax, a fingering chart is a column of keys: the left
+hand at the top in blue, the right hand under it in red, a key that's down filled (the sax's in
+written pitch, as its music is printed). Each **Find the notes** lesson opens with the charts of
+its new notes, then asks *Which note is this?* about each chart (practice only: the stage is still
+passed by playing). **Sheet ▸ Fingering** puts a small chart under the notes of any score: *Where
+it changes* (a run of the same note gets one) or *First time on each line* (each note once per
+row; on the sideways line, once per four bars). It's off by default, since it makes the sheet
+taller and spreads the notes out; it goes under a lesson's line or, in a band song, the parts
+named for the instrument. **Monitor** (beside it, on by default) shows two charts in the corner
+while you play: the note the music is waiting for, and the note the microphone hears, green when
+they match and red when not. A note with no chart (the flute above E♭6, the sax above F6) gets
+none. The Maestro can set both.
+
 **Audio to MIDI** (Preferences, Ctrl+,) tunes how the microphone turns the flute into notes.
 While the pane is open the microphone listens: a graph shows the last four seconds (level, the
 noise gate, the pitch heard, the note being held), a line under it the live level, pitch,
@@ -490,10 +523,66 @@ The microphone listens over each instrument's range (a low voice's from about 70
 little more forgiving of a voice's slides and vibrato; **Audio to MIDI** in Preferences still
 tunes it.
 
+## Fiddle, electric guitar and bass guitar
+
+These three work like the flute too (the microphone, examples from the page, a Maestro who
+teaches that instrument, **write me…**, the welcome's microphone check), and each is the coach's
+own course (no exam board's): *First notes* in first position, then Grades 1 and 2 with scales
+and arpeggios, sight-reading, aural tests (from the flute's local syllabus when there is one),
+theory and public-domain tunes. The syllabi and tunes are in `midi_coach/atlas/data`
+(`fiddle_*`, `guitar_*`, `bass_*`).
+
+**Fiddle** reads the treble clef at the pitch it sounds. *First notes*: holding the fiddle and
+bow, the open strings, the fingers on the A, D, E and G strings, the low second finger; whole
+bows, string crossing, two notes to a bow. Scales are learnt with separate bows, then slurred,
+then at tempo from memory; the keys start with D, G and A major.
+
+**Electric guitar** and **bass guitar** music is written an octave above how it sounds, as
+guitar and bass books print it: the sheet shows an 8 under the treble (guitar) or bass clef
+(bass), and the coach hears and grades the pitch that sounds, so nothing needs moving. The
+microphone hears one note at a time, so everything graded is single notes (melodies, riffs,
+scales, arpeggios); chords, strumming and power chords are taught in the guitar's *Theory &
+chords* strand, not graded: pick a chord's strings one at a time to hear each note. Plug in and
+keep the amp low; a bass's low E (41 Hz) needs an amp, and the page analyses longer windows for
+these two (2048 samples for the guitar, 4096 for the bass) whatever **Audio to MIDI** is set to.
+
+**Tab.** For the guitar and the bass, **Sheet ▸ Tab** (on by default) adds a tab staff under the
+notes: a line per string, the number the fret to press, 0 the open string. It is worked out on
+the page from the notes, lowest fret first (so first position), for a lesson's line or, in a
+band song, the parts named for the instrument; it shows and hides with that part, and is never
+marked or graded. The Maestro can turn it on or off too.
+
+Build the three Roadmaps with:
+
+```bat
+.venv\Scripts\python -m midi_coach.atlas.fiddle
+.venv\Scripts\python -m midi_coach.atlas.guitar
+.venv\Scripts\python -m midi_coach.atlas.bass
+```
+
 ## Talk to the Maestro (voice chat, optional)
 
-Tap **🎤 Talk** on the coach page, speak, tap again (or hold it, or hold **Space**, and let go
-when you're done), or type in the box next to it. A level meter shows whether the microphone
+The **Maestro panel** floats over every part of the coach page. Drag it by its top bar; the
+arrow opens it on today's conversation or folds it to the bar. Open, it keeps everything said
+today — what you asked, each answer, and what the Maestro, Claude or the Examiner said unasked
+(marked *unasked*) — and a reload shows the same day (`~/MidiCoach/maestro_log/<date>.jsonl`).
+Folded, a new line shows in the dialogue box as before and lights a dot on the bar. 🔊 beside
+a line says it again (even with the voice off); **Clear** empties the panel for the rest of
+the day without touching the log; a dashed line marks where the Maestro started a fresh
+conversation and forgot what's above it. Resize it from its top-right corner. **Ask
+Maestro** (top bar, Home, Actions) opens it where you are, without leaving what you're doing.
+
+Under the bar, folded or open, are **quick-action tiles** for the part of the app you're on.
+Session: Play/Stop, Start, Loop, Metronome, Tempo − / +, Record. Roadmap: Today, Next stop,
+Planner, Mock exam. Home: Today, Continue. Record and YouTube: Play/Stop, Metronome. A tile that
+can't act right now is greyed, and its hover says why (*Open a piece first*). **✎** edits this
+part's set: × takes a tile off, the tray below adds one, drag to reorder, **Done** to finish. Any
+tile can go on any part; one that belongs elsewhere has a dashed edge and goes there first
+(asking first if that would stop a run). Or ask: *"Put the metronome on my Roadmap tiles."* Each
+profile keeps its own sets (`tiles.json` in the profile's folder).
+
+Tap **🎤 Talk** on the panel, speak, tap again (or hold it, or hold **Space**, and let go
+when you're done), or open the panel and type. A level meter shows whether the microphone
 hears you; pick the microphone in the menu next to it. The JUNO-DS's USB audio input is
 not a microphone, so plug in a headset or USB mic. The Maestro
 answers out loud in character and can run the practice for you:
@@ -503,6 +592,9 @@ answers out loud in character and can run the practice for you:
 - *"Play bars one to four for me."* (through the keyboard)
 - *"Write me a G major arpeggio exercise."* / *"Switch to the C major scale."*
 - *"Be a bit gentler."* / *"Be strict with me today."* (the Friend / Strict setting)
+- *"Show the falling notes."* / *"Note names on."* / *"Zoom in."* / *"Metronome on at sixty."* /
+  *"Open the Roadmap."* / *"Set bars nine to twelve and loop them."* (the page's own controls,
+  set as if you'd clicked them, without starting a run)
 - With a flute in your hands, tick **Hands-free** and start with *"Maestro, …"* instead (see
   [Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone)).
 
@@ -561,14 +653,35 @@ recent log, a screenshot of the window in front, and up to five from the 15 seco
 adds one more to the latest report, with anything you say after it. The screenshots are of
 whatever window is in front and stay on your PC; the last few seconds are kept in memory only
 while a coach page is open, and only written when you report a bug. Later, in Claude Code, say
-*"fix the bug reports"*; fixed ones move to `bug_reports/fixed/`.
+*"fix the bug reports"*; each fixed one waits in `bug_reports/check/` until you try it.
+
+**Typing instead (F9).** On the coach page, **F9** opens a small box: pick 🐞 Bug or 💡 Idea,
+type what's wrong, press Enter. The box closes before the screenshot is taken, and the report
+is saved exactly like a spoken one (screenshots from the seconds before, the practice on
+screen, the page's errors). F9 again or Escape closes it without saving.
+
+**Trying the fixes.** When something you reported has been fixed, a **👀 N fixes to try** button
+appears at the top of the coach page. It lists each fix with your screenshot, what you said and
+where you were (page, song, bar, mode), and a line on what changed. Try it, then press
+**✅ Works** (it moves to `fixed/`, or `requests/done/`) or **↩️ Still wrong** and say what's
+still off (it goes back to `open/` with your words, to be fixed again). **↗ Go there** opens
+the piece you reported it on and sets the page up as it was: the view, the mode, the bars, the
+tempo, the loop and the cursor's bar (this becomes that piece's saved practice settings, as if
+you'd set them). It's off while a run is going. Opening
+`http://127.0.0.1:8765/#checks` opens the list straight away.
+
+**The backlog in Obsidian.** If your Obsidian vault has a `Projects/MidiCoach` folder (the vault
+is `~/Vault` unless `MIDI_COACH_VAULT` says otherwise), every report, fix and check rewrites
+`Projects/MidiCoach/Backlog.md`: what's ready to try, what's open, and what was done in the last
+two weeks, each with its screenshot (copied to the vault's `attachments/backlog/`). It's written
+by the coach, so edit the reports, not the note.
 
 **Requests for the app.** Want something changed or added? Say *"Idea: a bigger metronome
 button"* (or *"feature: …"*, *"feature request …"*, *"wish list: …"*, *"suggestion: …"*).
 It's saved like a bug report, with screenshots, to `~/MidiCoach/requests/open/<date_time>/`, free
 and with no API call; asking in other words (*"could the sheet have finger numbers?"*) also works,
 through the Maestro. *"Another screenshot"* adds to whichever report or request you made last.
-In Claude Code, say *"do the requests"*; done ones move to `requests/done/`.
+In Claude Code, say *"do the requests"*; built ones wait in `requests/check/` for you to try, like fixes.
 
 **Conversation log.** Everything you say or type to the Maestro, and its answer, is added to
 `~/MidiCoach/maestro_log/<date>.md`, so a wish said in passing isn't lost. It stays on your PC.
@@ -715,7 +828,7 @@ it for any earlier take. Wait-mode takes are scored on notes only, since the cur
 **Files with no steady beat.** Some MIDI files were played in without a click, so their
 notes don't line up with the file's bar lines. When the coach can't recover the beat by
 itself, the sheet is still drawn on the file's own grid, with a yellow warning above it
-that the bar lines and rhythms are rough. Press **Auto clean** (under **Maestro → This sheet**;
+that the bar lines and rhythms are rough. Press **Auto clean** (under **Sheet → This sheet**;
 the warning has a button that opens it) to have the coach
 follow the playing, find a beat and redraw the sheet. It tries starting tempos from 50 to
 200 BPM; when a few different beats fit about equally well, it writes the sheet for each and
@@ -731,8 +844,9 @@ line an octave up while it plays the riff, so the right hand would need B2 and D
 (Ghostbusters' chorus); two parts play the same key at the same moment; a file has a note
 written twice. The sheet of such a part is hard to read too, full of clef changes and 8va / 8vb
 marks. When the coach finds this in the parts you play, a yellow warning above the sheet says
-in which bars. Press **Clean** (under **Maestro → This sheet**; the warning has a button that
-opens it). Chord by chord, it:
+in which bars. Press **Clean** (under **Sheet → This sheet**; the warning has a button that
+opens it), or **✕** to ignore the warning for that sheet (remembered in this browser; Clean
+stays under *This sheet*). Chord by chord, it:
 
 1. plays a key sounded twice at once only once, in the hand it sits best in;
 2. hands notes one hand can't reach (more than a ninth from its top note in the right hand,
@@ -749,7 +863,7 @@ alongside the part choice. A part both hands can already play is left as it is.
 
 ### Chords, lyrics and sections
 
-**Add chords & lyrics** (under **Maestro → This sheet**) writes extra information onto the song that is
+**Add chords & lyrics** (under **Sheet → This sheet**) writes extra information onto the song that is
 open. It never changes a note, and it doesn't change the lesson file: only the drawn sheet.
 It isn't offered on the Roadmap's own music (scales, arpeggios, exercises, exam pieces,
 sight-reading), which has no chart or lyrics to look up.
@@ -903,8 +1017,8 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `list_midi_ports` | Show MIDI inputs/outputs |
 | `find_reference` | Fuzzy search the reference library by title |
 | `inspect_reference` | Parts (track + channel) with their instrument, what each is (a hand, pedals, vocals), bars, tempo, pedal, long rests; suggests which parts to play |
-| `set_parts` | Save what each part is — `right` / `left` / `both` hands, `pedals` (feet), `vocals` (shown, never graded) — remembered per file |
-| `start_recording` | Record from the input; optional reference / hand (`both` / `right` / `left`, `+pedals` to add the feet, or `pedals`) / bars; `mode` = free / wait / rehearsal; `backing` = parts you don't play to sound on the MIDI output along with you |
+| `set_parts` | Save what each part is — `right` / `left` / `both` hands, `pedals` (feet), `vocals` (shown, never graded), and `named` parts (`{"flute": [4]}`: played on their own, `hand="flute"`, over the rest of the file as backing) — remembered per file |
+| `start_recording` | Record from the input; optional reference / hand (`both` / `right` / `left`, `+pedals` to add the feet, or `pedals`) / bars; `mode` = free / wait / rehearsal; in wait / rehearsal every track you don't play sounds on the MIDI output as the Playing menu mixes it (mute / volume per track) |
 | `wait_for_recording` | Block until the take ends; returns the comparison (or standalone analysis) |
 | `stop_recording` | End the take now |
 | `status` | Recording + playback status |
@@ -1039,7 +1153,10 @@ Takes are saved as `.mid` plus `.json` in `%USERPROFILE%\MidiCoach\takes` (overr
 | `MIDI_COACH_OUTPUT` | JUNO | Output port name substring |
 | `MIDI_COACH_HOME` | `~/MidiCoach` | Takes and extra references |
 | `MIDI_COACH_REFERENCE_DIRS` | — | Extra reference folders (`;`-separated) |
-| `MIDI_COACH_CONFIG` | `<repo>/config.json` | Where `search_folders` and `online_search` (the bitmidi.com search; on unless `false`) are kept |
+| `MIDI_COACH_CONFIG` | `<repo>/config.json` | Where `search_folders`, `online_search` (the bitmidi.com search; on unless `false`) and `watch_downloads` (pick up new songs from Downloads; on unless `false`) are kept |
+| `MIDI_COACH_DOWNLOADS` | `~/Downloads` | The Downloads folder the Maestro's open_song and the new-song watcher look in |
+| `MIDI_COACH_VAULT` | `~/Vault` | Obsidian vault for `Projects/MidiCoach/Backlog.md` (used only if that folder exists); `off` for none |
+| `MIDI_COACH_SONG_WATCH` | on | `off` stops the coach watching the song folders and Downloads for new songs |
 | `MIDI_COACH_DISPLAY_PORT` | `8765` | Live score server port (next free port if taken) |
 | `MIDI_COACH_NO_BROWSER` | — | Set to stop Claude opening the browser automatically |
 | `ANTHROPIC_API_KEY` | `~/MidiCoach/anthropic_api_key.txt` | API key for talking to the Maestro |

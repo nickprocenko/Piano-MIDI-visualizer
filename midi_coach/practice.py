@@ -26,7 +26,7 @@ def main() -> None:
     url = server.hub.start()
     query = " ".join(sys.argv[1:]).strip()
     lessons = server.PAGE_COMMANDS["lessons"]({})["lessons"]
-    path = str(server.library.resolve_reference(query)) if query else lessons[0]["path"] if lessons else None
+    path = str(server.library.resolve_reference(query)) if query else server.restarted_score() or (lessons[0]["path"] if lessons else None)
     if path:
         server.hub.load_score(server.library.get_score(path))
         server.hub.status(f"{pathlib.Path(path).stem} · pick Listen, Learn or Rehearse and press Start")

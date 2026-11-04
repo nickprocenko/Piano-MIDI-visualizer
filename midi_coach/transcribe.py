@@ -118,6 +118,9 @@ def transcribe(
     return {**out, "dropped": dropped}
 
 
+EXTRA_BASS_BELOW = 55  # an extra staff whose middle note is below G3 is in the bass clef
+
+
 def grand_staff(
     events: list[tuple[str, Fraction, Fraction, int]],
     title: str,
@@ -131,6 +134,8 @@ def grand_staff(
     clef_every: Fraction | None = None,
     pickup: Fraction | None = None,
     dynamics: list[tuple[Fraction, str]] | None = None,
+    piano: bool = True,
+    extra: list[tuple[str, list[tuple[Fraction, Fraction, int]]]] | None = None,
 ) -> dict:
     """Write (hand, onset beat, end beat, pitch) events as a two-staff piano score; events
     whose hand is 'pedals' (a bass line played with the feet) get a third staff below.
@@ -153,7 +158,10 @@ def grand_staff(
     climbs). pickup: the music starts with an upbeat this many beats long - written as a
     short bar 0 (implicit in MusicXML), bars numbered from 1 after it, as printed music does.
     dynamics: [(beat, "mf"), ...] marks for the piano, written once under the right hand
-    (between the staves, where piano music puts them).
+    (between the staves, where piano music puts them). piano=False writes the melody staff
+    alone (a named part: the flute's line, no piano under it). extra: other tracks to show
+    above everything, [(name, [(onset, end, pitch)])], one staff each (treble, or bass for a
+    low line), written like a hand (chords, a second voice for held notes).
     Returns {xml, bars, notes, key, keys: [(bar, key signature sharps)]}.
     """
     import bisect
@@ -161,7 +169,8 @@ def grand_staff(
     from music21 import chord, clef, dynamics as m21dynamics, key as m21key, metadata, meter, note, stream, tempo, tie
     from music21.musicxml.m21ToXml import GeneralObjectExporter
 
-    if not events and not melody:
+    extra = [(name, list(notes)) for name, notes in extra or [] if notes]
+    if not events and not melody and not extra:
         raise ValueError("No notes to write.")
     tune = list(melody or [])
     shift = Fraction(0)
@@ -172,9 +181,10 @@ def grand_staff(
         tune = [(on + shift, end + shift, p, lyric) for on, end, p, lyric in tune]
         tempo_marks = [(at + shift if at else at, bpm) for at, bpm in tempo_marks or []]
         dynamics = [(at + shift, mark) for at, mark in dynamics or []]
+        extra = [(name, [(on + shift, end + shift, p) for on, end, p in notes]) for name, notes in extra]
         if not isinstance(time_signature, str):
             time_signature = [(at + shift if at else at, sig) for at, sig in sorted(time_signature)]
-    last = max([e[2] for e in events] + [m[1] for m in tune])
+    last = max([e[2] for e in events] + [m[1] for m in tune] + [n[1] for _, notes in extra for n in notes])
     bar_starts, bar_sigs, total = _bar_grid(time_signature, last)
     bars = len(bar_starts)
 
@@ -182,7 +192,7 @@ def grand_staff(
         return max(0, min(bisect.bisect_right(bar_starts, at) - 1, bars - 1))
 
     # Key from the pitches, for the key signature and sharps-vs-flats spelling.
-    every = events + [("tune", on, end, p) for on, end, p, _ in tune]
+    every = events + [("tune", on, end, p) for on, end, p, _ in tune] + [("extra", *n) for _, notes in extra for n in notes]
     probe = stream.Stream([note.Note(p) for *_, p in every])
     try:
         found = probe.analyze("key")
@@ -225,7 +235,49 @@ def grand_staff(
         _ottavas(part)  # first: accidentals follow where notes are drawn
         _print_accidentals(part)
 
+    def write_staff(part, hand_events) -> int:
+        """Notes in chords (a second voice for notes held over the next chord), rests between,
+        bars, ties and accidentals: a hand's staff, or an extra one."""
+        written = 0
+        voices = _voices(hand_events)
+        for k, notes_in_voice in enumerate(voices):
+            target = part if len(voices) == 1 else stream.Voice(id=str(k + 1))
+            written += _write_voice(target, notes_in_voice, legato_gap, total, spelled, chord, note, tie, bar_starts)
+            if target is not part:
+                target.makeRests(fillGaps=True, inPlace=True, timeRangeFromBarDuration=False, refStreamOrTimeRange=[0, total])
+                _plain_rests(target, bar_starts)
+                part.insert(0, target)
+        if len(voices) == 1:
+            part.makeRests(fillGaps=True, inPlace=True, timeRangeFromBarDuration=False, refStreamOrTimeRange=[0, total])
+            _plain_rests(part, bar_starts)
+        part.makeMeasures(inPlace=True)
+        part.makeTies(inPlace=True)
+        if shift:
+            _pickup_bar(part, shift)
+        for m in part.getElementsByClass("Measure"):
+            # A voice with nothing to play in a bar is left out of it, rather than drawing a whole rest.
+            idle = [v for v in m.voices if not v.notes]
+            for v in idle[: len(m.voices) - 1]:
+                m.remove(v)
+            # Nor is a rest drawn under the other voice's held note.
+            for v in m.voices:
+                others = [n for w in m.voices if w is not v for n in w.notes]
+                for r in v.getElementsByClass("Rest"):
+                    if any(n.offset < r.offset + r.quarterLength and r.offset < n.offset + n.quarterLength for n in others):
+                        r.style.hideObjectOnPrint = True
+        accidentals(part)
+        _beat_triplets(part)
+        return written
+
     count = 0
+    for name, notes in extra:  # other tracks shown, above everything
+        part = stream.Part()
+        part.partName = name
+        pitches = sorted(p for _, _, p in notes)
+        part.insert(0, clef.BassClef() if pitches[len(pitches) // 2] < EXTRA_BASS_BELOW else clef.TrebleClef())
+        meters_and_keys(part)
+        count += write_staff(part, notes)
+        score.insert(0, part)
     if tune:
         part = stream.Part()
         part.partName = melody_name
@@ -251,7 +303,7 @@ def grand_staff(
         _beat_triplets(part)
         score.insert(0, part)
     feet =("pedals",) if any(e[0] == "pedals" for e in events) else ()
-    for hand in ("right", "left") + feet:
+    for hand in (("right", "left") if piano else ()) + feet:
         part = stream.Part()
         part.partName = {"right": "Right Hand", "left": "Left Hand", "pedals": "Pedals"}[hand]
         hand_events = [(on, end, p) for h, on, end, p in events if h == hand]
@@ -269,34 +321,7 @@ def grand_staff(
         if hand == "right":
             for at, mark in dynamics or []:
                 part.insert(at, m21dynamics.Dynamic(mark))
-        voices = _voices(hand_events)
-        for k, notes_in_voice in enumerate(voices):
-            target = part if len(voices) == 1 else stream.Voice(id=str(k + 1))
-            count += _write_voice(target, notes_in_voice, legato_gap, total, spelled, chord, note, tie, bar_starts)
-            if target is not part:
-                target.makeRests(fillGaps=True, inPlace=True, timeRangeFromBarDuration=False, refStreamOrTimeRange=[0, total])
-                _plain_rests(target, bar_starts)
-                part.insert(0, target)
-        if len(voices) == 1:
-            part.makeRests(fillGaps=True, inPlace=True, timeRangeFromBarDuration=False, refStreamOrTimeRange=[0, total])
-            _plain_rests(part, bar_starts)
-        part.makeMeasures(inPlace=True)
-        part.makeTies(inPlace=True)
-        if shift:
-            _pickup_bar(part, shift)
-        for m in part.getElementsByClass("Measure"):
-            # A voice with nothing to play in a bar is left out of it, rather than drawing a whole rest.
-            idle = [v for v in m.voices if not v.notes]
-            for v in idle[: len(m.voices) - 1]:
-                m.remove(v)
-            # Nor is a rest drawn under the other voice's held note.
-            for v in m.voices:
-                others = [n for w in m.voices if w is not v for n in w.notes]
-                for r in v.getElementsByClass("Rest"):
-                    if any(n.offset < r.offset + r.quarterLength and r.offset < n.offset + n.quarterLength for n in others):
-                        r.style.hideObjectOnPrint = True
-        accidentals(part)
-        _beat_triplets(part)
+        count += write_staff(part, hand_events)
         score.insert(0, part)
     xml = GeneralObjectExporter(score).parse().decode("utf-8")
     xml = xml.replace('<creator type="composer">Music21</creator>', "")  # music21's placeholder, not a composer

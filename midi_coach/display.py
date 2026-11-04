@@ -24,6 +24,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote
 
+from . import transcript
 from .notes import MUSICXML_SUFFIXES, Score
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -41,6 +42,7 @@ STATIC_FILES = {
     "/coach.png": (pathlib.Path(__file__).parent / "static" / "coach.png", "image/png"),
     "/favicon.ico": (pathlib.Path(__file__).parent / "static" / "coach.ico", "image/x-icon"),
     "/notation.html": (REPO_ROOT / "docs" / "notation.html", "text/html; charset=utf-8"),
+    "/fingering.js": (REPO_ROOT / "docs" / "fingering.js", "application/javascript; charset=utf-8"),
     "/opensheetmusicdisplay.min.js": (REPO_ROOT / "src" / "static" / "opensheetmusicdisplay.min.js", "application/javascript"),
 }
 DEFAULT_PORT = 8765
@@ -72,7 +74,7 @@ def cleanup_state(score: Score) -> str | None:
 
 
 def playable_state(score: Score) -> dict | None:
-    """Maestro → This sheet's Clean button for a MIDI file: {"on", "summary", "warning"}:
+    """Sheet → This sheet's Clean button for a MIDI file: {"on", "summary", "warning"}:
     what Clean changed, or where the hands are asked for what they can't play (a warning over
     the sheet). None for a file that is notation already."""
     from . import playable
@@ -104,22 +106,39 @@ class _Server(ThreadingHTTPServer):
 
 def roll_notes(score: Score) -> list[list]:
     """The notes for the coach page's falling-notes view, as [beat, length in beats, pitch, role]
-    with the role the Parts menu shows and hides (right, left, pedals, vocals). Parts with no
-    role (drums, the rest of a band) are left out, as on the piano sheet."""
+    with the role the Playing menu shows and hides (right, left, pedals, vocals, a named part,
+    or 'track:<index>' for a backing track: the page draws those only when shown). Drums are
+    left out, as on the sheet."""
     from .analysis import side_resolver
-    from .notes import HAND_ROLES, effective_roles, playable_parts
+    from .notes import HAND_ROLES, effective_roles, playable_parts, select_notes
 
+    drums = {p.index for p in score.parts if p.drums}
+    length = lambda n: round(max(0.05, score.beat_of(n.end) - n.beat), 3)  # noqa: E731
+    if score.playing:  # a named part: its notes, as drawn on its sheet, and the backing
+        mine = {p.index for p in score.parts if score.roles.get(p.index) == score.playing}
+        return ([[round(n.beat, 3), length(n), n.pitch, score.playing] for n in select_notes(score, score.playing)[0]] +
+                [[round(n.beat, 3), length(n), n.pitch, f"track:{n.part}"] for n in score.notes
+                 if n.part not in mine and n.part not in drums and not is_hand(score.roles.get(n.part))])
     roles = effective_roles(score) or {p.index: "both" for p in playable_parts(score)}
     side = side_resolver(score)
     out = []
     for n in score.notes:
         role = roles.get(n.part)
         if role is None:
-            continue
-        if role in HAND_ROLES:
+            if n.part in drums:
+                continue
+            role = f"track:{n.part}"
+        elif role in HAND_ROLES:
             role = side(n)
-        out.append([round(n.beat, 3), round(max(0.05, score.beat_of(n.end) - n.beat), 3), n.pitch, role])
+        out.append([round(n.beat, 3), length(n), n.pitch, role])
     return out
+
+
+def is_hand(role: str | None) -> bool:
+    """A hand's or the feet's or the singer's part (not drawn beside a named part's sheet)."""
+    from .notes import ROLES
+
+    return role in ROLES
 
 
 def score_to_musicxml(path: str) -> str:
@@ -208,8 +227,10 @@ class DisplayHub:
     def load_score(self, score: Score) -> None:
         from . import details, lessons, sheet
 
-        # A new part choice, turning Auto clean or Clean on or off, or new details redraws the sheet.
-        key = (score.path, tuple(sorted(score.roles.items())), score.regrid is not None, details.stamp(score.path), score.clean is not None)
+        # A new part choice, a backing track shown or hidden, turning Auto clean or Clean on or off,
+        # or new details redraws the sheet.
+        key = (score.path, tuple(sorted(score.roles.items())), score.playing, score.regrid is not None, details.stamp(score.path),
+               score.clean is not None, tuple(sheet.shown_backing(score)))
         if key == self._score_key and self._score_payload:
             return
         notice = sheet_problem(score)
@@ -243,9 +264,16 @@ class DisplayHub:
             self._heat = None
             self._cursor = None
             self._status = ""
-        self._broadcast({"type": "score", "version": self._version, "title": pathlib.Path(score.path).stem})
+        self._broadcast(self._score_message(score.path))
         if new_piece:  # the labels were for the last piece's bars
             self._broadcast({"type": "aids", "bars": [], "off": False})
+
+    def _score_message(self, path: str) -> dict:
+        """The page's "score" event: a new sheet, with how its Session was last set up
+        (library.practice_settings), which the page puts back when the piece changes."""
+        from . import library
+        return {"type": "score", "version": self._version, "title": pathlib.Path(path).stem, "path": path,
+                "practice": library.practice_settings(path)}
 
     def sheet_xml(self, score: Score) -> str | None:
         """What to draw for a score: a piano sheet of the chosen parts for band arrangements and
@@ -356,15 +384,40 @@ class DisplayHub:
         a flute profile's examples), or stop them (None). Not replayed to pages that connect later."""
         self._broadcast({"type": "sound", "notes": notes} if notes is not None else {"type": "sound", "stop": True})
 
-    def flash(self, text: str) -> None:
-        self._broadcast({"type": "flash", "text": text})
+    def page(self, changes: dict) -> int:
+        """Have the coach page change its own controls ({view, show, labels, zoom_percent, ...}, the
+        Maestro's page_control), as if clicked. Not replayed to pages that connect later. Returns
+        how many pages were connected to do it."""
+        self._broadcast({"type": "page", **changes})
+        return self.clients
+
+    def songs_added(self, songs: list[dict]) -> None:
+        """New songs turned up in the song folders or Downloads (songwatch.py): [{title, path,
+        folder}]. The page refreshes its Songs list and offers to open them. Not replayed."""
+        self._broadcast({"type": "songs_added", "songs": songs})
+
+    def flash(self, text: str, hint: str | None = None) -> None:
+        """A short message over the sheet (a wrong key's name). hint: the key(s) to play instead,
+        shown only at Sheet ▸ Labels ▸ Easy."""
+        msg = {"type": "flash", "text": text}
+        if hint:
+            msg["hint"] = hint
+        self._broadcast(msg)
 
     def say(self, text: str, interrupt: bool = False, speaker: str = "Claude") -> int:
         """Have the coach page speak a line (and show it in its dialogue box, under the
         speaker's name). Not replayed to pages that connect later. Returns how many pages
-        were connected to hear it."""
+        were connected to hear it. The line also goes in today's transcript (the Maestro panel)."""
+        self.line(speaker, text)
         self._broadcast({"type": "say", "text": text, "interrupt": interrupt, "speaker": speaker})
         return self.clients
+
+    def line(self, who: str, text: str, kind: str = "", link: str = "") -> None:
+        """Add a line to today's transcript and show it in every page's Maestro panel (with a
+        link under it, opened in the browser, when given)."""
+        entry = transcript.add(who, text, kind, link)
+        if entry:
+            self._broadcast({"type": "line", **entry})
 
     def status(self, text: str) -> None:
         with self._lock:
@@ -378,8 +431,8 @@ class DisplayHub:
             practice = [self._practice] if self._practice else []
             practice += [self._atlas] if self._atlas else []
             if not self._score_payload:
-                return lesson + practice + [{"type": "status", "text": "Pick a lesson, or ask Claude for one."}]
-            out = [{"type": "score", "version": self._version, "title": self._score_payload["title"]}] + lesson + practice + [self._session]
+                return lesson + practice + [{"type": "status", "text": "Pick a lesson, or ask the Maestro for one."}]
+            out = [self._score_message(self._score_payload["path"])] + lesson + practice + [self._session]
             if self._marks:
                 out.append({"type": "marks", "reset": True, "marks": [{"beat": b, "pitch": p, "status": s} for (b, p), s in self._marks.items()]})
             if self._heat:

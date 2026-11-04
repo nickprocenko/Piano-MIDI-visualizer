@@ -8,7 +8,7 @@ pieces, derived caches, the speech models and the API key. Deleting a profile on
 it from the list; its folder is left on disk.
 
 A profile learns one or more instruments, like courses: piano (the keyboard, over MIDI), or
-flute, alto saxophone or voice (the microphone, pitch-tracked on the coach page; see
+flute, alto saxophone, voice, fiddle, electric guitar or bass guitar (the microphone, pitch-tracked on the coach page; see
 instruments.py), and plays one of them at a time (picked on Home). A singer has a high or a
 low voice (voice), which picks the vocal Roadmap's octave. The current instrument picks the Roadmap, the default input, the music the coach
 writes and how the Maestro teaches. Each instrument keeps its own Roadmap progress: the first
@@ -30,7 +30,7 @@ from . import library
 
 DEFAULT_ID = "default"
 MAX_NAME = 30
-INSTRUMENTS = ("piano", "flute", "sax", "voice")  # instruments.INSTRUMENTS says what each one changes
+INSTRUMENTS = ("piano", "flute", "sax", "voice", "fiddle", "guitar", "bass")  # instruments.INSTRUMENTS says what each one changes
 VOICES = ("high", "low")
 
 
@@ -69,7 +69,7 @@ def active() -> dict:
 
 
 def instrument() -> str:
-    """The active profile's instrument: 'piano', 'flute', 'sax' or 'voice'."""
+    """The active profile's instrument: one of INSTRUMENTS."""
     return active()["instrument"]
 
 

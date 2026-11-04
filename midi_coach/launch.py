@@ -6,7 +6,8 @@ If a coach is already answering on the display port and it started after the new
 file changed, the page just opens in it. If it's older (started before an update), a practice
 copy is stopped and started fresh; Claude Desktop's midi-coach isn't ours to stop, so the
 launcher says to restart Claude Desktop instead of opening a half-working page. Otherwise it
-starts the practice page (midi_coach.practice) in this window.
+starts the practice page (midi_coach.practice) in this window, as a child process, so the
+page's Restart (after an update) can bring it back on the new code in the same window.
 """
 
 from __future__ import annotations
@@ -58,6 +59,49 @@ def newest_source(roots=SOURCES) -> float:
             except OSError:
                 pass
     return newest
+
+
+RESTART_EXIT = 75   # the coach page's Restart: the practice copy exits with this, and main() starts it again
+SETTLE_SEC = 15     # a file changed more recently than this is still being edited: not an update yet
+
+
+def code_times(settle: float = SETTLE_SEC, now: float | None = None) -> dict:
+    """When the running coach's code and the page's files last changed, counting only changes that
+    have settled: {'code': the server's .py/.json, 'page': the files the page loads from disk}."""
+    from .display import STATIC_FILES
+
+    cutoff = (time.time() if now is None else now) - settle
+    page_files = {file for file, _ in STATIC_FILES.values()}
+    newest = {"code": 0.0, "page": 0.0}
+
+    def note(kind: str, path: pathlib.Path) -> None:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return
+        if mtime <= cutoff:
+            newest[kind] = max(newest[kind], mtime)
+
+    for path in page_files:
+        note("page", path)
+    for path in PACKAGE.rglob("*"):
+        if path.suffix in (".py", ".json") and not {"tests", "__pycache__", "static", "youtube_extension"} & set(path.parts):
+            note("code", path)
+    return newest
+
+
+def supervise(args: list[str]) -> int:
+    """Run the practice page in this window, again each time the page's Restart asks for it."""
+    env = {**os.environ, "MIDI_COACH_RESTARTABLE": "1"}
+    while True:
+        try:
+            code = subprocess.call([sys.executable, "-m", "midi_coach.practice", *args], env=env, cwd=PACKAGE.parent)
+        except KeyboardInterrupt:
+            return 0
+        if code != RESTART_EXIT:
+            return code
+        print("Restarting the Music Coach on the updated code...")
+        args = []  # practice.main reopens the piece that was on the page (restart.json)
 
 
 def is_current(info: dict, newest: float) -> bool:
@@ -116,10 +160,7 @@ def main() -> int:
         if not stop(pid, p):
             print(f"Couldn't stop the old copy (process {pid}). Close its window, then use the shortcut again.")
             return 1
-    from . import practice
-
-    practice.main()  # reads the piece from sys.argv
-    return 0
+    return supervise(sys.argv[1:])
 
 
 if __name__ == "__main__":

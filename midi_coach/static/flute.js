@@ -34,12 +34,15 @@ const VAD = {startMs: 40, beforeMs: 90, end: 0.75, maxSec: 8, minSec: 0.35, flut
 // What changes per instrument (instruments.py): FLUTE's limits, and the transposition.
 const MIC_SOUND = {flute: {partials: [[1, 1], [2, .15]], cents: 8},  // the examples' tone: harmonics, vibrato depth
                    sax: {partials: [[1, 1], [2, .5], [3, .32], [4, .18], [5, .1]], cents: 6},
-                   voice: {partials: [[1, 1], [2, .3], [3, .12]], cents: 18}};
+                   voice: {partials: [[1, 1], [2, .3], [3, .12]], cents: 18},
+                   fiddle: {partials: [[1, 1], [2, .5], [3, .35], [4, .2], [5, .12]], cents: 12},
+                   guitar: {partials: [[1, 1], [2, .45], [3, .25], [4, .12]], cents: 0},
+                   bass: {partials: [[1, 1], [2, .6], [3, .2]], cents: 0}};
 const micInstrument = () => window.coachInstrument || {id: 'flute', name: 'Flute', transpose: 0, mic: null};
 const micTranspose = () => micInstrument().transpose || 0;
 const micName = () => {
   const id = micInstrument().id;
-  return id === 'voice' ? 'your voice' : id === 'sax' ? 'your saxophone' : 'your flute';
+  return id === 'voice' ? 'your voice' : `your ${{sax: 'saxophone', guitar: 'guitar', bass: 'bass', fiddle: 'fiddle'}[id] || 'flute'}`;
 };
 // Preferences → Audio to MIDI. size/hop in samples; gateDb is FLUTE.rmsGate in dBFS (-38 = 0.012);
 // strict is the YIN threshold; startMs/endMs become holdFrames/endFrames; latencyMs is extra
@@ -93,7 +96,13 @@ function audioMidiSettings() {
   let saved = {};
   try { saved = JSON.parse(store.get('audioMidi', '{}')) || {}; } catch (e) {}
   const mic = micInstrument().mic || {};
-  return {...AUDIO_MIDI, ...(mic.threshold ? {strict: mic.threshold} : {}), ...saved};  // the instrument's strictness unless you set one
+  const out = {...AUDIO_MIDI, ...(mic.threshold ? {strict: mic.threshold} : {}), ...saved};  // the instrument's strictness unless you set one
+  if (mic.size && out.size < mic.size) {  // a guitar's or a bass's low notes need a longer window: the same overlap, longer
+    const overlap = Math.max(1, Math.round(out.size / out.hop));
+    out.size = mic.size;
+    out.hop = mic.size / overlap;
+  }
+  return out;
 }
 
 const hopMs = () => flute.hop / flute.sr * 1000;
@@ -336,6 +345,7 @@ function fluteExample(msg) {
 // -- the tuner ----------------------------------------------------------------------------------
 
 function fluteTuner(m) {
+  try { fingeringMonitor(flute.ctx ? m : null); } catch (_) {}
   let el = $('flute-tuner');
   if (!el) {
     el = document.createElement('span');
@@ -348,6 +358,58 @@ function fluteTuner(m) {
   const near = Math.round(m), cents = Math.round(100 * (m - near));
   el.textContent = `🎤 ${fluteNoteName(near)} ${cents >= 0 ? '+' : '−'}${Math.abs(cents)}¢`;
   el.className = Math.abs(cents) <= 15 ? 'in-tune' : '';
+}
+
+// -- the fingering monitor ------------------------------------------------------------------------
+// While a run listens (a flute or a sax, Sheet ▸ Fingering ▸ Monitor): the fingering of the note the
+// music is waiting for (the server's 'pending' marks, Learn mode) beside the note the microphone
+// hears, green when they match and red when not. The heard note stays a moment after the sound stops.
+
+const fingMon = {marks: new Map(), expected: null, heard: null, heardAt: 0, shown: ''};
+const FING_HOLD_MS = 1500;
+
+function fingeringMarks(msg) {
+  if (msg.reset) fingMon.marks.clear();
+  for (const mk of msg.marks || []) {
+    const key = `${mk.beat}|${mk.pitch}`;
+    if (mk.status === 'pending') fingMon.marks.set(key, mk); else fingMon.marks.delete(key);
+  }
+  let first = null;
+  for (const mk of fingMon.marks.values()) {
+    if (!first || mk.beat < first.beat - 1e-3 || (Math.abs(mk.beat - first.beat) < 1e-3 && mk.pitch > first.pitch)) first = mk;
+  }
+  const next = first ? first.pitch : null;
+  if (next !== fingMon.expected) { fingMon.previous = fingMon.expected; fingMon.expected = next; }
+  fingeringMonitor();
+}
+
+function fingeringMonitor(m) {
+  const now = performance.now();
+  if (m !== undefined && m !== null) { fingMon.heard = Math.round(m); fingMon.heardAt = now; }
+  else if (fingMon.heard !== null && now - fingMon.heardAt > FING_HOLD_MS) fingMon.heard = null;
+  const inst = typeof fingeredInstrument === 'function' ? fingeredInstrument() : null;
+  const on = !!inst && flute.run && !flute.taps && $('fing-monitor-on')?.checked;
+  const sig = on ? `${inst}|${fingMon.expected}|${fingMon.heard}` : '';
+  if (sig === fingMon.shown) return;
+  fingMon.shown = sig;
+  let el = $('fing-monitor');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'fing-monitor';
+    el.setAttribute('aria-live', 'polite');
+    document.body.appendChild(el);
+  }
+  el.hidden = !on;
+  if (!on) { el.innerHTML = ''; return; }
+  const card = (label, note, cls) => {
+    const svg = note === null ? '' : Fingering.svg(inst, note, {height: 140});
+    return `<figure class="${cls}">${svg || '<div class="fm-empty">…</div>'}` +
+           `<figcaption>${note === null ? '—' : esc(Fingering.name(note).replace(/\d+$/, ''))}<small>${label}</small></figcaption></figure>`;
+  };
+  const exp = fingMon.expected, heard = fingMon.heard;
+  // The note just played, still sounding as the music moves on, isn't a wrong one.
+  const verdict = exp === null || heard === null ? '' : heard === exp ? 'right' : heard === fingMon.previous ? '' : 'wrong';
+  el.innerHTML = card('Play', exp, '') + card('Heard', heard, verdict);
 }
 
 // -- hands-free: "Maestro, ..." -------------------------------------------------------------------
@@ -404,12 +466,12 @@ async function fluteHeard(frames) {
     const text = wake ? wake[1].trim() : heard;
     if (!text) {  // "Maestro" alone
       flute.awaitUntil = performance.now() + 8000;
-      showNpc('Yes?', 'Maestro');
+      if (mpOpen()) mpLine({who: 'Maestro', kind: 'pending', text: 'Yes?'}); else showNpc('Yes?', 'Maestro');
       return;
     }
     flute.awaitUntil = 0;
     stopSpeaking();
-    showNpc('…', 'Maestro');
+    mpThinking();
     const out = await fetch('cmd/chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text})});
     showAnswer(await out.json());
   } catch (err) {

@@ -97,13 +97,13 @@ window.coachRoll = (() => {
     } else if (m.type === 'heat') {
       heat = m.bars || [];
     } else if (m.type === 'flash') {
-      flash = {text: '✗ ' + m.text, until: now + 700};
+      flash = {text: '✗ ' + m.text + (m.hint ? '  ·  play ' + m.hint : ''), until: now + (m.hint ? 1600 : 700)};
     } else if (m.type === 'keys') {
       held = new Set(m.on || []);
     }
   }
 
-  // What's shown (the Parts menu's Show boxes) and what you play (the rest is drawn faint).
+  // What's shown (the Playing menu's Show boxes) and what you play (the rest is drawn faint).
   function parts(hiddenRoles, playedRoles) {
     hidden = new Set(hiddenRoles || []);
     played = new Set(playedRoles || []);

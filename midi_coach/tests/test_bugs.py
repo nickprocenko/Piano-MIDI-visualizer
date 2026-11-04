@@ -138,3 +138,140 @@ def test_everything_said_to_the_maestro_is_logged(home, monkeypatch):
     assert "You:** Play bars one to four" in text and "Maestro:** Sure, bars one to four." in text
     assert "did: play_passage" in text
     assert "You:** Can the sheet be bigger?" in text and "rate limited" in text
+
+
+CONTEXT = ("Local time: Tuesday 8:38 PM.\nThe page is on Session (practice); its panel tiles: play, start.\n"
+           "Lesson on screen: The moody blues   nights in white satin [1495], 116 bars.\n"
+           "Cursor at bar 63 (\"here\" / \"this bar\" when they spoke).\n"
+           "Run going now (Learn mode, hand flute, bars 56-63, tempo 100.0%, loop on), pass 1.")
+
+
+@pytest.fixture
+def vault(monkeypatch, tmp_path):
+    root = tmp_path / "vault"
+    (root / "Projects" / "MidiCoach").mkdir(parents=True)
+    monkeypatch.setenv("MIDI_COACH_VAULT", str(root))
+    return root
+
+
+def reporter():
+    return bugs.BugLog(bugs.ScreenRing(active=lambda: True, grab=lambda: None), grab=shots("red"))
+
+
+def test_a_fix_waits_for_the_user_then_goes_to_fixed(home, vault):
+    bug = reporter().report("the loop didn't go back at bar 63", CONTEXT)["saved"]
+    backlog = vault / "Projects" / "MidiCoach" / "Backlog.md"
+    text = backlog.read_text(encoding="utf-8")
+    assert "## 🆕 Open" in text and "the loop didn't go back at bar 63" in text
+    assert "*Session · The moody blues nights in white satin · bar 63 · Learn mode*" in text
+    assert f"![[bug-{bug}.jpg|320]]" in text and (vault / "attachments" / "backlog" / f"bug-{bug}.jpg").exists()
+    assert bugs.to_check() == {"count": 0, "items": []}
+
+    assert bugs.mark_ready(bug, "The loop now restarts on the last bar's release.", "flute-loop-build") == {"ready": bug, "kind": "bug"}
+    assert (home / "bug_reports" / "check" / bug / "fix.md").exists()
+    rows = bugs.to_check(with_shots=True)["items"]
+    assert [r["id"] for r in rows] == [bug] and rows[0]["shot"].startswith("data:image/jpeg;base64,")
+    assert rows[0]["fix"] == "The loop now restarts on the last bar's release." and rows[0]["log"] == "flute-loop-build"
+    text = backlog.read_text(encoding="utf-8")
+    assert text.index("## 👀 Ready to check") < text.index(bug) < text.index("## 🆕 Open")
+    assert "Fix: The loop now restarts on the last bar's release. ([[flute-loop-build]])" in text
+    assert bugs.mark_ready(bug, "again")["error"]
+
+    assert bugs.verify(bug, works=True) == {"checked": bug, "works": True}
+    report = (home / "bug_reports" / "fixed" / bug / "report.md").read_text(encoding="utf-8")
+    assert ": works" in report and "restarts on the last bar's release" in report
+    assert "## ✅ Done" in backlog.read_text(encoding="utf-8").split("## 🆕 Open")[1] and bugs.to_check()["count"] == 0
+
+
+def test_still_wrong_sends_a_fix_back_to_open_with_what_was_said(home, vault):
+    idea = reporter().report("a bigger metronome button", kind="request")["saved"]
+    bugs.mark_ready(idea, "The metronome button is twice the size.")
+    assert bugs.verify(idea, works=False, note="still tiny on the Session page")["works"] is False
+    folder = home / "requests" / "open" / idea
+    report = (folder / "report.md").read_text(encoding="utf-8")
+    assert ": still wrong" in report and "still tiny on the Session page" in report and "twice the size" in report
+    assert not (folder / "fix.md").exists() and bugs.verify(idea, works=True)["error"]
+    assert "- ↩️ **Idea:** a bigger metronome button" in (vault / "Projects" / "MidiCoach" / "Backlog.md").read_text(encoding="utf-8")
+    bugs.mark_ready(idea, "Bigger on every page now.")
+    assert bugs.verify(idea, works=True)["works"] and (home / "requests" / "done" / idea).is_dir()
+
+
+def test_no_vault_means_no_backlog_and_nothing_fails(home):
+    reporter().report("sound cuts out")
+    assert bugs.write_backlog() is None
+
+
+def test_the_cli_marks_a_report_ready(home, capsys):
+    bug = reporter().report("play does nothing")["saved"]
+    assert bugs._main(["ready", bug, "Play starts the run again.", "--log", "play-fix"]) == 0
+    assert bugs._main(["ready", "nope", "x"]) == 1
+    bugs._main(["list"])
+    assert f"check  bug      {bug}  play does nothing" in capsys.readouterr().out
+
+
+def test_place_comes_from_state_json_or_from_the_practice_context(home):
+    log = reporter()
+    saved = log.report("cursor stuck", "Lesson on screen: Scale, 8 bars.",
+                       state={"score": "C:/songs/scale.mid", "bar": 3, "view": "session", "mode": "learn"})["saved"]
+    assert bugs.place(saved) == {"score": "C:/songs/scale.mid", "bar": 3, "view": "session", "mode": "learn"}
+    old = log.report("the loop didn't go back", CONTEXT)["saved"]
+    (home / "bug_reports" / "open" / old / "state.json").unlink(missing_ok=True)
+    assert bugs.place(old) == {"view": "practice", "title": "The moody blues   nights in white satin [1495]", "bar": 63,
+                               "mode": "learn", "hand": "flute", "bars": "56-63", "tempo_percent": 100, "loop": True}
+    assert "error" in bugs.place("nope")
+
+
+def test_go_there_opens_the_piece_and_hands_the_page_its_settings(home, monkeypatch, tmp_path):
+    from midi_coach import display, server
+
+    song = tmp_path / "The Moody Blues - Nights in White Satin [1495].mid"
+    song.write_bytes(b"")
+    hub = display.DisplayHub()
+    monkeypatch.setattr(server, "hub", hub)
+    monkeypatch.setattr(server, "_busy", lambda: False)
+    monkeypatch.setattr(server.library, "scan_references", lambda: [song])
+    loaded = []
+    monkeypatch.setattr(server, "_cmd_load", lambda body: loaded.append(body["lesson"]) or {"title": "x"})
+    old = reporter().report("the loop didn't go back", CONTEXT)["saved"]
+    out = server.PAGE_COMMANDS["goto_report"]({"id": old})
+    assert loaded == [str(song)] and out["loaded"] and out["bar"] == 63
+    assert out["page"] == {"view": "practice", "mode": "learn", "bars": "56-63", "tempo_percent": 100, "loop": True}
+
+    monkeypatch.setattr(server, "_busy", lambda: True)
+    assert server.PAGE_COMMANDS["goto_report"]({"id": old})["error"] == "Stop the run first."
+
+
+def test_f9_saves_a_typed_report_with_where_the_page_was(home, monkeypatch, tmp_path):
+    from midi_coach import display, server
+
+    hub = display.DisplayHub()
+    hub.score_path = str(tmp_path / "scale.mid")
+    monkeypatch.setattr(server, "hub", hub)
+    monkeypatch.setattr(server, "_bugs", reporter())
+    monkeypatch.setattr(server, "_voice_context", lambda: "Lesson on screen: Scale, 8 bars.")
+    monkeypatch.setattr(server, "_report_state", lambda: {"score": hub.score_path, "bar": 4, "view": "practice"})
+    assert "error" in server.PAGE_COMMANDS["report"]({"text": "  "})
+    out = server.PAGE_COMMANDS["report"]({"text": "the bar numbers overlap", "kind": "request"})
+    assert out["kind"] == "request" and out["screenshots"] == 1
+    folder = home / "requests" / "open" / out["saved"]
+    assert "the bar numbers overlap" in (folder / "report.md").read_text(encoding="utf-8")
+    assert bugs.place(out["saved"]) == {"score": hub.score_path, "bar": 4, "view": "practice"}
+    assert "(typed, F9) Idea: the bar numbers overlap" in next((home / "maestro_log").glob("*.md")).read_text(encoding="utf-8")
+
+
+def test_report_state_never_breaks_a_report(monkeypatch):
+    from midi_coach import display, server
+
+    hub = display.DisplayHub()
+    hub.score_path = "C:/gone.mid"
+    monkeypatch.setattr(server, "hub", hub)
+    assert server._report_state() == {}  # the file can't be read: no state, no error
+
+
+def test_close_moves_a_report_to_done_without_a_fix(home, vault):
+    bug = reporter().report("check console send to Claude code")["saved"]
+    assert bugs._main(["close", bug, "Not a bug: a request to the Maestro, and it worked."]) == 0
+    report = (home / "bug_reports" / "fixed" / bug / "report.md").read_text(encoding="utf-8")
+    assert "no fix needed" in report and "it worked" in report
+    assert bugs.close(bug, "again")["error"] and bugs._main(["close", "nope", "x"]) == 1
+    assert "✅ **Bug:** check console" in (vault / "Projects" / "MidiCoach" / "Backlog.md").read_text(encoding="utf-8")

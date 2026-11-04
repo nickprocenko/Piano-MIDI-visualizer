@@ -311,7 +311,8 @@ def _key(key: str | int | None):
     return m21key.Key(tonic.lower() if m.group(3) else tonic)
 
 
-CLEFS = {"treble": "TrebleClef", "bass": "BassClef", "treble8vb": "Treble8vbClef"}  # treble8vb: a low voice's, sounding an octave down
+CLEFS = {"treble": "TrebleClef", "bass": "BassClef", "treble8vb": "Treble8vbClef",  # a low voice's or a guitar's
+         "bass8vb": "Bass8vbClef"}  # a bass guitar's; both 8vb clefs sound an octave below the written notes
 
 
 def _part(name: str, items, clef_name: str, time_signature: str, key: str | int | None, tempo_bpm: float | None, total_ql: float,

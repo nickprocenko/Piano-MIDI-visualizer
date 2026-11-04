@@ -112,7 +112,7 @@ def test_a_young_learner_gets_simple_words_read_aloud_steps_and_first_steps(root
                                                                    content=[NS(type="text", text="Thumb on C!")])], calls),
                            young=profiles.young)
     voice.ask("what do I do")
-    assert calls[0]["system"] == chat.SYSTEM + chat.YOUNG_SYSTEM
+    assert calls[0]["system"] == chat.SYSTEM + chat.PART_SYSTEM + chat.PAGE_SYSTEM + chat.YOUNG_SYSTEM
 
     server._cmd_profile_young({"id": mia["id"], "young": False})
     assert not profiles.young() and "Pupil:" not in server._voice_context()

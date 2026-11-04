@@ -13,6 +13,8 @@
       position: absolute;
       inset: 0;
       overflow: hidden;
+      user-select: none;  /* a drag pans the score, it doesn't select its text */
+      -webkit-user-drag: none;
     }
     body.pannable #viewport { cursor: grab; touch-action: none; }
     body.pannable.dragging #viewport { cursor: grabbing; }
@@ -91,6 +93,14 @@
       z-index: 6;
       font-family: 'Segoe UI', Arial, sans-serif;
     }
+    /* Fingering (midi-coach): a woodwind's key diagram under its notes (fingering.js) */
+    #fing-layer {
+      position: absolute;
+      top: 0; left: 0;
+      pointer-events: none;
+      z-index: 5;
+    }
+    #fing-layer svg { position: absolute; transform: translateX(-50%); display: block; }
     .aid-name {
       position: absolute;
       transform: translate(-50%, -50%);
@@ -138,6 +148,13 @@
       transition: opacity .25s;
       pointer-events: none;
       z-index: 110;
+    }
+    #flash .hint {
+      margin-left: 8px;
+      padding: 0 7px;
+      border-radius: 8px;
+      background: #fff;
+      color: #1a7f3c;
     }
     /* Where a range of bars starts and ends (the coach's Bars, Learn Mode's A–B loop), labelled:
        the start's tag at the top, the end's at the bottom, each on the inside of the range */
@@ -195,6 +212,7 @@
     <div id="osmd-div"></div>
     <div id="heat-layer"></div>
     <div id="aid-layer"></div>
+    <div id="fing-layer"></div>
   </div>
   <div id="key-header"></div>
   <div id="range-start" class="range-mark"><span>Start</span></div>
@@ -211,6 +229,7 @@
 // Offline fallback: midi-coach serves a bundled copy next to this page.
 if (typeof opensheetmusicdisplay === 'undefined') document.write('<script src="opensheetmusicdisplay.min.js"><\/script>');
 </script>
+<script src="fingering.js"></script>
 <script>
 "use strict";
 
@@ -243,7 +262,8 @@ const REHEARSE_SNAP_BEATS = 0.5, LEARN_SNAP_BEATS = 8;  // further off than this
 const gliding = () => beatBps > 0 && (beatUntil === null || beatShown < beatUntil - 0.01);
 const MARK_COLORS = { hit: '#159a3c', missed: '#d42020', pending: '#00a6b8' };
 // Which staves are drawn (midi-coach): each staff's role ('right', 'left', 'both', 'pedals',
-// 'vocals', 'other'), sent with the score, and the roles hidden from the page's Parts menu.
+// 'vocals', a named part, 'track:<n>' for a backing track, 'other'), sent with the score, and
+// the roles hidden from the page's Playing menu.
 let staffRoles   = null;
 let hiddenRoles  = new Set();
 let heatBars     = [];
@@ -267,6 +287,15 @@ let aidMeasures  = [];  // [{q0, q1, num, den, lead, y, row}] each bar and where
 // 'line': one long line scrolling sideways under a fixed playhead. 'rows': ordinary systems
 // scrolling down, the row being played at the top and the next one under it.
 let layout       = 'line';
+// A tab staff (midi-coach, a guitar's or a bass's): {strings: open strings' MIDI notes low to high,
+// frets, match: the part-name word for the instrument's parts}, or null for none. Drawn from the
+// notes as a part of its own under each of the instrument's lines; it is never marked or graded.
+let tabSpec      = null;
+// Fingering diagrams (midi-coach, a flute's or a saxophone's): {instrument: 'flute' | 'sax', mode:
+// 'repeats' (a diagram where the fingering changes) | 'line' (each note the first time on a line)},
+// or null for none. Drawn on the page only, under the instrument's staff, with room made for them.
+let fingSpec     = null;
+let fingItems    = [];  // [{x, y, pitch, row, line}] in unscaled track px
 
 function filteredXml(xml) {
   const hide = [];
@@ -274,7 +303,7 @@ function filteredXml(xml) {
   if (!showDetails.roman) hide.push('harmony[id^="details-roman"]');
   if (!showDetails.lyrics) hide.push('lyric');
   if (!showDetails.sections) hide.push('direction[id^="details-section"]');
-  if (showDynamics && !hide.length) return xml;
+  if (showDynamics && !hide.length && !tabSpec) return xml;
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
   if (doc.querySelector('parsererror')) return xml;
   if (hide.length) doc.querySelectorAll(hide.join(', ')).forEach(el => el.remove());
@@ -287,7 +316,97 @@ function filteredXml(xml) {
     }
     doc.querySelectorAll('notations > dynamics').forEach(el => el.remove());
   }
+  if (tabSpec) addTab(doc, tabSpec);
   return new XMLSerializer().serializeToString(doc);
+}
+
+// ── Tab (midi-coach) ──────────────────────────────────────────────────────────
+const TAB_SUFFIX = ' (tab)';
+const STEP_PC = {C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11};
+const SHARP_NAMES = [['C', 0], ['C', 1], ['D', 0], ['D', 1], ['E', 0], ['F', 0], ['F', 1], ['G', 0], ['G', 1], ['A', 0], ['A', 1], ['B', 0]];
+const isTabStaff = st => !!st && (st.isTab || ((st.ParentInstrument && st.ParentInstrument.Name) || '').endsWith(TAB_SUFFIX));
+
+// Where to play a note: the string that needs the lowest fret (open strings and first position
+// first), as {string: 1 for the highest, fret}; null when the instrument can't reach it.
+function tabPlace(midi, spec) {
+  let best = null;
+  spec.strings.forEach((open, k) => {
+    const fret = midi - open;
+    if (fret >= 0 && fret <= spec.frets && (!best || fret < best.fret)) best = {string: spec.strings.length - k, fret};
+  });
+  return best;
+}
+
+function addTab(doc, spec) {
+  const scoreParts = [...doc.querySelectorAll('part-list > score-part')];
+  const word = new RegExp(spec.match === 'fiddle' ? 'fiddle|violin' : spec.match, 'i');
+  const named = scoreParts.filter(sp => word.test((sp.querySelector('part-name') || {}).textContent || ''));
+  const el = (name, text) => { const e = doc.createElement(name); if (text !== undefined) e.textContent = String(text); return e; };
+  for (const sp of (scoreParts.length === 1 ? scoreParts : named)) {
+    const id = sp.getAttribute('id'), part = doc.querySelector(`part[id="${id}"]`);
+    if (!part || [...part.querySelectorAll('attributes > staves')].some(s => +s.textContent > 1)) continue;  // one line only
+    const tabId = id + '-tab';
+    const sp2 = sp.cloneNode(false);
+    sp2.setAttribute('id', tabId);
+    sp2.appendChild(el('part-name', (((sp.querySelector('part-name') || {}).textContent) || 'Guitar') + TAB_SUFFIX));
+    sp2.appendChild(el('part-name-display')).appendChild(el('display-text', 'TAB'));
+    sp.after(sp2);
+    const part2 = doc.createElement('part');
+    part2.setAttribute('id', tabId);
+    let clefSet = false;
+    for (const m of part.querySelectorAll(':scope > measure')) {
+      const m2 = doc.createElement('measure');
+      m2.setAttribute('number', m.getAttribute('number') || '');
+      for (const child of m.children) {
+        if (child.tagName === 'attributes') {
+          const a = el('attributes');
+          for (const keep of ['divisions', 'time']) { const k = child.querySelector(keep); if (k) a.appendChild(k.cloneNode(true)); }
+          if (!clefSet && child.querySelector('clef')) {
+            clefSet = true;
+            const clef = el('clef');
+            clef.appendChild(el('sign', 'TAB'));
+            clef.appendChild(el('line', 5));
+            a.appendChild(clef);
+            const details = el('staff-details');
+            details.appendChild(el('staff-lines', spec.strings.length));
+            spec.strings.forEach((open, k) => {
+              const t = el('staff-tuning');
+              t.setAttribute('line', k + 1);
+              const [step, alter] = SHARP_NAMES[open % 12];
+              t.appendChild(el('tuning-step', step));
+              if (alter) t.appendChild(el('tuning-alter', alter));
+              t.appendChild(el('tuning-octave', Math.floor(open / 12) - 1));
+              details.appendChild(t);
+            });
+            a.appendChild(details);
+          }
+          if (a.children.length) m2.appendChild(a);
+        } else if (child.tagName === 'backup' || child.tagName === 'forward') {
+          m2.appendChild(child.cloneNode(true));
+        } else if (child.tagName === 'note' && !child.querySelector('grace')) {
+          const n = el('note'), pitch = child.querySelector('pitch');
+          const midi = pitch ? 12 * (+pitch.querySelector('octave').textContent + 1) + STEP_PC[pitch.querySelector('step').textContent]
+            + +((pitch.querySelector('alter') || {}).textContent || 0) : null;
+          const at = midi === null ? null : tabPlace(midi, spec);
+          if (child.querySelector('chord') && at) n.appendChild(el('chord'));
+          if (at) n.appendChild(pitch.cloneNode(true)); else n.appendChild(el('rest'));
+          for (const keep of ['duration', 'tie', 'voice', 'type', 'dot']) child.querySelectorAll(`:scope > ${keep}`).forEach(k => n.appendChild(k.cloneNode(true)));
+          if (at) {
+            const notations = el('notations'), technical = el('technical');
+            child.querySelectorAll(':scope > notations > tied').forEach(t => notations.appendChild(t.cloneNode(true)));
+            technical.appendChild(el('string', at.string));
+            technical.appendChild(el('fret', at.fret));
+            notations.appendChild(technical);
+            n.appendChild(notations);
+          }
+          if (child.querySelector('chord') && !at) continue;  // a chord note out of reach: nothing to show
+          m2.appendChild(n);
+        }
+      }
+      part2.appendChild(m2);
+    }
+    part.after(part2);
+  }
 }
 const sheetXml = () => filteredXml(scoreXml);
 
@@ -308,10 +427,20 @@ window.addEventListener('message', async e => {
     if (e.data.layout) setLayout(e.data.layout);
     if (e.data.zoom) setZoom(e.data.zoom);
     if (e.data.aids) setAidSettings(e.data.aids);
+    if ('tab' in e.data) tabSpec = e.data.tab || null;
+    if ('fingering' in e.data) fingSpec = fingeringSpec(e.data.fingering);
     await loadScore(e.data.xml);
   } else if (e.data.type === 'visibility') {
     hiddenRoles = new Set(e.data.hidden || []);
     if (rendered) await drawScore();
+  } else if (e.data.type === 'tab') {
+    const was = JSON.stringify(tabSpec);
+    tabSpec = e.data.tab || null;
+    if (rendered && scoreXml && was !== JSON.stringify(tabSpec)) await reloadScore();
+  } else if (e.data.type === 'fingering') {
+    const was = JSON.stringify(fingSpec);
+    fingSpec = fingeringSpec(e.data.fingering);
+    if (rendered && was !== JSON.stringify(fingSpec)) { applyRules(); await drawScore(); }  // room for them, or not
   } else if (e.data.type === 'dynamics') {
     showDynamics = !!e.data.show;
     if (rendered && scoreXml) await reloadScore();
@@ -379,7 +508,7 @@ window.addEventListener('message', async e => {
     heatBars = e.data.bars || [];
     drawHeat(heatBars);
   } else if (e.data.type === 'flash') {
-    showFlash(e.data.text);
+    showFlash(e.data.text, aidLevel === 'all' ? e.data.hint : null);  // the right key, on Easy only
   } else if (e.data.type === 'status') {
     const hud = document.getElementById('hud');
     hud.textContent = e.data.text || '';
@@ -397,6 +526,7 @@ function clearScore() {
   document.body.classList.remove('pannable');
   document.getElementById('heat-layer').innerHTML = '';
   document.getElementById('aid-layer').innerHTML = '';
+  document.getElementById('fing-layer').innerHTML = ''; fingItems = [];
   clearHeaders();
   scoreTrack.style.transform = 'translateX(0px)';
   document.getElementById('osmd-div').innerHTML = '';
@@ -413,6 +543,7 @@ async function loadScore(musicXml) {
   document.body.classList.remove('pannable');
   document.getElementById('heat-layer').innerHTML = '';
   document.getElementById('aid-layer').innerHTML = '';
+  document.getElementById('fing-layer').innerHTML = ''; fingItems = [];
   clearHeaders();
   statusEl.style.display = 'flex';
   statusEl.textContent   = 'Rendering score…';
@@ -490,6 +621,11 @@ function applyRules() {
   er.MeasureNumberInterval = 1;
   er.RenderSlurs          = true;
   er.RenderTies           = true;
+  // Fingering diagrams need room: wider notes for their width, and their height under each staff.
+  const fing = fingSpec ? FING_H / 10 + 1 : 0;  // in OSMD units (a staff space)
+  er.VoiceSpacingAddendVexflow = fingSpec ? 3 + FING_W / 10 : 3;
+  er.MinSkyBottomDistBetweenStaves = 1 + fing;
+  er.MinSkyBottomDistBetweenSystems = 5 + fing;
 }
 
 // Render the loaded score with the chosen staves, and map it. Also used to show or hide
@@ -502,6 +638,7 @@ async function drawScore(again = false) {
     fit = {top: 0, h: 0};
     document.getElementById('heat-layer').innerHTML = '';
     document.getElementById('aid-layer').innerHTML = '';
+  document.getElementById('fing-layer').innerHTML = ''; fingItems = [];
     clearHeaders();
     rows = []; rowScroll = null;
     scoreTrack.style.transform = 'none';  // measure the drawing unscaled
@@ -517,6 +654,7 @@ async function drawScore(again = false) {
     drawnHidden = !window.innerHeight;
     buildTimestampMap();
     try { buildAids(); } catch (err) { console.error('[OSMD] labels failed:', err); heads = []; aidMeasures = []; }
+    try { buildFingering(); } catch (err) { console.error('[OSMD] fingering failed:', err); fingItems = []; }
     if (rowsOn() && !again && Math.abs(fitScale() - rowsZoom) > 0.03) {
       rowsZoom = fitScale();
       return drawScore(true);
@@ -527,6 +665,7 @@ async function drawScore(again = false) {
     }
     if (heatBars.length) drawHeat(heatBars);
     drawAids();
+    drawFingering();
     window.parent.postMessage({type:'ready'}, '*');
   } catch (err) {
     statusEl.textContent = 'Error rendering score:\n' + (err.message || err);
@@ -538,6 +677,12 @@ async function drawScore(again = false) {
 // Each staff's role, top to bottom: as sent with the score, else guessed from the part names
 // (a two-staff part is the right hand over the left).
 function staffRoleList(staves) {
+  const tab = staves.map(isTabStaff);  // a tab staff shows and hides with the line above it
+  if (tab.some(Boolean)) {
+    const roles = staffRoleList(staves.filter((_, k) => !tab[k]));
+    let i = 0, last = 'other';
+    return staves.map((_, k) => tab[k] ? last : (last = roles[i++]));
+  }
   if (staffRoles && staffRoles.length === staves.length) return staffRoles;
   return staves.map(st => {
     const ins = st.ParentInstrument, name = (ins.Name || '').toLowerCase();
@@ -724,13 +869,19 @@ function placeRange(tx, ty, s) {
 }
 
 let flashTimer = null;
-function showFlash(text) {
+function showFlash(text, hint) {
   const el = document.getElementById('flash');
   el.textContent = '✗ ' + text;
+  if (hint) {  // the same wrong key again: name the one to play
+    const play = document.createElement('span');
+    play.className = 'hint';
+    play.textContent = 'play ' + hint;
+    el.append(play);
+  }
   el.style.left = rowsOn() ? playheadEl.style.left : (window.innerWidth * PLAYHEAD_FRAC) + 'px';
   el.style.opacity = '1';
   clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => { el.style.opacity = '0'; }, 700);
+  flashTimer = setTimeout(() => { el.style.opacity = '0'; }, hint ? 1600 : 700);
 }
 
 // ── Labels: note names and counting (midi-coach) ──────────────────────────────
@@ -825,6 +976,94 @@ function buildAids() {
   for (const m of aidMeasures) {
     if (rows[m.row]) rows[m.row].bandBottom = Math.max(rows[m.row].bandBottom, m.y + COUNT_ROOM);
   }
+}
+
+// ── Fingering (midi-coach) ────────────────────────────────────────────────────
+const FING_H = 62, FING_W = FING_H * 12 / 31;  // a diagram's size in px at zoom 1 (fingering.js's box)
+const FING_WORDS = {flute: /flute|flauto|flöte|fl\.|piccolo/i, sax: /sax/i};
+
+function fingeringSpec(f) {
+  if (!f || typeof window.Fingering === 'undefined' || !Fingering.has(f.instrument)) return null;
+  return {instrument: f.instrument, mode: f.mode === 'line' ? 'line' : 'repeats'};
+}
+
+// Which notes get a diagram, and where: under the instrument's staff (a lone staff, or the parts
+// named for it), one row of diagrams per line, below the counts when they're shown.
+function buildFingering() {
+  fingItems = [];
+  if (!fingSpec || !heads.length) return;
+  const inst = fingSpec.instrument;
+  const staves = [...new Set(heads.map(h => h.staff).filter(st => st && !isTabStaff(st) && st.isVisible()))];
+  const ours = staves.length === 1 ? staves
+    : staves.filter(st => FING_WORDS[inst].test((st.ParentInstrument && st.ParentInstrument.Name) || ''));
+  if (!ours.length) return;
+  const svgEl = document.querySelector('#osmd-div svg');
+  if (!svgEl) return;
+  const oy = svgEl.getBoundingClientRect().top - scoreTrack.getBoundingClientRect().top;
+  const unit = 10 * osmd.zoom;
+  const all = osmd.Sheet.Staves.filter(st => staves.includes(st));
+  const lowest = all[all.length - 1];
+  const lineY = new Map();  // staff line -> the diagrams' top
+  const lineOf = h => {
+    const gm = (osmd.GraphicSheet.MeasureList[h.mi] || []).find(g => g && g.ParentStaff === h.staff);
+    return gm && gm.ParentStaffLine;
+  };
+  for (const staff of ours) {
+    // One note per onset (the top of a chord), in order.
+    const byQ = new Map();
+    for (const h of heads) {
+      if (h.staff !== staff || h.tied || h.x === undefined) continue;
+      const k = Math.round(h.q * 1000);
+      if (!byQ.has(k) || byQ.get(k).pitch < h.pitch) byQ.set(k, h);
+    }
+    const notes = [...byQ.values()].sort((a, b) => a.q - b.q);
+    let prev = null, prevLine = null, seen = new Set(), group = null;
+    for (const h of notes) {
+      const line = lineOf(h);
+      if (!line) continue;
+      const g = layout === 'rows' ? line : Math.floor(h.mi / 4);  // a line: a row, or four bars of the sideways line
+      if (g !== group) { group = g; seen = new Set(); }
+      if (line !== prevLine) { prevLine = line; prev = null; }
+      const want = fingSpec.mode === 'line' ? !seen.has(h.pitch) : !(prev !== null && Fingering.same(inst, prev, h.pitch));
+      seen.add(h.pitch); prev = h.pitch;
+      if (!want || !Fingering.chart(inst, h.pitch)) continue;
+      if (!lineY.has(line)) {
+        let y = oy + (line.PositionAndShape.AbsolutePosition.y + 4) * unit;
+        try { y = Math.max(y, oy + (line.PositionAndShape.AbsolutePosition.y + line.SkyBottomLineCalculator.getBottomLineMax()) * unit); } catch (_) {}
+        y += 0.4 * unit;
+        if (staff === lowest && aidsReserved()) {
+          const m = aidMeasures.find(a => a.below && h.q >= a.q0 - 0.01 && h.q < a.q1 - 0.01);
+          if (m) y = Math.max(y, m.y + COUNT_ROOM + 2);
+        }
+        lineY.set(line, y);
+      }
+      const mm = measureMap[h.mi];
+      fingItems.push({x: h.x, y: lineY.get(line), pitch: h.pitch, row: mm ? mm.row : undefined, line});
+    }
+  }
+  // Diagrams side by side never overlap: a crowd is pushed to the right.
+  const gap = FING_W * osmd.zoom + 2;
+  const byLine = new Map();
+  for (const it of fingItems) { if (!byLine.has(it.line)) byLine.set(it.line, []); byLine.get(it.line).push(it); }
+  for (const list of byLine.values()) {
+    list.sort((a, b) => a.x - b.x);
+    for (let i = 1; i < list.length; i++) list[i].x = Math.max(list[i].x, list[i - 1].x + gap);
+  }
+  if (!fingItems.length) return;
+  // Room under the last staff (the strip's height, a row's band).
+  const h = FING_H * osmd.zoom;
+  const bottom = Math.max(...fingItems.map(it => it.y + h + 4));
+  if (fit.h && bottom > fit.top + fit.h) fit.h = bottom - fit.top;
+  for (const it of fingItems) if (rows[it.row]) rows[it.row].bandBottom = Math.max(rows[it.row].bandBottom, it.y + h + 4);
+}
+
+function drawFingering() {
+  const layer = document.getElementById('fing-layer');
+  layer.innerHTML = '';
+  if (!rendered || !fingSpec || !fingItems.length) return;
+  const h = FING_H * osmd.zoom;
+  layer.innerHTML = fingItems.map(it => Fingering.svg(fingSpec.instrument, it.pitch, {height: h})
+    .replace('<svg ', `<svg style="left:${it.x.toFixed(1)}px;top:${it.y.toFixed(1)}px" `)).join('');
 }
 
 // Which beats get which label at the page's level.
@@ -974,10 +1213,12 @@ function buildTimestampMap() {
           for (const gn of osmd.cursor.GNotesUnderCursor()) {
             const sn = gn.sourceNote;
             if (!sn || sn.isRest()) continue;
+            if (isTabStaff(sn.ParentStaffEntry && sn.ParentStaffEntry.ParentStaff)) continue;  // its fret numbers aren't noteheads
             const el = gn.getSVGGElement();
             const tied = !!(sn.NoteTie && sn.NoteTie.StartNote !== sn);
             const head = {q, pitch: sn.halfTone + 12, el, tied, fund: sn.Pitch ? sn.Pitch.FundamentalNote : null,
-                          hollow: !!(sn.Length && sn.Length.RealValue >= 0.5)};
+                          hollow: !!(sn.Length && sn.Length.RealValue >= 0.5),
+                          staff: sn.ParentStaffEntry && sn.ParentStaffEntry.ParentStaff, mi: osmd.cursor.iterator.CurrentMeasureIndex};
             if (el) {
               heads.push(head);
               for (const nh of el.querySelectorAll('.vf-notehead')) {
@@ -1404,7 +1645,8 @@ viewportEl.addEventListener('wheel', e => {
 let dragX = null;
 const dragPos = e => rowsOn() ? e.clientY : e.clientX;
 viewportEl.addEventListener('pointerdown', e => {
-  if (!document.body.classList.contains('pannable')) return;
+  if (!document.body.classList.contains('pannable') || e.button !== 0) return;
+  e.preventDefault();  // no text selection or native drag stealing the pointer
   dragX = dragPos(e);
   viewportEl.setPointerCapture(e.pointerId);
   document.body.classList.add('dragging');

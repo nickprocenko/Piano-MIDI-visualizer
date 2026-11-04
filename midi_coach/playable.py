@@ -3,7 +3,7 @@
 A band arrangement often asks the hands for more than they can do: an organ part doubles
 the bass line an octave up while it plays the riff, so one hand would need B2 and D5 at
 once; two parts play the same key at the same moment; a file has a note written twice.
-Clean (Maestro → This sheet) finds every chord a hand can't play and changes as little as
+Clean (Sheet → This sheet) finds every chord a hand can't play and changes as little as
 it can, chord by chord:
 
   1. a key sounded twice at once (two parts, or the file twice) is played once, by the hand

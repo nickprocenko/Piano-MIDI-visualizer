@@ -15,7 +15,7 @@ import subprocess
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 REPO = STATIC.parent.parent
 NAME = "Music Coach"
-DESCRIPTION = "Practice piano, flute, saxophone or singing with the coach page"
+DESCRIPTION = "Practice piano, flute, saxophone, singing, fiddle, guitar or bass with the coach page"
 
 
 def _script(lnk: str) -> str:

@@ -23,7 +23,17 @@ SAX_HINT = ("Maestro, saxophone practice: Listen, Learn mode, Rehearse, bars fiv
 VOICE_HINT = ("Maestro, singing practice: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, long notes, "
               "legato, sol-fa, do re mi, F sharp, B flat, C major scale, A minor, arpeggio, sight-singing, metronome, "
               "Roadmap, write me.")
-HINTS = {"flute": FLUTE_HINT, "sax": SAX_HINT, "voice": VOICE_HINT}
+FIDDLE_HINT = ("Maestro, fiddle practice: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, whole bows, "
+               "down bow, up bow, string crossing, slurred, separate bows, low second finger, F sharp, C sharp, D major scale, "
+               "A major, arpeggio, metronome, Roadmap, write me.")
+GUITAR_HINT = ("Maestro, guitar practice: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, alternate picking, "
+               "hammer-on, pull-off, fret, first position, E minor chord, power chord, strumming, F sharp, G major scale, "
+               "A minor, arpeggio, riff, tab, metronome, Roadmap, write me.")
+BASS_HINT = ("Maestro, bass practice: Listen, Learn mode, Rehearse, bars five to eight, tempo, loop, root and fifth, groove, "
+             "alternating fingers, muting, fret, first position, F sharp, G major scale, E minor, arpeggio, bass line, tab, "
+             "metronome, Roadmap, write me.")
+HINTS = {"flute": FLUTE_HINT, "sax": SAX_HINT, "voice": VOICE_HINT, "fiddle": FIDDLE_HINT, "guitar": GUITAR_HINT,
+         "bass": BASS_HINT}
 
 _lock = threading.Lock()
 _model = None

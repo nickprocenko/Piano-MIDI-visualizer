@@ -1,4 +1,5 @@
-// File menu beside Home: open a file from the computer, save a copy of the sheet, download it.
+// File menu beside Home: open a file from the computer, save a copy of the sheet, download it,
+// choose the song folders.
 // The song folders dialog lives here too; Preferences (prefs.js) opens it. Loaded after profiles.js.
 (function () {
   const btn = $('file-btn'), list = $('file-menu');
@@ -47,6 +48,7 @@
       a.download = '';
       a.click();
     },
+    folders: () => openFolders(),
     profile: () => $('profile-chip').click(),
   };
 
@@ -145,6 +147,8 @@
     if (!src.folders.length) ul.innerHTML = '<li class="none">No folders chosen yet. Add the folder where you keep MIDI files.</li>';
     $('folders-always').textContent = 'Always searched too: ' + src.always.join(' · ');
     $('folders-online').checked = src.online;
+    $('folders-watch').checked = src.watch_downloads;
+    $('folders-watch-hint').textContent = `New MIDI or MusicXML files in ${src.downloads_folder} are copied into your library. Files added to the folders above are noticed by themselves.`;
     $('folders-downloads').textContent = `Songs you pick there are saved in ${src.downloads}`;
     lib.online = src.online;
   }
@@ -188,4 +192,16 @@
     b.disabled = false;
   });
   $('folders-online').addEventListener('change', e => saveFolders({online: e.target.checked}));
+  $('folders-watch').addEventListener('change', e => saveFolders({watch_downloads: e.target.checked}));
+  $('folders-rescan').addEventListener('click', async () => {
+    const b = $('folders-rescan');
+    b.disabled = true;
+    $('folders-msg').textContent = '';
+    try {
+      const {total} = await cmd('rescan');
+      $('folders-msg').textContent = `${total.toLocaleString()} songs in your library.`;
+      searchSongs();
+    } catch (err) { $('folders-msg').textContent = err.message; }
+    b.disabled = false;
+  });
 })();

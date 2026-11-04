@@ -1,0 +1,24 @@
+{
+ "source": "The coach's own bass guitar course (not any exam board's syllabus): a beginner's path in first position from the open strings to Grade 2-level scales, sight-reading and melodies, in written pitch (the bass sounds an octave lower). The aural tests are added from the local flute syllabus when there is one.",
+ "version": 1,
+ "instrument": "bass",
+ "speeds": {"scale": {"g1": 60, "g2": 72}, "arpeggio": {"g1": 80, "g2": 92}},
+ "grades": [
+  {"id": "g1", "title": "Grade 1", "order": 1,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["G"], "range": "octave"},
+    {"type": "scale", "quality": "minor", "keys": ["A", "E"], "range": "octave"},
+    {"type": "arpeggio", "quality": "major", "keys": ["G"], "range": "octave"},
+    {"type": "arpeggio", "quality": "minor", "keys": ["A", "E"], "range": "octave"}],
+   "sight": {"bars": 4, "times": ["4/4", "3/4"], "keys": ["G", "Am"], "range": ["E2", "D3"],
+             "features": ["minims, crotchets and steps", "roots and fifths"]}},
+  {"id": "g2", "title": "Grade 2", "order": 2,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["C", "F"], "range": "octave"},
+    {"type": "scale", "quality": "minor", "keys": ["G"], "range": "octave"},
+    {"type": "arpeggio", "quality": "major", "keys": ["C", "F"], "range": "octave"},
+    {"type": "arpeggio", "quality": "minor", "keys": ["G"], "range": "octave"}],
+   "sight": {"bars": 6, "times": ["2/4"], "keys": ["C", "F"], "range": ["A2", "G3"],
+             "features": ["quaver pairs", "rests between notes", "f and p"]}}
+ ]
+}

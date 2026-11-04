@@ -1,0 +1,24 @@
+{
+ "source": "The coach's own electric guitar course (not any exam board's syllabus): a beginner's path in first position from the top E string to Grade 2-level scales, sight-reading and melodies, in written pitch (the guitar sounds an octave lower). Graded work is single notes; chords and strumming are in the Theory strand. The aural tests are added from the local flute syllabus when there is one.",
+ "version": 1,
+ "instrument": "guitar",
+ "speeds": {"scale": {"g1": 60, "g2": 72}, "arpeggio": {"g1": 80, "g2": 92}},
+ "grades": [
+  {"id": "g1", "title": "Grade 1", "order": 1,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["C", "G"], "range": "octave"},
+    {"type": "scale", "quality": "minor", "keys": ["A", "E"], "range": "octave"},
+    {"type": "arpeggio", "quality": "major", "keys": ["C", "G"], "range": "octave"},
+    {"type": "arpeggio", "quality": "minor", "keys": ["A", "E"], "range": "octave"}],
+   "sight": {"bars": 4, "times": ["4/4", "3/4"], "keys": ["C", "G"], "range": ["C4", "E5"],
+             "features": ["minims, crotchets and steps", "moving between strings"]}},
+  {"id": "g2", "title": "Grade 2", "order": 2,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["D", "F"], "range": "octave"},
+    {"type": "scale", "quality": "minor", "keys": ["D"], "range": "octave"},
+    {"type": "arpeggio", "quality": "major", "keys": ["D", "F"], "range": "octave"},
+    {"type": "arpeggio", "quality": "minor", "keys": ["D"], "range": "octave"}],
+   "sight": {"bars": 6, "times": ["2/4"], "keys": ["D", "Am"], "range": ["A3", "D5"],
+             "features": ["quaver pairs", "hammer-ons and pull-offs", "f and p"]}}
+ ]
+}

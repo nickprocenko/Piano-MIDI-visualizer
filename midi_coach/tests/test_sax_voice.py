@@ -139,7 +139,7 @@ def test_the_maestro_teaches_a_saxophonist_and_a_singer(home):
         client = NS(messages=NS(create=create), beta=NS(messages=NS(create=create)))
         voice_chat = chat.VoiceChat({}, lambda: "", client=client, instrument=lambda i=instrument: i)
         assert voice_chat.ask("how was that")["reply"] == "Lovely."
-        assert calls[0]["system"] == system and f"[The {player} said]" in calls[0]["messages"][0]["content"]
+        assert calls[0]["system"] == system + chat.PART_SYSTEM + chat.PAGE_SYSTEM and f"[The {player} said]" in calls[0]["messages"][0]["content"]
         assert chat.LESSON_SYSTEMS[instrument] and "Maestro" in stt.HINTS[instrument]
     assert "written pitch" in chat.SAX_SYSTEM and "high or a low voice" in chat.VOICE_SYSTEM
 

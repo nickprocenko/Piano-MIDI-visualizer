@@ -27,6 +27,7 @@ from .templates import slug
 
 REPAIRS = 2
 MAX_BRIDGES = 5
+SONG_BARS_RE = re.compile(r"\d+(?:\s*-\s*\d+)?(?:\s*,\s*\d+(?:\s*-\s*\d+)?)*")
 
 PLAN_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -38,7 +39,8 @@ PLAN_SCHEMA = {
             "type": "object", "additionalProperties": False,
             "properties": {"title": {"type": "string"}, "brief": {"type": "string"},
                            "after": {"type": "array", "items": {"type": "string"}},
-                           "before": {"type": "array", "items": {"type": "string"}}},
+                           "before": {"type": "array", "items": {"type": "string"}},
+                           "song_bars": {"type": "string"}},
             "required": ["title", "brief", "after", "before"]}},
         "order_hints": {"type": "array", "items": {"type": "string"}},
         "reasons": {"type": "array", "items": {"type": "string"}},
@@ -52,7 +54,7 @@ Answer with:
 - title: the goal in a few words ("Piano Man", "Sight-reading hymns").
 - kind: song, skill or grade.
 - targets: the ids of the requirements, families or exam nodes (e.g. "g3.exam") the goal needs. Use only ids from the list given. Choose what the goal truly needs: for a song, the keys, scales, chords, rhythms and reading skills its music uses, at about the grade its hardest parts sit. Prerequisites are added automatically, so don't list the whole tree; known requirements are skipped automatically.
-- bridges: at most 5 skills the goal needs that no requirement covers (e.g. "Walking bass in C"), each with a brief for the lesson writer (what to teach, in which key, which hand, how hard), 'after' (ids it builds on) and 'before' (ids of targets it prepares, may be empty). Only when the tree truly lacks it.
+- bridges: at most 5 skills the goal needs that no requirement covers (e.g. "Walking bass in C"), each with a brief for the lesson writer (what to teach, in which key, which hand, how hard), 'after' (ids it builds on) and 'before' (ids of targets it prepares, may be empty). Only when the tree truly lacks it. For a song, also 'song_bars': the bars of the song file where the skill comes up, like "9-12" or "9-12, 25-28" (bar numbers as the file counts them), or "" if it isn't in particular bars; the pianist sees those bars highlighted in the song.
 - order_hints: target ids to bring forward, most useful first (e.g. the song's key before anything else).
 - reasons: 2-6 short sentences for the pianist on why these steps. For a song, say which facts shaped the plan and cite where they came from ("TheoryTab shows the verse as I V6 IV6 I64"). If a source disagreed with the file, say so; the file is what they'll play. If no published facts were found, say the plan uses the file alone."""
 
@@ -103,6 +105,8 @@ def validate(plan: dict | None, atlas: dict) -> list[str]:
     for k, b in enumerate(bridges, 1):
         if not b.get("title", "").strip() or len(b.get("brief", "").strip()) < 20:
             errors.append(f"Bridge {k} needs a title and a brief of a sentence or two.")
+        if b.get("song_bars") and not SONG_BARS_RE.fullmatch(b["song_bars"].strip()):
+            errors.append(f"Bridge {k}'s song_bars should look like '9-12' or '9-12, 25-28', not {b['song_bars']!r}.")
         wrong = [i for i in (b.get("after") or []) + (b.get("before") or []) if i not in known]
         if wrong:
             errors.append(f"Bridge {k} ('{b.get('title')}') names ids that aren't in the tree: {wrong[:6]}.")
@@ -158,7 +162,8 @@ def build_goal(plan: dict, text: str, base: dict, states: dict | None = None, so
     targets = [t for t in plan.get("targets") or [] if t in base["by_id"]]
     bridges = []
     for b in (plan.get("bridges") or [])[:MAX_BRIDGES]:
-        node = temporary.add_bridge(base, goal_id, b["title"].strip(), b["brief"].strip(), b.get("after") or [], b.get("before") or [])
+        node = temporary.add_bridge(base, goal_id, b["title"].strip(), b["brief"].strip(), b.get("after") or [], b.get("before") or [],
+                                    song_bars=(b.get("song_bars") or "").strip() if song_path is not None else "")
         bridges.append(node["id"])
     goal_targets = targets + [b for b in bridges if not temporary_before(b)]
     if song_path is not None:

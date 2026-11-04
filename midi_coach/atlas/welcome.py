@@ -10,7 +10,8 @@ and can play or draw. The answers pick a starting tier:
 Every tier below the start is credited ('placement_credit' events, as placement.py does),
 and the start tier becomes the goal. A flute or saxophone profile is asked about its
 instrument, and reads a treble G (its first note) in place of the bass-clef check; a singer
-reads middle C (do). Their Roadmaps have no tiers below First notes, so someone brand new
+reads middle C (do), a fiddler the open A, a guitarist the open top E (written E5) and a
+bassist the open A in the bass clef. Their Roadmaps have no tiers below First notes, so someone brand new
 starts there. The answers are kept in <home>/atlas/welcome.json, so
 the Maestro knows why you're learning and how long you like to practice.
 """
@@ -80,8 +81,30 @@ VOICE_PROMPTS = {
 }
 VOICE_CHECK = {"id": "c4", "kind": "check", "prompt": "Which note is this? It's the first one you'll sing: do.",
                "staff": {"clef": "treble", "midi": 60}, "options": ["C", "E", "A", "D"], "answer": 0}
+FIDDLE_PROMPTS = {
+    "played": "Have you played the fiddle or violin before?",
+    "exams": "Have you passed a violin or fiddle exam? Any exam board counts.",
+    "why": "What brings you to the fiddle? Pick as many as you like.",
+}
+FIDDLE_CHECK = {"id": "a4", "kind": "check", "prompt": "Which note is this? It's your open A string, the first you'll play.",
+                "staff": {"clef": "treble", "midi": 69}, "options": ["F", "A", "C", "E"], "answer": 1}
+GUITAR_PROMPTS = {
+    "played": "Have you played the guitar before?",
+    "exams": "Have you passed a guitar exam? Any exam board counts.",
+    "why": "What brings you to the guitar? Pick as many as you like.",
+}
+GUITAR_CHECK = {"id": "e5", "kind": "check", "prompt": "Which note is this? It's the open top E string, the first you'll play.",
+                "staff": {"clef": "treble", "midi": 76}, "options": ["C", "G", "E", "D"], "answer": 2}
+BASS_PROMPTS = {
+    "played": "Have you played the bass guitar before?",
+    "exams": "Have you passed a bass guitar exam? Any exam board counts.",
+    "why": "What brings you to the bass? Pick as many as you like.",
+}
+BASS_CHECK = {"id": "a2", "kind": "check", "prompt": "Which note is this? It's your open A string.",
+              "staff": {"clef": "bass", "midi": 45}, "options": ["C", "F", "A", "E"], "answer": 2}
 # Each microphone instrument: its wording of the questions, and the note check that replaces the bass clef's.
-WORDING = {"flute": (FLUTE_PROMPTS, FLUTE_CHECK), "sax": (SAX_PROMPTS, SAX_CHECK), "voice": (VOICE_PROMPTS, VOICE_CHECK)}
+WORDING = {"flute": (FLUTE_PROMPTS, FLUTE_CHECK), "sax": (SAX_PROMPTS, SAX_CHECK), "voice": (VOICE_PROMPTS, VOICE_CHECK),
+           "fiddle": (FIDDLE_PROMPTS, FIDDLE_CHECK), "guitar": (GUITAR_PROMPTS, GUITAR_CHECK), "bass": (BASS_PROMPTS, BASS_CHECK)}
 
 # Where reading and the checks start you, by tier order (First steps -2 ... Grade 2).
 TARGET_ORDER = {"first": -2, "ready": -1, "initial": 0, "g1": 1, "g2": 2}
@@ -109,7 +132,7 @@ def questions(instrument: str | None = None) -> list[dict]:
 
 
 def correct(answers: dict) -> int:
-    checks = QUESTIONS + [FLUTE_CHECK, VOICE_CHECK]  # the sax's check is the flute's, reworded
+    checks = QUESTIONS + [FLUTE_CHECK, VOICE_CHECK, FIDDLE_CHECK, GUITAR_CHECK, BASS_CHECK]  # the sax's is the flute's, reworded
     return sum(1 for q in checks if q["kind"] == "check" and answers.get(q["id"]) == q["answer"])
 
 

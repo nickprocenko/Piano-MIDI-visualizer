@@ -524,8 +524,10 @@ async function stepOpen(nodeId, info) {
     lessonNav();
   }
   stepRender();
+  songMode(false);
   try {
     const out = await cmd('stage_open', {node: nodeId});  // its music on the sheet
+    $('lesson-song').hidden = !out.song;
     if (!out.shown) {  // aural work: nothing to read, so no unrelated score under the questions
       frame.hidden = true;
       $('sheet-notice').textContent = 'Listening work: nothing to read here.';
@@ -572,6 +574,21 @@ function stepRunning() {
   b.classList.toggle('stop', running);
 }
 
+// Fingering charts (docs/fingering.js): a woodwind's new notes on a lesson's read step, and the
+// diagram a 'Which note is this?' quiz asks about (its title left off, so it doesn't give the answer away).
+function fingeringSvg(instrument, note, height, title) {
+  if (typeof Fingering === 'undefined' || !Fingering.has(instrument)) return '';
+  return Fingering.svg(instrument, note, {height, ...(title === undefined ? {} : {title})});
+}
+function fingeringCharts(f) {
+  if (!f || !Array.isArray(f.notes)) return '';
+  const cells = f.notes.map(n => {
+    const svg = fingeringSvg(f.instrument, n, 110);
+    return svg ? `<figure>${svg}<figcaption>${esc(Fingering.name(n).replace(/\d+$/, ''))}</figcaption></figure>` : '';
+  }).join('');
+  return cells ? `<div class="fing-charts" title="Blue: left hand. Red: right hand. Filled: press the key.">${cells}</div>` : '';
+}
+
 function stepRender() {
   const panel = $('step-panel');
   // On to another step (or out of the lesson): an example still playing stops, and so does a
@@ -590,7 +607,7 @@ function stepRender() {
   let body = '';
   const sayBtn = '<button class="sp-say" data-act="read" title="Read it to me">🔊</button>';
   if (cur.type === 'read') {
-    body = `<p class="sp-text">${esc(cur.text || '')}${sayBtn}</p><button class="sp-act" data-act="done">Got it</button>`;
+    body = `<p class="sp-text">${esc(cur.text || '')}${sayBtn}</p>${fingeringCharts(cur.fingerings)}<button class="sp-act" data-act="done">Got it</button>`;
   } else if (cur.type === 'listen') {
     body = `<p>Listen${cur.hand && cur.hand !== 'both' ? ` (${esc(cur.hand)} hand)` : ''}${cur.tempo_percent && cur.tempo_percent !== 100 ? ` at ${cur.tempo_percent}%` : ''}: the cursor follows the music.</p><button class="sp-act" data-act="start" data-label="▶ Listen">▶ Listen</button>`;
   } else if (cur.type === 'play') {
@@ -602,6 +619,7 @@ function stepRender() {
            `<p class="a-muted">${stepGoal(cur)}</p><button class="sp-act" data-act="start" data-label="Start">Start</button>`;
   } else if (cur.type === 'quiz') {
     body = `<p class="sp-text">${esc(cur.prompt || '')}${sayBtn}</p>` +
+           (cur.fingering ? `<div class="fing-quiz">${fingeringSvg(cur.fingering.instrument, cur.fingering.note, 120, '')}</div>` : '') +
            (cur.file ? `<p><button class="sp-act" data-act="hear">▶ Listen</button></p>` : '') +
            `<div class="sp-options">${(cur.options || []).map((o, k) => `<button data-answer="${k}">${esc(o)}</button>`).join('')}` +
            `<button data-act="say" title="Say the answer instead (uses the microphone)">🎤 Say it</button></div>`;
@@ -734,7 +752,7 @@ window.addEventListener('popstate', () => { if (document.body.dataset.view === '
 let lessonViewWas = document.body.dataset.view;
 new MutationObserver(() => {
   const now = document.body.dataset.view;
-  if (lessonViewWas === 'lesson' && now !== 'lesson') cmd('stage_close').catch(() => {});
+  if (lessonViewWas === 'lesson' && now !== 'lesson') { cmd('stage_close').catch(() => {}); songMode(false); }
   lessonViewWas = now;
 }).observe(document.body, {attributes: true, attributeFilter: ['data-view']});
 
@@ -759,6 +777,52 @@ async function lessonNav() {
   }));
 }
 $('lesson-back').addEventListener('click', () => history.state && history.state.lesson ? history.back() : stepBack());
+
+// See in the song: the goal's song on the sheet in the lesson view, the lesson's bars marked
+// with the Bars range (a section's own bars, a bridge's from the planner, else the start).
+// Runs there aren't graded against the lesson. Back to exercise puts the lesson's music back.
+function songMode(on) {
+  document.body.classList.toggle('in-song', on);
+}
+
+async function sheetLoaded(version) {  // the score that replaced `version` is drawn
+  for (let i = 0; i < 80 && !(scoreVersion !== version && scoreReady); i++) await new Promise(r => setTimeout(r, 100));
+}
+
+async function songOpen() {
+  const was = scoreVersion;
+  let out;
+  try { out = await cmd('stage_song', {node: step.node}); } catch (err) { statusEl.textContent = err.message; return; }
+  songMode(true);
+  $('lesson-song-note').textContent = `“${out.title}”: ${out.why}.`;
+  await sheetLoaded(was);
+  const [first, last] = (out.bars.split(',')[0] || '').split('-').map(n => n.trim());
+  $('from').value = first || '';
+  $('to').value = first ? last || first : '';
+  $('to').dispatchEvent(new Event('change'));
+  if (first) jumpToBar(Number(first));
+}
+
+async function songBack() {
+  if (running) { try { await cmd('stop'); } catch (err) {} }
+  $('from').value = $('to').value = '';
+  $('to').dispatchEvent(new Event('change'));
+  songMode(false);
+  try { await cmd('stage_open', {node: step.node}); } catch (err) { statusEl.textContent = err.message; }
+}
+
+// To the Session with the song: the server keeps it as the Session's sheet (stage_close puts it
+// up as the lesson view closes), the marked bars stay chosen, and the map keeps this lesson.
+async function songToSession() {
+  if (running && !(await askSwitch('practice'))) return;
+  try { await cmd('stage_song', {node: step.node, keep: true}); } catch (err) { statusEl.textContent = err.message; return; }
+  store.set('atlasLastLesson', step.node);
+  window.coachGo('practice', {unguarded: true});
+}
+
+$('lesson-song-btn').addEventListener('click', songOpen);
+$('lesson-song-back').addEventListener('click', songBack);
+$('lesson-song-session').addEventListener('click', songToSession);
 
 // -- mock exams: the exam card -------------------------------------------------------------
 // The server runs the exam (atlas/exam.py); the card shows the sections, what the examiner
@@ -903,12 +967,14 @@ async function examStart(tier) {
 
 // Getting to know you (atlas/welcome.py), the side panel's "Where to start" tab: a few
 // questions about you, then some light music checks, one at a time, and the answers pick where
-// your path starts. No marks: a check you miss just shows the answer and moves on. A flute,
-// sax or voice profile then checks the microphone hears it, and the last screen starts Today.
+// your path starts. No marks: a check you miss just shows the answer and moves on. A profile on
+// the microphone (flute, sax, voice, fiddle, guitar, bass) then checks the microphone hears it,
+// and the last screen starts Today.
 const wl = {qs: null, i: 0, answers: {}, picked: [], audio: null, micChecked: false};
-const isMic = () => ['flute', 'sax', 'voice'].includes(document.body.dataset.instrument);
+const isMic = () => ['flute', 'sax', 'voice', 'fiddle', 'guitar', 'bass'].includes(document.body.dataset.instrument);
 const isVoice = () => document.body.dataset.instrument === 'voice';
-const instWord = () => ({flute: 'flute', sax: 'saxophone'})[document.body.dataset.instrument] || 'instrument';
+const instWord = () => ({flute: 'flute', sax: 'saxophone', fiddle: 'fiddle', guitar: 'guitar', bass: 'bass'})[document.body.dataset.instrument]
+  || 'instrument';
 
 async function atlasPlaceForm() {
   path.shown = false;  // a goals update mustn't redraw the Path over this
@@ -1426,7 +1492,10 @@ async function atlasShow(open) {
   } catch (err) {
     const build = {flute: 'The flute Roadmap is built from your local flute syllabus: <code>python -m midi_coach.atlas.pan</code>',
                    sax: 'The saxophone Roadmap is built from your local saxophone syllabus: <code>python -m midi_coach.atlas.sax</code>',
-                   voice: 'The vocal Roadmap is built with <code>python -m midi_coach.atlas.voice</code>'};
+                   voice: 'The vocal Roadmap is built with <code>python -m midi_coach.atlas.voice</code>',
+                   fiddle: 'The fiddle Roadmap is built with <code>python -m midi_coach.atlas.fiddle</code>',
+                   guitar: 'The guitar Roadmap is built with <code>python -m midi_coach.atlas.guitar</code>',
+                   bass: 'The bass Roadmap is built with <code>python -m midi_coach.atlas.bass</code>'};
     $('atlas-detail').innerHTML = `<p>${esc(err.message)}</p><p class="a-muted">` + (build[document.body.dataset.instrument]
       || 'The Roadmap is built from your local syllabus: <code>python -m midi_coach.atlas.build</code>') + `</p>`;
   }

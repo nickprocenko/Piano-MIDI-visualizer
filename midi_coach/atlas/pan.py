@@ -525,13 +525,42 @@ def piece_stages(bars: int) -> list[dict]:
                   st("whole", "Whole tune at tempo", "both", "rehearse", 100, final=True)]
 
 
+# Woodwinds with fingering charts (docs/fingering.js draws them on the page).
+FINGERED = ("flute", "sax")
+NOTE_NAMES = ("C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "G♯", "A", "B♭", "B")
+
+
+def fingering_quizzes(instrument: str, new: list[int], known: list[int]) -> list[dict]:
+    """'Which note is this?' from a fingering diagram, one per new note: the answer and up to two
+    other letter names from the notes learned so far (nearest first, never the same letter), in
+    pitch order. Ungraded: practice for the eyes, the stage is still passed by playing."""
+    out = []
+    for k, pitch in enumerate(new, 1):
+        pool = sorted({p for p in list(new) + list(known) if p % 12 != pitch % 12}, key=lambda p: (abs(p - pitch), p))
+        names: list[int] = []
+        for p in pool:
+            if p % 12 not in {q % 12 for q in names} and len(names) < 2:
+                names.append(p)
+        options = sorted([pitch] + names)
+        out.append({"id": f"which-{k}", "type": "quiz", "prompt": "Which note is this?",
+                    "fingering": {"instrument": instrument, "note": pitch},
+                    "options": [NOTE_NAMES[p % 12] for p in options], "answer": options.index(pitch), "graded": False,
+                    "explain": f"That's {NOTE_NAMES[pitch % 12]}."})
+    return out
+
+
 def _play_lesson(stage: dict, req: dict, file: str, text: str, made: str, checked: bool = True, plays: list[str] | None = None,
-                 learn_pass: dict | None = None) -> dict:
+                 learn_pass: dict | None = None, fingering: dict | None = None) -> dict:
+    """fingering: {instrument, notes, known} for a notes step on a woodwind: its Learn stage (Find the
+    notes) shows the new notes' fingering charts and asks 'Which note is this?' for each."""
     st = stage["stage"]
     learn = st["mode"] == "learn"
     bars = st.get("bars")
     listen = {"id": "listen", "type": "listen", "file": file, "hand": "both", "tempo_percent": st["tempo_percent"]}
     steps = [{"id": "read", "type": "read", "text": text + (" Learn mode waits for each note." if learn else " Rehearse keeps the beat.")}, listen]
+    if fingering and learn:
+        steps[0]["fingerings"] = {"instrument": fingering["instrument"], "notes": list(fingering["notes"])}
+        steps[1:1] = fingering_quizzes(fingering["instrument"], fingering["notes"], fingering.get("known", []))
     for name in plays or ["play"]:
         play = {"id": name, "type": "play", "file": file, "hand": "both", "mode": st["mode"], "tempo_percent": st["tempo_percent"],
                 "graded": True, "pass": (learn_pass or LEARN_PASS) if learn else rehearse_pass(st["tempo_percent"])}
@@ -789,8 +818,13 @@ def write(syllabus: dict, out: pathlib.Path | None = None, tunes: list[dict] | N
         elif kind == "exercise":
             if req["id"] not in files:
                 files[req["id"]] = score("first", templates.slug(req["id"]), data["title"], data["tiny"], "C", "4/4", data["tempo"])
+            fing = None
+            if course.instrument in FINGERED and data.get("new"):
+                keys = [ns["key"] for ns in course.note_steps]
+                before = course.note_steps[:keys.index(data["key"])] if data["key"] in keys else course.note_steps
+                fing = {"instrument": course.instrument, "notes": data["new"], "known": [p for ns in before for p in ns["new"]]}
             lesson = _play_lesson(stage, req, files[req["id"]], f"{data['title']}. {data['text']}", f"{course.made} (First notes)",
-                                  learn_pass=course.learn_pass)
+                                  learn_pass=course.learn_pass, fingering=fing)
         elif kind == "technique":
             spec = data["spec"]
             if req["id"] not in files:
@@ -845,6 +879,29 @@ def _tiny_midis(text: str, time: str) -> list[int]:
     from ..lessons import _tiny
 
     return [n.pitch.midi for n in _tiny(text, time) if n.isNote]
+
+
+def load_own_syllabus(name: str) -> dict:
+    """One of the coach's own syllabi in atlas/data (fiddle, guitar, bass), with the aural tests
+    from the flute's local syllabus when there is one (every instrument's aural tests are the
+    same, and they are ABRSM's, so never in git)."""
+    syllabus = json.loads((PACKAGE / "data" / name).read_text(encoding="utf-8"))
+    flute = shared_dir() / FOLDER / "syllabus.json"
+    if flute.is_file():
+        aural = json.loads(flute.read_text(encoding="utf-8"))
+        by_id = {g["id"]: g.get("aural", []) for g in aural.get("grades", [])}
+        for g in syllabus["grades"]:
+            g.setdefault("aural", by_id.get(g["id"], []))
+        syllabus.setdefault("first_notes_aural", aural.get("first_notes_aural", []))
+    return syllabus
+
+
+def own_main(course: "Course", name: str) -> None:
+    """Build one of the coach's own courses into <home>/atlas/<its folder>."""
+    report = write(load_own_syllabus(name), course=course)
+    print(f"{content_dir(course)}: {report['nodes']} nodes, {report['lessons']} lessons, {report['scores']} scores")
+    for problem in report["problems"]:
+        print("  problem:", problem)
 
 
 def load_syllabus(path: str | pathlib.Path | None = None, course: "Course | None" = None) -> dict:
