@@ -4017,7 +4017,8 @@ connect();
         item.remove();
         show(out.count);
         if (!out.count) list.append(el('p', 'dlg-hint', 'All checked. Thanks!'));
-        msg.textContent = out.undone === true ? 'Sent back, and its change was undone.'
+        msg.textContent = out.merged ? 'Thanks! The fix is now in your code.'
+          : out.undone === true ? 'Sent back, and its change was undone.'
           : out.undone === false ? 'Sent back. Its change couldn’t be undone automatically: the next fix will deal with it.' : '';
       } catch (e) {
         msg.textContent = e.message;

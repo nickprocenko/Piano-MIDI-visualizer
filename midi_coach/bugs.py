@@ -529,6 +529,7 @@ def mark_ready(report_id: str, summary: str, build_log: str = "", files=(), by: 
         if "commit" not in out:
             return out
         commit = out["commit"]
+        fixgit.keep(commit, report_id)  # a worker's branch is reset for its next batch
     (folder / "claim.json").unlink(missing_ok=True)
     folder = _move(folder, kind, "check")
     lines = [f"# Fixed {time.strftime('%Y-%m-%d %H:%M')}", "", summary.strip()]
@@ -553,18 +554,29 @@ def verify(report_id: str, works: bool, note: str = "") -> dict:
     tried = (fixed or "(no fix note)") + (f" (build log: {build_log})" if build_log else "")
     stamp = time.strftime("%Y-%m-%d %H:%M")
     m = COMMIT_RE.search((folder / "fix.md").read_text(encoding="utf-8")) if (folder / "fix.md").exists() else None
-    undone = None
+    from . import fixgit
+
+    undone = merged = None
     if works:
-        addition = ["", f"## Checked {stamp}: works", "", tried + (f" (commit {m.group(1)}, kept)" if m else "")]
+        kept = ""
+        if m:
+            merged = fixgit.merge(m.group(1))  # from a worker's side branch onto the user's
+            if "merged" not in merged:
+                return merged  # stays in check/: the page says why, and ✅ can be pressed again
+            fixgit.forget(report_id)
+            kept = (f" (commit {m.group(1)}, kept)" if merged.get("already")
+                    else f" (commit {m.group(1)}, added to your code as {merged['commit']})")
+        addition = ["", f"## Checked {stamp}: works", "", tried + kept]
         folder = _move(folder, kind, DONE[kind])
     else:
         addition = ["", f"## Checked {stamp}: still wrong", "", note.strip() or "(nothing more was said)",
                     "", f"The fix that was tried: {tried}"]
         if m:
-            from . import fixgit
-
-            undone = fixgit.revert(m.group(1))
-            addition += ["", f"Its commit {m.group(1)} was undone ({undone['commit']})." if "commit" in undone else
+            undone = fixgit.undo(m.group(1))
+            fixgit.forget(report_id)
+            addition += ["", f"Its commit {m.group(1)} was never added to your code, so nothing needed undoing."
+                         if "dropped" in undone else
+                         f"Its commit {m.group(1)} was undone ({undone['commit']})." if "commit" in undone else
                          f"**Needs an agent:** its commit {m.group(1)} couldn't be undone automatically "
                          f"({undone.get('error')}). Undo it by hand before fixing again."]
         (folder / "fix.md").unlink(missing_ok=True)
@@ -574,7 +586,9 @@ def verify(report_id: str, works: bool, note: str = "") -> dict:
     write_backlog()
     out = {"checked": report_id, "works": works}
     if undone is not None:
-        out["undone"] = "commit" in undone
+        out["undone"] = "commit" in undone or "dropped" in undone
+    if merged is not None:
+        out["merged"] = merged["commit"]
     return out
 
 

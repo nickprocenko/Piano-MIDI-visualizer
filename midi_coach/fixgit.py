@@ -91,6 +91,73 @@ def revert(commit: str) -> dict:
     return {"error": (out.stderr or out.stdout).strip().splitlines()[0] if (out.stderr or out.stdout).strip() else "revert failed"}
 
 
+# ---- Side branches: each worker fixes things in its own copy of the code ------------------------
+#
+# A runner's worker builds in a git worktree (<home>/workers/<name>, branch runner/<name>), so the
+# user's own folder is never touched while it works. Each fix it marks ready is kept under
+# refs/fixes/<report id> (the worktree is reset for its next batch). ✅ on the coach page copies that
+# commit onto the user's branch (merge); ↩️ before then just drops it, since it never reached them.
+
+
+def worktree(name: str) -> pathlib.Path:
+    """A worker's own copy of the code, fresh from the user's latest commit (their uncommitted
+    edits aren't in it): created the first time, reset for each new batch."""
+    path = home() / "workers" / name
+    branch = f"runner/{name}"
+    head = git("rev-parse", "HEAD").stdout.strip()
+    if not (path / ".git").exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        git("worktree", "prune")
+        git("worktree", "add", "-q", "-B", branch, str(path), head)
+    else:
+        run = lambda *a: subprocess.run(["git", *a], cwd=path, capture_output=True, text=True, check=True)
+        run("checkout", "-q", "-B", branch, head)
+        run("reset", "-q", "--hard", head)
+        run("clean", "-q", "-fd")
+    return path
+
+
+def keep(commit: str, report_id: str) -> None:
+    """Hold on to a fix's commit by its report, so resetting the worker's branch doesn't lose it."""
+    git("update-ref", f"refs/fixes/{report_id}", commit)
+
+
+def forget(report_id: str) -> None:
+    git("update-ref", "-d", f"refs/fixes/{report_id}", check=False)
+
+
+def _in_branch(commit: str) -> bool:
+    return git("merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode == 0
+
+
+def merge(commit: str) -> dict:
+    """✅: copy a fix's commit onto the user's branch. If they have uncommitted edits in a file it
+    changes, it waits ({"wait": files}) so their work isn't mixed in; if it doesn't apply cleanly,
+    nothing changes and that's said."""
+    if _in_branch(commit):
+        return {"merged": commit, "commit": commit, "already": True}  # committed on their branch already
+    files = [_norm(f) for f in git("diff-tree", "--no-commit-id", "--name-only", "-r", commit).stdout.split("\n") if f.strip()]
+    theirs = sorted(set(files) & set(dirty_files()))
+    if theirs:
+        return {"wait": theirs, "error": "You have unsaved changes in a file this fix changes, so it wasn't added yet "
+                                         "(yours and the fix's would be mixed). Commit or undo them, then press ✅ again: "
+                                         + ", ".join(theirs)}
+    out = git("cherry-pick", commit, check=False)
+    if out.returncode:
+        git("cherry-pick", "--abort", check=False)
+        text = (out.stderr or out.stdout).strip()
+        return {"error": "This fix couldn't be added to your code automatically (it clashes with a later change): "
+                         + (text.splitlines()[0] if text else "cherry-pick failed")}
+    return {"merged": commit, "commit": git("rev-parse", "--short", "HEAD").stdout.strip()}
+
+
+def undo(commit: str) -> dict:
+    """↩️: a fix still on a side branch is just dropped; one already on the user's branch is reverted."""
+    if not _in_branch(commit):
+        return {"dropped": commit}
+    return revert(commit)
+
+
 # ---- One runner at a time ------------------------------------------------------------------------
 
 def _alive(pid: int) -> bool:

@@ -141,6 +141,54 @@ def test_two_workers_take_whole_batches_that_share_no_files(home, repo):
     assert third["batch"] == "top bar" and set(third["claimed"]) == {video, tiles}  # the whole batch
 
 
+def worker_fixes(monkeypatch, repo, item, name="worker-1", text="<button>Video</button> <!-- top -->\n"):
+    """A worker builds a fix in its own copy of the code and marks it ready; back to the user's after."""
+    tree = fixgit.worktree(name)
+    monkeypatch.setenv("MIDI_COACH_REPO", str(tree))
+    bugs.claim(item, name)
+    (tree / "page.html").write_text(text, encoding="utf-8")
+    out = bugs.mark_ready(item, "Video button moved to the top bar.", files=["page.html"], by=name)
+    monkeypatch.setenv("MIDI_COACH_REPO", str(repo))
+    return tree, out
+
+
+def test_a_workers_fix_stays_on_its_side_branch_until_you_say_it_works(home, repo, monkeypatch):
+    item = report()
+    (repo / "notes.py").write_text("TEMPO = 90  # yours\n", encoding="utf-8")  # your own edit, elsewhere
+    tree, out = worker_fixes(monkeypatch, repo, item)
+    assert "commit" in out
+    assert (repo / "page.html").read_text(encoding="utf-8") == "<button>Video</button>\n"  # yours untouched
+    assert log_of(repo)[0] == "start"
+    done = bugs.verify(item, works=True)
+    assert done["merged"] and log_of(repo)[0].startswith("Request: Video button moved")
+    assert "top" in (repo / "page.html").read_text(encoding="utf-8")
+    assert (repo / "notes.py").read_text(encoding="utf-8") == "TEMPO = 90  # yours\n"  # still yours, uncommitted
+    assert "added to your code as" in (home / "requests" / "done" / item / "report.md").read_text(encoding="utf-8")
+    assert fixgit.git("show-ref", f"refs/fixes/{item}", check=False).returncode  # no longer held
+
+
+def test_a_fix_waits_while_you_are_editing_its_file(home, repo, monkeypatch):
+    item = report()
+    worker_fixes(monkeypatch, repo, item)
+    (repo / "page.html").write_text("<button>Video</button><!-- mine -->\n", encoding="utf-8")
+    out = bugs.verify(item, works=True)
+    assert out["wait"] == ["page.html"] and "unsaved changes" in out["error"]
+    assert (home / "requests" / "check" / item).is_dir() and log_of(repo)[0] == "start"
+    subprocess.run(["git", "checkout", "--", "page.html"], cwd=repo, check=True)  # you put yours away
+    assert bugs.verify(item, works=True)["merged"]
+
+
+def test_still_wrong_drops_a_side_branch_fix_without_touching_your_code(home, repo, monkeypatch):
+    item = report()
+    tree, _ = worker_fixes(monkeypatch, repo, item)
+    out = bugs.verify(item, works=False, note="it's in the wrong corner")
+    assert out["undone"] is True and log_of(repo)[0] == "start"
+    text = (home / "requests" / "open" / item / "report.md").read_text(encoding="utf-8")
+    assert "never added to your code" in text
+    assert fixgit.worktree("worker-1") == tree  # next batch: the worker starts again from your code
+    assert (tree / "page.html").read_text(encoding="utf-8") == "<button>Video</button>\n"
+
+
 def test_one_runner_at_a_time(home):
     home.mkdir(parents=True, exist_ok=True)
     assert fixgit.acquire("overnight") == {"locked": "overnight"}

@@ -665,8 +665,10 @@ appears at the top of the coach page. It lists each fix with your screenshot, wh
 where you were (page, song, bar, mode), and a line on what changed. Try it, then press
 **✅ Works** (it moves to `fixed/`, or `requests/done/`) or **↩️ Still wrong** and say what's
 still off (it goes back to `open/` with your words, to be fixed again). Each fix is its own git
-commit on this PC (never pushed by the coach); Still wrong undoes that commit, and says so if it
-can't be undone cleanly. **↗ Go there** opens
+commit on this PC (never pushed by the coach). A fix made by a background worker waits on its own
+side branch: Works adds it to your code (not while you have unsaved changes in a file it changes:
+then it says which, and you press Works again), and Still wrong just drops it. A fix made in
+your folder is undone by Still wrong, which says so if it can't be undone cleanly. **↗ Go there** opens
 the piece you reported it on and sets the page up as it was: the view, the mode, the bars, the
 tempo, the loop and the cursor's bar (this becomes that piece's saved practice settings, as if
 you'd set them). It's off while a run is going. Opening
