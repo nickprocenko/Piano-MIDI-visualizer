@@ -19,6 +19,7 @@ import collections
 import io
 import json
 import logging
+import os
 import pathlib
 import re
 import sys
@@ -376,7 +377,7 @@ def _fix_parts(folder: pathlib.Path) -> tuple[str, str]:
         return "", ""
     body = fix.read_text(encoding="utf-8").split("\n", 1)[-1]
     m = LOG_LINK_RE.search(body)
-    return " ".join(LOG_LINK_RE.sub("", body).split()), (m.group(1) if m else "")
+    return " ".join(COMMIT_RE.sub("", LOG_LINK_RE.sub("", body)).split()), (m.group(1) if m else "")
 
 
 PAGE_MODES = {"wait": "learn", "rehearsal": "rehearse", "listen": "listen", "learn": "learn", "rehearse": "rehearse"}
@@ -418,21 +419,107 @@ def place(report_id: str) -> dict:
     return out
 
 
-def mark_ready(report_id: str, summary: str, build_log: str = "") -> dict:
-    """An agent fixed it: open/ → check/, with what changed, for the user to try."""
+CLAIM_STALE_SEC = 3 * 3600  # a claim older than this was left by a worker that stopped
+COMMIT_RE = re.compile(r"^Commit: ([0-9a-f]{6,40})\s*$", re.M)
+
+
+def claimed_by(folder: pathlib.Path) -> dict | None:
+    """Who is working on an item now ({by, at, dirty}), if anyone (a stale claim counts as none)."""
+    try:
+        claim = json.loads((folder / "claim.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return claim if time.time() - float(claim.get("at", 0)) < CLAIM_STALE_SEC else None
+
+
+def claim(report_id: str, by: str) -> dict:
+    """A worker takes an open item before touching any code, so no other worker takes it too. Also
+    notes which files already had uncommitted changes (the user's), so the fix's commit leaves them be."""
+    from . import fixgit
+
     found = find(report_id)
     if found is None:
         return {"error": f"No report {report_id}."}
     kind, stage, folder = found
     if stage != "open":
         return {"error": f"{report_id} is in {stage}/, not open/."}
+    path = folder / "claim.json"
+    held = claimed_by(folder)
+    if held and held.get("by") != by:
+        return {"error": f"{report_id} is being worked on by {held.get('by')}."}
+    path.unlink(missing_ok=True)  # a stale claim, or this worker's own
+    try:
+        dirty = fixgit.dirty_files()
+    except Exception as exc:  # not a git checkout: the fix just won't be committed
+        dirty, log_note = None, str(exc)
+        log.info("claim: %s", log_note)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)  # two workers at once: one wins
+    except FileExistsError:
+        return {"error": f"{report_id} was just taken by another worker."}
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"by": by, "at": time.time(), "dirty": dirty}, f)
+    write_backlog()
+    return {"claimed": report_id, "by": by}
+
+
+def release(report_id: str) -> dict:
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    (found[2] / "claim.json").unlink(missing_ok=True)
+    write_backlog()
+    return {"released": report_id}
+
+
+def take_next(by: str) -> dict:
+    """The next item to build, in batch order, claimed for `by`: {"claimed", "batch", ...} or {"none"}."""
+    for batch in batches()["batches"]:
+        for it in batch["items"]:
+            if it["claimed"] is None:
+                out = claim(it["id"], by)
+                if "claimed" in out:
+                    return {**out, "batch": batch["area"], "kind": it["kind"], "said": it["said"],
+                            "files": it["triage"]["files"]}
+    return {"none": "Nothing triaged and free to build."}
+
+
+def mark_ready(report_id: str, summary: str, build_log: str = "", files=(), by: str = "") -> dict:
+    """An agent fixed it: open/ → check/, with what changed, for the user to try. With `files`,
+    the fix is first committed on its own (fixgit.commit_fix), using the claim's note of which
+    files the user was editing; if that can't be done, nothing moves and the reason comes back."""
+    from . import fixgit
+
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    kind, stage, folder = found
+    if stage != "open":
+        return {"error": f"{report_id} is in {stage}/, not open/."}
+    commit = None
+    files = [f for f in files if f and f.strip()]
+    if files:
+        held = claimed_by(folder)
+        if held is None or held.get("dirty") is None:
+            return {"error": f"Claim {report_id} before working on it (bugs claim), so its commit can leave your own edits alone."}
+        if by and held.get("by") != by:
+            return {"error": f"{report_id} is claimed by {held.get('by')}."}
+        tag = "Fix" if kind == "bug" else "Request"
+        out = fixgit.commit_fix(files, f"{tag}: {summary.strip().splitlines()[0][:72]}\n\n{summary.strip()}\n\n"
+                                       f"From {kind} report {report_id}.", held["dirty"])
+        if "commit" not in out:
+            return out
+        commit = out["commit"]
+    (folder / "claim.json").unlink(missing_ok=True)
     folder = _move(folder, kind, "check")
     lines = [f"# Fixed {time.strftime('%Y-%m-%d %H:%M')}", "", summary.strip()]
     if build_log.strip():
         lines += ["", f"Build log: [[{build_log.strip()}]]"]
+    if commit:
+        lines += ["", f"Commit: {commit}"]
     (folder / "fix.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     write_backlog()
-    return {"ready": report_id, "kind": kind}
+    return {"ready": report_id, "kind": kind, **({"commit": commit} if commit else {})}
 
 
 def verify(report_id: str, works: bool, note: str = "") -> dict:
@@ -446,18 +533,30 @@ def verify(report_id: str, works: bool, note: str = "") -> dict:
     fixed, build_log = _fix_parts(folder)
     tried = (fixed or "(no fix note)") + (f" (build log: {build_log})" if build_log else "")
     stamp = time.strftime("%Y-%m-%d %H:%M")
+    m = COMMIT_RE.search((folder / "fix.md").read_text(encoding="utf-8")) if (folder / "fix.md").exists() else None
+    undone = None
     if works:
-        addition = ["", f"## Checked {stamp}: works", "", tried]
+        addition = ["", f"## Checked {stamp}: works", "", tried + (f" (commit {m.group(1)}, kept)" if m else "")]
         folder = _move(folder, kind, DONE[kind])
     else:
         addition = ["", f"## Checked {stamp}: still wrong", "", note.strip() or "(nothing more was said)",
                     "", f"The fix that was tried: {tried}"]
+        if m:
+            from . import fixgit
+
+            undone = fixgit.revert(m.group(1))
+            addition += ["", f"Its commit {m.group(1)} was undone ({undone['commit']})." if "commit" in undone else
+                         f"**Needs an agent:** its commit {m.group(1)} couldn't be undone automatically "
+                         f"({undone.get('error')}). Undo it by hand before fixing again."]
         (folder / "fix.md").unlink(missing_ok=True)
         folder = _move(folder, kind, "open")
     with (folder / "report.md").open("a", encoding="utf-8") as f:
         f.write("\n".join(addition) + "\n")
     write_backlog()
-    return {"checked": report_id, "works": works}
+    out = {"checked": report_id, "works": works}
+    if undone is not None:
+        out["undone"] = "commit" in undone
+    return out
 
 
 def close(report_id: str, reason: str) -> dict:
@@ -587,6 +686,7 @@ def _item(kind: str, folder: pathlib.Path) -> dict:
     return {"id": folder.name, "kind": kind, "said": _said(text, limit=2000), "where": _where(text),
             "fix": fixed, "log": build_log, "reopened": ": still wrong" in text,
             "important": "\n## Priority\n" in "\n" + text, "triage": _triage_of(folder),
+            "claimed": claimed_by(folder),
             "shot": shot if shot.exists() else None, "when": report.stat().st_mtime}
 
 
@@ -629,6 +729,9 @@ def _backlog_lines(it: dict, mark: str, shots: pathlib.Path) -> list[str]:
     said = it["said"] if len(it["said"]) <= 160 else it["said"][:159].rstrip() + "…"
     out = [f"- {mark} {'⭐ ' if it.get('important') else ''}**{tag}:** {said}",
            f"  *{it['where']}* · `{it['id']}`" if it["where"] else f"  `{it['id']}`"]
+    if it.get("claimed"):
+        out.append(f"  🔧 Being worked on by {it['claimed']['by']} since "
+                   f"{time.strftime('%H:%M', time.localtime(it['claimed']['at']))}")
     t = it.get("triage")
     if t and mark not in ("✅",):
         out.append(f"  Size {t['size']} · {', '.join(t['files']) or 'files not named'}"
@@ -706,6 +809,15 @@ def _main(argv=None) -> int:
     ready.add_argument("id", help="the report's folder name, e.g. 2026-11-03_20-38-42")
     ready.add_argument("summary", help="what changed, in a sentence or two the user will read")
     ready.add_argument("--log", default="", help="the build log's note name in the vault")
+    ready.add_argument("--files", default="", help="comma-separated repo paths the fix changed: they're committed on their own")
+    ready.add_argument("--by", default="", help="the worker that claimed it")
+    take = sub.add_parser("claim", help="take an open item before working on it")
+    take.add_argument("id")
+    take.add_argument("--by", required=True, help="who is working on it, e.g. 'overnight' or 'session'")
+    free = sub.add_parser("release", help="give an item back without fixing it")
+    free.add_argument("id")
+    nxt = sub.add_parser("next", help="claim the next item to build, in batch order")
+    nxt.add_argument("--by", required=True)
     shut = sub.add_parser("close", help="done without a fix, on the user's word (not a bug, already works)")
     shut.add_argument("id")
     shut.add_argument("reason", help="why, in the user's terms")
@@ -746,9 +858,20 @@ def _main(argv=None) -> int:
         print(out.get("error") or f"{args.id}: closed")
         return 1 if "error" in out else 0
     if args.what == "ready":
-        out = mark_ready(args.id, args.summary, args.log)
-        print(out.get("error") or f"{args.id}: ready to check")
+        out = mark_ready(args.id, args.summary, args.log, args.files.split(","), args.by)
+        print(out.get("error") or f"{args.id}: ready to check" + (f" (commit {out['commit']})" if out.get("commit") else ""))
         return 1 if "error" in out else 0
+    if args.what in ("claim", "release"):
+        out = claim(args.id, args.by) if args.what == "claim" else release(args.id)
+        print(out.get("error") or f"{args.id}: {'claimed' if args.what == 'claim' else 'released'}")
+        return 1 if "error" in out else 0
+    if args.what == "next":
+        out = take_next(args.by)
+        if "claimed" in out:
+            print(f"{out['claimed']}  ({out['kind']}, batch: {out['batch']})  {out['said'][:100]}  [{', '.join(out['files'])}]")
+            return 0
+        print(out.get("none") or out.get("error"))
+        return 1
     if args.what == "list":
         for stage in ("open", "check", "done"):
             for it in items(stage):

@@ -664,7 +664,9 @@ screen, the page's errors). F9 again or Escape closes it without saving.
 appears at the top of the coach page. It lists each fix with your screenshot, what you said and
 where you were (page, song, bar, mode), and a line on what changed. Try it, then press
 **✅ Works** (it moves to `fixed/`, or `requests/done/`) or **↩️ Still wrong** and say what's
-still off (it goes back to `open/` with your words, to be fixed again). **↗ Go there** opens
+still off (it goes back to `open/` with your words, to be fixed again). Each fix is its own git
+commit on this PC (never pushed by the coach); Still wrong undoes that commit, and says so if it
+can't be undone cleanly. **↗ Go there** opens
 the piece you reported it on and sets the page up as it was: the view, the mode, the bars, the
 tempo, the loop and the cursor's bar (this becomes that piece's saved practice settings, as if
 you'd set them). It's off while a run is going. Opening

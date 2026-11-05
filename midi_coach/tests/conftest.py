@@ -16,6 +16,12 @@ def _own_home(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_repo(monkeypatch, tmp_path):
+    """Tests never run git on the user's own checkout; test_fixgit.py makes a throwaway repo."""
+    monkeypatch.setenv("MIDI_COACH_REPO", str(tmp_path / "no-repo"))
+
+
+@pytest.fixture(autouse=True)
 def _no_vault(monkeypatch):
     """Tests never write Backlog.md into the user's Obsidian vault; test_bugs.py points it at a temp one."""
     monkeypatch.setenv("MIDI_COACH_VAULT", "off")
