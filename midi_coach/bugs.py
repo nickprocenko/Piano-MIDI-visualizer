@@ -432,9 +432,10 @@ def claimed_by(folder: pathlib.Path) -> dict | None:
     return claim if time.time() - float(claim.get("at", 0)) < CLAIM_STALE_SEC else None
 
 
-def claim(report_id: str, by: str) -> dict:
+def claim(report_id: str, by: str, dirty: dict | None = None) -> dict:
     """A worker takes an open item before touching any code, so no other worker takes it too. Also
-    notes which files already had uncommitted changes (the user's), so the fix's commit leaves them be."""
+    notes which files already had uncommitted changes (the user's), so the fix's commit leaves them be.
+    `dirty`: that note given instead (a runner's worker starts in a clean worktree: {})."""
     from . import fixgit
 
     found = find(report_id)
@@ -449,7 +450,7 @@ def claim(report_id: str, by: str) -> dict:
         return {"error": f"{report_id} is being worked on by {held.get('by')}."}
     path.unlink(missing_ok=True)  # a stale claim, or this worker's own
     try:
-        dirty = fixgit.dirty_files()
+        dirty = fixgit.dirty_files() if dirty is None else dirty
     except Exception as exc:  # not a git checkout: the fix just won't be committed
         dirty, log_note = None, str(exc)
         log.info("claim: %s", log_note)
@@ -472,6 +473,35 @@ def release(report_id: str) -> dict:
     return {"released": report_id}
 
 
+def stuck(report_id: str, why: str, by: str = "") -> dict:
+    """A worker couldn't finish an item (it can't reproduce it, a command was refused, it ran out of
+    time): it's given back and set aside, so no worker retries it until someone looks (`unstick`)."""
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    folder = found[2]
+    (folder / "stuck.json").write_text(json.dumps({"by": by, "at": time.time(), "why": why.strip()}), encoding="utf-8")
+    (folder / "claim.json").unlink(missing_ok=True)
+    write_backlog()
+    return {"stuck": report_id}
+
+
+def unstick(report_id: str) -> dict:
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    (found[2] / "stuck.json").unlink(missing_ok=True)
+    write_backlog()
+    return {"unstuck": report_id}
+
+
+def _stuck_of(folder: pathlib.Path) -> dict | None:
+    try:
+        return json.loads((folder / "stuck.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def take_next(by: str) -> dict:
     """The next item to build, in batch order, claimed for `by`: {"claimed", "batch", ...} or {"none"}."""
     for batch in batches()["batches"]:
@@ -484,7 +514,7 @@ def take_next(by: str) -> dict:
     return {"none": "Nothing triaged and free to build."}
 
 
-def take_batch(by: str) -> dict:
+def take_batch(by: str, dirty: dict | None = None) -> dict:
     """A worker takes a whole batch (one area) to build: every free item in the first batch nobody
     else is working on and whose files don't overlap another worker's batch, so two workers never
     change the same file. {"batch", "claimed": [ids], "files"} or {"none"}."""
@@ -497,7 +527,7 @@ def take_batch(by: str) -> dict:
         files = sorted({f for it in batch["items"] for f in it["triage"]["files"]})
         if busy_files & set(files):
             continue
-        got = [it["id"] for it in batch["items"] if "claimed" in claim(it["id"], by)]
+        got = [it["id"] for it in batch["items"] if "claimed" in claim(it["id"], by, dirty)]
         if got:
             return {"batch": batch["area"], "claimed": got, "files": files}
     return {"none": "No batch is free to build (the rest are taken, or share files with one that is)."}
@@ -684,11 +714,13 @@ def _triage_of(folder: pathlib.Path) -> dict | None:
 def batches() -> dict:
     """The open items, sorted: {"batches": [{area, items, important, size}], "questions", "design",
     "untriaged"}. A batch holds the buildable items of one area; batches go most urgent first."""
-    out = {"batches": [], "questions": [], "design": [], "untriaged": []}
+    out = {"batches": [], "questions": [], "design": [], "untriaged": [], "stuck": []}
     areas: dict[str, list] = {}
     for it in items("open"):
         t = it["triage"]
-        if t is None:
+        if it["stuck"]:
+            out["stuck"].append(it)
+        elif t is None:
             out["untriaged"].append(it)
         elif t["needs"] == "question":
             out["questions"].append(it)
@@ -706,7 +738,7 @@ def batches() -> dict:
                                "bugs": sum(r["kind"] == "bug" for r in rows),
                                "size": sum(SIZES[r["triage"]["size"]] for r in rows)})
     out["batches"].sort(key=lambda b: (not b["important"], not b["bugs"], b["size"], b["items"][0]["id"]))
-    for key in ("questions", "design", "untriaged"):
+    for key in ("questions", "design", "untriaged", "stuck"):
         out[key].sort(key=lambda it: (not it["important"], it["id"]))
     return out
 
@@ -719,7 +751,7 @@ def _item(kind: str, folder: pathlib.Path) -> dict:
     return {"id": folder.name, "kind": kind, "said": _said(text, limit=2000), "where": _where(text),
             "fix": fixed, "log": build_log, "reopened": ": still wrong" in text,
             "important": "\n## Priority\n" in "\n" + text, "triage": _triage_of(folder),
-            "claimed": claimed_by(folder),
+            "claimed": claimed_by(folder), "stuck": _stuck_of(folder),
             "shot": shot if shot.exists() else None, "when": report.stat().st_mtime}
 
 
@@ -765,6 +797,8 @@ def _backlog_lines(it: dict, mark: str, shots: pathlib.Path) -> list[str]:
     if it.get("claimed"):
         out.append(f"  🔧 Being worked on by {it['claimed']['by']} since "
                    f"{time.strftime('%H:%M', time.localtime(it['claimed']['at']))}")
+    if it.get("stuck") and mark == "🧱":
+        out.append(f"  🧱 {it['stuck'].get('by') or 'A worker'} got stuck: {it['stuck'].get('why') or '(no reason given)'}")
     t = it.get("triage")
     if t and mark not in ("✅",):
         out.append(f"  Size {t['size']} · {', '.join(t['files']) or 'files not named'}"
@@ -808,6 +842,10 @@ def write_backlog() -> pathlib.Path | None:
                 "[Try them on the coach page](http://127.0.0.1:8765/#checks) (on this PC, with the coach running)")
         plan = batches()
         section("❓ Needs you", plan["questions"], "❓", "One answer each, then they join a batch.")
+        if plan["stuck"]:
+            section("🧱 Stuck", plan["stuck"], "🧱",
+                    "A worker couldn't finish these, so they're set aside. Ask an agent session to look, "
+                    "or `bugs unstick <id>` to put one back in the queue.")
         lines += ["## 📦 Batches (worked in this order)", ""]
         if not plan["batches"]:
             lines += ["*Nothing triaged and ready to build.*", ""]
@@ -851,6 +889,12 @@ def _main(argv=None) -> int:
     free.add_argument("id")
     nxt = sub.add_parser("next", help="claim the next item to build, in batch order")
     nxt.add_argument("--by", required=True)
+    stk = sub.add_parser("stuck", help="a worker couldn't finish an item: give it back and set it aside")
+    stk.add_argument("id")
+    stk.add_argument("why", help="what stopped it, in a sentence")
+    stk.add_argument("--by", default="")
+    unstk = sub.add_parser("unstick", help="put a stuck item back in the queue")
+    unstk.add_argument("id")
     bat = sub.add_parser("take-batch", help="claim the next free batch (one area), skipping any that shares files with another worker's")
     bat.add_argument("--by", required=True)
     shut = sub.add_parser("close", help="done without a fix, on the user's word (not a bug, already works)")
@@ -907,6 +951,10 @@ def _main(argv=None) -> int:
             return 0
         print(out.get("none") or out.get("error"))
         return 1
+    if args.what in ("stuck", "unstick"):
+        out = stuck(args.id, args.why, args.by) if args.what == "stuck" else unstick(args.id)
+        print(out.get("error") or f"{args.id}: {'set aside' if args.what == 'stuck' else 'back in the queue'}")
+        return 1 if "error" in out else 0
     if args.what == "take-batch":
         out = take_batch(args.by)
         if "claimed" in out:

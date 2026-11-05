@@ -687,6 +687,17 @@ and with no API call; asking in other words (*"could the sheet have finger numbe
 through the Maestro. *"Another screenshot"* adds to whichever report or request you made last.
 In Claude Code, say *"do the requests"*; built ones wait in `requests/check/` for you to try, like fixes.
 
+**The backlog runner.** `python -m midi_coach.runner` works the backlog by itself: whenever there's
+something queued, it starts up to two Claude Code workers (on your claude.ai account), any time of
+day. One triages new reports first; then each takes a batch (one area of the app), never two that
+change the same file. Each works in its own copy of the code in `~/MidiCoach/workers/`, so your
+folder isn't touched, and may only read, edit its own copy, run the project's Python and use
+read-only git: no pushing, no other programs. Its fixes appear under 👀 like any other. One it
+can't finish is set aside as 🧱 Stuck in the backlog (`python -m midi_coach.bugs unstick <id>` puts
+it back). When your usage runs out it gives the work back and tries again 30 minutes later.
+`--install` starts it at every Windows login (`--uninstall` stops that), `--once` fills the free
+slots once and waits for those workers. What it did: `~/MidiCoach/runner/<date>.log`.
+
 **Conversation log.** Everything you say or type to the Maestro, and its answer, is added to
 `~/MidiCoach/maestro_log/<date>.md`, so a wish said in passing isn't lost. It stays on your PC.
 

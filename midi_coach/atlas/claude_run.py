@@ -58,10 +58,11 @@ def command(model: str, schema: dict | None = None, system: str | None = None, t
 
 def run(prompt: str, model: str, schema: dict | None = None, system: str | None = None, tools: str = "",
         resume: str | None = None, timeout: int = TIMEOUT_SEC, runner=subprocess.run, extra: list[str] | None = None,
-        cwd: str | pathlib.Path | None = None) -> dict:
+        cwd: str | pathlib.Path | None = None, env: dict | None = None) -> dict:
     """{result, structured, session_id, cost_usd} or {error, usage_limit}. runner:
-    subprocess.run, replaceable in tests; cwd: where it runs (default <home>/atlas/generator)."""
-    env = {k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}
+    subprocess.run, replaceable in tests; cwd: where it runs (default <home>/atlas/generator);
+    env: extra environment variables for this run only."""
+    env = {**{k: v for k, v in os.environ.items() if k not in STRIPPED_ENV}, **(env or {})}
     folder = pathlib.Path(cwd) if cwd else shared_dir() / "generator"
     folder.mkdir(parents=True, exist_ok=True)
     try:
