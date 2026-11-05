@@ -484,6 +484,25 @@ def take_next(by: str) -> dict:
     return {"none": "Nothing triaged and free to build."}
 
 
+def take_batch(by: str) -> dict:
+    """A worker takes a whole batch (one area) to build: every free item in the first batch nobody
+    else is working on and whose files don't overlap another worker's batch, so two workers never
+    change the same file. {"batch", "claimed": [ids], "files"} or {"none"}."""
+    plan = batches()["batches"]
+    others = [b for b in plan if any(it["claimed"] and it["claimed"].get("by") != by for it in b["items"])]
+    busy_files = {f for b in others for it in b["items"] for f in it["triage"]["files"]}
+    for batch in plan:
+        if batch in others:
+            continue
+        files = sorted({f for it in batch["items"] for f in it["triage"]["files"]})
+        if busy_files & set(files):
+            continue
+        got = [it["id"] for it in batch["items"] if "claimed" in claim(it["id"], by)]
+        if got:
+            return {"batch": batch["area"], "claimed": got, "files": files}
+    return {"none": "No batch is free to build (the rest are taken, or share files with one that is)."}
+
+
 def mark_ready(report_id: str, summary: str, build_log: str = "", files=(), by: str = "") -> dict:
     """An agent fixed it: open/ → check/, with what changed, for the user to try. With `files`,
     the fix is first committed on its own (fixgit.commit_fix), using the claim's note of which
@@ -818,6 +837,8 @@ def _main(argv=None) -> int:
     free.add_argument("id")
     nxt = sub.add_parser("next", help="claim the next item to build, in batch order")
     nxt.add_argument("--by", required=True)
+    bat = sub.add_parser("take-batch", help="claim the next free batch (one area), skipping any that shares files with another worker's")
+    bat.add_argument("--by", required=True)
     shut = sub.add_parser("close", help="done without a fix, on the user's word (not a bug, already works)")
     shut.add_argument("id")
     shut.add_argument("reason", help="why, in the user's terms")
@@ -871,6 +892,15 @@ def _main(argv=None) -> int:
             print(f"{out['claimed']}  ({out['kind']}, batch: {out['batch']})  {out['said'][:100]}  [{', '.join(out['files'])}]")
             return 0
         print(out.get("none") or out.get("error"))
+        return 1
+    if args.what == "take-batch":
+        out = take_batch(args.by)
+        if "claimed" in out:
+            print(f"batch: {out['batch']}  files: {', '.join(out['files'])}")
+            for item_id in out["claimed"]:
+                print(f"   {item_id}")
+            return 0
+        print(out["none"])
         return 1
     if args.what == "list":
         for stage in ("open", "check", "done"):

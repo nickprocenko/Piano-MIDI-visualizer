@@ -121,6 +121,26 @@ def test_one_worker_per_item_and_next_takes_them_in_order(home, repo, monkeypatc
     assert bugs.release(b)["released"] == b and not claim.exists()
 
 
+def test_two_workers_take_whole_batches_that_share_no_files(home, repo):
+    video, tiles = report("video button"), report("tiles overlap", kind="bug")
+    tempo = report("metronome too fast", kind="bug")
+    names = report("note names on the sheet")
+    bugs.triage(video, "top bar", "S", ["page.html"])
+    bugs.triage(tiles, "top bar", "M", ["page.html", "notes.py"])
+    bugs.triage(tempo, "metronome", "S", ["notes.py"])  # shares notes.py with the top bar batch
+    bugs.triage(names, "sheet", "S", ["sheet.html"])
+    first = bugs.take_batch("worker-1")  # the smallest batch with a bug goes first
+    assert first["batch"] == "metronome" and first["claimed"] == [tempo]
+    second = bugs.take_batch("worker-2")
+    assert second["batch"] == "sheet" and second["claimed"] == [names]  # top bar skipped: notes.py is busy
+    assert "none" in bugs.take_batch("worker-3")
+    bugs.release(tempo)  # given back: it's first in line again
+    assert bugs.take_batch("worker-3")["claimed"] == [tempo]
+    bugs.close(tempo, "done")  # once it's finished, notes.py is free for the top bar batch
+    third = bugs.take_batch("worker-1")
+    assert third["batch"] == "top bar" and set(third["claimed"]) == {video, tiles}  # the whole batch
+
+
 def test_one_runner_at_a_time(home):
     home.mkdir(parents=True, exist_ok=True)
     assert fixgit.acquire("overnight") == {"locked": "overnight"}
