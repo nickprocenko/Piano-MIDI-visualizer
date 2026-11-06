@@ -610,13 +610,14 @@
   .eyebrow { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .14em; }
   .home-intro h1 { margin: 7px 0 8px; font-size: clamp(26px, 4vw, 38px); line-height: 1.15; }
   .home-intro > p:last-child { color: var(--muted); font-size: 16px; }
-  /* Which instrument you're learning now: one pill per instrument, like a course switcher */
-  .home-inst { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-  .home-inst button { display: flex; align-items: center; gap: 7px; padding: 7px 14px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: var(--panel); color: var(--text); font: inherit; font-size: 14px; cursor: pointer; }
-  .home-inst button:hover, .home-inst button:focus-visible { border-color: var(--accent); outline: none; }
-  .home-inst button[aria-pressed=true] { border-color: var(--accent); background: rgba(0,180,180,.16); font-weight: 650; cursor: default; }
-  .home-inst button.new { border-style: dashed; color: var(--muted); }
-  .home-inst button.voice { margin-left: 4px; border-color: transparent; background: transparent; color: var(--muted); font-size: 13px; }  /* a singer's high or low voice */
+  /* Which course (instrument) you're learning now: one drop-down, then a singer's voice */
+  .home-inst { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+  .home-inst label { color: var(--muted); font-size: 13px; font-weight: 600; letter-spacing: .04em; }
+  .home-inst select { min-width: 180px; padding: 7px 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 15px; font-weight: 650; cursor: pointer; }
+  .home-inst select:hover, .home-inst select:focus-visible { background: rgba(0,180,180,.16); outline: none; }
+  .home-inst select option, .home-inst select optgroup { background: var(--panel); color: var(--text); font-weight: 400; }
+  .home-inst button.voice { margin-left: 4px; padding: 7px 10px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }  /* a singer's high or low voice */
+  .home-inst button.voice:hover, .home-inst button.voice:focus-visible { color: var(--accent); outline: none; }
   .home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .home-card.wide { grid-column: 1 / -1; min-height: 0; }
   .home-card { min-height: 184px; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 20px; border: 1px solid rgba(255,255,255,.11); border-radius: 12px; background: var(--panel); color: var(--text); text-align: left; font: inherit; cursor: pointer; transition: border-color .15s, transform .15s, background .15s; }
@@ -1016,7 +1017,7 @@
     <p class="eyebrow">YOUR PRACTICE, MADE CLEAR</p>
     <h1>What would you like to work on?</h1>
     <p>Choose a starting point. Your Maestro can help you decide what comes next.</p>
-    <div class="home-inst" id="home-inst" role="group" aria-label="Instrument you're learning"></div>
+    <div class="home-inst" id="home-inst" role="group" aria-label="Course you're learning"></div>
   </section>
   <div class="home-main" id="home-main">
   <section class="today-card" id="today-card" aria-label="Today's practice">

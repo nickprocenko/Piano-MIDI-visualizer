@@ -27,25 +27,36 @@
     renderInstruments(p);
   }
 
-  // Home's instrument switcher: the ones this profile learns, then "+ <name>" for the rest.
+  // Home's course selector: one drop-down with the instruments this profile learns ("Your
+  // courses"), then "+ Learn <name>" for the rest (each its own Roadmap, like a course).
   function renderInstruments(p) {
     const box = $('home-inst');
     if (!p.id) { box.innerHTML = ''; return; }
-    const learnt = p.instruments || [p.instrument || 'piano'];
+    const now = p.instrument || 'piano';
+    const learnt = p.instruments || [now];
     box.innerHTML = '';
+    const label = document.createElement('label');
+    label.htmlFor = 'home-course';
+    label.textContent = 'Course';
+    const sel = document.createElement('select');
+    sel.id = 'home-course';
+    sel.title = `You're learning ${instName(now).toLowerCase()} now. Pick another of your courses to switch ` +
+                `(its own Roadmap, input and Maestro), or + Learn … to start a new one; your progress stays.`;
+    const mine = document.createElement('optgroup'), more = document.createElement('optgroup');
+    mine.label = 'Your courses';
+    more.label = 'Start a new course';
     for (const inst of INSTRUMENTS) {
-      const b = document.createElement('button');
-      const has = learnt.includes(inst.id), current = inst.id === (p.instrument || 'piano');
-      b.dataset.instrument = inst.id;
-      b.setAttribute('aria-pressed', current ? 'true' : 'false');
-      if (!has) b.className = 'new';
-      b.innerHTML = `<span aria-hidden="true">${has ? inst.glyph : '+'}</span>${esc(has ? inst.name : 'Learn ' + inst.name.toLowerCase())}`;
-      b.title = current ? `You're learning ${inst.name.toLowerCase()} now`
-              : has ? `Switch to ${inst.name.toLowerCase()}: its own Roadmap, input and Maestro`
-              : `Start learning ${inst.name.toLowerCase()} too. It gets its own Roadmap; your ${instName(p.instrument).toLowerCase()} progress stays.`;
-      box.appendChild(b);
+      const o = document.createElement('option');
+      const has = learnt.includes(inst.id) || inst.id === now;
+      o.value = inst.id;
+      o.textContent = has ? `${inst.glyph} ${inst.name}` : `+ Learn ${inst.name.toLowerCase()}`;
+      o.selected = inst.id === now;
+      (has ? mine : more).appendChild(o);
     }
-    if ((p.instrument || 'piano') === 'voice') {  // a singer's octave: the Roadmap in the treble clef, or an octave down
+    sel.appendChild(mine);
+    if (more.children.length) sel.appendChild(more);
+    box.append(label, sel);
+    if (now === 'voice') {  // a singer's octave: the Roadmap in the treble clef, or an octave down
       const v = document.createElement('button');
       v.dataset.voice = p.voice === 'low' ? 'high' : 'low';
       v.className = 'voice';
@@ -59,13 +70,20 @@
   $('home-inst').addEventListener('click', e => {
     const p = view.profiles.find(x => x.id === view.active);
     const v = e.target.closest('button[data-voice]');
-    if (v && p) { change('profile_voice', {id: p.id, voice: v.dataset.voice}); return; }
-    const b = e.target.closest('button[data-instrument]');
-    if (!b || !p || b.dataset.instrument === p.instrument) return;
-    const to = b.dataset.instrument;
-    if (!(p.instruments || []).includes(to) &&
-        !confirm(`Start learning ${instName(to).toLowerCase()} on "${p.name}"? It gets its own Roadmap ${to === 'piano' ? '(the keyboard over MIDI)' : to === 'voice' ? '(the microphone hears you sing)' : '(the microphone hears you play)'}; your ${instName(p.instrument).toLowerCase()} progress stays.`)) return;
-    change('profile_instrument', {id: p.id, instrument: to});
+    if (v && p) change('profile_voice', {id: p.id, voice: v.dataset.voice});
+  });
+  $('home-inst').addEventListener('change', async e => {
+    const p = view.profiles.find(x => x.id === view.active);
+    const sel = e.target.closest('#home-course');
+    if (!sel || !p) return;
+    const to = sel.value, now = p.instrument || 'piano';
+    if (to === now) return;
+    if (!(p.instruments || [now]).includes(to) &&
+        !confirm(`Start learning ${instName(to).toLowerCase()} on "${p.name}"? It gets its own Roadmap ${to === 'piano' ? '(the keyboard over MIDI)' : to === 'voice' ? '(the microphone hears you sing)' : '(the microphone hears you play)'}; your ${instName(now).toLowerCase()} progress stays.`)) {
+      sel.value = now;  // said no: the drop-down goes back to the course you're on
+      return;
+    }
+    if (!(await change('profile_instrument', {id: p.id, instrument: to}))) sel.value = now;
   });
 
   function renderMenu() {

@@ -388,8 +388,9 @@ press **Looks right**; **Something's wrong** asks what, and notes it in
 
 **Getting started on the flute:**
 
-1. On the *Who is practicing?* screen, add a profile and pick **Flute**, or on Home press
-   **+ Learn flute** under the heading to add the flute to the profile you're on.
+1. On the *Who is practicing?* screen, add a profile and pick **Flute**, or on Home pick
+   **+ Learn flute** in the **Course** drop-down under the heading to add the flute to the
+   profile you're on.
 2. Plug in a headset or USB microphone and choose it under **Preferences → Microphone &
    speakers** (the JUNO-DS's audio input is not a microphone).
 3. On Home, press **Find where I start ▸** on the Today card and answer the questions (about
@@ -398,10 +399,12 @@ press **Looks right**; **Something's wrong** asks what, and notes it in
 4. Press **Start today's practice ▸**. Someone brand new starts with *Making a sound*, then
    the notes B, A and G. After that, the **Today** card on Home plans each day's practice.
 
-A profile can learn **piano**, **flute**, **alto sax** and **vocals**, one or more, like courses:
-pick the first when you add a profile on the *Who is practicing?* screen. The buttons under
-Home's heading show the instrument you're on (**🎹 Piano** / **🎶 Flute** / **🎷 Alto sax** /
-**🎤 Vocals**); press another to switch, or **+ Learn …** to add one. Each instrument keeps its own Roadmap progress, goals and exams (the first in the
+A profile can learn **piano**, **flute**, **alto sax**, **vocals**, **fiddle**, **electric
+guitar** and **bass guitar**, one or more, like courses: pick the first when you add a profile
+on the *Who is practicing?* screen. The **Course** drop-down under Home's heading shows the
+instrument you're on (**🎹 Piano**, **🎶 Flute**, **🎷 Alto sax**, **🎤 Vocals** …): pick another
+under *Your courses* to switch, or one under *Start a new course* (**+ Learn …**) to add it
+(it asks first). Each instrument keeps its own Roadmap progress, goals and exams (the first in the
 profile's `atlas` folder, one added later in `atlas-<instrument>`), while takes, lessons and the
 Maestro's notes stay the person's. Switching to the flute changes four things:
 
@@ -513,7 +516,7 @@ then at tempo from memory; sight-singing; theory; public-domain songs in
 when there is one. A singer has a **high voice** (soprano, alto: the treble clef) or a **low
 voice** (tenor, baritone, bass: the same Roadmap an octave down, in the treble clef with an 8
 below). Pick it when you add the profile, or press **High voice** / **Low voice** beside the
-instrument buttons on Home; progress is shared between the two. Build both with:
+**Course** drop-down on Home; progress is shared between the two. Build both with:
 
 ```bat
 .venv\Scripts\python -m midi_coach.atlas.voice
