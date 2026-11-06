@@ -248,11 +248,13 @@
   #npc.claude #npc-name { color: #e8956f; }
   #npc-name { color: var(--accent); font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: .1em; text-transform: uppercase; margin-bottom: 3px; }
   #npc-text { font-size: 15.5px; line-height: 1.45; min-height: 1.45em; }
-  /* Stop the Maestro mid-sentence: shown only while it speaks */
+  /* Cut the Maestro short: shown only while it speaks. Pressed, it finishes its sentence; then ■ Now stops it at once */
   .hush { display: none; padding: 4px 10px; border: 1px solid var(--miss); border-radius: 5px; background: transparent; color: var(--miss);
           font: 600 12px 'Segoe UI', Arial, sans-serif; cursor: pointer; white-space: nowrap; }
   .hush:hover { background: var(--miss); color: #fff; }
   body.speaking .hush { display: inline-block; }
+  .hush .now, body.wrapping .hush .first { display: none; }
+  body.wrapping .hush .now { display: inline; }
   #npc-hush { flex: none; align-self: center; }
   #npc.done #npc-text::after { content: ' ▼'; font-size: 11px; color: var(--muted); animation: blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -1422,7 +1424,7 @@
 <div id="npc" role="status" aria-live="polite" title="Click to skip / close">
   <div id="npc-face" aria-hidden="true">𝄞</div>
   <div><div id="npc-name">Maestro</div><div id="npc-text"></div></div>
-  <button id="npc-hush" class="hush" title="Stop speaking">■ Stop</button>
+  <button id="npc-hush" class="hush" title="Finish this sentence, then stop (Esc). Press again to stop at once"><span class="first">■ Stop</span><span class="now">■ Now</span></button>
 </div>
 <!-- The Maestro panel: every view, draggable by its top bar, folded to that bar or open on
      today's transcript. Folded, a new line shows in the dialogue box (#npc) and lights the dot. -->
@@ -1432,7 +1434,7 @@
     <span id="mp-name">Maestro</span>
     <span id="mp-unread" title="New since you last looked" hidden></span>
     <button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
-    <button id="mp-hush" class="hush" title="Stop the Maestro speaking">■ Stop</button>
+    <button id="mp-hush" class="hush" title="The Maestro finishes this sentence, then stops (Esc, or say “that's enough”). Press again to stop at once. A run keeps going"><span class="first">■ Stop</span><span class="now">■ Now</span></button>
     <span id="level" aria-hidden="true"><i></i></span>
     <button id="mp-clear" title="Empty the panel (today's log stays on disk)">Clear</button>
     <button id="mp-toggle" aria-expanded="false" title="Open the conversation">▴</button>
@@ -2591,7 +2593,7 @@ function showPractice(p) {
 // Natural voices (Kokoro) are synthesized by the coach server (GET tts); the
 // browser's Windows voices are the fallback. Option values: 'kokoro:<id>' / 'web:<name>'.
 const synth = window.speechSynthesis, voiceBox = $('voice'), voiceSel = $('voice-name'), voiceVol = $('voice-vol');
-let kokoroVoices = [], speaking = null;
+let kokoroVoices = [], speaking = null, wrapping = false;
 const pending = [];
 
 async function loadVoices() {
@@ -2622,6 +2624,17 @@ function fillVoices() {
   voiceSel.value = values.includes(saved) ? saved : kokoroVoices.length ? 'kokoro:' + kokoroVoices[0].id : 'web:' + english.name;
 }
 
+// A line is said one sentence at a time, so ■ Stop (or Esc) can let the sentence it's on
+// finish and drop the rest. "Bar 5." / "100.0%" stay whole: a sentence ends at . ! ? … and a space.
+function sentences(text) {
+  const out = [];
+  for (const part of text.split(/(?<=[.!?…]["”’')\]]*)\s+(?=\S)/)) {
+    if (out.length && out[out.length - 1].length < 25) out[out.length - 1] += ' ' + part;  // too short to be worth a gap
+    else out.push(part);
+  }
+  return out;
+}
+
 function speak(text, interrupt, force) {  // force: asked for (a 🔊 button), even with the voice switched off
   if ((!voiceBox.checked && !force) || !text) return;
   // Browsers only let a page play sound once it has been clicked.
@@ -2631,16 +2644,25 @@ function speak(text, interrupt, force) {  // force: asked for (a 🔊 button), e
   }
   if (interrupt) stopSpeaking();
   const v = voiceSel.value || '';
-  if (!v.startsWith('kokoro:')) return speakWeb(text, v.slice(4));
-  // Fetch now, so the next line is ready by the time the current one ends.
-  const url = 'tts?' + new URLSearchParams({text, voice: v.slice(7)});
-  pending.push({text, ready: fetch(url).then(r => r.ok ? r.blob() : Promise.reject(new Error('speech ' + r.status)))});
-  if (!speaking) playNext();
+  for (const part of sentences(text)) {
+    if (!v.startsWith('kokoro:')) { pending.push({text: part, web: v.slice(4)}); continue; }
+    const url = 'tts?' + new URLSearchParams({text: part, voice: v.slice(7)});
+    const item = {text: part};
+    // Fetched when it's next up (while the one before plays), so it's ready by the time that ends.
+    item.load = () => item.ready || (item.ready = fetch(url).then(r => r.ok ? r.blob() : Promise.reject(new Error('speech ' + r.status))));
+    pending.push(item);
+  }
+  wrapping = false;  // a new line after ■ Stop is said in full
+  if (!speaking) playNext(); else speechState();
 }
 
-// While the Maestro speaks, ■ Stop shows (in its panel and its dialogue box).
+// While the Maestro speaks, ■ Stop shows (in its panel and its dialogue box); once pressed,
+// it finishes the sentence it's on and ■ Now stops it at once.
 function speechState() {
-  document.body.classList.toggle('speaking', !!(speaking || pending.length || (synth && (synth.speaking || synth.pending))));
+  const on = !!(speaking || pending.length || (synth && (synth.speaking || synth.pending)));
+  if (!on) wrapping = false;
+  document.body.classList.toggle('speaking', on);
+  document.body.classList.toggle('wrapping', on && wrapping);
 }
 
 async function playNext() {
@@ -2648,8 +2670,11 @@ async function playNext() {
   speaking = item || null;
   speechState();
   if (!item) return;
+  if (item.web !== undefined) return playWeb(item, item.web);
   try {
-    const blob = await item.ready;
+    const next = item.load();
+    if (pending[0] && pending[0].load) pending[0].load();
+    const blob = await next;
     if (speaking !== item) return;  // stopped meanwhile
     const audio = item.audio = new Audio(URL.createObjectURL(blob));
     audio.volume = voiceVol.value / 100;
@@ -2658,17 +2683,16 @@ async function playNext() {
     await audio.play();
   } catch (err) {
     if (speaking !== item) return;
-    speakWeb(item.text, null);  // Kokoro unavailable: use the browser's voice for this line
-    playNext();
+    playWeb(item, null);  // Kokoro unavailable: use the browser's voice for this sentence
   }
 }
 
-function speakWeb(text, name) {
-  if (!synth) return;
-  const u = new SpeechSynthesisUtterance(text);
+function playWeb(item, name) {
+  if (!synth) return playNext();
+  const u = new SpeechSynthesisUtterance(item.text);
   u.voice = synth.getVoices().find(v => v.name === name) || null;
   u.volume = voiceVol.value / 100;
-  u.onend = u.onerror = () => setTimeout(speechState);
+  u.onend = u.onerror = () => setTimeout(() => { if (speaking === item) playNext(); else speechState(); });
   synth.speak(u);
   speechState();
 }
@@ -2680,9 +2704,23 @@ function stopSpeaking() {
   if (synth) synth.cancel();
   speechState();
 }
-for (const id of ['mp-hush', 'npc-hush']) {
-  $(id).addEventListener('click', e => { e.stopPropagation(); stopSpeaking(); });
+
+// ■ Stop, Esc, or saying "that's enough": the Maestro finishes the sentence it's on and says no
+// more of that line (you've read it, or know what's coming). Pressed again: quiet at once.
+function wrapUp() {
+  if (wrapping) return stopSpeaking();
+  pending.length = 0;
+  wrapping = true;
+  speechState();
 }
+for (const id of ['mp-hush', 'npc-hush']) {
+  $(id).addEventListener('click', e => { e.stopPropagation(); wrapUp(); });
+}
+window.addEventListener('keydown', e => {  // capture: before Escape closes a menu or the full-screen sheet
+  if (e.key !== 'Escape' || e.repeat || !document.body.classList.contains('speaking') || document.querySelector('dialog[open]')) return;
+  e.stopPropagation();
+  wrapUp();
+}, true);
 
 // -- NPC dialogue box: typewriter text; click once to finish the line, again to close --
 
@@ -3162,6 +3200,7 @@ function heardWords(text) {
 
 function showAnswer(out) {
   heardWords(out.heard ? `You: “${out.heard}”` : '');
+  if (out.hushed && npcFull === '…') hideNpc();  // "that's enough": nothing more to wait for
   if (out.error && !mpOpen()) showNpc(out.error, 'Maestro');  // the panel gets it as a 'line'; the reply arrives as a 'say' event
   if (out.spent_today !== undefined) showSpend(out.spent_today);
 }
@@ -3740,6 +3779,7 @@ function pageControl(msg) {
   }
   if ('metronome' in msg && !!metro.timer !== msg.metronome) mGo.click();
   if (msg.menu) openMenu(msg.menu);
+  if (msg.hush && document.body.classList.contains('speaking') && !wrapping) wrapUp();  // "that's enough", said here or on another page
   if (msg.today && typeof todayLoad === 'function') todayLoad();  // the Maestro took something out of today's plan
   if (msg.tiles && tiles.layouts) { tiles.layouts[msg.tiles.view] = msg.tiles.tiles; mpTilesRender(); }  // set_tiles, or another page's edit
 }

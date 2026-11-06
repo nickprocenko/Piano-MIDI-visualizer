@@ -2141,6 +2141,12 @@ def _voice_reply(heard: str) -> dict:
 
 
 def _answer(heard: str) -> dict:
+    # "That's enough" / "stop talking": the Maestro finishes its sentence and stops, on every
+    # page. Never a practice command (a run keeps going), and no API call.
+    if chat.heard_hush(heard):
+        hub.page({"hush": True})
+        hub.line("Maestro", "Okay, I'll stop there.")
+        return {"heard": heard, "reply": "", "hushed": True, "actions": ["hush"], "cost": 0.0}
     # "No" / "undo" right after an autopilot change reverses it here, at once and for free.
     if _autopilot.can_undo and _UNDO_RE.match(re.sub(r"[^a-z' ]+", "", (heard or "").lower()).strip()):
         text = _undo_autopilot()

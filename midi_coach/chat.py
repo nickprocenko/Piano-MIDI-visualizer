@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 
@@ -31,6 +32,21 @@ DEFAULT_DAILY_CAP = 0.50
 MAX_TOOL_ROUNDS = 5
 NEW_CONVERSATION_AFTER_SEC = 20 * 60
 NEW_CONVERSATION_AFTER_MESSAGES = 40
+
+# "That's enough", "stop talking", "I know": cut the Maestro short (it finishes the sentence it's
+# on and says no more of that line), answered by the app, never by Claude. A plain "stop" isn't
+# one of them: that still stops the run.
+HUSH_RE = re.compile(
+    r"(?:(?:ok|okay|oh|alright|all right|yeah|yes) )*(?:maestro )?(?:please )?"
+    r"(?:(?:stop|quit|no more) (?:talking|speaking)|(?:that'?s )?enough(?: talking)?|be quiet|quiet|hush|shush|sh+|shut up"
+    r"|i know(?: that)?|i got it|got it|i'?ve (?:read|got) it)"
+    r"(?: (?:now|maestro|please|thanks|thank you|okay|ok))*")
+
+
+def heard_hush(said: str) -> bool:
+    """True when what was said is one of HUSH_RE's phrases (and nothing else)."""
+    text = " ".join(re.sub(r"[^a-z' ]+", " ", (said or "").lower().replace("’", "'")).split())
+    return bool(text) and HUSH_RE.fullmatch(text) is not None
 
 SYSTEM = """\
 You are the Maestro, the piano teacher character in a practice app. The pianist talks to you \
@@ -807,7 +823,11 @@ When they ask where a setting is, or want to change one page_control can't set, 
 with page_control's menu (it lights up on their screen) and say in a few words what to pick \
 there. If no menu fits, say you can't open that yet.
 
-When they name a song or piece to play or open ("home for a rest", "put on Desperado", a title and its artist), call open_song with the title, even when a word of it sounds like a command ("home", "rest", "stop"); a title they say beside a page name is still a song. switch_lesson is for exercises and lessons already saved. When they don't want something in today's plan ("skip Thriller", "drop the warm-up", "clear today's plan"), use remove_from_today."""
+When they name a song or piece to play or open ("home for a rest", "put on Desperado", a title and its artist), call open_song with the title, even when a word of it sounds like a command ("home", "rest", "stop"); a title they say beside a page name is still a song. switch_lesson is for exercises and lessons already saved. When they don't want something in today's plan ("skip Thriller", "drop the warm-up", "clear today's plan"), use remove_from_today.
+
+"Stop" alone means the run. To cut you short (you finish your sentence and say no more) they \
+press ■ Stop or Esc while you talk, or say "that's enough": the app does it without you. Tell \
+them so when they ask how."""
 
 # Added to either Maestro's prompt for a young learner's profile.
 YOUNG_SYSTEM = """

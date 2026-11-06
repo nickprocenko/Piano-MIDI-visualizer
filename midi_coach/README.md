@@ -601,6 +601,12 @@ answers out loud in character and can run the practice for you:
 - With a flute in your hands, tick **Hands-free** and start with *"Maestro, …"* instead (see
   [Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone)).
 
+**Cutting the Maestro short.** Already read it, or know what's coming? Press **■ Stop** (on the
+panel or its speech box, shown while it talks) or **Esc**: it finishes the sentence it's on and
+says no more of that line. Press **■ Now** (the same button) to stop it at once. Saying
+*"That's enough"*, *"Stop talking"* or *"I know"* does the same, answered by the app, not
+Claude. None of these touch a run: a plain *"Stop"* still stops the run.
+
 Your speech is transcribed **on your PC** (Whisper `base.en`, downloaded once, ~145 MB, to
 `%USERPROFILE%\MidiCoach\whisper`). Only the text, plus a short summary of your practice,
 goes to Claude: **Haiku 5.5** for the conversation and commands, **Sonnet 5.5** when it

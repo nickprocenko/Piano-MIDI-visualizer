@@ -88,6 +88,27 @@ def test_start_practice_with_nothing_open_asks_which(page, monkeypatch):
     assert "Ask which one" in server._voice_start("learn")["error"]
 
 
+@pytest.mark.parametrize("said", ["That's enough.", "Stop talking", "Maestro, be quiet please", "I know.",
+                                  "okay okay got it", "Shh", "That’s enough, thanks"])
+def test_cutting_the_maestro_short_is_never_a_practice_command(said):
+    assert chat.heard_hush(said)
+
+
+@pytest.mark.parametrize("said", ["Stop", "Maestro, stop", "stop the run", "I know this bar now, loop the next one",
+                                  "enough of the warm-up", "skip Thriller", ""])
+def test_stop_and_real_requests_still_reach_the_maestro(said):
+    assert not chat.heard_hush(said)
+
+
+def test_thats_enough_hushes_every_page_without_asking_claude(page, monkeypatch):
+    monkeypatch.setattr(server._voice, "ask", lambda heard: pytest.fail("went to Claude"))
+    monkeypatch.setattr(server, "_cmd_stop", lambda body: pytest.fail("stopped the run"))
+    out = server._answer("That's enough")
+    assert out["hushed"] and out["reply"] == "" and out["cost"] == 0.0
+    assert page.get_nowait() == {"type": "page", "hush": True}
+    assert page.get_nowait()["text"] == "Okay, I'll stop there."  # the panel's "…" goes, nothing is spoken
+
+
 def test_see_in_song_needs_a_lesson_on_a_song_goal(page, monkeypatch):
     monkeypatch.setattr(server._atlas, "current", None)
     assert "Roadmap lesson" in server._voice_page(menu="see_in_song")["error"]
