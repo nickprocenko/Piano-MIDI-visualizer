@@ -141,6 +141,8 @@
   #ask:disabled { opacity: .4; }
   #heard { padding: 4px 20px 0; color: var(--muted); font-size: 13px; font-style: italic; }
   #heard:empty, #last:empty { display: none; }
+  /* What you said (and Listening… / Transcribing…) is already in the open Maestro panel; folded or closed, this line is the only place it shows. */
+  body:has(#maestro-panel:not(.folded):not(.closed)) #heard:has(> .words) { display: none; }
   .seg { display: inline-flex; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; overflow: hidden; }
   .seg button { background: transparent; color: var(--muted); border: 0; padding: 5px 12px; font: inherit; cursor: pointer; }
   .seg button.on { background: var(--accent); color: #031414; font-weight: 600; }
@@ -3136,8 +3138,20 @@ async function loadVoiceStatus() {
   }
 }
 
+// The line under the pass line: your words and the talk button's progress. Kept as a .words span so the open
+// panel can hide it; anything else written there (a mic error, hands-free) replaces the span and still shows.
+function heardWords(text) {
+  const el = $('heard');
+  el.textContent = '';
+  if (!text) return;
+  const span = document.createElement('span');
+  span.className = 'words';
+  span.textContent = text;
+  el.append(span);
+}
+
 function showAnswer(out) {
-  $('heard').textContent = out.heard ? `You: “${out.heard}”` : '';
+  heardWords(out.heard ? `You: “${out.heard}”` : '');
   if (out.error && !mpOpen()) showNpc(out.error, 'Maestro');  // the panel gets it as a 'line'; the reply arrives as a 'say' event
   if (out.spent_today !== undefined) showSpend(out.spent_today);
 }
@@ -3192,7 +3206,7 @@ async function startTalking() {
   micRecorder.ondataavailable = e => { if (e.data.size) micChunks.push(e.data); };
   micRecorder.onstop = sendTalk;
   micRecorder.start();
-  $('heard').textContent = 'Listening… let go when you’re done.';
+  heardWords('Listening… let go when you’re done.');
 }
 
 function stopTalking() {
@@ -3211,7 +3225,7 @@ async function sendTalk() {
     return;
   }
   talkBtn.disabled = true;
-  $('heard').textContent = 'Transcribing…';
+  heardWords('Transcribing…');
   mpThinking();
   try {
     const res = await fetch('voice', {method: 'POST', headers: {'Content-Type': blob.type}, body: blob});
