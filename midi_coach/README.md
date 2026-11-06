@@ -104,9 +104,9 @@ running and current it just opens the page; if that copy started before the code
 practice copy is restarted, and for Claude Desktop's midi-coach it tells you to restart
 Claude Desktop.
 
-**Updates while it's open.** When the code changes (say, after a fix in Claude Code), a bar at
-the top of the coach page tells you, once the files have stopped changing for 15 seconds:
-*This page was updated* → **Reload**, or *The coach was updated* → **Restart coach**. Restart
+**Updates while it's open.** When the code changes (say, after a fix in Claude Code), a bar in
+the coach page's top bar, next to Ask Maestro, on every page, tells you, once the files have
+stopped changing for 15 seconds: *This page was updated* → **Reload**, or *The coach was updated* → **Restart coach**. Restart
 is off while a run is going. It takes a few seconds: the coach comes back in the same window
 with the same piece, and the page reloads by itself. A coach started by the shortcut or by
 `python -m midi_coach.launch` can restart this way. For Claude Desktop's midi-coach the bar says
@@ -661,7 +661,8 @@ is saved exactly like a spoken one (screenshots from the seconds before, the pra
 screen, the page's errors). F9 again or Escape closes it without saving.
 
 **Trying the fixes.** When something you reported has been fixed, a **👀 N fixes to try** button
-appears at the top of the coach page. It lists each fix with your screenshot, what you said and
+appears in the coach page's top bar, next to Ask Maestro, on every page (Home, Session, the
+Roadmap, YouTube). It lists each fix with your screenshot, what you said and
 where you were (page, song, bar, mode), and a line on what changed. Try it, then press
 **✅ Works** (it moves to `fixed/`, or `requests/done/`) or **↩️ Still wrong** and say what's
 still off (it goes back to `open/` with your words, to be fixed again). Each fix is its own git

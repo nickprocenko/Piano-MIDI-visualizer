@@ -753,6 +753,7 @@
   #pick-piece { padding: 5px 11px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
   #pick-piece:hover { border-color: var(--accent); color: var(--text); }
   body:not([data-view=practice]) #pick-piece { display: none; }
+  #dash #checks-btn, #dash #update-bar { margin: 4px 0 4px 10px; }
   #checks-btn { padding: 5px 11px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
   #checks-btn:hover { background: rgba(255,255,255,.06); }
   #checks-btn[hidden] { display: none; }
@@ -974,6 +975,7 @@
     #dash .brand { display: none; }
     #dash .dtab { padding: 9px 8px 7px; font-size: 12px; }
     #dash-ask { padding: 5px 8px 3px; font-size: 12px; }
+    #dash #checks-btn, #dash #update-bar { margin-left: 6px; }
     #profile-chip { margin-left: auto; padding-right: 6px; }
     #chip-name { display: none; }
     .home-grid { grid-template-columns: 1fr; gap: 10px; }
@@ -1003,6 +1005,9 @@
   <button class="dtab" data-dash="home">Home</button>
   <button id="dash-ask" title="Ask the Maestro"><span class="maestro-avatar" aria-hidden="true">𝄞</span>Ask Maestro</button>
   <span id="dash-where" title="The mode you're in. To change modes, go back to Home: that stops what's running"></span>
+  <!-- In the nav, not the Session header, so they show on every page -->
+  <button id="checks-btn" hidden title="Bugs and ideas that have been fixed: try each one and say whether it works">👀 <span id="checks-n"></span></button>
+  <div id="update-bar" hidden role="status"><span id="update-text"></span><button id="update-go" type="button"></button></div>
   <span class="spacer"></span>
   <button id="profile-chip" title="Switch profile"><span class="avatar" id="chip-avatar">?</span><span id="chip-name">Profile</span></button>
 </nav>
@@ -1122,8 +1127,6 @@
     <button id="pl-next" title="The next piece in this playlist">▶</button>
   </span>
   <button id="pick-piece" title="Search your songs and lessons for another piece (the sheet stays until you choose one)">Change piece</button>
-  <div id="update-bar" hidden role="status"><span id="update-text"></span><button id="update-go" type="button"></button></div>
-  <button id="checks-btn" hidden title="Bugs and ideas that have been fixed: try each one and say whether it works">👀 <span id="checks-n"></span></button>
   <div id="status">Pick a song or lesson to begin.</div>
   <div id="conn" class="down">connecting…</div>
 </header>
