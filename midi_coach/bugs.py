@@ -377,7 +377,15 @@ def _fix_parts(folder: pathlib.Path) -> tuple[str, str]:
         return "", ""
     body = fix.read_text(encoding="utf-8").split("\n", 1)[-1]
     m = LOG_LINK_RE.search(body)
-    return " ".join(COMMIT_RE.sub("", LOG_LINK_RE.sub("", body)).split()), (m.group(1) if m else "")
+    return " ".join(TRIED_RE.sub("", COMMIT_RE.sub("", LOG_LINK_RE.sub("", body))).split()), (m.group(1) if m else "")
+
+
+def _fix_commits(folder: pathlib.Path) -> tuple[str, str]:
+    """(the fix's commit, the copy of it put in the user's code by Try it) from a fix.md; "" for none."""
+    fix = folder / "fix.md"
+    text = fix.read_text(encoding="utf-8") if fix.exists() else ""
+    m, t = COMMIT_RE.search(text), TRIED_RE.search(text)
+    return (m.group(1) if m else ""), (t.group(1) if t else "")
 
 
 PAGE_MODES = {"wait": "learn", "rehearsal": "rehearse", "listen": "listen", "learn": "learn", "rehearse": "rehearse"}
@@ -421,6 +429,7 @@ def place(report_id: str) -> dict:
 
 CLAIM_STALE_SEC = 3 * 3600  # a claim older than this was left by a worker that stopped
 COMMIT_RE = re.compile(r"^Commit: ([0-9a-f]{6,40})\s*$", re.M)
+TRIED_RE = re.compile(r"^Tried: ([0-9a-f]{6,40})\s*$", re.M)  # Try it put the fix in the user's code as this commit
 
 
 def claimed_by(folder: pathlib.Path) -> dict | None:
@@ -572,6 +581,33 @@ def mark_ready(report_id: str, summary: str, build_log: str = "", files=(), by: 
     return {"ready": report_id, "kind": kind, **({"commit": commit} if commit else {})}
 
 
+def try_fix(report_id: str) -> dict:
+    """Try it: put a worker's fix (still on its side branch) into the user's code, so they can see
+    it before saying whether it works (restart for code, reload for page files). Works then keeps
+    it; Still wrong takes it out again (git revert). Waits, like ✅, while they're editing its files."""
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    kind, stage, folder = found
+    if stage != "check":
+        return {"error": f"{report_id} isn't waiting to be checked."}
+    commit, tried = _fix_commits(folder)
+    if tried:
+        return {"tried": report_id, "commit": tried, "already": True}
+    if not commit:
+        return {"tried": report_id, "already": True}  # no commit: it was made in your own code
+    from . import fixgit
+
+    out = fixgit.merge(commit)
+    if "merged" not in out:
+        return out
+    if out.get("already"):
+        return {"tried": report_id, "commit": commit, "already": True}
+    with (folder / "fix.md").open("a", encoding="utf-8") as f:
+        f.write(f"\nTried: {out['commit']}\n")
+    return {"tried": report_id, "commit": out["commit"]}
+
+
 def verify(report_id: str, works: bool, note: str = "") -> dict:
     """The user tried a fix: check/ → fixed/ (requests: done/), or back to open/ with what's still wrong."""
     found = find(report_id)
@@ -583,31 +619,36 @@ def verify(report_id: str, works: bool, note: str = "") -> dict:
     fixed, build_log = _fix_parts(folder)
     tried = (fixed or "(no fix note)") + (f" (build log: {build_log})" if build_log else "")
     stamp = time.strftime("%Y-%m-%d %H:%M")
-    m = COMMIT_RE.search((folder / "fix.md").read_text(encoding="utf-8")) if (folder / "fix.md").exists() else None
+    commit, in_code = _fix_commits(folder)
     from . import fixgit
 
     undone = merged = None
     if works:
         kept = ""
-        if m:
-            merged = fixgit.merge(m.group(1))  # from a worker's side branch onto the user's
+        if in_code:  # Try it already put it in their code
+            fixgit.forget(report_id)
+            merged = {"merged": commit, "commit": in_code}
+            kept = f" (commit {commit}, added to your code as {in_code} when you tried it)"
+        elif commit:
+            merged = fixgit.merge(commit)  # from a worker's side branch onto the user's
             if "merged" not in merged:
                 return merged  # stays in check/: the page says why, and ✅ can be pressed again
             fixgit.forget(report_id)
-            kept = (f" (commit {m.group(1)}, kept)" if merged.get("already")
-                    else f" (commit {m.group(1)}, added to your code as {merged['commit']})")
+            kept = (f" (commit {commit}, kept)" if merged.get("already")
+                    else f" (commit {commit}, added to your code as {merged['commit']})")
         addition = ["", f"## Checked {stamp}: works", "", tried + kept]
         folder = _move(folder, kind, DONE[kind])
     else:
         addition = ["", f"## Checked {stamp}: still wrong", "", note.strip() or "(nothing more was said)",
                     "", f"The fix that was tried: {tried}"]
-        if m:
-            undone = fixgit.undo(m.group(1))
+        if commit:
+            shown = in_code or commit  # what's in their code: Try it's copy, or the commit itself
+            undone = fixgit.undo(shown)
             fixgit.forget(report_id)
-            addition += ["", f"Its commit {m.group(1)} was never added to your code, so nothing needed undoing."
+            addition += ["", f"Its commit {commit} was never added to your code, so nothing needed undoing."
                          if "dropped" in undone else
-                         f"Its commit {m.group(1)} was undone ({undone['commit']})." if "commit" in undone else
-                         f"**Needs an agent:** its commit {m.group(1)} couldn't be undone automatically "
+                         f"Its commit {shown} was undone ({undone['commit']})." if "commit" in undone else
+                         f"**Needs an agent:** its commit {shown} couldn't be undone automatically "
                          f"({undone.get('error')}). Undo it by hand before fixing again."]
         (folder / "fix.md").unlink(missing_ok=True)
         folder = _move(folder, kind, "open")
@@ -868,7 +909,16 @@ def to_check(with_shots: bool = False) -> dict:
     rows = items("check")
     if not with_shots:
         return {"count": len(rows), "items": []}
+    from . import fixgit
+
     for row in rows:
+        commit, tried = _fix_commits(stage_dir(row["kind"], "check") / row["id"])
+        # A worker's fix on its side branch isn't in the user's code yet: the page offers Try it
+        try:
+            row["try"] = bool(commit and not tried and not fixgit.in_code(commit))
+        except Exception:  # not a git checkout
+            row["try"] = False
+        row["tried"] = bool(tried)
         shot = row.pop("shot")
         row["shot"] = "data:image/jpeg;base64," + base64.b64encode(shot.read_bytes()).decode() if shot else ""
     return {"count": len(rows), "items": rows}

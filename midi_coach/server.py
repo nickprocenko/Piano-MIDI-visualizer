@@ -1961,6 +1961,11 @@ def _cmd_answer(body: dict) -> dict:
     return out if "error" in out else {**out, **bugs.to_check(), "asks": len(bugs.questions())}
 
 
+def _cmd_try_fix(body: dict) -> dict:
+    """Try it: put a worker's fix into the user's code before they say whether it works."""
+    return bugs.try_fix(str(body.get("id") or ""))
+
+
 RESTART_NOTE = "restart.json"  # the piece on the page when Restart was pressed, for the fresh copy
 _code_cache: dict = {"at": 0.0, "times": {}}
 
@@ -2343,7 +2348,7 @@ PAGE_COMMANDS = {"ports": _cmd_ports, "mic_note": _cmd_mic_note, "lessons": _cmd
                  "youtube": _cmd_youtube,
                  "record": _cmd_record, "maestro": _cmd_maestro, "stop_playback": lambda _body: _quiet(),
                  "voice_status": _cmd_voice_status, "talk": _cmd_talk, "page_error": _cmd_page_error,
-                 "checks": _cmd_checks, "check": _cmd_check, "code_status": _cmd_code_status, "restart": _cmd_restart, "goto_report": _cmd_goto_report, "report": _cmd_report, "chat": lambda body: _voice_reply(body.get("text", "")),
+                 "checks": _cmd_checks, "check": _cmd_check, "try_fix": _cmd_try_fix, "code_status": _cmd_code_status, "restart": _cmd_restart, "goto_report": _cmd_goto_report, "report": _cmd_report, "chat": lambda body: _voice_reply(body.get("text", "")),
                  "transcript": _cmd_transcript, "view": _cmd_view, "tiles": _cmd_tiles, "tiles_set": _cmd_tiles_set}
 def _atlas_show(path: str) -> dict:
     """A lesson's music on the sheet. Opening a lesson means leaving whatever was running

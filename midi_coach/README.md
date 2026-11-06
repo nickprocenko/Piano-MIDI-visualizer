@@ -666,9 +666,12 @@ where you were (page, song, bar, mode), and a line on what changed. Try it, then
 **✅ Works** (it moves to `fixed/`, or `requests/done/`) or **↩️ Still wrong** and say what's
 still off (it goes back to `open/` with your words, to be fixed again). Each fix is its own git
 commit on this PC (never pushed by the coach). A fix made by a background worker waits on its own
-side branch: Works adds it to your code (not while you have unsaved changes in a file it changes:
-then it says which, and you press Works again), and Still wrong just drops it. A fix made in
-your folder is undone by Still wrong, which says so if it can't be undone cleanly. **↗ Go there** opens
+side branch, so it has a **🧪 Try it** button: that adds it to your code so you can see it (press
+Restart or Reload when the bar at the top asks), then Works keeps it and Still wrong takes it out
+again. Pressing Works without trying adds it too, and Still wrong without trying just drops it.
+Neither Try it nor Works adds a fix while you have unsaved changes in a file it changes: it says
+which, and you press it again once they're committed or undone. A fix made in your folder (or
+tried) is undone by Still wrong, which says so if it can't be undone cleanly. **↗ Go there** opens
 the piece you reported it on and sets the page up as it was: the view, the mode, the bars, the
 tempo, the loop and the cursor's bar (this becomes that piece's saved practice settings, as if
 you'd set them). It's off while a run is going. Opening

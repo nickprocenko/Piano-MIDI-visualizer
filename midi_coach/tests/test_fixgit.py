@@ -189,6 +189,53 @@ def test_still_wrong_drops_a_side_branch_fix_without_touching_your_code(home, re
     assert (tree / "page.html").read_text(encoding="utf-8") == "<button>Video</button>\n"
 
 
+def test_try_it_puts_a_side_branch_fix_in_your_code_and_works_keeps_it(home, repo, monkeypatch):
+    item = report()
+    worker_fixes(monkeypatch, repo, item)
+    row = bugs.to_check(with_shots=True)["items"][0]
+    assert row["try"] is True and row["tried"] is False
+    out = bugs.try_fix(item)
+    assert out["tried"] == item and "top" in (repo / "page.html").read_text(encoding="utf-8")
+    assert log_of(repo)[0].startswith("Request: Video button moved")
+    row = bugs.to_check(with_shots=True)["items"][0]
+    assert row["try"] is False and row["tried"] is True
+    assert "Tried" not in row["fix"]  # the note on what changed stays clean
+    assert bugs.try_fix(item)["already"]  # a second press changes nothing
+    assert len([s for s in log_of(repo) if s]) == 2
+    done = bugs.verify(item, works=True)
+    assert done["merged"] == out["commit"] and len([s for s in log_of(repo) if s]) == 2  # not added twice
+    assert "when you tried it" in (home / "requests" / "done" / item / "report.md").read_text(encoding="utf-8")
+    assert fixgit.git("show-ref", f"refs/fixes/{item}", check=False).returncode
+
+
+def test_still_wrong_after_try_it_takes_the_fix_out_again(home, repo, monkeypatch):
+    item = report()
+    worker_fixes(monkeypatch, repo, item)
+    tried = bugs.try_fix(item)["commit"]
+    out = bugs.verify(item, works=False, note="still in the wrong corner")
+    assert out["undone"] is True and (repo / "page.html").read_text(encoding="utf-8") == "<button>Video</button>\n"
+    assert log_of(repo)[0].startswith('Revert "Request: Video button moved')
+    assert f"commit {tried} was undone" in (home / "requests" / "open" / item / "report.md").read_text(encoding="utf-8")
+
+
+def test_try_it_waits_while_you_are_editing_its_file(home, repo, monkeypatch):
+    item = report()
+    worker_fixes(monkeypatch, repo, item)
+    (repo / "page.html").write_text("<button>Video</button><!-- mine -->\n", encoding="utf-8")
+    out = bugs.try_fix(item)
+    assert out["wait"] == ["page.html"] and log_of(repo)[0] == "start"
+    assert bugs.to_check(with_shots=True)["items"][0]["try"] is True
+
+
+def test_a_fix_made_in_your_own_code_has_nothing_to_try(home, repo):
+    item = report()
+    bugs.claim(item, "session")
+    (repo / "page.html").write_text("<header><button>Video</button></header>\n", encoding="utf-8")
+    bugs.mark_ready(item, "Moved it.", files=["page.html"], by="session")
+    assert bugs.to_check(with_shots=True)["items"][0]["try"] is False
+    assert bugs.try_fix(item)["already"] and log_of(repo)[0] == "Request: Moved it."
+
+
 def test_one_runner_at_a_time(home):
     home.mkdir(parents=True, exist_ok=True)
     assert fixgit.acquire("overnight") == {"locked": "overnight"}

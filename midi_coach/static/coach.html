@@ -780,6 +780,9 @@
   .chk-btns button { padding: 5px 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   .chk-btns button.ok { border-color: var(--hit); }
   .chk-btns button.no { border-color: var(--miss); }
+  .chk-btns button.try { border-color: var(--accent); }
+  .chk-btns button[hidden], .chk-state[hidden] { display: none; }
+  .chk-state { color: var(--muted); font-size: 12px; }
   .chk-note { display: flex; gap: 6px; }
   .chk-note[hidden] { display: none; }
   .chk-note input { flex: 1; min-width: 0; }
@@ -3898,7 +3901,7 @@ connect();
       <div id="asks-list"></div>
     </div>
     <h2 id="checks-title">Fixes to try</h2>
-    <p class="dlg-hint">Each of these was fixed after you reported it. Try it, then say whether it works. “Still wrong” sends it back to be fixed again, with what you write.</p>
+    <p class="dlg-hint">Each of these was fixed after you reported it. Try it, then say whether it works (a fix with 🧪 Try it isn’t in your code yet: press that first). “Still wrong” sends it back to be fixed again, with what you write.</p>
     <div id="checks-list"></div>
     <p class="dlg-msg" id="checks-msg" role="alert"></p>
     <div class="dlg-row"><button value="close">Done</button></div>
@@ -4053,9 +4056,28 @@ connect();
     const btns = el('div', 'chk-btns');
     const ok = el('button', 'ok', '✅ Works'), no = el('button', 'no', '↩️ Still wrong');
     const there = el('button', '', '↗ Go there');
-    ok.type = no.type = there.type = 'button';
+    // A worker's fix waits on its side branch: Try it puts it in your code first (fixgit.merge).
+    const tryIt = el('button', 'try', '🧪 Try it');
+    const state = el('div', 'chk-state', it.tried ? 'In your code now, to try. Still wrong takes it out again.' : '');
+    state.hidden = !it.tried;
+    ok.type = no.type = there.type = tryIt.type = 'button';
     there.title = 'Open the piece, view and bar you reported this from, set up as it was, to try the fix';
-    btns.append(there, ok, no);
+    tryIt.title = 'This fix isn’t in your code yet: put it there so you can see it (then Restart or Reload when the bar asks)';
+    tryIt.hidden = !it.try;
+    btns.append(tryIt, there, ok, no);
+    tryIt.addEventListener('click', async () => {
+      tryIt.disabled = true;
+      try {
+        await cmd('try_fix', {id: it.id});
+        tryIt.hidden = true;
+        state.textContent = 'In your code now. Restart or Reload when the bar at the top asks, try it, then say whether it works. Still wrong takes it out again.';
+        state.hidden = false;
+        msg.textContent = '';
+      } catch (e) {
+        msg.textContent = e.message;
+        tryIt.disabled = false;
+      }
+    });
     there.addEventListener('click', async () => {
       there.disabled = true;
       try {
@@ -4071,7 +4093,7 @@ connect();
         there.disabled = false;
       }
     });
-    body.append(btns, note, el('div', 'chk-id', it.id));
+    body.append(state, btns, note, el('div', 'chk-id', it.id));
     item.append(body);
     async function answer(works) {
       ok.disabled = no.disabled = send.disabled = true;

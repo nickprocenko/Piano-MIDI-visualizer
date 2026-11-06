@@ -95,8 +95,9 @@ def revert(commit: str) -> dict:
 #
 # A runner's worker builds in a git worktree (<home>/workers/<name>, branch runner/<name>), so the
 # user's own folder is never touched while it works. Each fix it marks ready is kept under
-# refs/fixes/<report id> (the worktree is reset for its next batch). ✅ on the coach page copies that
-# commit onto the user's branch (merge); ↩️ before then just drops it, since it never reached them.
+# refs/fixes/<report id> (the worktree is reset for its next batch). Try it or ✅ on the coach page
+# copies that commit onto the user's branch (merge); ↩️ before then just drops it, since it never
+# reached them, and after Try it reverts the copy.
 
 
 def worktree(name: str) -> pathlib.Path:
@@ -128,6 +129,11 @@ def forget(report_id: str) -> None:
 
 def _in_branch(commit: str) -> bool:
     return git("merge-base", "--is-ancestor", commit, "HEAD", check=False).returncode == 0
+
+
+def in_code(commit: str) -> bool:
+    """Whether a fix's commit is on the user's branch already (it was made there, or merged)."""
+    return _in_branch(commit)
 
 
 def merge(commit: str) -> dict:
