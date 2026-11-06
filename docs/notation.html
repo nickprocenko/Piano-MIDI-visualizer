@@ -477,14 +477,16 @@ window.addEventListener('message', async e => {
     const now = performance.now();
     const drawn = beatMode && beatMap.length ? cursorBeatAt(now) : null;
     beatMode = true;
-    panPx = 0;  // the cursor moved: snap back to it
     document.body.classList.add('pannable');
     beatTarget = e.data.beat; beatBps = e.data.bps || 0; beatAt = now;
     beatUntil = typeof e.data.until === 'number' ? e.data.until : null;
     const steady = beatBps > 0 && beatUntil === null;  // Rehearse: moving at tempo
     beatEase = steady ? REHEARSE_EASE_MS : LEARN_EASE_MS;
     beatOffset = drawn === null ? 0 : drawn - cursorBase(now);
-    if (Math.abs(beatOffset) > (steady ? REHEARSE_SNAP_BEATS : LEARN_SNAP_BEATS)) beatOffset = 0;
+    // A seek or a restart: show the cursor again. A step through the music keeps a scroll
+    // the pianist just made (it eases back on its own, see PAN_HOLD_MS).
+    if (Math.abs(beatOffset) > (steady ? REHEARSE_SNAP_BEATS : LEARN_SNAP_BEATS)) { beatOffset = 0; panPx = 0; }
+    else if (now - panAt >= PAN_HOLD_MS) panPx = 0;
     beatShown = cursorBeatAt(now);
   } else if (e.data.type === 'updateBeat') {
     // The visualizer's Learn Mode: where it is, in beats, every frame (no clock of our own)
@@ -1617,12 +1619,14 @@ function updateHeader(trackX, s, phX) {
 }
 
 // ── Manual panning (midi-coach) ───────────────────────────────────────────────
-// Drag or scroll the score to look around while the cursor is parked; the next
-// cursor update snaps back. Disabled while it moves at tempo (rehearsal).
-let panPx = 0;
+// Drag or scroll the score to look around, during a run too: the view stays where it was
+// put, following the cursor, until PAN_HOLD_MS after the last scroll, then eases back.
+const PAN_HOLD_MS = 4000;
+let panPx = 0, panAt = -Infinity, panTick = 0;
 
 function panBy(dx) {
-  if (!rendered || !beatMode || gliding() || !beatMap.length) return;
+  if (!rendered || !beatMode || !beatMap.length) return;
+  if (dx) panAt = performance.now();
   const s = fitScale();
   if (rowsOn()) {  // up and down, keeping some of the score in view
     const [lo, hi] = rowYRange(s), base = rowY(rowPoint(getXForBeat(beatShown)).row, s);
@@ -1633,6 +1637,14 @@ function panBy(dx) {
   const x = getXForBeat(beatShown) * s;
   // Keep some part of the score under the playhead: 0 <= x - panPx <= width.
   panPx = Math.max(x - width, Math.min(x, panPx + dx));
+}
+
+function easePanBack(now) {
+  const dt = Math.min(100, now - panTick);
+  panTick = now;
+  if (!panPx || dragX !== null || now - panAt < PAN_HOLD_MS) return;
+  panPx *= Math.exp(-dt / 200);
+  if (Math.abs(panPx) < 0.5) panPx = 0;
 }
 
 const viewportEl = document.getElementById('viewport');
@@ -1681,7 +1693,7 @@ function tick() {
   const s     = fitScale();
   if (beatMode && beatMap.length) {
     beatShown = cursorBeatAt(performance.now());
-    if (gliding()) panPx = 0;
+    easePanBack(performance.now());
     if (rowsOn()) { drawRows(getXForBeat(beatShown), s); return; }
     const x = phX - getXForBeat(beatShown) * s + panPx;
     scoreTrack.style.transform = trackTransform(x, s);
