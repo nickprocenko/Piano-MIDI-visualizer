@@ -30,6 +30,7 @@ window.coachRoll = (() => {
   // with a short ease from where it was drawn so a correction never jolts.
   const cur = {target: 0, bps: 0, at: 0, until: null, ease: EASE_MS.learn, offset: 0, seen: false};
   let shown = false, raf = 0, width = 0, height = 0;
+  let pan = 0, ppbShown = 0;  // beats dragged away from the cursor (as the sheet pans); pixels per beat drawn
 
   function cursorBase(now) {
     if (!(cur.bps > 0)) return cur.target;
@@ -80,6 +81,7 @@ window.coachRoll = (() => {
     if (m.type === 'cursorBeat') {
       const drawn = cur.seen ? cursorAt(now) : null;
       cur.seen = true;
+      pan = 0;  // the next cursor update snaps a dragged view back, as on the sheet
       cur.target = m.beat; cur.bps = m.bps || 0; cur.at = now;
       cur.until = typeof m.until === 'number' ? m.until : null;
       const steady = cur.bps > 0 && cur.until === null;  // Rehearse / Listen: moving at tempo
@@ -160,7 +162,8 @@ window.coachRoll = (() => {
     const keyH = Math.max(50, Math.min(h * 0.26, (w / whites) * 5.2));
     const floor = h - keyH;
     const ppb = floor / span;  // pixels per beat
-    const beat = cursorAt(now);
+    ppbShown = ppb;
+    const beat = cursorAt(now) + pan;
     const keys = keyboard(keyH);
     const yOf = b => floor - (b - beat) * ppb;
 
@@ -211,7 +214,8 @@ window.coachRoll = (() => {
 
     // The keys: held ones green when the piece wants them now, red when it doesn't; the
     // notes due now tinted in their hand's colour, so you can see what to play.
-    const wanted = p => (byPitch.get(p) || []).some(n => !hidden.has(n.role) && n.b - 0.25 <= beat && beat <= n.b + n.d);
+    const at = beat - pan;  // what you hold is judged at the cursor, wherever the view was dragged
+    const wanted = p => (byPitch.get(p) || []).some(n => !hidden.has(n.role) && n.b - 0.25 <= at && at <= n.b + n.d);
     const keyFill = (p, k) => {
       if (held.has(p)) return rgb(wanted(p) ? HIT : MISS);
       const g = guide.get(p);
@@ -266,6 +270,36 @@ window.coachRoll = (() => {
     span = Math.max(2, Math.min(32, span * (e.deltaY > 0 ? 1.15 : 1 / 1.15)));
     store.set('beats', span.toFixed(2));
   }, {passive: false});
+
+  // Drag up and down to look through the piece while the cursor is parked, the way the sheet
+  // pans: grab the notes and pull them down to see what's coming. The next cursor update snaps
+  // back; nothing pans while the cursor moves at tempo (Rehearse / Listen).
+  const gliding = () => cur.bps > 0 && cur.until === null;
+  function panBy(dy) {
+    if (!notes.length || !(ppbShown > 0) || gliding()) return;
+    const base = cursorAt(performance.now());
+    const start = notes[0].b, end = notes.reduce((m, n) => Math.max(m, n.b + n.d), start);
+    // Keep some of the piece in view: the keys at most a view below its start, at most its end.
+    pan = Math.max(start - span - base, Math.min(end - base, pan + dy / ppbShown));
+  }
+  canvas.style.touchAction = 'none';
+  canvas.style.cursor = 'grab';
+  let dragY = null;
+  canvas.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.style.cursor = 'grabbing';
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (dragY === null) return;
+    panBy(e.clientY - dragY);
+    dragY = e.clientY;
+  });
+  const endDrag = () => { dragY = null; canvas.style.cursor = 'grab'; };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
 
   return {score, event, parts, show};
 })();
