@@ -1024,52 +1024,6 @@ def test_voice_chat_runs_tools_and_meters_cost(monkeypatch, tmp_path):
     assert capped["capped"] and len(calls) == 3  # no request once the day's budget is spent
 
 
-def test_stop_talking_phrases_are_reserved_and_plain_stop_is_not():
-    from midi_coach import chat
-
-    for said in ("Stop talking.", "Maestro, stop talking", "Be quiet, please.", "That's all for now, thanks.",
-                 "OK, that’s enough.", "Never mind.", "End the conversation.", "Maestro, end chat", "Shh.",
-                 "Goodbye, Maestro.", "Stop speaking.", "Okay, you can stop talking now.", "I'm done talking."):
-        assert chat.heard_end(said), said
-    for said in ("Stop.", "Maestro, stop.", "Stop the run.", "Stop playing", "Switch to the Learn mode. Stop.",
-                 "Stop at bar eight", "Is that all the notes?", "", "Quiet passages are hard"):
-        assert not chat.heard_end(said), said
-
-
-def test_ending_the_conversation_cuts_off_an_answer_on_its_way(monkeypatch, tmp_path):
-    from types import SimpleNamespace as NS
-
-    from midi_coach import chat
-
-    monkeypatch.setenv("MIDI_COACH_HOME", str(tmp_path))
-    usage = NS(input_tokens=10, output_tokens=10, cache_creation_input_tokens=0, cache_read_input_tokens=0)
-    replies = [NS(stop_reason="end_turn", usage=usage, content=[NS(type="text", text="Hello there.")]),
-               NS(stop_reason="tool_use", usage=usage, content=[NS(type="tool_use", id="t1", name="stop_practice", input={})])]
-    voice = chat.VoiceChat({}, lambda: "", client=_fake_claude(replies, []))
-    assert voice.ask("hello")["reply"] == "Hello there." and voice.messages
-    assert voice.end() and voice.messages == [] and not voice.end()  # nothing left to end
-    voice.actions["stop_practice"] = lambda: voice.end() and {}  # End chat pressed while it answers
-    out = voice.ask("tell me a long story")
-    assert out["cancelled"] and out["reply"] == "" and voice.messages == []
-
-
-def test_saying_stop_talking_hushes_every_page_without_the_api(monkeypatch, tmp_path):
-    from midi_coach import display, server
-
-    monkeypatch.setenv("MIDI_COACH_HOME", str(tmp_path))
-    hub, sent = display.DisplayHub(), []
-    monkeypatch.setattr(server, "hub", hub)
-    monkeypatch.setattr(hub, "_broadcast", sent.append)
-    monkeypatch.setattr(hub, "say", lambda *a, **k: pytest.fail("nothing is said"))
-    monkeypatch.setattr(server._voice, "ask", lambda heard: pytest.fail("never a question for Claude"))
-    out = server._voice_reply("Maestro, stop talking.")
-    assert out["ended"] and out["actions"] == ["end_conversation"]
-    assert {"type": "page", "hush": True} in sent and sent[-1]["kind"] == "divider"
-    sent.clear()
-    assert server.PAGE_COMMANDS["end_conversation"]({}) == {"ended": True}  # End chat / Esc
-    assert sent == [{"type": "page", "hush": True}]  # nothing to forget: no second line
-
-
 def test_voice_chat_hands_lesson_writing_to_sonnet(monkeypatch, tmp_path):
     from types import SimpleNamespace as NS
 

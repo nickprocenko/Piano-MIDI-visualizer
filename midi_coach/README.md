@@ -601,15 +601,6 @@ answers out loud in character and can run the practice for you:
 - With a flute in your hands, tick **Hands-free** and start with *"Maestro, …"* instead (see
   [Flute: the flute Roadmap and the microphone](#flute-the-flute-roadmap-and-the-microphone)).
 
-**Stopping the Maestro.** *"Stop"* on its own stops the run. To stop the Maestro itself, press
-**End chat** on the panel, press **Esc** while it's talking, listening or thinking, or say
-*"Stop talking"*, *"Be quiet"*, *"That's all"* or *"End the conversation"* (with or without
-*"Maestro, …"*; hands-free too). It goes quiet on every open page, an answer still on its way
-is never said, what you were saying into the mic is dropped, and the conversation is ended: a
-dashed line marks it and the Maestro forgets what's above. A run keeps going. These phrases
-never reach Claude, so they cost nothing. **■ Stop** (shown while it speaks) only cuts the
-current line short.
-
 Your speech is transcribed **on your PC** (Whisper `base.en`, downloaded once, ~145 MB, to
 `%USERPROFILE%\MidiCoach\whisper`). Only the text, plus a short summary of your practice,
 goes to Claude: **Haiku 5.5** for the conversation and commands, **Sonnet 5.5** when it
