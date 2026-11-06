@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 
@@ -31,6 +32,24 @@ DEFAULT_DAILY_CAP = 0.50
 MAX_TOOL_ROUNDS = 5
 NEW_CONVERSATION_AFTER_SEC = 20 * 60
 NEW_CONVERSATION_AFTER_MESSAGES = 40
+
+# Reserved phrases that end the conversation instead of going to Claude: "stop talking",
+# "Maestro, be quiet", "that's all", "end the conversation"... A plain "stop" isn't one of
+# them: that still stops the run.
+END_RE = re.compile(
+    r"(?:(?:hey|ok|okay|oh|alright|all right) )?(?:maestro )?(?:please )?(?:ok |okay )?(?:you can )?"
+    r"(?:(?:stop|quit|no more|enough) (?:talking|speaking|chatting)|be quiet|quiet|quiet please|hush|shush|sh+|shut up"
+    r"|(?:thanks |thank you )?(?:maestro )?that'?s (?:all|enough)(?: for now)?"
+    r"|never ?mind|forget it|(?:i'?m|we'?re) done (?:talking|chatting)"
+    r"|(?:end|stop|close|pause) (?:the |this |our )?(?:conversation|chat)"
+    r"|(?:good)?bye(?: for now)?)"
+    r"(?: (?:now|maestro|please|thanks|thank you))*")
+
+
+def heard_end(said: str) -> bool:
+    """True when what was said is one of END_RE's phrases (and nothing else)."""
+    text = " ".join(re.sub(r"[^a-z' ]+", " ", (said or "").lower().replace("’", "'")).split())
+    return bool(text) and END_RE.fullmatch(text) is not None
 
 SYSTEM = """\
 You are the Maestro, the piano teacher character in a practice app. The pianist talks to you \
@@ -807,7 +826,11 @@ When they ask where a setting is, or want to change one page_control can't set, 
 with page_control's menu (it lights up on their screen) and say in a few words what to pick \
 there. If no menu fits, say you can't open that yet.
 
-When they name a song or piece to play or open ("home for a rest", "put on Desperado", a title and its artist), call open_song with the title, even when a word of it sounds like a command ("home", "rest", "stop"); a title they say beside a page name is still a song. switch_lesson is for exercises and lessons already saved. When they don't want something in today's plan ("skip Thriller", "drop the warm-up", "clear today's plan"), use remove_from_today."""
+When they name a song or piece to play or open ("home for a rest", "put on Desperado", a title and its artist), call open_song with the title, even when a word of it sounds like a command ("home", "rest", "stop"); a title they say beside a page name is still a song. switch_lesson is for exercises and lessons already saved. When they don't want something in today's plan ("skip Thriller", "drop the warm-up", "clear today's plan"), use remove_from_today.
+
+"Stop" alone means the run. To stop you talking or end the conversation they say "stop \
+talking" or "that's all", press Esc while you talk, or End chat in your panel: the app does it \
+without you. Tell them so when they ask how."""
 
 # Added to either Maestro's prompt for a young learner's profile.
 YOUNG_SYSTEM = """
@@ -914,6 +937,7 @@ class VoiceChat:
         self.messages: list = []
         self._last_turn = 0.0
         self._lock = threading.Lock()
+        self._ended = 0  # counts end()s, so an answer still on its way knows it was cut off
 
     def available(self) -> tuple[bool, str]:
         if self._client is not None:
@@ -967,17 +991,33 @@ class VoiceChat:
             return True
         return False
 
+    def end(self) -> bool:
+        """End the conversation (End chat, Esc, or "stop talking"): forget it, and cut off an
+        answer still on its way (it comes back cancelled, unsaid). True if there was anything
+        to end."""
+        self._ended += 1
+        if self._lock.acquire(blocking=False):
+            try:
+                had, self.messages = bool(self.messages), []
+                return had
+            finally:
+                self._lock.release()
+        return True  # answering now: _ask sees _ended change and forgets it all
+
     def _ask(self, said: str) -> dict:
         if self.ledger.today() >= daily_cap():
             return {"reply": "That's enough talking for today. We've hit the daily budget. Play, don't chat.",
                     "cost": 0.0, "actions": [], "spent_today": self.ledger.today(), "capped": True}
         self.start_fresh_if_due()
         self._last_turn = time.time()
+        ended = self._ended
         player = PLAYERS.get(self.instrument(), "pianist")
         self.messages.append({"role": "user", "content": f"[Practice context]\n{self.context()}\n\n[The {player} said]\n{said}"})
         cost, done = 0.0, []
         reply = ""
         for _ in range(MAX_TOOL_ROUNDS):
+            if self._ended != ended:
+                break
             response = self.client().messages.create(
                 model=CHAT_MODEL,
                 max_tokens=2000,
@@ -1005,6 +1045,10 @@ class VoiceChat:
                 results.append({"type": "tool_result", "tool_use_id": use.id, "content": json.dumps(out, default=str)[:4000],
                                 **({"is_error": True} if isinstance(out, dict) and "error" in out else {})})
             self.messages.append({"role": "user", "content": results})
+        if self._ended != ended:  # cut off meanwhile: say nothing, remember nothing
+            self.messages = []
+            return {"reply": "", "cancelled": True, "cost": round(cost, 5), "actions": done,
+                    "spent_today": round(self.ledger.today(), 4)}
         return {"reply": reply or "Hm.", "cost": round(cost, 5), "actions": done, "spent_today": round(self.ledger.today(), 4)}
 
     def _run_tool(self, name: str, args: dict) -> tuple[dict, float]:

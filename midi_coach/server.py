@@ -2129,7 +2129,7 @@ def _voice_reply(heard: str) -> dict:
     """Answer what was said; the reply is spoken and shown by the Maestro on every open page.
     Both go in today's conversation log, and in the Maestro panel's transcript, under a line
     when the Maestro starts a fresh conversation (it no longer remembers what's above it)."""
-    if (heard or "").strip() and _voice.start_fresh_if_due():
+    if (heard or "").strip() and not chat.heard_end(heard) and _voice.start_fresh_if_due():
         hub.line("Maestro", "New conversation: the Maestro doesn't remember what's above this line.", "divider")
     hub.line("You", heard, "you")
     with transcript.answering():
@@ -2140,7 +2140,23 @@ def _voice_reply(heard: str) -> dict:
     return out
 
 
+def _end_conversation(said: bool = False) -> dict:
+    """The Maestro stops: what it's saying on every page, an answer still on its way (never
+    said) and the conversation (forgotten). A run is left alone. The panel draws a line,
+    always after "stop talking" (it follows that line), from End chat / Esc only when there
+    was something to end."""
+    had = _voice.end()
+    hub.page({"hush": True})
+    if had or said:
+        hub.line("Maestro", "Conversation ended: the Maestro doesn't remember what's above this line.", "divider")
+    return {"ended": True}
+
+
 def _answer(heard: str) -> dict:
+    # "Stop talking" / "that's all" / "end the conversation": never a practice command.
+    if chat.heard_end(heard):
+        _end_conversation(said=True)
+        return {"heard": heard, "reply": "", "ended": True, "actions": ["end_conversation"], "cost": 0.0}
     # "No" / "undo" right after an autopilot change reverses it here, at once and for free.
     if _autopilot.can_undo and _UNDO_RE.match(re.sub(r"[^a-z' ]+", "", (heard or "").lower()).strip()):
         text = _undo_autopilot()
@@ -2349,6 +2365,7 @@ PAGE_COMMANDS = {"ports": _cmd_ports, "mic_note": _cmd_mic_note, "lessons": _cmd
                  "record": _cmd_record, "maestro": _cmd_maestro, "stop_playback": lambda _body: _quiet(),
                  "voice_status": _cmd_voice_status, "talk": _cmd_talk, "page_error": _cmd_page_error,
                  "checks": _cmd_checks, "check": _cmd_check, "try_fix": _cmd_try_fix, "code_status": _cmd_code_status, "restart": _cmd_restart, "goto_report": _cmd_goto_report, "report": _cmd_report, "chat": lambda body: _voice_reply(body.get("text", "")),
+                 "end_conversation": lambda _body: _end_conversation(),
                  "transcript": _cmd_transcript, "view": _cmd_view, "tiles": _cmd_tiles, "tiles_set": _cmd_tiles_set}
 def _atlas_show(path: str) -> dict:
     """A lesson's music on the sheet. Opening a lesson means leaving whatever was running

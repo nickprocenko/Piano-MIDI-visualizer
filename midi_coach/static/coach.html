@@ -890,6 +890,8 @@
   .mp-divider::before, .mp-divider::after { content: ''; flex: 1; border-top: 1px dashed rgba(255,255,255,.2); }
   #mp-clear { padding: 2px 8px; border: 0; background: transparent; color: var(--muted); font: 12px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
   #mp-clear:hover { color: var(--text); }
+  #mp-end { padding: 2px 8px; border: 0; background: transparent; color: var(--muted); font: 12px 'Segoe UI', Arial, sans-serif; cursor: pointer; white-space: nowrap; }
+  #mp-end:hover { color: var(--miss); }
   #mp-grip { position: absolute; top: -1px; right: -1px; width: 14px; height: 14px; cursor: nesw-resize;
              border-top: 2px solid rgba(255,255,255,.25); border-right: 2px solid rgba(255,255,255,.25); border-top-right-radius: 10px; }
   #mp-grip:hover { border-color: var(--accent); }
@@ -1428,6 +1430,7 @@
     <button id="talk" disabled title="Talk to the Maestro (needs an Anthropic API key)">🎤 Talk</button>
     <button id="mp-hush" class="hush" title="Stop the Maestro speaking">■ Stop</button>
     <span id="level" aria-hidden="true"><i></i></span>
+    <button id="mp-end" title="Stop the Maestro and end the conversation: it forgets what was said, a run keeps going (Esc while it talks, or say “stop talking”)">End chat</button>
     <button id="mp-clear" title="Empty the panel (today's log stays on disk)">Clear</button>
     <button id="mp-toggle" aria-expanded="false" title="Open the conversation">▴</button>
     <button id="mp-close" title="Close (Ask Maestro brings it back)" aria-label="Close the Maestro">✕</button>
@@ -3242,6 +3245,32 @@ async function sendTalk() {
   }
 }
 
+// End chat (or Esc while the Maestro talks, listens or thinks, or saying "stop talking"): it
+// stops speaking on every page, an answer on its way is never said, what you were saying is
+// dropped, and the conversation is forgotten. Never a practice command: a run keeps going.
+const mpBusy = () => document.body.classList.contains('speaking') || talking || !!mpLog.querySelector('.pending')
+  || (npc.classList.contains('show') && npcFull === '…');
+function hushed() {  // here, or on another page: nothing left saying or waiting to say
+  stopSpeaking();
+  mpLog.querySelector('.pending')?.remove();
+  if (npcFull === '…') hideNpc();
+}
+function endChat() {
+  if (talking) {
+    if (micRecorder) micRecorder.onstop = null;  // not sent
+    stopTalking();
+    heardWords('');
+  }
+  if (typeof flute !== 'undefined') flute.awaitUntil = 0;  // hands-free: no longer waiting after "Maestro"
+  hushed();
+  cmd('end_conversation').catch(() => {});
+}
+$('mp-end').addEventListener('click', e => { e.stopPropagation(); endChat(); });
+window.addEventListener('keydown', e => {  // capture: before Escape closes a menu or the full-screen sheet
+  if (e.key !== 'Escape' || e.repeat || document.querySelector('dialog[open]') || !mpBusy()) return;
+  endChat();
+}, true);
+
 // Space talks unless you're typing text (a focused dropdown or checkbox doesn't count).
 const typing = el => el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|number|search)$/.test(el.type))
   || !!el.closest?.('dialog[open]');  // Space presses the dialog's buttons (Preferences, Save as…)
@@ -3734,6 +3763,7 @@ function pageControl(msg) {
   }
   if ('metronome' in msg && !!metro.timer !== msg.metronome) mGo.click();
   if (msg.menu) openMenu(msg.menu);
+  if (msg.hush) hushed();  // the conversation was ended (End chat, Esc, "stop talking"), here or on another page
   if (msg.today && typeof todayLoad === 'function') todayLoad();  // the Maestro took something out of today's plan
   if (msg.tiles && tiles.layouts) { tiles.layouts[msg.tiles.view] = msg.tiles.tiles; mpTilesRender(); }  // set_tiles, or another page's edit
 }
