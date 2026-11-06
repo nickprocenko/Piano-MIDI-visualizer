@@ -821,6 +821,11 @@
                 width: max-content; max-width: calc(100vw - 40px); padding: 12px 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
   .menu-row { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }  /* a label that holds buttons */
   #settings-menu .menu-row { flex-wrap: wrap; }
+  #fing-wrap[hidden], #tab-wrap[hidden] { display: none; }  /* .menu-row's and #menu label's display would show them for every instrument */
+  /* Sheet ▸ the controls that only change the sheet, greyed while only the falling notes show */
+  #sheet-only-note { display: none; color: var(--muted); font-size: 12px; font-style: italic; }
+  body[data-show=notes] #sheet-only-note { display: block; }
+  body[data-show=notes] #sheet-settings .sheet-only { opacity: .4; pointer-events: none; }
   #settings-menu kbd, #actions-menu kbd { color: var(--muted); font: 11.5px 'Segoe UI', Arial, sans-serif; }
   #actions-menu .menu-panel { align-items: stretch; gap: 0; min-width: 230px; padding: 5px; }
   .act-item { display: flex; justify-content: space-between; gap: 18px; padding: 7px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; text-align: left; cursor: pointer; }
@@ -1175,27 +1180,28 @@
     <button data-show="notes" title="The visualizer's view: the notes fall onto a keyboard. Scroll on it to change how fast they fall">Falling notes</button>
     <button data-show="both" title="The sheet above, the falling notes under it">Both</button>
   </span></span>
-  <span class="menu-row">Labels <span class="seg" id="aid-level" aria-label="How much the sheet is labeled">
+  <span id="sheet-only-note">The settings below change the sheet: pick Sheet or Both to see them.</span>
+  <span class="menu-row sheet-only">Labels <span class="seg" id="aid-level" aria-label="How much the sheet is labeled">
     <button data-aid="all" title="Note names and counting on every bar. The quickest start, but lean on it and you learn to read the labels, not the music">Easy</button>
     <button data-aid="coach" title="Labels only where you slip: note names on a bar where you play wrong keys or hunt for them, counting where you play off the beat. They come off once you play that bar clean twice">Coached</button>
     <button data-aid="off" title="No labels: read the music yourself">Hard</button>
   </span></span>
-  <span class="menu-row">
+  <span class="menu-row sheet-only">
     <label title="The letter name on each notehead, filled or hollow like the note; a sharp or flat beside it, from the key signature too"><input type="checkbox" id="aid-names"> Note names</label>
     <label title="The beats under each bar (1 & 2 &), faint where you hold or rest"><input type="checkbox" id="aid-counts"> Counting</label>
   </span>
-  <label title="Show dynamics (pp to ff, hairpins) on the sheet. For MIDI files they're worked out from how hard each passage was played."><input type="checkbox" id="dynamics"> Dynamics</label>
+  <label class="sheet-only" title="Show dynamics (pp to ff, hairpins) on the sheet. For MIDI files they're worked out from how hard each passage was played."><input type="checkbox" id="dynamics"> Dynamics</label>
   <span id="fing-wrap" class="menu-row" hidden>
-    <label title="A key diagram under each note: blue the left hand, red the right, filled a key that's down. It makes the sheet taller and the notes further apart.">Fingering <select id="fingering">
+    <label class="sheet-only" title="A key diagram under each note: blue the left hand, red the right, filled a key that's down. It makes the sheet taller and the notes further apart.">Fingering <select id="fingering">
       <option value="">Off</option><option value="repeats">Where it changes</option><option value="line">First time on each line</option>
     </select></label>
     <label title="While you play: the fingering of the note the music is waiting for, next to the note the microphone hears (green when they match)"><input type="checkbox" id="fing-monitor-on"> Monitor</label>
   </span>
-  <label id="tab-wrap" hidden title="Add a tab staff under the notes: a line for each string, the number on it the fret to press (0: the open string). For the guitar and the bass; the notes above stay the music you're graded on."><input type="checkbox" id="tab"> Tab</label>
-  <label title="Sideways: one long line moving past a fixed cursor. Two rows: the sheet as rows across the page, the row you're playing on top and the next one under it, scrolling down.">Layout <select id="layout">
+  <label id="tab-wrap" class="sheet-only" hidden title="Add a tab staff under the notes: a line for each string, the number on it the fret to press (0: the open string). For the guitar and the bass; the notes above stay the music you're graded on."><input type="checkbox" id="tab"> Tab</label>
+  <label class="sheet-only" title="Sideways: one long line moving past a fixed cursor. Two rows: the sheet as rows across the page, the row you're playing on top and the next one under it, scrolling down.">Layout <select id="layout">
     <option value="line">Scrolls sideways</option><option value="rows">Two rows, scrolls down</option>
   </select></label>
-  <label title="How big the sheet is drawn. Smaller shows more bars at once; larger makes the notes easier to read.">Zoom <input type="range" id="zoom" min="50" max="200" step="10" value="100"> <span id="zoom-val">100%</span></label>
+  <label class="sheet-only" title="How big the sheet is drawn. Smaller shows more bars at once; larger makes the notes easier to read.">Zoom <input type="range" id="zoom" min="50" max="200" step="10" value="100"> <span id="zoom-val">100%</span></label>
   <div id="sheet-tools" hidden>
     <h3>This sheet</h3>
     <div id="sheet-details" class="tool-row" hidden>
