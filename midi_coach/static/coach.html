@@ -828,6 +828,7 @@
   #sheet-only-note { display: none; color: var(--muted); font-size: 12px; font-style: italic; }
   body[data-show=notes] #sheet-only-note { display: block; }
   body[data-show=notes] #sheet-settings .sheet-only { opacity: .4; pointer-events: none; }
+  body:not([data-show=notes]):not([data-show=both]) #sheet-settings .roll-only { opacity: .4; }
   #settings-menu kbd, #actions-menu kbd { color: var(--muted); font: 11.5px 'Segoe UI', Arial, sans-serif; }
   #actions-menu .menu-panel { align-items: stretch; gap: 0; min-width: 230px; padding: 5px; }
   .act-item { display: flex; justify-content: space-between; gap: 18px; padding: 7px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; text-align: left; cursor: pointer; }
@@ -1182,6 +1183,7 @@
     <button data-show="notes" title="The visualizer's view: the notes fall onto a keyboard. Scroll on it to change how fast they fall">Falling notes</button>
     <button data-show="both" title="The sheet above, the falling notes under it">Both</button>
   </span></span>
+  <label class="roll-only" title="The letter name printed inside each falling note (sharps or flats as the piece's key suggests). Pick Falling notes or Both to see them."><input type="checkbox" id="roll-names"> Note names on falling notes</label>
   <span id="sheet-only-note">The settings below change the sheet: pick Sheet or Both to see them.</span>
   <span class="menu-row sheet-only">Labels <span class="seg" id="aid-level" aria-label="How much the sheet is labeled">
     <button data-aid="all" title="Note names and counting on every bar. The quickest start, but lean on it and you learn to read the labels, not the music">Easy</button>
@@ -3747,6 +3749,8 @@ function setView(v) {
 }
 document.querySelectorAll('#view button').forEach(b => b.addEventListener('click', () => setView(b.dataset.show)));
 setView(store.get('show', 'sheet'));
+$('roll-names').checked = coachRoll.names();
+$('roll-names').addEventListener('change', e => coachRoll.showNames(e.target.checked));
 
 // The Maestro's page_control: the controls are set as if clicked, so their own handlers run.
 function pageControl(msg) {

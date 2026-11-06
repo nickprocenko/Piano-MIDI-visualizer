@@ -26,6 +26,12 @@ window.coachRoll = (() => {
   let held = new Set();
   let flash = null;
   let span = Math.max(2, Math.min(32, Number(store.get('beats', '8')) || 8));  // beats between the top and the keys
+  // Note names printed inside the falling notes (Sheet ▸ Names on falling notes), spelled with
+  // sharps or flats as the piece's key suggests: the score sent here has pitches, not spellings.
+  let names = store.get('names', '') === '1';
+  const SHARPS = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+  const FLATS = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+  let spelling = SHARPS;
   // The cursor, moving the way the sheet's does: at bps from target, parking at until (Learn),
   // with a short ease from where it was drawn so a correction never jolts.
   const cur = {target: 0, bps: 0, at: 0, until: null, ease: EASE_MS.learn, offset: 0, seen: false};
@@ -65,7 +71,26 @@ window.coachRoll = (() => {
       else break;
     }
     if (!cur.seen && notes.length) cur.target = notes[0].b;
+    spelling = guessSpelling(notes);
   }
+
+  // The major key (or its relative minor) whose scale holds most of the music, by beats held;
+  // keys with fewer sharps or flats win a tie. Its signature says sharps or flats.
+  function guessSpelling(list) {
+    const weight = new Array(12).fill(0);
+    for (const n of list) weight[((n.p % 12) + 12) % 12] += Math.max(0.25, n.d);
+    const MAJOR = [0, 2, 4, 5, 7, 9, 11];
+    const ORDER = [0, 7, 5, 2, 10, 9, 3, 4, 8, 11, 1, 6];  // C, G, F, D, B♭, A, E♭, E, A♭, B, D♭, F♯
+    const FLAT_KEYS = new Set([5, 10, 3, 8, 1]);
+    let best = 0, bestFit = -1;
+    for (const t of ORDER) {
+      const fit = MAJOR.reduce((s, i) => s + weight[(t + i) % 12], 0);
+      if (fit > bestFit + 1e-9) { best = t; bestFit = fit; }
+    }
+    return FLAT_KEYS.has(best) ? FLATS : SHARPS;
+  }
+
+  function showNames(on) { names = !!on; store.set('names', names ? '1' : ''); }
 
   function findNote(beat, pitch) {
     let best = null;
@@ -208,6 +233,7 @@ window.coachRoll = (() => {
           ctx.lineWidth = 2;
           ctx.stroke();
         }
+        if (names) noteName(n, k, top, bottom, mine);
       }
     }
     ctx.globalAlpha = 1;
@@ -249,6 +275,27 @@ window.coachRoll = (() => {
       ctx.fillText(flash.text, w / 2, floor - 14);
       ctx.globalAlpha = 1;
     }
+  }
+
+  // The letter name inside a falling note, at its bottom end (the end that reaches the keys
+  // first), sized to fit the note's width; left off a note too small to hold it.
+  function noteName(n, k, top, bottom, mine) {
+    const text = spelling[((n.p % 12) + 12) % 12];
+    const room = k.w - 4;
+    let size = Math.min(14, room * (text.length > 1 ? 0.62 : 0.8));
+    if (size < 7 || bottom - top < size + 4) return;
+    ctx.font = `600 ${size}px "Segoe UI", Arial, sans-serif`;
+    const tw = ctx.measureText(text).width;
+    if (tw > room) {
+      size *= room / tw;
+      if (size < 7) return;
+      ctx.font = `600 ${size}px "Segoe UI", Arial, sans-serif`;
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = mine ? 'rgba(10,12,18,.9)' : 'rgba(220,224,236,.5)';  // a faint part's note is dark
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(text, k.x + k.w / 2, bottom - 4);
   }
 
   function lowerBound(beat) {
@@ -301,5 +348,5 @@ window.coachRoll = (() => {
   canvas.addEventListener('pointerup', endDrag);
   canvas.addEventListener('pointercancel', endDrag);
 
-  return {score, event, parts, show};
+  return {score, event, parts, show, showNames, names: () => names};
 })();
