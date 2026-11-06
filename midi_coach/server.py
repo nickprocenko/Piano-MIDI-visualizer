@@ -1600,7 +1600,8 @@ def _cursor_bar(score) -> int | None:
 def _voice_context() -> str:
     """What Claude sees each turn: the lesson, the run, recent passes, history."""
     settings = _practice.get("settings") or {}
-    hand = settings.get("hand") or "both"
+    roles = settings.get("roles") or []  # Listen keeps the part it plays as its roles
+    hand = settings.get("hand") or (roles[0] if len(roles) == 1 else "both")
     lines = [time.strftime("Local time: %A %I:%M %p.").replace(" 0", " "), f"Teaching style: {_coach.style}.",
              _talk_line()]
     view = _page_view.get("view")
@@ -1733,7 +1734,7 @@ def _voice_start(mode: str, hand: str = "both", bars: str = "", tempo_percent: i
 def _voice_start_run(mode: str, hand: str, bars: str, tempo_percent: int, loop: bool, last: dict) -> dict:
     return _cmd_start({"mode": mode, "hand": hand, "bars": bars or None, "tempo": tempo_percent, "loop": loop,
                        "port": last.get("input_port"), "count_in": last.get("count_in"), "autopilot": last.get("autopilot"),
-                       "roles": [hand] if hand in ("right", "left") else last.get("roles"),
+                       "roles": [hand] if hand in ("right", "left") or is_named(hand) else last.get("roles"),
                        "output": last.get("output_port")})
 
 

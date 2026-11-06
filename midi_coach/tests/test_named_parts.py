@@ -413,3 +413,32 @@ def test_listen_plays_every_track_as_itself(band, fake_rtmidi, monkeypatch):
         server._practice["stopping"] = True
         server._live["session"].stop()
         server.hub.shutdown()
+
+
+def test_maestro_listen_to_a_named_part_plays_it_alone(band, fake_rtmidi, monkeypatch):
+    """'Play the flute part out loud': Listen sounds just the flute, on its own channel and
+    program, and the run says it's the flute, not both hands."""
+    from midi_coach import display
+    from midi_coach.tests.test_midi_coach import _post
+
+    _name_flute(band)
+    monkeypatch.setenv("MIDI_COACH_NO_BROWSER", "1")
+    monkeypatch.setattr(server, "hub", display.DisplayHub())
+    monkeypatch.setattr(server, "_practice", {**server._practice, "pass": 0, "last": None, "settings": None})
+    server.hub.commands.update(server.PAGE_COMMANDS)
+    url = server.hub.start() + "cmd/"
+    ix = {p.name: p.index for p in band.parts}
+    try:
+        _post(url + "load", {"lesson": "band song"})
+        out = server._voice_start("listen", part="flute", bars="5-6", loop=True)
+        assert out["mode"] == "listen", out
+        session = server._live["session"]
+        assert set(session.lanes) == {str(ix["Flute"])} and {n.part for n in session.notes} == {ix["Flute"]}
+        assert [0xC5, 73] in [m for _, m in FakeOut.sent]  # on the flute's channel, as a flute
+        assert "Listen mode, hand flute, bars 5-6" in server._voice_context()
+    finally:
+        server._practice["stopping"] = True
+        session = server._live.get("session")
+        if session:
+            session.stop()
+        server.hub.shutdown()
