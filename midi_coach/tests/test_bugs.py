@@ -329,6 +329,85 @@ def test_triage_sorts_open_items_into_batches_questions_and_design(home, vault):
     assert "⚠️ Learn timing" in text and "shared: docs/notation.html" in text and "⭐ **Idea:** move the video" in text
 
 
+def test_an_answered_question_joins_its_batch_with_the_answer(home, vault):
+    log = reporter()
+    metro = log.report("the metronome should fit midi logic", kind="request")["saved"]
+    bugs.triage(metro, "playback & metronome", "M", ["midi_coach/live.py"], needs="question",
+                question="What should it follow?", choices=["The song's tempo changes", "The time signature", "Both"])
+    assert bugs.questions()[0]["choices"][2] == "Both" and not bugs.batches()["batches"]
+    assert "error" in bugs.answer(metro, "") and "error" in bugs.answer("nope", "1")
+    assert bugs.answer(metro, "2")["answer"] == "The time signature"
+    assert bugs.questions() == [] and [it["id"] for it in bugs.batches()["batches"][0]["items"]] == [metro]
+    text = (home / "requests" / "open" / metro / "report.md").read_text(encoding="utf-8")
+    assert "## Answered" in text and "A: The time signature" in text
+    assert "error" in bugs.answer(metro, "1")  # answered once
+    backlog = (vault / "Projects" / "MidiCoach" / "Backlog.md").read_text(encoding="utf-8")
+    assert "💬 You answered: The time signature" in backlog.split("## 📦 Batches")[1]
+
+
+def test_a_worker_asks_instead_of_guessing(home, capsys):
+    item = reporter().report("stop the maestro mid session")["saved"]
+    bugs.triage(item, "maestro & voice", "M", ["midi_coach/chat.py"])
+    bugs.claim(item, "worker-1", dirty={})
+    assert "error" in bugs.ask(item, "Which?", ["only one"])
+    out = bugs.ask(item, "A button or a phrase?", ["A Hush button", "A spoken phrase", "Both"], by="worker-1")
+    assert out["choices"] == ["A Hush button", "A spoken phrase", "Both"]
+    it = bugs.items("open")[0]
+    assert it["claimed"] is None and it["triage"]["files"] == ["midi_coach/chat.py"] and it["triage"]["asked_by"] == "worker-1"
+    assert [q["id"] for q in bugs.questions()] == [item]
+    assert bugs._main(["answer", item, "a button, and Esc too"]) == 0
+    assert "now in the maestro & voice batch" in capsys.readouterr().out
+    assert bugs.items("open")[0]["triage"]["answered"]["own"] is True
+
+
+@pytest.mark.parametrize("heard, asking, expected", [
+    ("Any questions?", False, ("ask", "")),
+    ("Maestro, do you have any questions for me?", False, ("ask", "")),
+    ("What are your questions", False, ("ask", "")),
+    ("Answer two.", True, ("answer", "2")),
+    ("The first one", True, ("answer", "1")),
+    ("Option 3", True, ("answer", "3")),
+    ("My answer is a button and the Escape key", True, ("answer", "a button and the escape key")),
+    ("Skip that one", True, ("skip", "")),
+    ("Next question", True, ("skip", "")),
+    ("Answer two.", False, None),            # nothing was asked: "two" means something else
+    ("Play bars one to four", True, None),
+    ("Stop", True, None),
+])
+def test_question_answers_are_recognised_from_speech(heard, asking, expected):
+    assert bugs.heard_answer(heard, asking) == expected
+
+
+def test_the_maestro_asks_the_questions_and_takes_the_answers(home, monkeypatch):
+    from midi_coach import display, server
+
+    hub = display.DisplayHub()
+    monkeypatch.setattr(server, "hub", hub)
+    spoken = []
+    monkeypatch.setattr(hub, "say", lambda text, interrupt=False, speaker="Claude": spoken.append(text) or 0)
+    monkeypatch.setattr(server, "_asking", {})
+    monkeypatch.setattr(server._voice, "ask", lambda heard: pytest.fail("no API for backlog questions"))
+    log = reporter()
+    first = log.report("stop the maestro mid session", kind="request")["saved"]
+    second = log.report("the metronome should follow the song")["saved"]
+    for item in (first, second):
+        bugs.triage(item, "maestro & voice", "S", ["midi_coach/chat.py"], needs="question",
+                    question="Button or phrase?", choices=["A Hush button", "A spoken phrase", "Both"])
+    out = server._voice_reply("Any questions?")
+    assert out["cost"] == 0.0 and "Question 1 of 2" in out["reply"] and "Two: A spoken phrase." in out["reply"]
+    assert "your idea" in out["reply"]  # oldest first
+    out = server._voice_reply("Skip")
+    assert "Question 2 of 2" in out["reply"] and "your bug" in out["reply"]
+    out = server._voice_reply("Answer three")
+    assert out["reply"].startswith("Got it: Both.") and "skipped ones another time" in out["reply"]
+    assert [q["id"] for q in bugs.questions()] == [first]
+    assert bugs.items("open")[1]["triage"]["answered"]["answer"] == "Both"
+    out = server._voice_reply("any questions")
+    assert "One question" in out["reply"]
+    assert server._voice_reply("My answer is a button, and Escape")["reply"].endswith("That's all my questions.")
+    assert bugs.questions() == [] and "No questions right now." == server._voice_reply("any questions?")["reply"]
+
+
 def test_two_reports_in_the_same_second_keep_apart(home, monkeypatch):
     monkeypatch.setattr(bugs.time, "time", lambda: 1_800_000_000.0)
     log = reporter()

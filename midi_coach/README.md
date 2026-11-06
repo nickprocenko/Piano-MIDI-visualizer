@@ -698,6 +698,16 @@ it back). When your usage runs out it gives the work back and tries again 30 min
 `--install` starts it at every Windows login (`--uninstall` stops that), `--once` fills the free
 slots once and waits for those workers. What it did: `~/MidiCoach/runner/<date>.log`.
 
+**Questions for you (❓).** When building a report would mean guessing what you meant, it isn't
+built: it waits under ❓ Needs you with one question and two to four answers. Triage asks these,
+and so does a worker that finds two fair ways to read a report halfway through. The 👀 button then
+also says *"1 question"*. Its box lists the questions above the fixes: press an answer, or write
+your own and press **Use this**. Or ask the Maestro *"any questions?"*. It reads the first one out,
+with its answers numbered. Say *"answer two"* (or *"the first one"*, *"option 3"*), *"my answer
+is …"* in your own words, or *"skip"*, and it goes on to the next. That's free, with no API call.
+An answered item goes back in the queue, in its area's batch, and the worker building it reads
+your answer. From a terminal: `python -m midi_coach.bugs answer <id> 2` (or your own words).
+
 **Conversation log.** Everything you say or type to the Maestro, and its answer, is added to
 `~/MidiCoach/maestro_log/<date>.md`, so a wish said in passing isn't lost. It stays on your PC.
 

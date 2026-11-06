@@ -704,6 +704,103 @@ def triage(report_id: str, area: str, size: str, files=(), needs: str = "build",
     return {"triaged": report_id, **data}
 
 
+def ask(report_id: str, question: str, choices=(), by: str = "") -> dict:
+    """A worker building an item found it needs a decision only the user can make: the item goes
+    to ❓ Needs you with the question (its triage otherwise kept) and the worker's claim is given
+    back, instead of the item being set aside as stuck or built on a guess."""
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    kind, stage, folder = found
+    if stage != "open":
+        return {"error": f"{report_id} is in {stage}/, not open/."}
+    choices = [c.strip() for c in choices if c and c.strip()]
+    if not question.strip() or len(choices) < 2:
+        return {"error": "A question needs its text and at least two choices."}
+    t = _triage_of(folder) or {"area": "other", "size": "M", "files": [], "risk": "", "shared": [], "depends_on": []}
+    t.update(needs="question", question=question.strip(), choices=choices[:4], asked_by=by,
+             at=time.strftime("%Y-%m-%d %H:%M"))
+    (folder / "triage.json").write_text(json.dumps(t, indent=1, ensure_ascii=False), encoding="utf-8")
+    (folder / "claim.json").unlink(missing_ok=True)
+    write_backlog()
+    return {"asked": report_id, "question": t["question"], "choices": t["choices"]}
+
+
+def answer(report_id: str, choice: str, how: str = "on the coach page") -> dict:
+    """The user answered an item's ❓ question: their answer goes in report.md (where a worker reads
+    it) and the item joins its area's batch to be built. `choice` is one of the choices as written,
+    its number (1-4), or the user's own words."""
+    found = find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    kind, stage, folder = found
+    t = _triage_of(folder)
+    if stage != "open" or not t or t.get("needs") != "question":
+        return {"error": f"{report_id} isn't waiting for an answer."}
+    choice = (choice or "").strip()
+    if choice.isdigit() and 1 <= int(choice) <= len(t["choices"]):
+        choice = t["choices"][int(choice) - 1]
+    if not choice:
+        return {"error": "Pick one of the answers, or write your own."}
+    own = choice not in t["choices"]
+    with (folder / "report.md").open("a", encoding="utf-8") as f:
+        f.write(f"\n## Answered {time.strftime('%Y-%m-%d %H:%M')} ({how})\n\n"
+                f"Q: {t['question']}\n\nA: {choice}" + (" (in their own words)" if own else "") + "\n\n"
+                "Build it this way. The answer was given after triage, so check the triage's files still fit.\n")
+    t.update(needs="build", answered={"question": t["question"], "answer": choice, "own": own},
+             question="", choices=[])
+    (folder / "triage.json").write_text(json.dumps(t, indent=1, ensure_ascii=False), encoding="utf-8")
+    write_backlog()
+    return {"answered": report_id, "answer": choice, "area": t["area"]}
+
+
+ASK_RE = re.compile(r"^(?:maestro\s+)?(?:(?:do you have |have you got |are there |any )+(?:any )?questions?(?: for me)?|"
+                    r"what (?:are|is) (?:your|the) questions?|(?:read me |ask me )?(?:the |your )?questions? for me|"
+                    r"ask me (?:your|the) questions?)$")
+SKIP_RE = re.compile(r"^(?:maestro\s+)?(?:skip(?: (?:it|that|this)(?: one)?)?(?: question)?|next question|ask me later|later)$")
+NUMBERS = {"one": 1, "won": 1, "first": 1, "two": 2, "to": 2, "too": 2, "second": 2, "three": 3, "third": 3,
+           "four": 4, "for": 4, "fourth": 4, "1": 1, "2": 2, "3": 3, "4": 4}
+PICK_RE = re.compile(r"^(?:maestro\s+)?(?:(?:answer|option|number|choice|choose|pick|go with|i'll go with|i pick|i choose)\s+)?"
+                     r"(?:the\s+)?(one|won|two|to|too|three|four|for|first|second|third|fourth|[1-4])(?:\s+(?:one|option|please))?$")
+OWN_RE = re.compile(r"^(?:maestro\s+)?(?:my )?answer(?: is)?\s+(.+)$")
+
+
+def heard_answer(heard: str, asking: bool) -> tuple[str, str] | None:
+    """Speech about the ❓ questions: ('ask', '') for "any questions?", and while one is being asked
+    ('skip', '') or ('answer', '2' | the user's own words). None for anything else."""
+    text = " ".join(re.sub(r"[^a-z0-9' ]+", " ", (heard or "").lower()).split())
+    if ASK_RE.match(text):
+        return "ask", ""
+    if not asking:
+        return None
+    if SKIP_RE.match(text):
+        return "skip", ""
+    m = PICK_RE.match(text)
+    if m:
+        return "answer", str(NUMBERS[m.group(1)])
+    m = OWN_RE.match(text)
+    if m:
+        return "answer", m.group(1)
+    return None
+
+
+def spoken_question(q: dict, n: int, total: int) -> str:
+    """One ❓ question as the Maestro says it, with its choices numbered."""
+    said = q["said"] if len(q["said"]) <= 110 else q["said"][:110].rsplit(" ", 1)[0] + "…"
+    head = f"Question {n} of {total}" if total > 1 else "One question"
+    choices = " ".join(f"{word}: {c}." for word, c in zip(("One", "Two", "Three", "Four"), q["choices"]))
+    return (f"{head}, about your {'idea' if q['kind'] == 'request' else 'bug'}: “{said}” {q['question']} {choices} "
+            "Say “answer” and its number, “my answer is” and your own words, or “skip”.")
+
+
+def questions() -> list[dict]:
+    """The ❓ items for the coach page and the Maestro, most urgent first: {id, kind, said, where,
+    question, choices, important}."""
+    return [{"id": it["id"], "kind": it["kind"], "said": it["said"], "where": it["where"],
+             "question": it["triage"]["question"], "choices": it["triage"]["choices"], "important": it["important"]}
+            for it in batches()["questions"]]
+
+
 def _triage_of(folder: pathlib.Path) -> dict | None:
     try:
         return json.loads((folder / "triage.json").read_text(encoding="utf-8"))
@@ -807,6 +904,8 @@ def _backlog_lines(it: dict, mark: str, shots: pathlib.Path) -> list[str]:
                    + (f" · after {', '.join(t['depends_on'])}" if t["depends_on"] else ""))
         if t["needs"] == "question":
             out.append(f"  ❓ **{t['question']}** " + " · ".join(f"[{c}]" for c in t["choices"]))
+        elif t.get("answered"):
+            out.append(f"  💬 You answered: {t['answered']['answer']}")
     if it["fix"]:
         out.append(f"  Fix: {it['fix']}" + (f" ([[{it['log']}]])" if it["log"] else ""))
     if it["shot"] is not None:
@@ -841,7 +940,9 @@ def write_backlog() -> pathlib.Path | None:
         section("👀 Ready to check", items("check"), "👀",
                 "[Try them on the coach page](http://127.0.0.1:8765/#checks) (on this PC, with the coach running)")
         plan = batches()
-        section("❓ Needs you", plan["questions"], "❓", "One answer each, then they join a batch.")
+        section("❓ Needs you", plan["questions"], "❓",
+                "One answer each, then they join a batch. [Answer on the coach page](http://127.0.0.1:8765/#checks), "
+                "or ask the Maestro “any questions?”")
         if plan["stuck"]:
             section("🧱 Stuck", plan["stuck"], "🧱",
                     "A worker couldn't finish these, so they're set aside. Ask an agent session to look, "
@@ -910,6 +1011,14 @@ def _main(argv=None) -> int:
     tri.add_argument("--question", default="", help="with --needs question: the one thing to ask")
     tri.add_argument("--choice", action="append", default=[], help="with --needs question: an answer (two or more)")
     tri.add_argument("--after", default="", help="comma-separated ids this depends on")
+    qst = sub.add_parser("ask", help="while building: this needs Nick's decision, so ask him (it goes to ❓ Needs you)")
+    qst.add_argument("id")
+    qst.add_argument("--question", required=True, help="the one thing to ask, in his terms")
+    qst.add_argument("--choice", action="append", default=[], help="an answer he can pick (two to four)")
+    qst.add_argument("--by", default="")
+    ans = sub.add_parser("answer", help="answer an item's ❓ question (a choice's number or your own words)")
+    ans.add_argument("id")
+    ans.add_argument("choice")
     sub.add_parser("batches", help="the open items as batches, in the order to work them")
     imp = sub.add_parser("important", help="mark an item important (or --off)")
     imp.add_argument("id")
@@ -932,6 +1041,12 @@ def _main(argv=None) -> int:
             for it in plan[key]:
                 print(f"{label}: {it['id']}  {it['kind']:7} {it['said'][:80]}")
         return 0
+    if args.what in ("ask", "answer"):
+        out = (ask(args.id, args.question, args.choice, args.by) if args.what == "ask"
+               else answer(args.id, args.choice, "from the command line"))
+        print(out.get("error") or (f"{args.id}: asked, now in ❓ Needs you" if args.what == "ask"
+                                   else f"{args.id}: answered ({out['answer']}), now in the {out['area']} batch"))
+        return 1 if "error" in out else 0
     if args.what == "close":
         out = close(args.id, args.reason)
         print(out.get("error") or f"{args.id}: closed")

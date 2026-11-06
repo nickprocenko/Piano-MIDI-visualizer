@@ -1942,14 +1942,23 @@ def _cmd_goto_report(body: dict) -> dict:
 
 
 def _cmd_checks(body: dict) -> dict:
-    """Fixes waiting for the user to try (the page's 👀 button); with screenshots when it opens."""
-    return bugs.to_check(with_shots=bool(body.get("full")))
+    """Fixes waiting for the user to try (the page's 👀 button); with screenshots when it opens.
+    Also the ❓ questions waiting for an answer: how many, and (full) each one with its choices."""
+    asks = bugs.questions()
+    return {**bugs.to_check(with_shots=bool(body.get("full"))), "asks": len(asks),
+            **({"questions": asks} if body.get("full") else {})}
 
 
 def _cmd_check(body: dict) -> dict:
     """The user tried a fix: it works (→ fixed) or it's still wrong (→ open, with what they said)."""
     out = bugs.verify(str(body.get("id") or ""), bool(body.get("works")), str(body.get("note") or ""))
-    return out if "error" in out else {**out, **bugs.to_check()}
+    return out if "error" in out else {**out, **bugs.to_check(), "asks": len(bugs.questions())}
+
+
+def _cmd_answer(body: dict) -> dict:
+    """The user picked an answer to a ❓ question (or wrote their own): the item joins its batch."""
+    out = bugs.answer(str(body.get("id") or ""), str(body.get("choice") or ""))
+    return out if "error" in out else {**out, **bugs.to_check(), "asks": len(bugs.questions())}
 
 
 RESTART_NOTE = "restart.json"  # the piece on the page when Restart was pressed, for the fresh copy
@@ -2003,6 +2012,40 @@ def restarted_score() -> str | None:
         return None
     score = saved.get("score")
     return score if score and time.time() - float(saved.get("at") or 0) < 120 and pathlib.Path(score).exists() else None
+
+
+ASKING_SEC = 10 * 60  # how long after reading a question "answer two" still means it
+_asking: dict = {}     # the ❓ question the Maestro read out last: {id, at, skipped}
+
+
+def _asking_now() -> dict | None:
+    return _asking if _asking.get("id") and time.time() - _asking["at"] < ASKING_SEC else None
+
+
+def _voice_questions(what: str, value: str, asked: dict | None) -> str:
+    """"Any questions?" reads the first ❓ question; "answer two" / "my answer is …" answers the one
+    just read and goes on to the next; "skip" goes on without answering."""
+    skipped = set(asked.get("skipped", ())) if asked else set()
+    lead = ""
+    if what == "answer" and asked:
+        out = bugs.answer(asked["id"], value, "told the Maestro")
+        if "error" in out:
+            _asking.clear()
+            return out["error"]
+        lead = f"Got it: {out['answer']}. That one's back in the queue. "
+    elif what == "skip" and asked:
+        skipped.add(asked["id"])
+    waiting = bugs.questions()
+    left = [q for q in waiting if q["id"] not in skipped]
+    if not left:
+        _asking.clear()
+        if lead:
+            return lead + ("That's all my questions." if not waiting else "I'll ask the skipped ones another time.")
+        return "No questions right now." if not waiting else "That's all for now: I'll ask the rest another time."
+    q = left[0]
+    _asking.update(id=q["id"], at=time.time(), skipped=sorted(skipped))
+    hub.line("Maestro", "❓ " + q["question"] + "  " + "  ".join(f"{i}. {c}" for i, c in enumerate(q["choices"], 1)), "remark")
+    return lead + bugs.spoken_question(q, waiting.index(q) + 1, len(waiting))
 
 
 def _voice_request(description: str, add_to_last: bool = False, important: bool = False) -> dict:
@@ -2099,6 +2142,13 @@ def _answer(heard: str) -> dict:
         if text:
             _npc_say(lambda: text)
             return {"heard": heard, "reply": text, "actions": ["undo"], "cost": 0.0}
+    # "Any questions?": the backlog's ❓ questions, read out and answered here, with no API call.
+    asked = _asking_now()
+    said = bugs.heard_answer(heard, asking=asked is not None)
+    if said:
+        text = _voice_questions(*said, asked)
+        _npc_say(lambda: text)
+        return {"heard": heard, "reply": text, "actions": ["backlog_question"], "cost": 0.0}
     # "Bug: ..." / "Idea: ..." / "another screenshot" are saved here too, with no API call.
     command = bugs.heard_command(heard)
     if command:
@@ -2309,6 +2359,9 @@ def _atlas_show(path: str) -> dict:
     if "error" in out:
         raise RuntimeError(out["error"])
     return out
+
+
+PAGE_COMMANDS["answer"] = _cmd_answer  # the 👀 box's ❓ questions (bugs.answer)
 
 
 def _atlas_listen(path: str, hand: str = "both", bars: str | None = None, tempo_percent: float = 100.0) -> dict:

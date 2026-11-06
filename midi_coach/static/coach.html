@@ -784,6 +784,18 @@
   .chk-note[hidden] { display: none; }
   .chk-note input { flex: 1; min-width: 0; }
   @media (max-width: 560px) { .chk-item { grid-template-columns: 1fr; } }
+  #asks-part[hidden] { display: none; }
+  #asks-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .ask-item { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--accent); border-radius: 6px; font-size: 13px; }
+  .ask-q { font-weight: 600; font-size: 14px; }
+  .ask-said { color: var(--muted); font-size: 12px; }
+  .ask-choices { display: flex; flex-direction: column; gap: 6px; }
+  .ask-choices button { text-align: left; padding: 6px 10px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .ask-choices button:hover { border-color: var(--accent); background: rgba(255,255,255,.06); }
+  .ask-choices button:disabled { opacity: .5; cursor: default; }
+  .ask-own { display: flex; gap: 6px; }
+  .ask-own input { flex: 1; min-width: 0; }
+  .ask-own button { padding: 5px 12px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   #go { margin: 0 0 0 auto; min-width: 110px; padding: 8px 18px; }
   /* Too narrow for one row: Start stays up beside the modes and the drop-downs take the row under them */
   @media (min-width: 761px) and (max-width: 1260px) {
@@ -3880,6 +3892,11 @@ connect();
 </dialog>
 <dialog id="checks-dlg" class="file-dlg" aria-labelledby="checks-title">
   <form method="dialog">
+    <div id="asks-part" hidden>
+      <h2>❓ Needs you</h2>
+      <p class="dlg-hint">Building these would mean guessing what you want. Pick an answer (or write your own) and each one goes back in the queue to be built that way.</p>
+      <div id="asks-list"></div>
+    </div>
     <h2 id="checks-title">Fixes to try</h2>
     <p class="dlg-hint">Each of these was fixed after you reported it. Try it, then say whether it works. “Still wrong” sends it back to be fixed again, with what you write.</p>
     <div id="checks-list"></div>
@@ -3951,12 +3968,58 @@ connect();
 (function () {
   const btn = document.getElementById('checks-btn'), dlg = document.getElementById('checks-dlg');
   const list = document.getElementById('checks-list'), msg = document.getElementById('checks-msg');
-  function show(count) {
-    btn.hidden = !count;
-    document.getElementById('checks-n').textContent = count === 1 ? '1 fix to try' : `${count} fixes to try`;
+  const asksPart = document.getElementById('asks-part'), asksList = document.getElementById('asks-list');
+  let fixes = 0, asks = 0;
+  function show(count, questions) {
+    fixes = count;
+    if (questions !== undefined) asks = questions;
+    btn.hidden = !fixes && !asks;
+    const bits = [];
+    if (asks) bits.push(asks === 1 ? '1 question' : `${asks} questions`);
+    if (fixes) bits.push(fixes === 1 ? '1 fix to try' : `${fixes} fixes to try`);
+    document.getElementById('checks-n').textContent = bits.join(' · ');
+    btn.title = asks ? 'Questions about your bugs and ideas, and fixes to try' : 'Bugs and ideas that have been fixed: try each one and say whether it works';
   }
   async function refresh() {
-    try { show((await cmd('checks')).count); } catch (e) { /* the coach is restarting */ }
+    try { const out = await cmd('checks'); show(out.count, out.asks); } catch (e) { /* the coach is restarting */ }
+  }
+  function askRow(q) {
+    const item = el('div', 'ask-item');
+    item.append(el('div', 'ask-q', q.question));
+    item.append(el('div', 'ask-said', (q.kind === 'request' ? 'Idea: ' : 'Bug: ') + q.said + (q.where ? ' (' + q.where + ')' : '')));
+    const choices = el('div', 'ask-choices'), own = el('div', 'ask-own');
+    const input = el('input'), send = el('button', '', 'Use this');
+    input.type = 'text';
+    input.placeholder = 'Or your own answer…';
+    input.setAttribute('aria-label', 'Your own answer');
+    send.type = 'button';
+    own.append(input, send);
+    const buttons = [];
+    async function pick(choice) {
+      buttons.forEach(b => { b.disabled = true; });
+      try {
+        const out = await cmd('answer', {id: q.id, choice});
+        item.remove();
+        show(out.count, out.asks);
+        if (!out.asks) asksPart.hidden = true;
+        msg.textContent = `Thanks: “${out.answer}”. It's back in the queue (${out.area}).`;
+      } catch (e) {
+        msg.textContent = e.message;
+        buttons.forEach(b => { b.disabled = false; });
+      }
+    }
+    q.choices.forEach((c, i) => {
+      const b = el('button', '', `${i + 1}. ${c}`);
+      b.type = 'button';
+      b.addEventListener('click', () => pick(String(i + 1)));
+      choices.append(b);
+      buttons.push(b);
+    });
+    buttons.push(send);
+    send.addEventListener('click', () => { if (input.value.trim()) pick(input.value.trim()); else input.focus(); });
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } });
+    item.append(choices, own, el('div', 'chk-id', q.id));
+    return item;
   }
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -4015,7 +4078,7 @@ connect();
       try {
         const out = await cmd('check', {id: it.id, works, note: input.value});
         item.remove();
-        show(out.count);
+        show(out.count, out.asks);
         if (!out.count) list.append(el('p', 'dlg-hint', 'All checked. Thanks!'));
         msg.textContent = out.merged ? 'Thanks! The fix is now in your code.'
           : out.undone === true ? 'Sent back, and its change was undone.'
@@ -4037,7 +4100,9 @@ connect();
     dlg.showModal();
     try {
       const out = await cmd('checks', {full: true});
-      show(out.count);
+      show(out.count, out.asks);
+      asksPart.hidden = !(out.questions || []).length;
+      asksList.replaceChildren(...(out.questions || []).map(askRow));
       list.replaceChildren(...(out.items.length ? out.items.map(row) : [el('p', 'dlg-hint', 'Nothing to try right now.')]));
     } catch (e) { msg.textContent = e.message; }
   }

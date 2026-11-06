@@ -89,8 +89,9 @@ def _items_text(ids: list[str]) -> str:
     return "\n".join(out)
 
 
-COMMON = """You are {name}, one of MidiCoach's unattended backlog workers. Nobody is watching and nobody
-will answer a question, so don't ask any: decide, or set the item aside as stuck.
+COMMON = """You are {name}, one of MidiCoach's unattended backlog workers. Nobody is watching, so
+don't ask questions in your reply: decide, ask Nick through the backlog (below), or set the item
+aside as stuck. An item whose report.md has an "## Answered" section has Nick's answer: follow it.
 
 You're in your own git worktree ({tree}), branch runner/{name}, made from Nick's latest commit.
 Work only in this folder. Nick's own folder, his real coach (port 8765) and the Obsidian vault are
@@ -121,11 +122,16 @@ For each item, following CLAUDE.md (bug reports, triage and batches, the sheet m
 4. Run the full test suite: `{py} -m pytest midi_coach/tests -q`. Everything must pass.
 5. `{py} -m midi_coach.bugs ready <id> "<what changed, a sentence or two for Nick>" --files <the repo paths you changed> --by {name}`
    That commits just those files on your branch. Nick tries it and presses ✅ to take it.
-If you can't finish an item (you can't find or reproduce it, a command was refused, it needs a
-decision only Nick can make, the tests won't pass), throw away your edits for it, run
+If building it would mean guessing what Nick wants (two fair readings of the report, or a choice
+that changes how he'd practise), throw away your edits for it and ask him instead:
+`{py} -m midi_coach.bugs ask <id> --question "<one question, in his terms>" --choice "<answer>" --choice "<answer>" --by {name}`
+(two to four choices, each one he could just pick). He answers on the coach page or to the
+Maestro, and the item comes back to a worker with his answer. Then go on to the next.
+If you can't finish an item for any other reason (you can't find or reproduce it, a command was
+refused, the tests won't pass), throw away your edits for it, run
 `{py} -m midi_coach.bugs stuck <id> "<why, one sentence>" --by {name}` and go on to the next.
 
-End with one line per item: its id, then "ready" or "stuck", then a few words."""
+End with one line per item: its id, then "ready", "asked" or "stuck", then a few words."""
 
 TRIAGE = COMMON + """
 
