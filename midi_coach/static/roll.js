@@ -400,18 +400,43 @@ window.coachRoll = (() => {
   // -- the hands ---------------------------------------------------------------
   // Stylized, lit from the upper left, seen from the player's seat: fingertips on the keys,
   // palms on the player's side. Each finger goes to the key of its note sounding now, or leans
-  // toward its next note; the hand sits where its fingers' keys put it, and glides between
-  // positions. Fingers without a note rest a white key apart. All of it eased per frame.
+  // toward its next note; the hand sits where its fingers' keys put it, opens as wide as they ask
+  // (an octave, up to a tenth), and glides between positions. Fingers without a note rest evenly
+  // between; fingers 2 to 5 never cross or lie on each other. All of it eased per frame.
 
   const HAND_ROOM = 0.75;  // keyboard heights under the keys, for the palms
   const LOOK = 1.5;  // beats ahead a finger leans toward its next note
+  const SPREAD = [0.8, 2.3];  // white keys between neighbouring fingers: closed up, to a tenth across the hand
+  const PALM_GIVE = 0.4;  // how much of the fingers' stretch widens the palm
   const LENGTH = [0, 0.62, 0.9, 1.0, 0.94, 0.74];  // finger lengths, the middle finger's = 1
   const SKIN = [240, 200, 170];
   let byFinger = {right: null, left: null};  // hand -> [finger] -> notes by beat
   const handState = {right: newHand(), left: newHand()};
   let lastFrame = 0;
 
-  function newHand() { return {anchor: null, x: [0, 0, 0, 0, 0, 0], y: [0, 0, 0, 0, 0, 0], press: [0, 0, 0, 0, 0, 0]}; }
+  function newHand() { return {anchor: null, spread: null, x: [0, 0, 0, 0, 0, 0], y: [0, 0, 0, 0, 0, 0], press: [0, 0, 0, 0, 0, 0]}; }
+
+  // The hand that best fits points {f, x, w}: x = anchor + dir·(f−1)·spread, by weighted least
+  // squares. With spread given only the anchor is fitted; without, both, when two fingers or more
+  // pin the spread down (else null). The thumb passing under the hand says nothing of its spread.
+  function fitHand(pts, dir, spread) {
+    if (spread === undefined) {
+      const two = pts.filter(p => p.f > 1);
+      const lo = two.length ? Math.min(...two.map(p => dir * p.x)) : Infinity;
+      pts = pts.filter(p => p.f > 1 || dir * p.x < lo);
+    }
+    let w = 0, mf = 0, mx = 0;
+    for (const p of pts) { w += p.w; mf += p.w * dir * (p.f - 1); mx += p.w * p.x; }
+    if (!w) return null;
+    mf /= w; mx /= w;
+    if (spread === undefined) {
+      let sxy = 0, sxx = 0;
+      for (const p of pts) { const u = dir * (p.f - 1) - mf; sxy += p.w * u * (p.x - mx); sxx += p.w * u * u; }
+      if (sxx < 1e-6) return null;
+      spread = sxy / sxx;
+    }
+    return {anchor: mx - mf * spread, spread};
+  }
 
   function indexFingers() {
     byFinger = {right: null, left: null};
@@ -461,33 +486,51 @@ window.coachRoll = (() => {
   function updateHand(hand, keys, ww, floor, keyH, at, dt) {
     const st = handState[hand], dir = hand === 'right' ? 1 : -1;
     const tg = targets(hand, keys, at);
-    // The thumb's place each finger's key asks for, weighted: notes sounding count most.
-    let sum = 0, wsum = 0;
+    // The keys that place the hand, weighted (notes sounding count most), and the ones coming
+    // next, which say how far it opens when only one key is down (an arpeggio under a held note).
+    const place = [], near = [];
     for (let f = 1; f <= 5; f++) {
       const t = tg[f];
-      if (!t || !t.places) continue;
-      const w = t.kind === 'now' ? 1 : t.weight;
-      sum += w * (t.x - dir * (f - 1) * ww); wsum += w;
+      if (!t) continue;
+      if (t.places) place.push({f, x: t.x, w: t.kind === 'now' ? 1 : t.weight});
+      else if (t.kind === 'next') near.push({f, x: t.x, w: t.weight * 0.5});
     }
-    let anchor = wsum ? sum / wsum : st.anchor;
+    const close = near.filter(p => place.some(q => Math.abs(p.x - q.x) <= 9 * ww));
+    const fitted = fitHand(place, dir) || fitHand(place.concat(close), dir);
+    const spread = Math.max(SPREAD[0] * ww, Math.min(SPREAD[1] * ww, fitted ? fitted.spread : ww));
+    let anchor = place.length ? fitHand(place, dir, spread).anchor : st.anchor;
     if (anchor === null) {  // before the first note: over the hand's first keys
       for (let f = 1; f <= 5 && anchor === null; f++) {
         const n = byFinger[hand][f][0], k = n && keys.get(n.p);
-        if (k) anchor = k.x + k.w / 2 - dir * (f - 1) * ww;
+        if (k) anchor = k.x + k.w / 2 - dir * (f - 1) * spread;
       }
       if (anchor === null) return false;
     }
     const ease = tau => 1 - Math.exp(-dt / tau);
     st.anchor = st.anchor === null ? anchor : st.anchor + (anchor - st.anchor) * ease(110);
+    st.spread = st.spread === null ? spread : st.spread + (spread - st.spread) * ease(110);
     const whiteY = floor + keyH * 0.8, blackY = floor + keyH * 0.45;
+    const want = [0, 0, 0, 0, 0, 0], hit = [null, null, null, null, null, null];
     for (let f = 1; f <= 5; f++) {
-      const natural = st.anchor + dir * (f - 1) * ww;
+      const natural = st.anchor + dir * (f - 1) * st.spread;
       let t = tg[f];
       // a note for a later position stays out of reach, except the thumb passing under the
       // hand (or a finger going over it), which reaches further
       const off = (t ? t.x - natural : 0) * dir, reach = f === 1 ? (off > 0 ? 4.5 : 1.5) : (off < 0 ? 3.5 : 2);
       if (t && !t.press && Math.abs(off) > reach * ww) t = null;
-      const x = t ? t.x : natural, y = t && t.black ? blackY : whiteY;
+      want[f] = t ? t.x : natural;
+      hit[f] = t;
+    }
+    // fingers 2 to 5 never cross or lie on each other: a finger not pressing steps aside
+    const gap = 0.55 * Math.min(ww, st.spread);
+    for (let f = 3; f <= 5; f++) {
+      if (!(hit[f] && hit[f].press) && dir * (want[f] - want[f - 1]) < gap) want[f] = want[f - 1] + dir * gap;
+    }
+    for (let f = 4; f >= 2; f--) {
+      if (!(hit[f] && hit[f].press) && dir * (want[f + 1] - want[f]) < gap) want[f] = want[f + 1] - dir * gap;
+    }
+    for (let f = 1; f <= 5; f++) {
+      const t = hit[f], x = want[f], y = t && t.black ? blackY : whiteY;
       if (!st.x[f]) { st.x[f] = x; st.y[f] = y; }
       st.x[f] += (x - st.x[f]) * ease(t && t.press ? 45 : 80);
       st.y[f] += (y - st.y[f]) * ease(80);
@@ -532,12 +575,14 @@ window.coachRoll = (() => {
     const L = keyH * 0.62;  // the middle finger's length
     const knuckleY = floor + keyH * 0.8 + L * 0.95;
     const width = Math.max(6, Math.min(ww * 0.66, keyH * 0.2));
+    // the palm widens with part of the fingers' stretch (an octave opens it about a third)
+    const pw = ww * (1 + PALM_GIVE * Math.max(0, (st.spread || ww) / ww - 1));
     // knuckles: along the palm's top edge, a little under a white key apart, the outer ones lower
     const kn = [null, null];
     for (let f = 2; f <= 5; f++) {
-      kn.push({x: st.anchor + dir * ((f - 1) * ww * 0.9 + ww * 0.12), y: knuckleY + [0, 0, 0.06, 0, 0.04, 0.16][f] * L});
+      kn.push({x: st.anchor + dir * ((f - 1) * pw * 0.9 + ww * 0.12), y: knuckleY + [0, 0, 0.06, 0, 0.04, 0.16][f] * L});
     }
-    const thumbBase = {x: kn[2].x - dir * ww * 0.75, y: knuckleY + L * 0.62};
+    const thumbBase = {x: kn[2].x - dir * pw * 0.75, y: knuckleY + L * 0.62};
     const wristY = knuckleY + L * 1.7;
 
     ctx.save();
@@ -547,8 +592,8 @@ window.coachRoll = (() => {
 
     // the palm, from the outer knuckle round to the thumb, into the wrist under the keyboard
     const outer = {x: kn[5].x + dir * width * 0.55, y: kn[5].y};
-    const pg = ctx.createRadialGradient(st.anchor + dir * ww * 1.2, knuckleY + L * 0.35, ww * 0.3,
-      st.anchor + dir * ww * 1.5, knuckleY + L * 0.6, ww * 3.6);
+    const pg = ctx.createRadialGradient(st.anchor + dir * pw * 1.2, knuckleY + L * 0.35, ww * 0.3,
+      st.anchor + dir * pw * 1.5, knuckleY + L * 0.6, pw * 3.6);
     pg.addColorStop(0, rgb(shade(skin, 22), alpha)); pg.addColorStop(0.7, rgb(skin, alpha)); pg.addColorStop(1, rgb(shade(skin, -60), alpha));
     ctx.fillStyle = pg;
     ctx.beginPath();
