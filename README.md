@@ -10,7 +10,7 @@ Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/"
 - Real-time MIDI input via the **Web MIDI API** (USB MIDI devices — tested with Roland JUNO-DS)
 - **Instrument Input** — use a microphone or audio interface for monophonic voice and instrument pitch detection, with per-instrument tuning, sensitivity, and octave shift
 - Rising-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
-- **Learn Mode** — drop a MIDI or MusicXML file, choose tracks and hands, and follow along at your own pace (Wait or Free-play)
+- **Play a File** — drop a MIDI file, choose track colours and outputs, and watch it play on the highway
 - **Freeplay** — just plug in and play, no file needed
 - **Sound** — Watch Play plays MIDI files out loud with a player bar (play/pause, seek, speed); a built-in synth with 12 instruments plus a drum kit, picked automatically from each track's General MIDI program or chosen per track
 - **Output routing** — send each track (and your live keyboard) to the built-in synth or any MIDI output on its own channel, to drive hardware synths or a VST through loopMIDI
@@ -58,7 +58,7 @@ Open **SETTINGS** from the main menu. Tabs:
 | Display | Background slides, frame rate cap |
 | Instrument Input | Choose MIDI or microphone/audio input, supported instrument, sensitivity, audio device, octave shift, and per-profile practice progress |
 | Hardware | MIDI CC mappings |
-| Sound | Synth volume and reverb, where new songs and your live keyboard play, Learn mode play-along, MIDI outputs and All notes off |
+| Sound | Synth volume and reverb, where new songs and your live keyboard play, MIDI outputs and All notes off |
 | LED Output | ESP32 serial / BLE config |
 | Audience | WebSocket URL for live audience colour votes |
 | Themes | Save / load / delete colour presets |
@@ -66,17 +66,15 @@ Open **SETTINGS** from the main menu. Tabs:
 
 For microphone input, use **Settings → Instrument Input → Instrument via audio**, choose an instrument, and press **Start listening**. Audio capture requires a secure browser context (HTTPS or localhost) and microphone permission. This mode tracks one note at a time; use headphones when sending detected notes to speakers to avoid feedback. Guitar, bass, bowed and wind instruments, voice, ukulele, and whistle are supported.
 
-## Learn Mode
+## Play a File
 
-1. Select **LEARN MODE** from the menu.
-2. Drop a `.mid`, `.midi`, `.xml`, or `.musicxml` file (or click **Browse**).
-3. Pick which tracks to show and assign hands (Left / Right).
-4. Choose **Wait** (pauses until you play the right note) or **Free-play** (plays at your set speed).
-5. Click **▶ Start Learning**.
+1. Select **PLAY A FILE** from the menu.
+2. Drop a `.mid` or `.midi` file (or click **Browse**).
+3. Set each track's colour, mute it, or choose where it plays.
+4. Click **▶ Watch Play**.
 
-A floating transport HUD lets you pause, loop, and adjust speed without leaving the highway.
-
-Learn mode plays the parts you set to **—** (not yours) along with you, on each track's output. Change this under **Settings → Sound → Play along**.
+Learning a piece (Wait / Rehearse, hands, loops, sheet music, grading) is the Music Hub's
+Session mode (`midi_coach`); the visualizer no longer has its own Learn Mode.
 
 ## Sound and MIDI output routing
 

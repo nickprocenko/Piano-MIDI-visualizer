@@ -1,6 +1,6 @@
 """Load MIDI / MusicXML files into a flat, seconds-based note model.
 
-Parts are split by MIDI track + channel, matching the visualizer's Learn Mode
+Parts are split by MIDI track + channel, matching the visualizer's
 track list. Bars are derived from the file's time-signature and tempo maps so
 results can be reported as "bar 12, beat 3".
 """

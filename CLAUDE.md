@@ -42,7 +42,7 @@ There is no linter or formatter configured. Tests use a fake `rtmidi` and synthe
 
 ## midi_coach architecture
 
-**Note model (`notes.py`).** Everything loads into a flat, seconds-based `Score` of `Note`s, with parts split by MIDI track + channel (matching the web visualizer's Learn Mode track list) and bars derived from the file's time-signature and tempo maps. Part/hand selection (`playable_parts`, `select_notes`, `suggest_hands`, `effective_hands`) lives here too; the user's confirmed choice is saved per file in `<home>/part_choices.json` via `library.py` and every downstream feature (grading, playback, sheet, Learn Mode) reads it.
+**Note model (`notes.py`).** Everything loads into a flat, seconds-based `Score` of `Note`s, with parts split by MIDI track + channel (matching the web visualizer's track list) and bars derived from the file's time-signature and tempo maps. Part/hand selection (`playable_parts`, `select_notes`, `suggest_hands`, `effective_hands`) lives here too; the user's confirmed choice is saved per file in `<home>/part_choices.json` via `library.py` and every downstream feature (grading, playback, sheet, Learn Mode) reads it.
 
 **Grading.** `analysis.py` groups onsets into chords and aligns take vs reference with dynamic programming, then scores notes/timing/tempo/dynamics/articulation/pedal. `live.py` runs the Synthesia-style `wait` and `rehearsal` modes in real time and pushes cursor/marks to the display. `remarks.py` turns a graded pass into the Maestro's spoken feedback.
 

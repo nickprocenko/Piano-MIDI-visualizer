@@ -1903,7 +1903,6 @@ function connect() {
     if (msg.type === 'songs_added') { songsAdded(msg.songs || []); return; }
     if (msg.type === 'sound') { if (typeof fluteExample === 'function') fluteExample(msg); return; }  // a flute's examples
     if (msg.type === 'marks' && typeof fingeringMarks === 'function') fingeringMarks(msg);  // the monitor's expected note
-    if (msg.type === 'lesson') return;  // the visualizer's Learn Mode push; this page uses its own menu
     if (msg.type === 'flash' && msg.hint && aidSettings().level !== 'all') msg = {...msg, hint: null};  // the right key is named on Easy only
     coachRoll.event(msg);
     if (msg.type === 'keys') return;  // only the falling notes light the keys

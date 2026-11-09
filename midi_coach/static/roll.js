@@ -9,7 +9,7 @@
 window.coachRoll = (() => {
   const canvas = document.getElementById('roll');
   const ctx = canvas.getContext('2d');
-  // Right / left as the visualizer draws them (its Learn Mode channel colours)
+  // Right / left in the visualizer's first two track colours
   const COLORS = {right: [0, 230, 230], left: [180, 80, 255], pedals: [255, 170, 60], vocals: [240, 120, 200]};
   const OTHER = [150, 160, 180];
   const HIT = [21, 154, 60], MISS = [212, 32, 32];

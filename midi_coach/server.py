@@ -56,9 +56,8 @@ until the right notes are played (best for learning notes); mode='rehearsal' mov
 tempo_percent and grades notes as they pass (best for performance practice). After each
 take the score shows a bar heat map; show_heatmap(take) redisplays any take's map.
 Custom lessons: create_lesson writes an exercise (tinyNotation per hand, or MusicXML, or
-an excerpt of a reference) and shows it on the coach page (to_visualizer=True also pushes
-it into the visualizer's Learn Mode). Check the returned bar-by-bar readout against what
-you meant. Target lessons at the user's weak spots (worst bars, hands, rhythms) and keep
+an excerpt of a reference) and shows it on the coach page. Check the returned bar-by-bar
+readout against what you meant. Target lessons at the user's weak spots (worst bars, hands, rhythms) and keep
 them short.
 The coach page has its own menu: input port, Listen / Learn (= wait) / Rehearse (= rehearsal),
 hand, bars, tempo, loop, Start/Stop. Listen plays the piece on the MIDI output while the
@@ -2668,7 +2667,7 @@ async def show_score(reference: str | None = None, hand: str = "both", bars: str
     return {"url": url, "reference": score.path, "viewers_connected": hub.clients}
 
 
-def _publish_lesson(path: str, score, practice_mode: str, tempo_percent: float, autostart: bool, to_visualizer: bool) -> dict:
+def _publish_lesson(path: str, score) -> dict:
     hub.start()
     hub.load_score(score)
     hub.marks([], reset=True)
@@ -2676,26 +2675,9 @@ def _publish_lesson(path: str, score, practice_mode: str, tempo_percent: float, 
     hub.status(f"Lesson: {pathlib.Path(path).stem} · pick Listen, Learn or Rehearse and press Start")
     if score.notes:
         hub.cursor(min(n.beat for n in score.notes))
-    version = None
-    if to_visualizer:
-        version = _push_to_visualizer(path, score, practice_mode, tempo_percent, autostart)
     if hub.clients == 0 and not os.environ.get("MIDI_COACH_NO_BROWSER"):
         hub.open_browser()
-    return {"lesson_version": version, "viewers_connected": hub.clients}
-
-
-def _push_to_visualizer(path: str, score, practice_mode: str, tempo_percent: float, autostart: bool) -> int:
-    side = analysis.side_resolver(score)
-    return hub.lesson({
-        "title": pathlib.Path(path).stem,
-        "path": path,
-        # No sheet for a live recording or a huge file: Learn Mode's falling notes still work.
-        "xml": hub.sheet_xml(score),
-        "events": lessons.learn_events(score, side),
-        "learn_mode": "wait" if practice_mode == "wait" else "freeplay",
-        "speed": max(0.1, tempo_percent / 100),
-        "autostart": autostart,
-    })
+    return {"viewers_connected": hub.clients}
 
 
 @mcp.tool()
@@ -2711,10 +2693,6 @@ async def create_lesson(
     bars: str | None = None,
     hand: str = "both",
     send: bool = True,
-    practice_mode: str = "wait",
-    tempo_percent: float = 100,
-    autostart: bool = True,
-    to_visualizer: bool = False,
     category: str | None = None,
 ) -> dict:
     """Create a practice lesson and show it on the coach sheet-music page, where the user
@@ -2731,8 +2709,6 @@ async def create_lesson(
     2. musicxml: a complete MusicXML document (for fingerings, dynamics, voices...).
     3. from_reference + bars (+ hand): excerpt of an existing piece, e.g. the user's worst bars.
     key: 'C', 'G', 'Bb', 'F#m', 'Am' (minor with m) or sharps count like -3.
-    to_visualizer: also push it into the web visualizer's Learn Mode. practice_mode ('wait' or
-      'rehearsal' at tempo_percent) and autostart only apply to that visualizer push.
     category: the group in the page's Songs / Lessons panel (a folder). Default: 'AI exercises' for a lesson you
       compose (right/left or musicxml), 'Exercises' for an excerpt of a real piece. Others:
       'Needs review', 'Solo piano', 'Vocals & accompaniment', 'Recordings', or a new name.
@@ -2766,7 +2742,7 @@ async def create_lesson(
         if send and recorder.active:
             out["sent"] = {"error": "Not shown: a practice run is going. send_lesson after it ends."}
         elif send:
-            out["sent"] = await asyncio.to_thread(_publish_lesson, path, score, practice_mode, tempo_percent, autostart, to_visualizer)
+            out["sent"] = await asyncio.to_thread(_publish_lesson, path, score)
             out["display"] = hub.url
         out["next"] = (
             "The user can start Learn/Rehearse from the page; call wait_for_recording (or "
@@ -2778,14 +2754,13 @@ async def create_lesson(
 
 
 @mcp.tool()
-async def send_lesson(lesson: str, practice_mode: str = "wait", tempo_percent: float = 100, autostart: bool = True, to_visualizer: bool = False) -> dict:
-    """Show an existing lesson or reference file (title or path) on the coach page (and, with
-    to_visualizer, in the visualizer's Learn Mode)."""
+async def send_lesson(lesson: str) -> dict:
+    """Show an existing lesson or reference file (title or path) on the coach page."""
     if recorder.active:
         return {"error": "A practice run is going; stop_recording first."}
     try:
         score = await asyncio.to_thread(library.get_score, lesson)
-        sent = await asyncio.to_thread(_publish_lesson, score.path, score, practice_mode, tempo_percent, autostart, to_visualizer)
+        sent = await asyncio.to_thread(_publish_lesson, score.path, score)
     except Exception as exc:
         return _err(exc)
     return {"path": score.path, "sent": sent, "display": hub.url}

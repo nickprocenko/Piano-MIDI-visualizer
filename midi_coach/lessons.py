@@ -27,7 +27,7 @@ import time
 
 from .engraving import tidy_heading
 from .library import _choices_path, _load_choices, profile_home
-from .notes import MIDI_SUFFIXES, MUSICXML_SUFFIXES, Score, load_score, select_notes
+from .notes import MIDI_SUFFIXES, MUSICXML_SUFFIXES, Score, load_score
 
 _KEY_RE = re.compile(r"^([A-Ga-g])([#b-]?)(m|min|minor)?$")
 
@@ -429,16 +429,6 @@ def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title:
     path = lessons_dir(category) / f"{_slug(title)}.musicxml"
     path.write_text(xml, encoding="utf-8")
     return str(path), load_score(path)
-
-
-def learn_events(score: Score, side) -> list[dict]:
-    """Note events for the visualizer's Learn Mode: channel 0 = right hand, 1 = left. beat (quarter
-    notes, as the sheet counts them) lets its sheet follow the music through tempo changes."""
-    return [
-        {"ms": round(n.start * 1000, 1), "durationMs": round(max(50.0, n.duration * 1000), 1), "note": n.pitch,
-         "channel": 0 if side(n) == "right" else 1, "beat": round(n.beat, 4)}
-        for n in select_notes(score)[0]  # drums and parts the user left out don't belong in Learn Mode
-    ]
 
 
 def key_spelling(key: str | int | None) -> str | None:

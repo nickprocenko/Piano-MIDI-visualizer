@@ -130,58 +130,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .track-player-btn{background:var(--btn-bg);color:var(--muted)}
 .track-player-btn.active{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
 .tracks-actions{display:flex;gap:12px;margin-top:24px;align-items:center}
-#tracks-learn-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:18px;padding:10px 12px;background:rgba(255,255,255,.04);border-radius:8px;border:1px solid var(--border)}
-#tracks-learn-bar .tlb-label{font-size:11px;opacity:.65;white-space:nowrap}
-#tracks-learn-bar #xml-file-row{font-size:11px;color:var(--muted);flex:1;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#btn-tracks-play,#btn-tracks-learn{width:auto;padding:0 28px;height:52px;font-size:16px}
-/* Learn mode — hand selector in track config */
-.track-hand-sel{display:flex;gap:4px;margin-left:4px}
-.track-hand-btn{padding:3px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid var(--border);background:var(--btn-bg);color:var(--muted);font-family:inherit;font-weight:700}
-.track-hand-btn.active{background:rgba(0,180,180,.15);color:var(--accent);border-color:var(--accent)}
-/* Learn mode — YouTube-style bottom transport bar */
-#learn-hud{display:none;position:fixed;bottom:0;left:0;right:0;background:rgba(10,12,18,.93);flex-direction:column;z-index:999;backdrop-filter:blur(10px);border-top:1px solid rgba(255,255,255,.1);box-shadow:0 -4px 28px rgba(0,0,0,.55)}
-#learn-hud.visible{display:flex}
-/* Timeline row */
-#lhud-timeline-row{padding:10px 16px 4px;position:relative;cursor:pointer}
-#lhud-timeline{height:4px;background:rgba(255,255,255,.18);border-radius:3px;position:relative;transition:height .15s;user-select:none}
-#lhud-timeline-row:hover #lhud-timeline,#lhud-timeline.dragging{height:7px}
-#lhud-fill{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:3px;pointer-events:none}
-#lhud-loop-region{position:absolute;top:-1px;bottom:-1px;background:rgba(0,210,210,.22);border:1px solid rgba(0,210,210,.55);border-radius:3px;pointer-events:none;display:none}
-#lhud-loop-region.visible{display:block}
-#lhud-thumb{position:absolute;width:13px;height:13px;background:#fff;border-radius:50%;top:50%;transform:translate(-50%,-50%);pointer-events:none;box-shadow:0 1px 5px rgba(0,0,0,.5);opacity:0;transition:opacity .15s}
-#lhud-timeline-row:hover #lhud-thumb,#lhud-timeline.dragging #lhud-thumb{opacity:1}
-/* Loop markers on timeline */
-.lhud-lmarker{position:absolute;top:-8px;bottom:-8px;width:4px;border-radius:2px;cursor:ew-resize;transform:translateX(-50%);display:none;touch-action:none}
-.lhud-lmarker.visible{display:block}
-.lhud-lmarker::before{content:'';position:absolute;top:-4px;left:-4px;right:-4px;bottom:-4px}
-#lhud-lm-start{background:rgba(0,220,130,.95);box-shadow:0 0 6px rgba(0,220,130,.6)}
-#lhud-lm-end{background:rgba(230,80,80,.95);box-shadow:0 0 6px rgba(230,80,80,.6)}
-/* "Loop start" / "Loop end" tags over the markers (drag them too); the row makes room for them */
-.lhud-ltag{position:absolute;bottom:calc(100% + 9px);left:0;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;line-height:14px;white-space:nowrap;cursor:ew-resize;display:none;touch-action:none;user-select:none}
-#lhud-timeline:has(.lhud-lmarker.visible) .lhud-ltag{display:block}
-#lhud-timeline-row:has(.lhud-lmarker.visible){padding-top:30px}
-#lhud-lt-start{background:rgba(0,220,130,.95);color:#04140c}
-#lhud-lt-end{background:rgba(230,80,80,.95);color:#fff}
-/* Timeline hover tooltip */
-#lhud-timeline-tip{position:absolute;bottom:calc(100% + 10px);background:rgba(10,12,18,.92);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px;pointer-events:none;opacity:0;transition:opacity .1s;white-space:nowrap;transform:translateX(-50%)}
-#lhud-timeline-row:hover #lhud-timeline-tip{opacity:1}
-/* Controls row */
-#lhud-controls{display:flex;align-items:center;gap:10px;padding:5px 16px 8px;flex-wrap:wrap}
-#learn-hud label{font-size:11px;opacity:.7;white-space:nowrap}
-#learn-hud button{padding:4px 12px;border-radius:5px;border:1px solid var(--border);background:var(--btn-bg);color:var(--text);cursor:pointer;font-family:inherit;font-size:13px}
-#learn-hud button:hover{background:var(--btn-hover)}
-#learn-hud button.on{background:rgba(0,180,180,.18);color:var(--accent);border-color:var(--accent)}
-#lhud-speed{width:80px}
-#lhud-speed-val,#lhud-progress{font-size:11px;opacity:.7;white-space:nowrap}
-.lhud-sep{width:1px;height:18px;background:rgba(255,255,255,.14);flex-shrink:0}
-/* Loop A/B controls */
-#lhud-loop-ctrls{display:none;align-items:center;gap:6px}
-#lhud-loop-ctrls.visible{display:flex}
-#lhud-set-a{background:rgba(0,200,110,.18);border-color:rgba(0,200,110,.6);color:rgba(0,220,130,1);font-weight:700;padding:4px 10px}
-#lhud-set-a:hover{background:rgba(0,200,110,.32)}
-#lhud-set-b{background:rgba(210,70,70,.18);border-color:rgba(210,70,70,.6);color:rgba(240,100,100,1);font-weight:700;padding:4px 10px}
-#lhud-set-b:hover{background:rgba(210,70,70,.32)}
-#lhud-loop-a-time,#lhud-loop-b-time{font-size:10px;opacity:.7;min-width:30px}
+#btn-tracks-play{width:auto;padding:0 28px;height:52px;font-size:16px}
 /* Watch Play — bottom player bar */
 #player-hud{display:none;position:fixed;bottom:0;left:0;right:0;background:rgba(10,12,18,.93);align-items:center;gap:10px;padding:8px 16px;flex-wrap:wrap;z-index:999;backdrop-filter:blur(10px);border-top:1px solid rgba(255,255,255,.1);box-shadow:0 -4px 28px rgba(0,0,0,.55)}
 #player-hud.visible{display:flex}
@@ -252,7 +201,6 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 #notation-cursor-line{position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(0,180,180,.55);pointer-events:none;z-index:2}
 </style>
 </head>
-<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js" defer></script>
 <body>
 <canvas id="bg-canvas" style="display:none"></canvas>
 <div id="bg-slide-a" style="position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;pointer-events:none"></div>
@@ -283,38 +231,6 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <div class="tab-panels" id="ptab-panels"></div>
 </div>
 <div id="toast"></div>
-<div id="learn-hud">
-  <div id="lhud-timeline-row">
-    <div id="lhud-timeline">
-      <div id="lhud-loop-region"></div>
-      <div id="lhud-fill"></div>
-      <div id="lhud-thumb"></div>
-      <div id="lhud-lm-start" class="lhud-lmarker" title="Loop start: drag to move"></div>
-      <div id="lhud-lm-end" class="lhud-lmarker" title="Loop end: drag to move"></div>
-      <div id="lhud-lt-start" class="lhud-ltag" title="Where the loop starts: drag to move">Loop start</div>
-      <div id="lhud-lt-end" class="lhud-ltag" title="Where the loop ends: drag to move">Loop end</div>
-    </div>
-    <div id="lhud-timeline-tip">0:00</div>
-  </div>
-  <div id="lhud-controls">
-    <button id="lhud-playpause">⏸</button>
-    <button id="lhud-reset">↺</button>
-    <span id="lhud-progress">0:00 / 0:00</span>
-    <div class="lhud-sep"></div>
-    <label>Speed</label>
-    <input type="range" id="lhud-speed" min="25" max="150" step="5" value="100">
-    <span id="lhud-speed-val">100%</span>
-    <div class="lhud-sep"></div>
-    <button id="lhud-loop">⟳ Loop</button>
-    <div id="lhud-loop-ctrls">
-      <button id="lhud-set-a" title="Set loop start to current position">A</button>
-      <span id="lhud-loop-a-time">0:00</span>
-      <span style="font-size:11px;opacity:.5">→</span>
-      <button id="lhud-set-b" title="Set loop end to current position">B</button>
-      <span id="lhud-loop-b-time">end</span>
-    </div>
-  </div>
-</div>
 <div id="player-hud">
   <button id="ph-play" title="Play / pause (Space)">▶</button>
   <button id="ph-stop" title="Stop and go back to the start">■</button>
@@ -340,7 +256,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 <div class="screen active" id="screen-menu">
   <div id="menu-title">Piano MIDI Visualizer</div>
   <div class="menu-buttons">
-    <button class="menu-btn" id="btn-learn-mode">LEARN MODE</button>
+    <button class="menu-btn" id="btn-play-file">PLAY A FILE</button>
     <button class="menu-btn" id="btn-freeplay">FREEPLAY</button>
     <button class="menu-btn" id="btn-midi-device">MIDI DEVICE</button>
     <button class="menu-btn" id="btn-settings">SETTINGS</button>
@@ -358,12 +274,11 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 
 <!-- FILE SELECT SCREEN -->
 <div class="screen" id="screen-file">
-  <div class="screen-title">Learn Mode</div>
+  <div class="screen-title">Play a File</div>
   <div id="drop-zone">
     <p>Drag &amp; drop a .mid file here</p>
-    <p style="font-size:11px;margin-top:-4px">optionally include the .xml file too</p>
     <button class="browse-btn" id="btn-browse">Browse…</button>
-    <input type="file" id="file-input" accept=".mid,.midi,.xml,.musicxml" multiple>
+    <input type="file" id="file-input" accept=".mid,.midi">
   </div>
   <div id="recent-files"></div>
   <button class="screen-back" id="btn-file-back">← Back</button>
@@ -371,22 +286,10 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 
 <!-- TRACK CONFIG SCREEN -->
 <div class="screen" id="screen-tracks">
-  <div class="screen-title" id="tracks-filename">Learn Mode</div>
+  <div class="screen-title" id="tracks-filename">Tracks</div>
   <div id="track-channel-list"></div>
-  <div id="tracks-learn-bar">
-    <span class="tlb-label">Mode</span>
-    <button class="toggle-btn" id="tc-mode-wait">Wait</button>
-    <button class="toggle-btn" id="tc-mode-free">Free-play</button>
-    <span class="tlb-label" style="margin-left:4px">Sheet Music</span>
-    <button class="toggle-btn" id="tc-notation-toggle">Off</button>
-    <button class="action-btn" id="tc-xml-browse" style="margin-left:4px">Load MusicXML…</button>
-    <input type="file" id="tc-xml-input" accept=".xml,.musicxml" style="display:none">
-    <span id="xml-file-row">No MusicXML loaded</span>
-  </div>
-  <div id="learn-info" style="font-size:12px;color:var(--muted);margin:8px 0 0 0"></div>
   <div class="tracks-actions">
     <button class="screen-back" id="btn-tracks-back">← Back</button>
-    <button class="menu-btn" id="btn-tracks-learn">▶ Start Learning</button>
     <button class="menu-btn" id="btn-tracks-play">▶ Watch Play</button>
   </div>
 </div>
@@ -460,10 +363,10 @@ const Config = {
     // source: 'midi' | 'mic'; sensitivity 0-100; octave_shift moves detected notes (guitar reads an octave up)
     instrument:{source:'midi', instrument:'voice', device_id:'', sensitivity:50, octave_shift:0},
     // dest: 'off' | 'synth' | 'out:<MIDI output name>'; live_ch 0 keeps the keyboard's channel
-    audio:{synth_volume:70, reverb:20, default_dest:'synth', live_dest:'off', live_ch:0, live_inst:'piano', learn_sound:'others'},
+    audio:{synth_volume:70, reverb:20, default_dest:'synth', live_dest:'off', live_ch:0, live_inst:'piano'},
     profiles:[],
     active_profile_id:'',
-    learn:{mode:'wait', speed:1.0, loop:false, lookahead_ms:6000, notation:true, notation_y:200, loop_start_ms:0, loop_end_ms:0},
+    learn:{notation_y:200},  // where the coach's sheet strip sits (key kept so saved positions carry over)
     user_themes:[], active_user_theme_index:0,
     note_color_themes:[], active_note_theme:{type:'builtin',index:0},
     fluid_themes:[],
@@ -553,7 +456,7 @@ function sc(r,g,b,f){return[Math.max(0,Math.min(255,r*f|0)),Math.max(0,Math.min(
 function rgb(r,g,b){return`rgb(${r},${g},${b})`;}
 function rgba(r,g,b,a){return`rgba(${r},${g},${b},${a})`;}
 
-function drawPiano(ctx,lay,active,ks,wrongKeys){
+function drawPiano(ctx,lay,active,ks){
   if(!ks.visible)return;
   const{wkeys,bkeys,pianoY,pianoH,offsetX,pw}=lay;
   const W=ctx.canvas.width;
@@ -583,7 +486,6 @@ function drawPiano(ctx,lay,active,ks,wrongKeys){
       ctx.textAlign='center';
       ctx.fillText('C'+(n/12|0-1),k.x+k.w/2,ky+kh-Math.max(3,kh*.06|0));
     }
-    if(wrongKeys?.has(n)&&performance.now()<wrongKeys.get(n)){ctx.globalAlpha=.55;ctx.fillStyle='rgb(255,60,60)';ctx.fillRect(k.x,ky,k.w,kh);ctx.globalAlpha=1;}
   }
   // Black keys
   const brad=Math.max(3,pianoH*.035|0);
@@ -601,7 +503,6 @@ function drawPiano(ctx,lay,active,ks,wrongKeys){
     }
     ctx.strokeStyle=rgb(...sc(10,12,16,br)); ctx.lineWidth=1;
     ctx.beginPath();ctx.roundRect(k.x+.5,ky+.5,k.w-1,kh-1,brad);ctx.stroke();
-    if(wrongKeys?.has(n)&&performance.now()<wrongKeys.get(n)){ctx.globalAlpha=.55;ctx.fillStyle='rgb(255,60,60)';ctx.beginPath();ctx.roundRect(k.x,ky,k.w,kh,brad);ctx.fill();ctx.globalAlpha=1;}
   }
 }
 
@@ -906,7 +807,6 @@ class MidiHandler{
       this.noteVelocity.set(n,v);
       this.noteChannel.set(n,ch);
       this.sustainedNotes.delete(n);
-      if(this._app?._learn?.active)this._app._onLearnNoteOn(n,ch);
     } else if(st===0x80||(st===0x90&&v===0)){
       if(this._sustain){this.sustainedNotes.add(n);}
       else{this.activeNotes.delete(n);this.noteChannel.delete(n);this.noteVelocity.delete(n);}
@@ -944,7 +844,7 @@ class MidiHandler{
   _startQwerty(){
     this._qwerty=true; this.portName='Computer Keyboard'; this.connected=true;
     const typing=e=>/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName);
-    window.addEventListener('keydown',this._kd=e=>{if(e.repeat)return;const n=QWERTY[e.code];if(n!=null){e.preventDefault();this.activeNotes.add(n);if(!typing(e))this._app?._liveMidi([0x90,n,100],true);if(this._app?._learn?.active)this._app._onLearnNoteOn(n,0);}});
+    window.addEventListener('keydown',this._kd=e=>{if(e.repeat)return;const n=QWERTY[e.code];if(n!=null){e.preventDefault();this.activeNotes.add(n);if(!typing(e))this._app?._liveMidi([0x90,n,100],true);}});
     window.addEventListener('keyup',this._ku=e=>{const n=QWERTY[e.code];if(n!=null){this.activeNotes.delete(n);this._app?._liveMidi([0x80,n,0],true);}});
   }
   _stopQwerty(){
@@ -1105,7 +1005,6 @@ class InstrumentInput{
     const m=this.app.midi;
     m.activeNotes.add(note);m.noteVelocity.set(note,vel);m.noteChannel.set(note,0);
     this.app._liveMidi([0x90,note,vel],true,'mic');
-    if(this.app._learn?.active)this.app._onLearnNoteOn(note,0,'mic');
   }
   _off(){
     if(this._emitted==null){this.cur=null;return;}
@@ -1128,7 +1027,7 @@ const Progress={
     const pr=p.progress||(p.progress={});
     const instruments=pr.instruments||(pr.instruments={});
     const id=this.currentId();
-    const s=instruments[id]||(instruments[id]={notes:0,hits:0,misses:0,streak:0,best:0,ms:0,sessions:0,last:0,days:{}});
+    const s=instruments[id]||(instruments[id]={notes:0,ms:0,sessions:0,last:0,days:{}});
     if(!s.days)s.days={};
     return s;
   },
@@ -1141,12 +1040,6 @@ const Progress={
       if(add>0&&add<=5000){s.ms+=add;const k=new Date().toISOString().slice(0,10);s.days[k]=(s.days[k]||0)+add;}
     }
     s.notes++;s.last=this._last=now;this._save();
-  },
-  learn(hit){
-    const s=this._stat();
-    if(hit){s.hits++;s.streak++;if(s.streak>s.best)s.best=s.streak;}
-    else{s.misses++;s.streak=0;}
-    this._save();
   },
   reset(){const p=SceneManager.getActiveProfile();if(p){p.progress={instruments:{}};Config.save();}},
 };
@@ -2715,10 +2608,6 @@ ${slider('Reverb','reverb')}
 <div class="row"><label>Synth instrument</label><select data-au-sel="live_inst" ${sel}>${insts}</select></div>
 <p class="snd-hint">Leave Off if your keyboard has its own sound. Pick a MIDI output to play a hardware synth or a VST from this keyboard, re-mapped to any channel. Pedal, pitch bend and controllers go with it. The mouse and the computer keyboard use the built-in synth while this is Off.</p>
 </div>
-<div class="section"><h2>Learn Mode</h2>
-<div class="row"><label>Play along</label><select data-au-sel="learn_sound" ${sel}><option value="others">Parts set to — (not yours)</option><option value="all">All parts</option><option value="off">Off</option></select></div>
-<p class="snd-hint">Plays the parts you aren't learning as the cursor reaches them, each on its track's output. In Wait mode they wait for you too.</p>
-</div>
 <div class="section"><h2>MIDI Outputs</h2>
 <div class="snd-outputs"></div>
 <div class="row" style="margin-top:8px"><button class="action-btn snd-refresh">Find MIDI outputs</button><button class="action-btn snd-panic" style="margin-left:6px">All notes off</button></div>
@@ -2741,7 +2630,7 @@ ${slider('Reverb','reverb')}
 <div class="row"><label></label><button class="action-btn" id="inst-toggle">Start listening</button><span id="inst-status" style="font-size:12px;color:var(--muted)"></span></div>
 <div class="inst-meter"><div class="inst-note" id="inst-note">—</div>
 <div class="inst-bars"><div class="inst-cents"><i id="inst-needle"></i></div><div class="inst-level"><i id="inst-level"></i></div></div></div>
-<p class="snd-hint">Notes you play are sent to the keyboard, Learn Mode and the sound output like MIDI notes. Use headphones if you route live sound out, to avoid feedback.</p>
+<p class="snd-hint">Notes you play are sent to the keyboard and the sound output like MIDI notes. Use headphones if you route live sound out, to avoid feedback.</p>
 </div></div>
 <div class="section"><h2>Progress</h2><div id="inst-progress"></div></div>`,
     hardware:`<div class="section"><h2>Sustain Pedal (CC 64)</h2>
@@ -3451,7 +3340,7 @@ function wireInstrument(root,app){
   function renderProgress(){
     const box=$('#inst-progress');if(!box)return;
     const p=SceneManager.getActiveProfile(),st=p?.progress?.instruments||{};
-    const rows=Object.entries(st).filter(([,s])=>s.notes||s.hits||s.misses).sort((a,b)=>b[1].last-a[1].last);
+    const rows=Object.entries(st).filter(([,s])=>s.notes).sort((a,b)=>b[1].last-a[1].last);
     const days=[];
     for(let i=6;i>=0;i--){
       const dt=new Date(Date.now()-i*864e5),k=dt.toISOString().slice(0,10);
@@ -3460,11 +3349,10 @@ function wireInstrument(root,app){
     const mx=Math.max(1,...days.map(d=>d.ms));
     const name=id=>id==='midi'?'🎹 MIDI':(PITCH_INSTRUMENTS[id]?PITCH_INSTRUMENTS[id].icon+' '+PITCH_INSTRUMENTS[id].name:esc(id));
     box.innerHTML=`<div class="row"><label>Profile</label><span style="flex:1;font-size:13px">${esc(p?.name||'—')}</span><button class="action-btn" id="inst-preset" style="padding:3px 10px;font-size:11px">Switch…</button></div>`+
-    (rows.length?`<table class="inst-ptable"><thead><tr><th>Input</th><th>Time</th><th>Notes</th><th>Accuracy</th><th>Best streak</th><th>Last</th></tr></thead><tbody>${rows.map(([id,s])=>{
-      const t=s.hits+s.misses;
-      return`<tr><td>${name(id)}</td><td>${fmtTime(s.ms)}</td><td>${s.notes}</td><td>${t?Math.round(100*s.hits/t)+'%':'—'}</td><td>${s.best||'—'}</td><td>${s.last?new Date(s.last).toLocaleDateString():'—'}</td></tr>`;}).join('')}</tbody></table>
+    (rows.length?`<table class="inst-ptable"><thead><tr><th>Input</th><th>Time</th><th>Notes</th><th>Last</th></tr></thead><tbody>${rows.map(([id,s])=>{
+      return`<tr><td>${name(id)}</td><td>${fmtTime(s.ms)}</td><td>${s.notes}</td><td>${s.last?new Date(s.last).toLocaleDateString():'—'}</td></tr>`;}).join('')}</tbody></table>
 <div class="inst-week">${days.map(d=>`<div><i style="height:${Math.round(40*d.ms/mx)}px" title="${fmtTime(d.ms)}"></i>${d.l}</div>`).join('')}</div>
-<p class="snd-hint" style="margin-top:2px">Practice time over the last 7 days. Accuracy counts notes played in Learn Mode (Wait).</p>
+<p class="snd-hint" style="margin-top:2px">Practice time over the last 7 days.</p>
 <button class="action-btn" id="inst-reset" style="margin-top:8px;font-size:11px;padding:4px 10px;color:#dc8c8c;border-color:#7a3a3a">Reset progress</button>`
     :`<p class="snd-hint">No practice recorded yet for this profile. Play something and it will show up here.</p>`);
     $('#inst-preset')?.addEventListener('click',()=>{
@@ -3949,146 +3837,6 @@ function wireSettings(root, app){
   const cardRefreshFns=[];
   function onCardChange(){refreshAllCards();refreshAllNcDropdowns();}
   cardRefreshFns.push(wireColourCard(root,'upper',onCardChange));
-
-  // ── Learn HUD (wired once; always present in DOM) ──
-  const hud=document.getElementById('learn-hud');
-  if(hud&&!hud._wired){
-    hud._wired=true;
-    const fmt=ms=>{const s=Math.max(0,ms)/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
-
-    document.getElementById('lhud-playpause')?.addEventListener('click',()=>{
-      if(app._learn?.active) app.pauseLearn(); else app.startLearn();
-    });
-    document.getElementById('lhud-reset')?.addEventListener('click',()=>app.resetLearn());
-    const speedSlider=document.getElementById('lhud-speed');
-    const speedVal=document.getElementById('lhud-speed-val');
-    speedSlider?.addEventListener('input',()=>{
-      Config.lrn.speed=speedSlider.value/100;
-      speedVal.textContent=speedSlider.value+'%';
-      schedSave();
-    });
-
-    // ── Loop toggle ──
-    document.getElementById('lhud-loop')?.addEventListener('click',()=>{
-      Config.lrn.loop=!Config.lrn.loop;
-      document.getElementById('lhud-loop').classList.toggle('on',Config.lrn.loop);
-      const ctrls=document.getElementById('lhud-loop-ctrls');
-      if(ctrls)ctrls.classList.toggle('visible',Config.lrn.loop);
-      // Show/hide loop markers and region
-      const lmS=document.getElementById('lhud-lm-start');
-      const lmE=document.getElementById('lhud-lm-end');
-      const lr=document.getElementById('lhud-loop-region');
-      if(Config.lrn.loop){
-        if(lmS)lmS.classList.add('visible');
-        if(lmE)lmE.classList.add('visible');
-        if(lr)lr.classList.add('visible');
-      } else {
-        if(lmS)lmS.classList.remove('visible');
-        if(lmE)lmE.classList.remove('visible');
-        if(lr)lr.classList.remove('visible');
-      }
-      schedSave();
-    });
-
-    // ── A/B loop point buttons ──
-    document.getElementById('lhud-set-a')?.addEventListener('click',()=>{
-      const ms=app._learn?Math.max(0,app._learn._currentNoteMs):0;
-      Config.lrn.loop_start_ms=ms;
-      document.getElementById('lhud-loop-a-time').textContent=fmt(ms);
-      schedSave();
-    });
-    document.getElementById('lhud-set-b')?.addEventListener('click',()=>{
-      const total=app._learn?app._learn._totalMs:0;
-      const ms=app._learn?Math.min(total,Math.max(0,app._learn._currentNoteMs)):0;
-      Config.lrn.loop_end_ms=ms;
-      document.getElementById('lhud-loop-b-time').textContent=ms>0&&ms<total?fmt(ms):'end';
-      schedSave();
-    });
-
-    // ── Timeline seek (click + drag) ──
-    const tlRow=document.getElementById('lhud-timeline-row');
-    const tl=document.getElementById('lhud-timeline');
-    const tip=document.getElementById('lhud-timeline-tip');
-    const thumb=document.getElementById('lhud-thumb');
-    let tlDragging=false;
-    const tlSeekAt=x=>{
-      const r=tl.getBoundingClientRect();
-      const pct=Math.max(0,Math.min(1,(x-r.left)/r.width));
-      const total=app._learn?app._learn._totalMs:0;
-      const ms=pct*total;
-      if(total>0)app._learnSeekTo(ms);
-    };
-    const tlUpdateTip=(x,e)=>{
-      const r=tl.getBoundingClientRect();
-      const pct=Math.max(0,Math.min(1,(x-r.left)/r.width));
-      const total=app._learn?app._learn._totalMs:0;
-      if(tip){tip.textContent=fmt(pct*total);tip.style.left=Math.max(20,Math.min(r.width-20,x-r.left))+'px';}
-      if(thumb){thumb.style.left=(pct*100)+'%';}
-    };
-    const onLoopMarker=e=>!!e.target.closest?.('.lhud-lmarker,.lhud-ltag');
-    tlRow?.addEventListener('mousedown',e=>{
-      if(onLoopMarker(e))return;
-      tlDragging=true;tl.classList.add('dragging');
-      tlSeekAt(e.clientX);tlUpdateTip(e.clientX,e);e.preventDefault();
-    });
-    window.addEventListener('mousemove',e=>{
-      if(!tlDragging)return;
-      tlSeekAt(e.clientX);tlUpdateTip(e.clientX,e);
-    });
-    window.addEventListener('mouseup',e=>{
-      if(!tlDragging)return;
-      tlDragging=false;tl.classList.remove('dragging');
-    });
-    tlRow?.addEventListener('mousemove',e=>{
-      if(tlDragging||onLoopMarker(e))return;
-      tlUpdateTip(e.clientX,e);
-    });
-    // Touch support for timeline
-    tlRow?.addEventListener('touchstart',e=>{
-      if(onLoopMarker(e))return;
-      tlDragging=true;tl.classList.add('dragging');
-      tlSeekAt(e.touches[0].clientX);e.preventDefault();
-    },{passive:false});
-    window.addEventListener('touchmove',e=>{
-      if(!tlDragging)return;
-      tlSeekAt(e.touches[0].clientX);tlUpdateTip(e.touches[0].clientX,e);
-    },{passive:true});
-    window.addEventListener('touchend',()=>{tlDragging=false;tl.classList.remove('dragging');});
-
-    // ── Loop marker drag ──
-    const wireMarker=(el,isStart)=>{
-      if(!el)return;
-      let dragging=false;
-      const onMove=e=>{
-        if(!dragging)return;
-        const cx=e.touches?e.touches[0].clientX:e.clientX;
-        const r=tl.getBoundingClientRect();
-        const pct=Math.max(0,Math.min(1,(cx-r.left)/r.width));
-        const total=app._learn?app._learn._totalMs:0;
-        const ms=pct*total;
-        if(isStart){
-          Config.lrn.loop_start_ms=Math.min(ms,Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms-500:ms);
-          document.getElementById('lhud-loop-a-time').textContent=fmt(Config.lrn.loop_start_ms);
-        } else {
-          Config.lrn.loop_end_ms=Math.max(ms,Config.lrn.loop_start_ms+500);
-          const lbt=document.getElementById('lhud-loop-b-time');
-          if(lbt)lbt.textContent=Config.lrn.loop_end_ms>0&&Config.lrn.loop_end_ms<total?fmt(Config.lrn.loop_end_ms):'end';
-        }
-        schedSave();
-      };
-      const onUp=()=>{if(!dragging)return;dragging=false;};
-      el.addEventListener('mousedown',e=>{dragging=true;e.stopPropagation();e.preventDefault();});
-      el.addEventListener('touchstart',e=>{dragging=true;e.stopPropagation();},{passive:true});
-      window.addEventListener('mousemove',onMove);
-      window.addEventListener('touchmove',e=>onMove(e),{passive:true});
-      window.addEventListener('mouseup',onUp);
-      window.addEventListener('touchend',onUp);
-    };
-    wireMarker(document.getElementById('lhud-lm-start'),true);
-    wireMarker(document.getElementById('lhud-lm-end'),false);
-    wireMarker(document.getElementById('lhud-lt-start'),true);
-    wireMarker(document.getElementById('lhud-lt-end'),false);
-  }
 }
 
 function updateLedStatus(root,app){
@@ -4225,8 +3973,8 @@ function escHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&l
 const SOUND_LOOKAHEAD_MS=100;  // file playback schedules notes this far ahead of the playhead
 const MAX_VOICES=72;
 
-// Polyphonic Web Audio synth. Voices belong to a `part` (a file track, Learn mode's
-// accompaniment, the live keyboard) so sustain, pitch bend and stopping act per part.
+// Polyphonic Web Audio synth. Voices belong to a `part` (a file track or the live
+// keyboard) so sustain, pitch bend and stopping act per part.
 class AudioSynth{
   constructor(){this._ctx=null;this._voices=[];this._held=new Map();this._sus=new Set();this._bend=new Map();this._vol=.7;this._rev=.12;}
   _ac(){
@@ -4550,176 +4298,10 @@ function setAudio(k,v){
   syncAudioControls();
 }
 
-// ─────────────────── MusicXML parser ────────────────────
-function _parseMusicXmlDoc(doc){
-  const STEP_SEMI={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
-  const firstPart=doc.querySelector('part');
-  const firstMeasure=firstPart?.querySelector('measure');
-  const firstAttrib=firstMeasure?.querySelector('attributes');
-  let globalDivs=parseInt(firstAttrib?.querySelector('divisions')?.textContent||'4');
-  const beats=parseInt(firstAttrib?.querySelector('time beats')?.textContent||'4');
-  const beatType=parseInt(firstAttrib?.querySelector('time beat-type')?.textContent||'4');
-  const fifths=parseInt(firstAttrib?.querySelector('key fifths')?.textContent||'0');
-  let tempoBpm=120;
-  const soundEl=firstMeasure?.querySelector('direction sound[tempo]')||doc.querySelector('sound[tempo]');
-  if(soundEl)tempoBpm=parseFloat(soundEl.getAttribute('tempo'));
-  const microsPerBeat=Math.round(60000000/tempoBpm);
-  const meta={
-    tempoMap:[{tick:0,microsPerBeat}],
-    timeSig:{num:beats,denom:beatType},
-    keySig:{sharps:fifths,mode:0}
-  };
-  const barDurationMs=beats*(microsPerBeat/1000);
-  // Each measure's chords where they start: rests, a second voice (<backup>) and <forward> move
-  // the position as they do in the score, so the notes sound where they are written. A chord:
-  // {notes, durationMs, ms, beat} with ms and beat (quarter notes) from the start of the piece.
-  const parsePart=(part,staffFilter=null)=>{
-    const measures=[];
-    let divs=globalDivs;
-    let usBeat=microsPerBeat;
-    let barLen=beats*4/beatType;  // quarter notes in a full bar
-    let barMs=0,barBeat=0;
-    const len=el=>parseInt(el.querySelector(':scope > duration')?.textContent||'0')||0;
-    Array.from(part.querySelectorAll('measure')).forEach(measure=>{
-      let pos=0,end=0,onset=0;  // divisions from the start of the measure
-      const at=new Map();
-      for(const el of measure.children){
-        if(el.tagName==='attributes'){
-          const d=el.querySelector('divisions');if(d)divs=parseInt(d.textContent)||divs;
-          const t=el.querySelector('time');
-          if(t){const b=parseInt(t.querySelector('beats')?.textContent),bt=parseInt(t.querySelector('beat-type')?.textContent);if(b&&bt)barLen=b*4/bt;}
-        }else if(el.tagName==='direction'||el.tagName==='sound'){
-          const s=el.tagName==='sound'?el:el.querySelector('sound[tempo]');
-          const bpm=parseFloat(s?.getAttribute('tempo'));
-          if(bpm>0)usBeat=Math.round(60000000/bpm);
-        }else if(el.tagName==='backup'){pos=Math.max(0,pos-len(el));}
-        else if(el.tagName==='forward'){pos+=len(el);end=Math.max(end,pos);}
-        else if(el.tagName==='note'){
-          if(el.querySelector('grace'))continue;
-          const d=len(el);
-          if(!el.querySelector('chord')){onset=pos;pos+=d;end=Math.max(end,pos);}
-          if(staffFilter!==null){
-            const sf=el.querySelector('staff');
-            if(sf&&sf.textContent!==String(staffFilter))continue;
-          }
-          const pitchEl=el.querySelector('pitch');
-          if(el.querySelector('rest')||!pitchEl)continue;
-          if(el.querySelector('tie[type="stop"]'))continue;  // held on from a tied note, not struck again
-          const step=pitchEl.querySelector('step')?.textContent||'C';
-          const alter=Math.round(parseFloat(pitchEl.querySelector('alter')?.textContent||'0'));
-          const octave=parseInt(pitchEl.querySelector('octave')?.textContent||'4');
-          const midi=Math.max(21,Math.min(108,(octave+1)*12+(STEP_SEMI[step]||0)+alter));
-          const durationMs=Math.max(50,d/divs*(usBeat/1000));
-          const c=at.get(onset)||{notes:[],durationMs:0,ms:barMs+onset/divs*(usBeat/1000),beat:barBeat+onset/divs};
-          if(!c.notes.includes(midi))c.notes.push(midi);
-          c.durationMs=Math.max(c.durationMs,durationMs);
-          at.set(onset,c);
-        }
-      }
-      measures.push([...at.values()].sort((a,b)=>a.beat-b.beat));
-      const q=end?end/divs:barLen;  // a pickup is as long as what is in it
-      barMs+=q*usBeat/1000;barBeat+=q;
-    });
-    return measures;
-  };
-  const parts=Array.from(doc.querySelectorAll('part'));
-  let trebleMeasures,bassMeasures;
-  const staveCount=parseInt(parts[0]?.querySelector('attributes staves')?.textContent||'1');
-  if(parts.length===1&&staveCount>1){
-    // Single-part grand staff (piano) — split by <staff> number
-    let trebleStaff=1,bassStaff=2;
-    parts[0].querySelectorAll('measure attributes clef').forEach(clef=>{
-      const num=parseInt(clef.getAttribute('number')||'1');
-      const sign=clef.querySelector('sign')?.textContent;
-      if(sign==='F')bassStaff=num;
-      else if(sign==='G')trebleStaff=num;
-    });
-    trebleMeasures=parsePart(parts[0],trebleStaff);
-    bassMeasures=parsePart(parts[0],bassStaff);
-  }else{
-    // Multiple parts — match by clef
-    const getClef=p=>p.querySelector('measure attributes clef sign')?.textContent==='F'?'bass':'treble';
-    const treblePart=parts.find(p=>getClef(p)==='treble')||parts[0]||null;
-    const bassPart=parts.find(p=>p!==treblePart&&getClef(p)==='bass')||(parts.length>1?parts.find(p=>p!==treblePart):null);
-    trebleMeasures=treblePart?parsePart(treblePart):[];
-    bassMeasures=bassPart?parsePart(bassPart):[];
-  }
-  const numBars=Math.min(400,Math.max(trebleMeasures.length,bassMeasures.length));
-  const bars=[];
-  for(let b=0;b<numBars;b++){
-    const first=trebleMeasures[b]?.[0]||bassMeasures[b]?.[0];
-    bars.push({
-      startMs:first?first.ms:b*barDurationMs,
-      treble:trebleMeasures[b]?.length?trebleMeasures[b]:null,
-      bass:bassMeasures[b]?.length?bassMeasures[b]:null
-    });
-  }
-  return{bars,meta};
-}
-
-// ─────────────────── Notation helpers ───────────────────
-const SHARP_NAMES=['c','c#','d','d#','e','f','f#','g','g#','a','a#','b'];
-const FLAT_NAMES=['c','db','d','eb','e','f','gb','g','ab','a','bb','b'];
-function _midiToVexKey(midi,useFlats){
-  const names=useFlats?FLAT_NAMES:SHARP_NAMES;
-  return names[midi%12]+'/'+(Math.floor(midi/12)-1);
-}
-// Returns true if this MIDI pitch needs an explicit accidental given the key signature
-function _needsAccidental(midi,keySig){
-  const pc=midi%12;
-  if(![1,3,6,8,10].includes(pc))return false; // white keys never need ♯/♭
-  const SHARP_ORDER=[6,1,8,3,10,5,0]; // F#,C#,G#,D#,A#,E#,B#
-  const FLAT_ORDER=[10,3,8,1,6,11,4];  // Bb,Eb,Ab,Db,Gb,Cb,Fb
-  const fifths=keySig?.sharps??0;
-  const inKeySig=fifths>0?new Set(SHARP_ORDER.slice(0,Math.min(fifths,7))):fifths<0?new Set(FLAT_ORDER.slice(0,Math.min(-fifths,7))):new Set();
-  return!inKeySig.has(pc);
-}
-
-// Quantize a duration in ms to the nearest VexFlow duration string
-function _quantizeDuration(durationMs,microsPerBeat){
-  const beats=durationMs*1000/microsPerBeat;
-  // [beats, vexDur, dotted]
-  const TABLE=[[4,'w',false],[3,'h',true],[2,'h',false],[1.5,'q',true],[1,'q',false],
-               [0.75,'8',true],[0.5,'8',false],[0.375,'16',true],[0.25,'16',false],[0.125,'32',false],[0.0625,'64',false]];
-  let best=TABLE[TABLE.length-1];
-  let bestDiff=Infinity;
-  for(const row of TABLE){
-    const d=Math.abs(row[0]-beats);
-    if(d<bestDiff){bestDiff=d;best=row;}
-  }
-  return {dur:best[1],dotted:best[2]};
-}
-// Note values a bar is filled with, in quarter notes, longest first: [beats, vexDur, dotted]
-const _VEX_STEPS=[[4,'w',false],[3,'h',true],[2,'h',false],[1.5,'q',true],[1,'q',false],[0.75,'8',true],[0.5,'8',false],[0.25,'16',false]];
-// The longest note value that fits in `beats` (at least a 16th)
-function _vexStep(beats){return _VEX_STEPS.find(s=>s[0]<=beats+1e-6)||_VEX_STEPS[_VEX_STEPS.length-1];}
-function _vexDuration(beats){const s=_vexStep(beats);return{dur:s[1],dotted:s[2]};}
-
-// The Learn timeline's "Loop start" / "Loop end" tags: each centred over its marker, pushed apart
-// when the loop is too short for both, and kept on the timeline.
-const _loopTagW={};
-function _placeLoopTags(sPct,ePct){
-  const tl=document.getElementById('lhud-timeline'),a=document.getElementById('lhud-lt-start'),b=document.getElementById('lhud-lt-end');
-  if(!tl||!a||!b)return;
-  const W=tl.clientWidth,gap=6;
-  const wa=_loopTagW.a||(_loopTagW.a=a.offsetWidth),wb=_loopTagW.b||(_loopTagW.b=b.offsetWidth);
-  if(!W||!wa||!wb)return;
-  let xa=sPct/100*W-wa/2,xb=ePct/100*W-wb/2;
-  const over=xa+wa+gap-xb;
-  if(over>0){xa-=over/2;xb+=over/2;}
-  xa=Math.max(0,xa);xb=Math.max(xb,xa+wa+gap);
-  xb=Math.min(xb,W-wb);xa=Math.max(0,Math.min(xa,xb-wa-gap));
-  a.style.left=xa.toFixed(1)+'px';b.style.left=xb.toFixed(1)+'px';
-}
-
 class NotationRenderer{
   constructor(){
     this._wrap=null;
-    this._totalMs=0;
-    this._pxPerMs=0;
-    this._anchors=[];  // [{ms,x}] where each drawn note and rest is, for scrolling (VexFlow path)
     this._ready=false;
-    this._svgEl=null;
     this._iframe=null;
     this._xmlMode=false;
     this._msgHandler=null;
@@ -4741,7 +4323,7 @@ class NotationRenderer{
       window.addEventListener('message',this._msgHandler);
     }
   }
-  // OSMD iframe path — used when raw XML is available
+  // The coach's score, drawn by notation.html (OSMD)
   renderXml(xmlStr){
     if(!this._wrap)return;
     this.destroy();
@@ -4758,151 +4340,10 @@ class NotationRenderer{
       iframe.contentWindow.postMessage({type:'loadScore',xml:xmlStr},'*');
     },{once:true});
   }
-  // VexFlow path — used for MIDI-only fallback
-  render(bars,meta){
-    if(typeof Vex==='undefined'){
-      if(this._wrap){const m=document.createElement('div');m.className='vex-loading-msg';m.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,160,60,.8);font-size:12px;pointer-events:none';m.textContent='Sheet music: VexFlow library not loaded';this._wrap.appendChild(m);}
-      return;
-    }
-    if(!this._wrap)return;
-    const old=this._wrap.querySelector('svg');
-    if(old)old.remove();
-    this._wrap.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
-    this._ready=false;
-    this._anchors=[];
-    this._gen++;
-    if(!bars||!bars.length)return;
-    const VF=Vex.VF||Vex.Flow||Vex;
-    if(!VF?.Renderer){console.error('VexFlow Renderer missing. Vex keys:',Object.keys(Vex||{}));return;}
-    try{
-    const stripH=document.getElementById('notation-strip').offsetHeight||260;
-    const PX_PER_BEAT=72;
-    const microsPerBeat=meta?.tempoMap?.[meta.tempoMap.length-1]?.microsPerBeat||500000;
-    const beatsPerBar=meta?.timeSig?.num||4;
-    const beatValue=meta?.timeSig?.denom||4;
-    const barDurationMs=beatsPerBar*microsPerBeat/1000;
-    const barW=beatsPerBar*PX_PER_BEAT+30;
-    const totalW=bars.length*barW+60;
-    const totalH=stripH;
-    const renderer=new VF.Renderer(this._wrap,VF.Renderer.Backends.SVG);
-    renderer.resize(totalW,totalH);
-    const ctx=renderer.getContext();
-    ctx.setFont('Arial',10);
-    ctx.setFillStyle('rgba(210,210,210,0.9)');
-    ctx.setStrokeStyle('rgba(180,180,180,0.9)');
-    const useFlats=(meta?.keySig?.sharps||0)<0;
-    const anchors=[];
-    let totalMs=0,endX=0;
-    // One staff's bar as VexFlow notes: items {notes, beats, ms} (no notes: a rest), or older
-    // chords {notes, durationMs}; nothing at all: a whole-bar rest.
-    const staffNotes=(items,clef)=>{
-      const restKey=[clef==='treble'?'b/4':'d/3'];
-      if(!items||!items.length)return[{sn:new VF.StaveNote({clef,keys:restKey,duration:'wr'})}];
-      return items.map(it=>{
-        const rest=!it.notes?.length;
-        const {dur,dotted}=Number.isFinite(it.beats)?_vexDuration(it.beats):_quantizeDuration(it.durationMs,microsPerBeat);
-        let sn;
-        try{
-          sn=new VF.StaveNote({clef,keys:rest?restKey:it.notes.map(n=>_midiToVexKey(n,useFlats)),duration:dur+(rest?'r':'')});
-          if(dotted)VF.Dot.buildAndAttach([sn],{all:true});
-          if(!rest)it.notes.forEach((n,i)=>{if(_needsAccidental(n,meta?.keySig))sn.addModifier(new VF.Accidental(useFlats?'b':'#'),i);});
-        }catch(e){
-          sn=new VF.StaveNote({clef,keys:restKey,duration:'qr'});
-        }
-        return{sn,ms:it.ms};
-      });
-    };
-    bars.forEach((bar,bi)=>{
-      totalMs=Math.max(totalMs,bar.endMs||(bar.startMs||0)+barDurationMs);
-      const xOff=bi*barW+10;
-      const trebleStave=new VF.Stave(xOff,28,barW-4);
-      const bassStave=new VF.Stave(xOff,Math.round(stripH*0.46),barW-4);
-      if(bi===0){
-        trebleStave.addClef('treble');bassStave.addClef('bass');
-        if(meta?.timeSig){trebleStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);bassStave.addTimeSignature(`${meta.timeSig.num}/${meta.timeSig.denom}`);}
-      }
-      trebleStave.setContext(ctx).draw();
-      bassStave.setContext(ctx).draw();
-      endX=xOff+barW-4;
-      // Both staves formatted together, so notes struck together line up across them
-      const staves=[[bar.treble,'treble',trebleStave],[bar.bass,'bass',bassStave]].map(([items,clef,stave])=>{
-        const notes=staffNotes(items,clef);
-        const voice=new VF.Voice({num_beats:beatsPerBar,beat_value:beatValue});
-        voice.setStrict(false);
-        voice.addTickables(notes.map(t=>t.sn));
-        return{notes,voice,stave};
-      });
-      try{
-        new VF.Formatter().joinVoices([staves[0].voice]).joinVoices([staves[1].voice]).format(staves.map(s=>s.voice),barW-24);
-      }catch(e){}
-      for(const{notes,voice,stave}of staves){
-        try{
-          let beams=[];
-          try{beams=VF.Beam.generateBeams(notes.map(t=>t.sn));}catch(e){}
-          voice.draw(ctx,stave);
-          beams.forEach(b=>b.setContext(ctx).draw());
-          for(const t of notes){
-            if(Number.isFinite(t.ms))anchors.push({ms:t.ms,x:(t.sn.getNoteHeadBeginX()+t.sn.getNoteHeadEndX())/2});
-          }
-        }catch(e){}
-      }
-    });
-    this._svgEl=this._wrap.querySelector('svg');
-    if(this._svgEl){
-      const style=document.createElementNS('http://www.w3.org/2000/svg','style');
-      style.textContent=[
-        'path,rect,polygon{fill:rgba(210,210,210,.88);stroke:rgba(160,160,160,.7)}',
-        'path[fill="none"],rect[fill="none"]{fill:none}',
-        'text{fill:rgba(220,220,220,.9);stroke:none}',
-        'line{stroke:rgba(170,170,170,.75)}'
-      ].join(' ');
-      this._svgEl.insertBefore(style,this._svgEl.firstChild);
-    }
-    this._totalMs=totalMs||1;
-    this._pxPerMs=totalW/this._totalMs;
-    // The music's place on the strip: each note and rest where it is drawn (one per moment,
-    // never backwards), then the final barline
-    anchors.sort((a,b)=>a.ms-b.ms||a.x-b.x);
-    this._anchors=[];
-    for(const a of [...anchors,{ms:totalMs,x:endX}]){
-      const p=this._anchors[this._anchors.length-1];
-      if(!p||(a.ms>p.ms+1&&a.x>=p.x))this._anchors.push(a);
-    }
-    this._ready=true;
-    }catch(err){
-      console.error('VexFlow render failed:',err);
-      const msg=document.createElement('div');
-      msg.className='vex-loading-msg';
-      msg.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(255,100,100,.7);font-size:12px;pointer-events:none';
-      msg.textContent='Sheet music unavailable';
-      this._wrap.appendChild(msg);
-    }
-  }
   // Forward a midi-coach message (marks, cursorBeat, heat, flash, status) to the OSMD iframe
   post(msg){
     if(this._xmlMode&&this._ready&&this._iframe?.contentWindow){this._iframe.contentWindow.postMessage(msg,'*');return true;}
     return false;
-  }
-  // beat: where Learn Mode is in the sheet's own beats, when known; the sheet then follows the
-  // music through tempo changes instead of timing it at one tempo.
-  scrollTo(cursorMs,beat=null){
-    if(this._xmlMode&&this._iframe?.contentWindow){
-      this._iframe.contentWindow.postMessage(beat!==null?{type:'updateBeat',beat}:{type:'updatePosition',ms:cursorMs},'*');
-      return;
-    }
-    if(!this._ready||!this._svgEl)return;
-    const wrapW=this._wrap?.offsetWidth||800;
-    this._svgEl.style.transform=`translateX(${(wrapW/2-this._xAt(cursorMs)).toFixed(1)}px)`;
-  }
-  // Where the music is at cursorMs on the drawn strip: between the notes and rests either side
-  _xAt(ms){
-    const a=this._anchors,n=a.length;
-    if(!n)return ms*this._pxPerMs;
-    if(ms<=a[0].ms)return a[0].x-(a[0].ms-ms)*this._pxPerMs;
-    if(ms>=a[n-1].ms)return a[n-1].x;
-    let lo=0,hi=n-1;
-    while(lo<hi-1){const mid=(lo+hi)>>1;if(a[mid].ms<=ms)lo=mid;else hi=mid;}
-    return a[lo].x+(ms-a[lo].ms)/(a[hi].ms-a[lo].ms)*(a[hi].x-a[lo].x);
   }
   destroy(){
     if(this._iframe){
@@ -4911,9 +4352,6 @@ class NotationRenderer{
       this._iframe=null;
     }
     this._xmlMode=false;
-    const el=this._wrap?.querySelector('svg');
-    if(el)el.remove();
-    this._wrap?.querySelectorAll('.vex-loading-msg').forEach(e=>e.remove());
     this._ready=false;
   }
 }
@@ -4923,7 +4361,7 @@ class NotationRenderer{
 // ═══════════════════════════════════════════════════════
 // midi-coach live score: mirrors the coach's Server-Sent Events into the notation strip.
 class CoachLink{
-  constructor(app){this.app=app;this.es=null;this.base='';this.version=0;this.lessonVersion=0;this.sessionActive=false;this._queue=[];}
+  constructor(app){this.app=app;this.es=null;this.base='';this.version=0;this.sessionActive=false;this._queue=[];}
   _status(t){const el=document.getElementById('coach-status');if(el)el.textContent=t;}
   connect(url){
     this.disconnect();
@@ -4938,7 +4376,7 @@ class CoachLink{
   }
   disconnect(){
     if(this.es){this.es.close();this.es=null;}
-    this.version=0;this.lessonVersion=0;this.sessionActive=false;this._queue=[];
+    this.version=0;this.sessionActive=false;this._queue=[];
     if(this.app._coachActive){
       this.app._coachActive=false;
       this.app._notationRenderer.destroy();
@@ -4964,23 +4402,12 @@ class CoachLink{
       this._status('Showing '+m.title+(payload.cleanup==='off'?' (no steady beat: rough sheet; Auto clean is on the coach page)':''));
       return;
     }
-    if(m.type==='lesson'){
-      if(m.version===this.lessonVersion)return;
-      this.lessonVersion=m.version;
-      const res=await fetch(this.base+'lesson',{cache:'no-store'});
-      const lesson=await res.json();
-      if(lesson.version===this.lessonVersion)this.app._loadCoachLesson(lesson,!!m.autostart);
-      return;
-    }
     if(m.type==='session'){
       this.sessionActive=!!m.active;
       if(!m.active)this.app._notationRenderer.post(m);
       return;
     }
-    if(m.type==='say'||m.type==='keys')return;  // spoken by / keys lit on the coach page
-    // While Learn Mode plays a lesson it scrolls the strip itself; only a live coach
-    // session (wait / rehearsal grading) takes the cursor over.
-    if(m.type==='cursorBeat'&&!m.live&&this.app._learn?.active)return;
+    if(m.type==='say'||m.type==='keys'||m.type==='lesson')return;  // for the coach page only
     if(!this.app._notationRenderer.post(m))this._queue.push(m);
   }
 }
@@ -5050,14 +4477,9 @@ class App{
     this.rebuildLayout=false;
     this._bgImages=[];   // [{url:string, name:string, isGif:bool}]
     this._mode='freeplay'; // 'freeplay' or 'file'
-    this._learn={active:false,cursorMs:0,_currentNoteMs:0,_lastFrameWall:0,_events:[],_totalMs:0,_pendingChord:new Set()};
-    this._learnWrongKeys=new Map();
     this._notationRenderer=new NotationRenderer();
     this._coachActive=false;
     this.coach=new CoachLink(this);
-    this._musicXmlBars=null;
-    this._musicXmlMeta=null;
-    this._pendingXmlFile=null;
     this._vizActive=false;
     this._panelOpen=false;
     this._selectedPortId='keyboard';
@@ -5158,7 +4580,7 @@ class App{
   }
 
   _update(dt){
-    this._learnTick(this._frameNow);
+    this._bgVideoFollow();
     const ns=Config.ns, ks=Config.ks;
     // Audience color
     this.audience.update(dt,ns);
@@ -5257,73 +4679,7 @@ class App{
     }
     this.fx.endFrame(ctx);
     if(shaderOn)this.shaderNotes.render(this.trails.all,ns,this.layout,this.smoothedDt);
-    if(this._learn?.active)this._drawLearnNotes(ctx,this.layout);
-    drawPiano(ctx,this.layout,this.prevNotes,Config.ks,this._learnWrongKeys);
-    // Update learn HUD progress, timeline, and notation scroll every frame
-    if(this._learn?.active||this._learn?._totalMs>0){
-      const l=this._learn;
-      const fmt=ms=>{const s=Math.max(0,ms)/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
-      const curMs=Math.max(0,l._currentNoteMs);
-      const pct=l._totalMs>0?Math.max(0,Math.min(1,curMs/l._totalMs)):0;
-      const prog=document.getElementById('lhud-progress');
-      if(prog)prog.textContent=fmt(curMs)+' / '+fmt(l._totalMs);
-      // Timeline fill and thumb
-      const fill=document.getElementById('lhud-fill');
-      const thumb=document.getElementById('lhud-thumb');
-      if(fill)fill.style.width=(pct*100)+'%';
-      if(thumb)thumb.style.left=(pct*100)+'%';
-      // Loop region and markers
-      if(Config.lrn.loop&&l._totalMs>0){
-        const sMs=Config.lrn.loop_start_ms||0;
-        const eMs=Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs;
-        const sPct=(sMs/l._totalMs)*100;
-        const ePct=(eMs/l._totalMs)*100;
-        const lr=document.getElementById('lhud-loop-region');
-        if(lr){lr.style.left=sPct+'%';lr.style.width=(ePct-sPct)+'%';}
-        const lmS=document.getElementById('lhud-lm-start');
-        const lmE=document.getElementById('lhud-lm-end');
-        if(lmS)lmS.style.left=sPct+'%';
-        if(lmE)lmE.style.left=ePct+'%';
-        _placeLoopTags(sPct,ePct);
-      }
-      if(l.active&&Config.lrn.notation&&!this.coach?.sessionActive){
-        this._notationRenderer?.scrollTo(l._currentNoteMs,this._learnBeatAt(l._currentNoteMs));
-        this._showLoopOnSheet();
-      }
-    }
-  }
-
-  // Learn Mode's position in beats (quarter notes from the start, as the sheet counts them), from
-  // the events' own beats; null when they have none (a MIDI file played here).
-  _learnBeatAt(ms){
-    const l=this._learn,ev=l._events;
-    if(l._beatsOf!==ev){
-      l._beatsOf=ev;
-      const pts=(ev||[]).filter(e=>Number.isFinite(e.beat)).map(e=>({ms:e.ms,beat:e.beat})).sort((a,b)=>a.ms-b.ms);
-      l._beatPts=[];
-      for(const p of pts){const q=l._beatPts[l._beatPts.length-1];if(!q||(p.ms>q.ms+1&&p.beat>q.beat))l._beatPts.push(p);}
-    }
-    const a=l._beatPts;
-    if(!a.length)return null;
-    if(a.length===1)return a[0].beat;
-    let lo=0,hi=a.length-1;
-    if(ms<=a[0].ms)hi=1; else if(ms>=a[hi].ms)lo=hi-1;
-    else while(lo<hi-1){const mid=(lo+hi)>>1;if(a[mid].ms<=ms)lo=mid;else hi=mid;}
-    const p=a[lo],q=a[hi];
-    return p.beat+(ms-p.ms)*(q.beat-p.beat)/(q.ms-p.ms);
-  }
-
-  // The A–B loop on the sheet, as labelled flags (when the sheet counts in beats)
-  _showLoopOnSheet(){
-    const l=this._learn,r=this._notationRenderer;
-    let msg={type:'range'};
-    if(Config.lrn.loop&&l._totalMs>0){
-      const s=this._learnBeatAt(Config.lrn.loop_start_ms||0);
-      const e=this._learnBeatAt(Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs);
-      if(s!==null&&e!==null)msg={type:'range',start:+s.toFixed(3),end:+e.toFixed(3),loop:true};
-    }
-    const key=r._gen+JSON.stringify(msg);
-    if(key!==this._loopShown&&r.post(msg))this._loopShown=key;
+    drawPiano(ctx,this.layout,this.prevNotes,Config.ks);
   }
 
   _setupKeyboardMouse(){
@@ -5349,7 +4705,6 @@ class App{
       _mouseNote=note;
       this.midi.activeNotes.add(note);
       this._liveMidi([0x90,note,100],true);
-      if(this._learn?.active)this._onLearnNoteOn(note,0);
       canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener('pointermove',e=>{
@@ -5359,7 +4714,7 @@ class App{
       if(note===_mouseNote)return;
       if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._liveMidi([0x80,_mouseNote,0],true);}
       _mouseNote=note;
-      if(note!=null){this.midi.activeNotes.add(note);this._liveMidi([0x90,note,100],true);if(this._learn?.active)this._onLearnNoteOn(note,0);}
+      if(note!=null){this.midi.activeNotes.add(note);this._liveMidi([0x90,note,100],true);}
     });
     const release=()=>{
       if(_mouseNote!=null){this.midi.activeNotes.delete(_mouseNote);this._liveMidi([0x80,_mouseNote,0],true);_mouseNote=null;}
@@ -5379,8 +4734,8 @@ class App{
     if(window.fluidSim)window.fluidSim.resize();
     this.shaderNotes?.resize(W,H);
     // Shrink usable height by HUD height so piano sits above the transport bar
-    const hudEl=['learn-hud','player-hud'].map(id=>document.getElementById(id)).find(el=>el?.classList.contains('visible'));
-    const hudH=hudEl?hudEl.offsetHeight:0;
+    const hudEl=document.getElementById('player-hud');
+    const hudH=hudEl?.classList.contains('visible')?hudEl.offsetHeight:0;
     this.layout=buildLayout(W,H-hudH,Config.ks.height_percent,Config.ks.width_percent??100);
     if(this.fx)this.fx.resize(W,H); else this.fx=new FXRenderer(W,H);
   }
@@ -5398,7 +4753,7 @@ class App{
       video_tune_cents:0,
       video_start_s:0,
       video_wait_note:true,
-      // Learn mode drives the clip: song time 0 = the start point, loops and seeks move the clip too
+      // The file player drives the clip: song time 0 = the start point, loops and seeks move the clip too
       video_follow:true,
       _video:null,
       slide_ms:Math.max(500,Config.ds.bg_slide_ms??5000),
@@ -5512,16 +4867,10 @@ class App{
     if(e._video.paused){this._bgVideoPlay(e);this._showToast?.('Video playing');}
     else{e._video.pause();this._showToast?.('Video paused');}
   }
-  // "Follow the song": while a Learn song is loaded, the clip sits at start point + song time.
-  // It plays while the song moves, pauses while Learn waits for you or is stopped, and jumps
-  // when the song jumps (loop back, seek). Speed below 100 % slows the clip with pitch kept.
-  // Which song the clip follows: Learn mode when its bar is up, otherwise the file player.
+  // "Follow the song": while the file player has a song, the clip sits at start point + song time.
+  // It plays while the song plays, pauses when it stops, and jumps when the song jumps (loop
+  // back, seek). Speed below 100 % slows the clip with pitch kept.
   _bgVideoSource(){
-    if(document.getElementById('learn-hud')?.classList.contains('visible')&&this._learn?._events?.length){
-      const l=this._learn;
-      return{ms:l.cursorMs,speed:Config.lrn.speed||1,
-        moving:l.active&&l.cursorMs>=0&&(Config.lrn.mode==='freeplay'||l.cursorMs<l._currentNoteMs)};
-    }
     if(this._mode==='file'&&this.midiFile?.events.length){
       const mf=this.midiFile;
       return{ms:mf.positionMs,speed:mf.speed||1,moving:mf.playing};
@@ -5831,10 +5180,10 @@ class App{
           wc.onchange=()=>{e.video_wait_note=wc.checked;};
           wl.append(wc,document.createTextNode('Start on my first note'));
           const fl=document.createElement('label');fl.style.cssText='width:auto;display:flex;align-items:center;gap:4px;cursor:pointer';
-          fl.title='With a song in Learn mode, the clip follows it: song start = Start point; loops and seeking move the clip too';
+          fl.title='While a song plays, the clip follows it: song start = Start point; loops and seeking move the clip too';
           const fc=document.createElement('input');fc.type='checkbox';fc.checked=!!e.video_follow;
           fc.onchange=()=>{e.video_follow=fc.checked;if(fc.checked)this._bgVideoFollow();};
-          fl.append(fc,document.createTextNode('Follow the song (Learn or player)'));
+          fl.append(fc,document.createTextNode('Follow the song'));
           br.appendChild(fl);
           const mk=(txt,fn)=>{const b=document.createElement('button');b.className='action-btn';b.textContent=txt;b.style.cssText='font-size:10px;padding:1px 6px';b.onclick=fn;return b;};
           br.append(wl,
@@ -5858,17 +5207,12 @@ class App{
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById(id)?.classList.add('active');
     document.getElementById('hud').classList.remove('active');
-    const lhud=document.getElementById('learn-hud');
-    const lhudWasVisible=lhud&&lhud.classList.contains('visible');
-    lhud?.classList.remove('visible');
-    if(lhudWasVisible)this._resize();
     this._vizActive=false;
     this._updatePlayerHud();
   }
   showMenu(){
     this._showScreen('screen-menu');
     if(this._mode==='file'&&this.midiFile.playing)this.midiFile.pause();
-    if(this._learn?.active)this._learnStop();
   }
   showVisualizer(){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -5886,25 +5230,8 @@ class App{
 
   showTrackConfig(){
     this._showScreen('screen-tracks');
-    let info=this.midiFile.getChannelInfo();
-    if(!info.length&&this._learn?._events?.length){
-      const chMap={};
-      for(const ev of this._learn._events){
-        const vid=(ev.track??0)*16+(ev.channel??0);
-        if(!chMap[vid])chMap[vid]={ch:ev.channel,track:ev.track??0,vid,name:'',count:0,minNote:127,maxNote:0};
-        chMap[vid].count++;
-        if(ev.note<chMap[vid].minNote)chMap[vid].minNote=ev.note;
-        if(ev.note>chMap[vid].maxNote)chMap[vid].maxNote=ev.note;
-      }
-      info=Object.values(chMap).sort((a,b)=>a.track-b.track||a.ch-b.ch);
-    }
-    document.getElementById('tracks-filename').textContent=this.midiFile.filename||'Learn Mode';
-    // Sync learn-bar button states
-    document.getElementById('tc-mode-wait')?.classList.toggle('on',Config.lrn.mode==='wait');
-    document.getElementById('tc-mode-free')?.classList.toggle('on',Config.lrn.mode==='freeplay');
-    const notationBtn=document.getElementById('tc-notation-toggle');
-    if(notationBtn){notationBtn.classList.toggle('on',!!Config.lrn.notation);notationBtn.textContent=Config.lrn.notation?'On':'Off';}
-    if(this._musicXmlBars){const r=document.getElementById('xml-file-row');if(r&&r.textContent==='No MusicXML loaded')r.textContent='MusicXML loaded';}
+    const info=this.midiFile.getChannelInfo();
+    document.getElementById('tracks-filename').textContent=this.midiFile.filename||'Tracks';
     const NOTE_NAMES=['C','C#','D','D#','E','F','F#','G','A♭','A','B♭','B'];
     const noteName=n=>NOTE_NAMES[n%12]+(Math.floor(n/12)-1);
     // Default palette — ch9 gets grey (drums)
@@ -5916,7 +5243,7 @@ class App{
       this._channelConfig._file=this.midiFile.filename;
     }
     info.forEach(({vid},i)=>{
-      if(!this._channelConfig[vid])this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+      if(!this._channelConfig[vid])this._channelConfig[vid]={muted:false,r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
     });
     const list=document.getElementById('track-channel-list');
     list.innerHTML='';
@@ -5929,12 +5256,7 @@ class App{
         <span class="track-ch-label" title="Track ${track+1}, Ch ${ch+1}">${label}</span>
         <span class="track-ch-meta">${count} notes &nbsp;·&nbsp; ${noteName(minNote)}–${noteName(maxNote)}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
-        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
-        <span class="track-hand-sel" title="Hand assignment for Learn mode">
-          <button class="track-hand-btn${cfg.hand==='right'?' active':''}" data-hand="right">R</button>
-          <button class="track-hand-btn${cfg.hand==='left'?' active':''}" data-hand="left">L</button>
-          <button class="track-hand-btn${cfg.hand==='none'?' active':''}" data-hand="none">—</button>
-        </span>`;
+        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>`;
       const colorEl=row.querySelector('.track-color-swatch');
       colorEl.oninput=e=>{
         const hex=e.target.value;
@@ -5947,409 +5269,17 @@ class App{
         muteBtn.classList.toggle('muted',cfg.muted);
         row.classList.toggle('muted',cfg.muted);
       };
-      row.querySelectorAll('.track-hand-btn').forEach(btn=>{
-        btn.addEventListener('click',()=>{
-          cfg.hand=btn.dataset.hand;
-          row.querySelectorAll('.track-hand-btn').forEach(b=>b.classList.toggle('active',b===btn));
-          if(this._learn?.active)this._learnResetCursor();
-        });
-      });
       row.appendChild(this._routeControls(vid,ch));
       list.appendChild(row);
     });
   }
 
-  // ─── Learn Mode ──────────────────────────────────────────────────────────────
-
-  _buildLearnEvents(){
-    const l=this._learn;
-    const rawEvents=this.midiFile.events; // already parsed, [{timeMs,type,note,velocity,channel}]
-    const active=new Map();
-    const events=[];
-    for(const ev of rawEvents){
-      const k=`${ev.note}-${ev.channel}-${ev.track??0}`;
-      if(ev.type==='noteon'&&ev.velocity>0){
-        active.set(k,ev);
-      } else if(ev.type==='noteoff'||(ev.type==='noteon'&&ev.velocity===0)){
-        const start=active.get(k);
-        if(start){
-          events.push({ms:start.timeMs,durationMs:Math.max(50,ev.timeMs-start.timeMs),note:ev.note,velocity:start.velocity,channel:ev.channel,track:start.track??0});
-          active.delete(k);
-        }
-      }
-    }
-    events.sort((a,b)=>a.ms-b.ms);
-    l._events=events;
-    l._totalMs=events.length?events[events.length-1].ms+events[events.length-1].durationMs:0;
-    // Reset loop region for new file
-    Config.lrn.loop_start_ms=0;
-    Config.lrn.loop_end_ms=0;
-    const aTimeEl=document.getElementById('lhud-loop-a-time');
-    const bTimeEl=document.getElementById('lhud-loop-b-time');
-    if(aTimeEl)aTimeEl.textContent='0:00';
-    if(bTimeEl)bTimeEl.textContent='end';
-    // Update sidebar learn tab info
-    const fileRow=document.getElementById('learn-file-row');
-    if(fileRow)fileRow.textContent=this.midiFile.filename||'File loaded';
-    const infoEl=document.getElementById('learn-info');
-    const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
-    if(infoEl)infoEl.textContent=events.length?events.length+' notes · '+fmt(l._totalMs):'No notes found';
-  }
-
-  _buildLearnEventsFromXmlBars(bars){
-    const events=[];
-    const TREBLE_CH=0,BASS_CH=1;
-    for(const bar of bars){
-      for(const[clef,ch]of[[bar.treble,TREBLE_CH],[bar.bass,BASS_CH]]){
-        if(!clef)continue;
-        let offsetMs=0;
-        for(const chord of clef){
-          const ms=chord.ms??bar.startMs+offsetMs;  // chords from _parseMusicXmlDoc know where they start
-          for(const note of chord.notes)
-            events.push({ms,durationMs:chord.durationMs,note,channel:ch,beat:chord.beat});
-          offsetMs+=chord.durationMs;
-        }
-      }
-    }
-    events.sort((a,b)=>a.ms-b.ms);
-    return events;
-  }
-
-  _buildNotation(){
-    if(!Config.lrn.notation||this._coachActive)return;
-    // OSMD path — raw XML available → iframe renderer handles voices, pedal, arpeggio
-    if(this._musicXmlText){
-      this._notationRenderer.renderXml(this._musicXmlText);
-      return;
-    }
-    // VexFlow path — MIDI-only fallback
-    if(typeof Vex==='undefined')return;
-    if(this._musicXmlBars){
-      this._notationRenderer.render(this._musicXmlBars,this._musicXmlMeta);
-      return;
-    }
-    const meta=this.midiFile?.meta;
-    const events=this._learn?._events;
-    if(!events||!events.length)return;
-    // Beats <-> ms through the file's tempo map, so bars and notes land where they sound
-    const tpb=meta?.ticksPerBeat||480;
-    const segs=[];
-    for(const t of [...(meta?.tempoMap||[])].sort((a,b)=>a.tick-b.tick)){
-      const p=segs[segs.length-1];
-      if(p&&p.tick===t.tick){p.us=t.microsPerBeat;continue;}
-      segs.push({tick:t.tick,us:t.microsPerBeat,ms:p?p.ms+(t.tick-p.tick)*p.us/tpb/1000:0});
-    }
-    if(!segs.length||segs[0].tick>0)segs.unshift({tick:0,us:500000,ms:0});
-    const segAt=(k,v)=>{let s=segs[0];for(const x of segs){if(x[k]>v)break;s=x;}return s;};
-    const beatToMs=b=>{const s=segAt('tick',b*tpb);return s.ms+(b*tpb-s.tick)*s.us/tpb/1000;};
-    const msToBeat=ms=>{const s=segAt('ms',ms);return(s.tick+(ms-s.ms)*1000*tpb/s.us)/tpb;};
-    const barQ=(meta?.timeSig?.num||4)*4/(meta?.timeSig?.denom||4);  // quarter notes per bar
-    const totalMs=this._learn._totalMs||1;
-    const numBars=Math.min(400,Math.max(1,Math.ceil(msToBeat(totalMs)/barQ-1e-6)));
-    // Use hand assignments if configured; otherwise auto-split at middle C.
-    const cfg=this._channelConfig;
-    const hasLeftHand=cfg&&cfg.some&&cfg.some(c=>c?.hand==='left'&&!c?.muted);
-    const _evVid=e=>(e.track??0)*16+(e.channel??0);
-    const notMuted=e=>e.channel!==9&&(!cfg||!cfg[_evVid(e)]?.muted);
-    let trebleEvents,bassEvents;
-    if(hasLeftHand){
-      trebleEvents=events.filter(e=>notMuted(e)&&cfg[_evVid(e)]?.hand!=='left');
-      bassEvents=events.filter(e=>notMuted(e)&&cfg[_evVid(e)]?.hand==='left');
-    }else{
-      // Auto-split: notes ≥ MIDI 60 (middle C) → treble, below → bass
-      trebleEvents=events.filter(e=>notMuted(e)&&e.note>=60);
-      bassEvents=events.filter(e=>notMuted(e)&&e.note<60);
-    }
-    // Each staff's chords per bar, on a 16th-note grid: [bar] -> Map(position in the bar -> {notes, beats})
-    const chordsByBar=evts=>{
-      const out=[];
-      for(const e of evts){
-        const b=msToBeat(e.ms),on=Math.round(b*4)/4;
-        const bar=Math.floor(on/barQ+1e-9);
-        if(bar>=numBars)continue;
-        const pos=on-bar*barQ;
-        const beats=Math.max(0.25,Math.round((msToBeat(e.ms+e.durationMs)-b)*4)/4);
-        const m=out[bar]||(out[bar]=new Map());
-        const c=m.get(pos)||{pos,notes:[],beats:0};
-        if(!c.notes.includes(e.note))c.notes.push(e.note);
-        c.beats=Math.max(c.beats,beats);
-        m.set(pos,c);
-      }
-      return out;
-    };
-    // A bar of one staff as notes and rests that fill it exactly: each chord held until the next
-    // (or its own end), rests in the gaps
-    const fillBar=(m,bar)=>{
-      if(!m)return null;
-      const bar0=bar*barQ,items=[];
-      let at=0;
-      const rest=len=>{while(len>0.24){const d=_vexStep(len)[0];items.push({notes:[],beats:d,ms:beatToMs(bar0+at)});at+=d;len-=d;}};
-      const chords=[...m.values()].sort((a,b)=>a.pos-b.pos);
-      chords.forEach((c,i)=>{
-        if(c.pos>at)rest(c.pos-at);
-        const room=(i+1<chords.length?chords[i+1].pos:barQ)-c.pos;
-        const d=_vexStep(Math.min(c.beats,room))[0];
-        items.push({notes:c.notes.sort((a,b)=>a-b),beats:d,ms:beatToMs(bar0+c.pos)});
-        at=c.pos+d;
-      });
-      if(at<barQ)rest(barQ-at);
-      return items;
-    };
-    const treble=chordsByBar(trebleEvents),bass=chordsByBar(bassEvents);
-    const bars=[];
-    for(let b=0;b<numBars;b++){
-      bars.push({startMs:beatToMs(b*barQ),endMs:beatToMs((b+1)*barQ),treble:fillBar(treble[b],b),bass:fillBar(bass[b],b)});
-    }
-    this._notationRenderer.render(bars,meta);
-  }
-
+  // The sheet strip shows while the coach is connected and has sent a score
   _updateNotationVisibility(){
-    const strip=document.getElementById('notation-strip');
-    if(!strip)return;
-    const show=(this._learn.active&&!!Config.lrn.notation)||this._coachActive;
-    strip.classList.toggle('visible',show);
-    if(!show||this._coachActive)return;  // the coach owns the strip while connected
-    if(typeof Vex==='undefined'){
-      // VexFlow CDN not yet loaded — show placeholder
-      const wrap=document.getElementById('notation-svg-wrap');
-      if(wrap&&!wrap.querySelector('.vex-loading-msg')){
-        const msg=document.createElement('div');
-        msg.className='vex-loading-msg';
-        msg.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:rgba(200,200,200,.6);font-size:13px;pointer-events:none';
-        msg.textContent='Loading sheet music library…';
-        wrap.appendChild(msg);
-        // Retry once VexFlow arrives (poll briefly)
-        let tries=0;
-        const poll=setInterval(()=>{
-          if(typeof Vex!=='undefined'||++tries>30){
-            clearInterval(poll);msg.remove();
-            if(typeof Vex!=='undefined'&&!this._notationRenderer._ready)this._buildNotation();
-          }
-        },500);
-      }
-      return;
-    }
-    if(!this._notationRenderer._ready)this._buildNotation();
+    document.getElementById('notation-strip')?.classList.toggle('visible',!!this._coachActive);
   }
 
-  _learnHandFilter(vid){
-    if(!this._channelConfig)return true;
-    const cfg=this._channelConfig[vid];
-    if(cfg)return cfg.hand!=='none'&&!cfg.muted;
-    // vid<16 means raw MIDI channel from live input — match any track using that channel
-    if(vid<16)return this._channelConfig.some(c=>c&&!c.muted&&c.hand!=='none');
-    return false;
-  }
-
-  _learnResetCursor(){
-    const l=this._learn;
-    this._learnSoundReset();
-    l._pendingChord.clear();
-    const sps=Config.ns.speed_px_per_sec;
-    // Time for a note to travel from the top of canvas down to the piano top
-    const leadInMs=this.layout?this.layout.pianoY/sps*1000:3000;
-    const first=l._events.find(ev=>this._learnHandFilter((ev.track??0)*16+(ev.channel??0)));
-    l._currentNoteMs=first?first.ms:0;
-    // Both modes: start above the canvas so notes enter from the top edge
-    l.cursorMs=l._currentNoteMs-leadInMs;
-    if(Config.lrn.mode==='wait'&&first){
-      for(const ev of l._events){
-        if(ev.ms>=first.ms-30&&ev.ms<=first.ms+50&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0)))
-          l._pendingChord.add(ev.note);
-      }
-    }
-  }
-
-  _learnSeekTo(targetMs){
-    const l=this._learn;
-    this._learnSoundReset();
-    l._pendingChord.clear();
-    const safeMs=Math.max(0,Math.min(targetMs,l._totalMs));
-    if(Config.lrn.mode==='freeplay'){
-      l.cursorMs=safeMs;
-      l._currentNoteMs=safeMs;
-    } else {
-      // Wait mode: snap to the next note at or after the target position
-      const next=l._events.find(ev=>ev.ms>=safeMs&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0)));
-      if(next){
-        l._currentNoteMs=next.ms;
-        l.cursorMs=safeMs;
-        for(const ev of l._events){
-          if(ev.ms>=next.ms-30&&ev.ms<=next.ms+50&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0)))
-            l._pendingChord.add(ev.note);
-        }
-      } else {
-        l.cursorMs=safeMs;
-        l._currentNoteMs=safeMs;
-      }
-    }
-    l._lastFrameWall=this._frameNow;
-    this._bgVideoFollow();
-  }
-
-  _learnAdvanceCursor(){
-    const l=this._learn;
-    const loopEnd=Config.lrn.loop&&Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs;
-    let nextMs=null;
-    for(const ev of l._events){
-      if(ev.ms>l._currentNoteMs+50&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0))&&ev.ms<loopEnd){nextMs=ev.ms;break;}
-    }
-    if(nextMs===null){
-      if(Config.lrn.loop){this._learnSeekTo(Config.lrn.loop_start_ms||0);l._lastFrameWall=this._frameNow;}
-      else this._learnStop();
-      return;
-    }
-    l._currentNoteMs=nextMs;
-    // Don't teleport cursorMs — _learnTick advances it naturally so notes fall smoothly
-    l._pendingChord.clear();
-    for(const ev of l._events){
-      if(ev.ms>=nextMs-30&&ev.ms<=nextMs+50&&this._learnHandFilter((ev.track??0)*16+(ev.channel??0)))
-        l._pendingChord.add(ev.note);
-    }
-  }
-
-  _learnStop(){
-    const l=this._learn; l.active=false;
-    this._learnSoundReset();
-    document.getElementById('lhud-playpause').textContent='▶';
-    this._bgVideoFollow();
-    // Keep HUD visible so the timeline remains accessible for replay/seeking
-    this._updateNotationVisibility();
-  }
-
-  _onLearnNoteOn(note,ch,input='midi'){
-    const l=this._learn;
-    if(!l.active||Config.lrn.mode!=='wait'||input!==(Config.data.instrument.source==='mic'?'mic':'midi'))return;
-    if(!this._learnHandFilter(ch))return;
-    Progress.learn(l._pendingChord.has(note));
-    if(l._pendingChord.has(note)){
-      l._pendingChord.delete(note);
-      if(l._pendingChord.size===0)this._learnAdvanceCursor();
-    } else {
-      this._learnWrongKeys.set(note,performance.now()+450);
-    }
-  }
-
-  _learnTick(now){
-    const l=this._learn;
-    if(!l.active)return;
-    const dt=(now-l._lastFrameWall)*Config.lrn.speed;
-    l._lastFrameWall=now;
-    if(dt<=0||dt>=500)return;
-    const loopEnd=Config.lrn.loop&&Config.lrn.loop_end_ms>0?Config.lrn.loop_end_ms:l._totalMs;
-    if(Config.lrn.mode==='freeplay'){
-      l.cursorMs+=dt; l._currentNoteMs=l.cursorMs;
-      if(l.cursorMs>=loopEnd){
-        if(Config.lrn.loop){this._learnSeekTo(Config.lrn.loop_start_ms||0);l._lastFrameWall=now;}
-        else this._learnStop();
-      }
-    } else {
-      // Wait mode: advance cursor toward the current pending note, then hold until user plays it
-      if(l.cursorMs<l._currentNoteMs)
-        l.cursorMs=Math.min(l.cursorMs+dt,l._currentNoteMs);
-      if(l.cursorMs>=loopEnd){
-        if(Config.lrn.loop){this._learnSeekTo(Config.lrn.loop_start_ms||0);l._lastFrameWall=now;}
-        else this._learnStop();
-      }
-    }
-    if(l.active)this._learnSoundTick();
-    this._bgVideoFollow();
-  }
-
-  _drawLearnNotes(ctx,layout){
-    const l=this._learn;
-    if(!l._events.length||!layout)return;
-    const{pianoY}=layout;
-    const canvasH=ctx.canvas.height;
-    const floorY=Math.min(pianoY,canvasH);
-    const sps=Config.ns.speed_px_per_sec;
-    const ns=Config.ns;
-    const windowEnd=l.cursorMs+Config.lrn.lookahead_ms;
-    for(const ev of l._events){
-      if(ev.ms>windowEnd)break;
-      const timeTillEnd=ev.ms+ev.durationMs-l.cursorMs;
-      if(timeTillEnd<0)continue;
-      const _vid=(ev.track??0)*16+(ev.channel??0);
-      if(!this._channelConfig?.[_vid]||this._channelConfig[_vid].muted)continue;
-      const timeTillStart=ev.ms-l.cursorMs;
-      const yBottom=floorY-Math.max(0,timeTillStart)/1000*sps;
-      const yTop=floorY-timeTillEnd/1000*sps;
-      if(yTop>=floorY)continue;
-      if(yBottom<0)continue;
-      const key=getRect(layout,ev.note);
-      if(!key)continue;
-      const {r,g,b}=resolveNoteColor(ev.note,_vid,ns);
-      const isPending=l._pendingChord.has(ev.note);
-      const isIgnored=this._channelConfig?.[_vid]?.hand==='none';
-      ctx.globalAlpha=isIgnored?0.2:(isPending?0.92:0.5);
-      const clampTop=Math.max(0,yTop), clampBot=Math.min(yBottom,floorY);
-      ctx.fillStyle=`rgb(${r},${g},${b})`;
-      ctx.beginPath();ctx.roundRect(key.x+1,clampTop,key.w-2,clampBot-clampTop,3);ctx.fill();
-      if(isPending){
-        ctx.globalAlpha=1;
-        ctx.strokeStyle=`rgb(${Math.min(255,r+90)},${Math.min(255,g+90)},${Math.min(255,b+90)})`;
-        ctx.lineWidth=2;
-        ctx.beginPath();ctx.roundRect(key.x+1,clampTop,key.w-2,clampBot-clampTop,3);ctx.stroke();
-      }
-    }
-    ctx.globalAlpha=1;
-  }
-
-  startLearn(){
-    const l=this._learn;
-    if(!l._events.length){this._showToast('Load a .mid or .xml file first');return;}
-    if(!this._vizActive)this.showVisualizer();
-    if(this.midiFile.playing)this.midiFile.pause();
-    l.active=true;
-    l._lastFrameWall=this._frameNow;
-    l._sndMs=null; this._fileProg=[]; this._fileProgCh=[];
-    if(l._currentNoteMs<=0||l._currentNoteMs>=l._totalMs)this._learnResetCursor();
-    const hud=document.getElementById('learn-hud');
-    const hudWasHidden=hud&&!hud.classList.contains('visible');
-    if(hud)hud.classList.add('visible');
-    this._updatePlayerHud();
-    if(hudWasHidden)this._resize();
-    const pp=document.getElementById('lhud-playpause');
-    if(pp)pp.textContent='⏸';
-    const loopBtn=document.getElementById('lhud-loop');
-    if(loopBtn)loopBtn.classList.toggle('on',!!Config.lrn.loop);
-    // Sync loop A/B controls visibility and labels
-    const fmt=ms=>{const s=Math.max(0,ms)/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
-    const ctrls=document.getElementById('lhud-loop-ctrls');
-    if(ctrls)ctrls.classList.toggle('visible',!!Config.lrn.loop);
-    const lmS=document.getElementById('lhud-lm-start');
-    const lmE=document.getElementById('lhud-lm-end');
-    const lr=document.getElementById('lhud-loop-region');
-    if(Config.lrn.loop){
-      if(lmS)lmS.classList.add('visible');
-      if(lmE)lmE.classList.add('visible');
-      if(lr)lr.classList.add('visible');
-    }
-    const aTime=document.getElementById('lhud-loop-a-time');
-    const bTime=document.getElementById('lhud-loop-b-time');
-    if(aTime)aTime.textContent=fmt(Config.lrn.loop_start_ms||0);
-    if(bTime)bTime.textContent=Config.lrn.loop_end_ms>0&&Config.lrn.loop_end_ms<l._totalMs?fmt(Config.lrn.loop_end_ms):'end';
-    const spd=document.getElementById('lhud-speed');
-    const spdVal=document.getElementById('lhud-speed-val');
-    if(spd){spd.value=Math.round(Config.lrn.speed*100);if(spdVal)spdVal.textContent=spd.value+'%';}
-    this._updateNotationVisibility();
-  }
-
-  pauseLearn(){
-    const l=this._learn; l.active=false;
-    this._learnSoundReset();
-    const pp=document.getElementById('lhud-playpause');
-    if(pp)pp.textContent='▶';
-    this._bgVideoFollow();
-  }
-
-  resetLearn(){
-    this.pauseLearn();
-    this._learnResetCursor();
-    this._bgVideoFollow();
-  }
-
-  // ─── Sound: tracks, Learn mode and the live keyboard → synth or MIDI outputs ───
+  // ─── Sound: tracks and the live keyboard → synth or MIDI outputs ───
 
   _applyAudio(){
     this._synth.setVolume(Config.au.synth_volume);
@@ -6373,7 +5303,7 @@ class App{
   }
   _routeChanged(vid){
     RouteStore.save(this._channelConfig?._file,this._channelConfig);
-    this.router.allOff(p=>p==='f'+vid||p==='l'+vid);
+    this.router.allOff(p=>p==='f'+vid);
     if(this._mode==='file'&&this.midiFile.playing)this._fileStart(this.midiFile.positionMs,vid);
   }
 
@@ -6405,25 +5335,6 @@ class App{
     if(!cfg||(cfg.muted&&e.type==='noteon'))return;
     this.router.send('f'+vid,cfg,evMsg(e),when,this._instFor(vid));
   }
-
-  // Learn mode sounds the notes the cursor passes: the parts set to — (or all parts), each on
-  // its track's route. Notes are timed by the cursor, so Wait mode holds them back with it.
-  _learnSoundTick(){
-    const l=this._learn, mode=Config.au.learn_sound, from=l._sndMs, to=l.cursorMs;
-    l._sndMs=to;
-    if(mode==='off'||from==null||to<=from||to-from>1000)return;
-    const ev=l._events, now=performance.now(), spd=Config.lrn.speed||1;
-    let lo=0,hi=ev.length;
-    while(lo<hi){const m=lo+hi>>1;ev[m].ms<=from?lo=m+1:hi=m;}
-    for(let i=lo;i<ev.length&&ev[i].ms<=to;i++){
-      const e=ev[i], ch=e.channel??0, vid=(e.track??0)*16+ch, cfg=this._routeFor(vid);
-      if(!cfg||cfg.muted||(mode==='others'&&cfg.hand!=='none'))continue;
-      const inst=this._instFor(vid);
-      this.router.send('l'+vid,cfg,[0x90|ch,e.note,e.velocity||90],undefined,inst);
-      this.router.send('l'+vid,cfg,[0x80|ch,e.note,0],now+e.durationMs/spd,inst);
-    }
-  }
-  _learnSoundReset(){this._learn._sndMs=null;this.router.allOff(p=>p[0]==='l');}
 
   // Every channel message from the MIDI input, plus the mouse and computer keyboard
   // (`computer`), which have no sound of their own so use the synth when live thru is off
@@ -6485,11 +5396,11 @@ class App{
     if(mf.playing)mf.pause(); else mf.play();
     this._playerHudTick(true);
   }
-  // The bar shows while a file is open in the visualizer and Learn mode's bar isn't up
+  // The bar shows while a file is open in the visualizer
   _updatePlayerHud(){
     const el=document.getElementById('player-hud');
     if(!el)return;
-    const show=this._vizActive&&this._mode==='file'&&this.midiFile.events.length>0&&!document.getElementById('learn-hud').classList.contains('visible');
+    const show=this._vizActive&&this._mode==='file'&&this.midiFile.events.length>0;
     if(el.classList.contains('visible')===show)return;
     el.classList.toggle('visible',show);
     this._resize();
@@ -6537,7 +5448,7 @@ class App{
     if(!this._channelConfig)return;
     this._channelConfig.forEach((cfg,vid)=>{if(cfg){this._routeFor(vid);cfg.dest=dest;}});
     RouteStore.save(this._channelConfig._file,this._channelConfig);
-    this.router.allOff(p=>p[0]==='f'||p[0]==='l');
+    this.router.allOff(p=>p[0]==='f');
     if(this._mode==='file'&&this.midiFile.playing)this._fileStart(this.midiFile.positionMs);
     this._refreshTracksTab();
     if(document.getElementById('screen-tracks')?.classList.contains('active'))this.showTrackConfig();
@@ -6550,8 +5461,7 @@ class App{
     const channelColors=[];
     this._channelConfig.forEach((c,vid)=>{
       if(!c||c.muted)return;
-      const dim=(c.hand&&c.hand!=='none')?1:0.35;
-      channelColors[vid]={r:Math.round(c.r*dim),g:Math.round(c.g*dim),b:Math.round(c.b*dim)};
+      channelColors[vid]={r:c.r,g:c.g,b:c.b};
     });
     Config.ns.note_colors={notes:new Array(128).fill(null),channelColors,zones:[]};
     Config.ns.color_mode='script';
@@ -6614,7 +5524,7 @@ class App{
 
   _setupScreens(){
     // Menu
-    document.getElementById('btn-learn-mode').onclick=()=>this.showFileSelect();
+    document.getElementById('btn-play-file').onclick=()=>this.showFileSelect();
     document.getElementById('btn-freeplay').onclick=()=>{this._mode='freeplay';this.showDeviceSelect();};
     document.getElementById('btn-midi-device').onclick=()=>this.showDeviceSelect();
     document.getElementById('btn-settings').onclick=()=>this.showSettings();
@@ -6622,7 +5532,7 @@ class App{
     // Device select
     document.getElementById('btn-device-back').onclick=()=>this.showMenu();
     // Track config
-    document.getElementById('btn-tracks-back').onclick=()=>{this._pendingXmlFile=null;this.showFileSelect();};
+    document.getElementById('btn-tracks-back').onclick=()=>this.showFileSelect();
     document.getElementById('btn-tracks-play').onclick=()=>{
       this._applyChannelConfig();
       this.prevNotes.clear();this._activeNotes?.clear();
@@ -6630,40 +5540,8 @@ class App{
       this.showVisualizer();
       this.startFilePlayback();
     };
-    document.getElementById('btn-tracks-learn').onclick=()=>{
-      this._applyChannelConfig();
-      this.prevNotes.clear();this._activeNotes?.clear();
-      this.showVisualizer();
-      this.startLearn();
-    };
-    // Track config learn-bar controls
-    document.getElementById('tc-mode-wait').onclick=()=>{
-      Config.lrn.mode='wait';
-      document.getElementById('tc-mode-wait').classList.add('on');
-      document.getElementById('tc-mode-free').classList.remove('on');
-      schedSave();
-    };
-    document.getElementById('tc-mode-free').onclick=()=>{
-      Config.lrn.mode='freeplay';
-      document.getElementById('tc-mode-wait').classList.remove('on');
-      document.getElementById('tc-mode-free').classList.add('on');
-      schedSave();
-    };
-    document.getElementById('tc-notation-toggle').onclick=e=>{
-      Config.lrn.notation=!Config.lrn.notation;
-      e.target.classList.toggle('on',Config.lrn.notation);
-      e.target.textContent=Config.lrn.notation?'On':'Off';
-      schedSave();
-    };
-    const tcXmlInput=document.getElementById('tc-xml-input');
-    document.getElementById('tc-xml-browse').onclick=()=>tcXmlInput?.click();
-    tcXmlInput.onchange=e=>{
-      const f=e.target.files[0]; if(!f)return;
-      this._loadMusicXmlFile(f);
-      e.target.value='';
-    };
     // File select
-    document.getElementById('btn-file-back').onclick=()=>{this._pendingXmlFile=null;this.showMenu();};
+    document.getElementById('btn-file-back').onclick=()=>this.showMenu();
     document.getElementById('btn-browse').onclick=()=>document.getElementById('file-input').click();
     document.getElementById('file-input').onchange=e=>{
       if(e.target.files.length)this._handleFileList(e.target.files);
@@ -6736,18 +5614,9 @@ class App{
   }
 
   _handleFileList(files){
-    let midFile=null, xmlFile=null;
-    for(const f of files){
-      const ext=f.name.split('.').pop().toLowerCase();
-      if(ext==='mid'||ext==='midi') midFile=f;
-      else if(ext==='xml'||ext==='musicxml') xmlFile=f;
-    }
-    if(xmlFile) this._pendingXmlFile=xmlFile;
-    if(midFile){
-      this._loadMidiFile(midFile);
-    } else if(xmlFile){
-      this._loadXmlOnlyForLearn(xmlFile);
-    }
+    const midFile=[...files].find(f=>/\.midi?$/i.test(f.name));
+    if(midFile)this._loadMidiFile(midFile);
+    else this._showToast('Choose a .mid file');
   }
 
   async _loadMidiFile(file){
@@ -6755,148 +5624,10 @@ class App{
     this.midiFile.load(buf,file.name);
     this._addRecent(file.name);
     RecentMidiDB.save(file.name,buf).catch(()=>{});
-    this._musicXmlText=null;
     this._mode='file';
     document.getElementById('hud-song').textContent=file.name;
-    this._buildLearnEvents();
-    this._notationRenderer.destroy();
-    if(this._pendingXmlFile){
-      await this._loadMusicXmlFile(this._pendingXmlFile);
-      this._pendingXmlFile=null;
-      Config.lrn.notation=true;
-    }
     this.showTrackConfig();
     this._refreshTracksTab();
-  }
-
-  // Load a MIDI file for learn mode without navigating to the track config screen.
-  // Used by the sidebar Learn tab file picker.
-  async _loadMidiFileForLearn(file){
-    const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
-    const buf=await file.arrayBuffer();
-    this.midiFile.load(buf,file.name);
-    this._addRecent(file.name);
-    RecentMidiDB.save(file.name,buf).catch(()=>{});
-    this._mode='file';
-    document.getElementById('hud-song').textContent=file.name;
-    if(!this._channelConfig||this._channelConfig._file!==file.name){
-      this._channelConfig=[];
-      this._channelConfig._file=file.name;
-      this.midiFile.getChannelInfo().forEach(({vid},i)=>{
-        this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
-      });
-    }
-    this._buildLearnEvents();
-    this._applyChannelConfig();
-    this._notationRenderer.destroy();
-    this._musicXmlText=null; this._musicXmlBars=null; this._musicXmlMeta=null;
-    const xmlRow=document.getElementById('xml-file-row');
-    if(xmlRow)xmlRow.textContent='No MusicXML loaded';
-    this._refreshTracksTab();
-    this._showToast(file.name);
-  }
-
-  // Lesson pushed live from midi-coach: events come pre-timed from the coach (rests and
-  // tempo included); the sheet strip is already showing the same score via CoachLink.
-  _loadCoachLesson(p,autostart){
-    if(!p?.events?.length){this._showToast('Lesson has no notes');return;}
-    if(this._learn?.active)this._learnStop();
-    this.midiFile.stop();
-    this.midiFile.events=[];
-    this.midiFile.durationMs=0;
-    this.midiFile.programs={vid:[],ch:[]};
-    this.midiFile.filename=p.title;
-    const l=this._learn;
-    l._events=p.events.map(e=>({ms:e.ms,durationMs:e.durationMs,note:e.note,channel:e.channel,track:0,beat:e.beat}));
-    l._totalMs=Math.max(...l._events.map(e=>e.ms+e.durationMs));
-    l._currentNoteMs=0;
-    l._pendingChord?.clear();
-    this._musicXmlText=p.xml; this._musicXmlBars=null; this._musicXmlMeta=null;
-    this._channelConfig=[];
-    this._channelConfig[0]={muted:false,hand:'right',r:0,g:230,b:230};
-    this._channelConfig[1]={muted:false,hand:'left',r:180,g:80,b:255};
-    this._channelConfig._file=p.title;
-    this._mode='file';
-    Config.lrn.notation=true;
-    Config.lrn.loop_start_ms=0; Config.lrn.loop_end_ms=0;
-    if(p.learn_mode==='wait'||p.learn_mode==='freeplay')Config.lrn.mode=p.learn_mode;
-    if(p.speed)Config.lrn.speed=p.speed;
-    this.prevNotes.clear();this._activeNotes?.clear();
-    document.getElementById('hud-song').textContent=p.title;
-    const fileRow=document.getElementById('learn-file-row');
-    if(fileRow)fileRow.textContent=p.title;
-    const xmlRow=document.getElementById('xml-file-row');
-    if(xmlRow)xmlRow.textContent=p.title;
-    const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
-    const infoEl=document.getElementById('learn-info');
-    if(infoEl)infoEl.textContent=l._events.length+' notes · '+fmt(l._totalMs);
-    this._refreshTracksTab();
-    this._updatePlayerHud();
-    this._showToast('Lesson: '+p.title);
-    if(autostart){this.showVisualizer();this.startLearn();}
-  }
-
-  async _loadXmlOnlyForLearn(file){
-    try{
-      const text=await file.text();
-      const doc=new DOMParser().parseFromString(text,'application/xml');
-      if(doc.querySelector('parseerror,parsererror')){this._showToast('Invalid XML file');return;}
-      const{bars,meta}=_parseMusicXmlDoc(doc);
-      if(!bars.length){this._showToast('No notes found in MusicXML');return;}
-      this._musicXmlText=text;
-      this._musicXmlBars=bars; this._musicXmlMeta=meta;
-      const events=this._buildLearnEventsFromXmlBars(bars);
-      if(!events.length){this._showToast('No playable notes in XML');return;}
-      const l=this._learn;
-      l._events=events;
-      l._totalMs=events[events.length-1].ms+events[events.length-1].durationMs;
-      // Two-channel config: vid0=treble (right), vid1=bass (left)
-      this._channelConfig=[];
-      this._channelConfig[0]={muted:false,hand:'right',r:0,g:230,b:230};
-      this._channelConfig[1]={muted:false,hand:'left',r:180,g:80,b:255};
-      this._channelConfig._file=file.name;
-      this._mode='file';
-      this.midiFile.filename=file.name;
-      this._addRecent(file.name);
-      Config.lrn.notation=true;
-      this._notationRenderer.destroy();
-      const xmlRow=document.getElementById('xml-file-row');
-      if(xmlRow)xmlRow.textContent=file.name;
-      document.getElementById('hud-song').textContent=file.name;
-      const fileRow=document.getElementById('learn-file-row');
-      if(fileRow)fileRow.textContent=file.name;
-      const fmt=ms=>{const s=ms/1000|0;return(s/60|0)+':'+(s%60+'').padStart(2,'0');};
-      const infoEl=document.getElementById('learn-info');
-      if(infoEl)infoEl.textContent=events.length+' notes · '+fmt(l._totalMs);
-      this.showTrackConfig();
-      this._refreshTracksTab();
-    }catch(e){
-      console.error('XML-only learn error:',e);
-      this._showToast('Failed to load XML for learn mode');
-    }
-  }
-
-  async _loadMusicXmlFile(file){
-    try{
-      const text=await file.text();
-      const doc=new DOMParser().parseFromString(text,'application/xml');
-      if(doc.querySelector('parsererror')){this._showToast('Invalid XML file');return;}
-      const{bars,meta}=_parseMusicXmlDoc(doc);
-      if(!bars.length){this._showToast('No notes found in MusicXML');return;}
-      this._musicXmlText=text;
-      this._musicXmlBars=bars;
-      this._musicXmlMeta=meta;
-      const row=document.getElementById('xml-file-row');
-      if(row)row.textContent=file.name;
-      this._showToast(file.name+' loaded');
-      if(Config.lrn.notation&&this._learn?.active){
-        this._notationRenderer.destroy();
-        this._buildNotation();
-      }
-    }catch(e){
-      console.error('MusicXML load error:',e);
-      this._showToast('Failed to load MusicXML');
-    }
   }
 
   startFilePlayback(){
@@ -6919,12 +5650,9 @@ class App{
     this._channelConfig=[];
     this._channelConfig._file=file.name;
     this.midiFile.getChannelInfo().forEach(({vid},i)=>{
-      this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+      this._channelConfig[vid]={muted:false,r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
     });
     this._applyChannelConfig();
-    this._buildLearnEvents();
-    this._notationRenderer.destroy();
-    this._musicXmlText=null; this._musicXmlBars=null; this._musicXmlMeta=null;
     this.prevNotes.clear();
     this.trails.active.clear();
     this.midiFile.play();
@@ -6935,8 +5663,7 @@ class App{
   _refreshTracksTab(){
     const wrap=document.querySelector('#tp-tracks #tracks-tab-content');
     if(!wrap)return;
-    const hasLearnEvents=!!this._learn?._events?.length;
-    if(this._mode!=='file'||(!this.midiFile.events.length&&!hasLearnEvents)){
+    if(this._mode!=='file'||!this.midiFile.events.length){
       wrap.innerHTML='<p style="color:var(--muted);font-size:12px">No file loaded.</p>';return;
     }
     const PAL=[[0,230,230],[180,80,255],[255,80,80],[80,220,120],[255,190,40],[60,140,255],[255,90,180],[40,220,220],[255,140,40],[160,160,170],[200,255,100],[255,60,120],[100,200,255],[255,220,180],[180,255,200],[220,180,255]];
@@ -6945,18 +5672,9 @@ class App{
       this._channelConfig=[];
       this._channelConfig._file=this.midiFile.filename;
     }
-    let tabInfo=this.midiFile.getChannelInfo();
-    if(!tabInfo.length&&hasLearnEvents){
-      const chMap={};
-      for(const ev of this._learn._events){
-        const vid=(ev.track??0)*16+(ev.channel??0);
-        if(!chMap[vid])chMap[vid]={ch:ev.channel,track:ev.track??0,vid,count:0};
-        chMap[vid].count++;
-      }
-      tabInfo=Object.values(chMap).sort((a,b)=>a.track-b.track||a.ch-b.ch);
-    }
+    const tabInfo=this.midiFile.getChannelInfo();
     tabInfo.forEach(({vid},i)=>{
-      if(!this._channelConfig[vid])this._channelConfig[vid]={muted:false,hand:'right',r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
+      if(!this._channelConfig[vid])this._channelConfig[vid]={muted:false,r:PAL[i%16][0],g:PAL[i%16][1],b:PAL[i%16][2]};
     });
     wrap.innerHTML='';
     tabInfo.forEach(({ch,track,vid,name})=>{
@@ -6966,27 +5684,14 @@ class App{
       row.style.cssText='margin-bottom:6px';
       row.innerHTML=`<span class="track-ch-label" title="Track ${track+1}, Ch ${ch+1}">${name||'Track '+(track+1)}</span>
         <input type="color" class="track-color-swatch" value="${toHex(cfg.r,cfg.g,cfg.b)}" title="Channel colour">
-        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>
-        <span class="track-hand-sel" title="Hand assignment for Learn mode">
-          <button class="track-hand-btn${cfg.hand==='right'?' active':''}" data-hand="right">R</button>
-          <button class="track-hand-btn${cfg.hand==='left'?' active':''}" data-hand="left">L</button>
-          <button class="track-hand-btn${cfg.hand==='none'?' active':''}" data-hand="none">—</button>
-        </span>`;
+        <button class="track-mute-btn${cfg.muted?' muted':''}">${cfg.muted?'Muted':'Active'}</button>`;
       row.querySelector('.track-color-swatch').oninput=e=>{
         const h=e.target.value;
         cfg.r=parseInt(h.slice(1,3),16);cfg.g=parseInt(h.slice(3,5),16);cfg.b=parseInt(h.slice(5,7),16);
         this._applyChannelConfig();
       };
       const mb=row.querySelector('.track-mute-btn');
-      mb.onclick=()=>{cfg.muted=!cfg.muted;mb.textContent=cfg.muted?'Muted':'Active';mb.classList.toggle('muted',cfg.muted);row.classList.toggle('muted',cfg.muted);this._applyChannelConfig();if(cfg.muted)this.router.allOff(p=>p==='f'+vid||p==='l'+vid);};
-      row.querySelectorAll('.track-hand-btn').forEach(btn=>{
-        btn.addEventListener('click',()=>{
-          cfg.hand=btn.dataset.hand;
-          row.querySelectorAll('.track-hand-btn').forEach(b=>b.classList.toggle('active',b===btn));
-          this._applyChannelConfig();
-          if(this._learn?.active)this._learnResetCursor();
-        });
-      });
+      mb.onclick=()=>{cfg.muted=!cfg.muted;mb.textContent=cfg.muted?'Muted':'Active';mb.classList.toggle('muted',cfg.muted);row.classList.toggle('muted',cfg.muted);this._applyChannelConfig();if(cfg.muted)this.router.allOff(p=>p==='f'+vid);};
       row.appendChild(this._routeControls(vid,ch));
       wrap.appendChild(row);
     });

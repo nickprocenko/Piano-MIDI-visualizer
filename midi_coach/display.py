@@ -171,8 +171,6 @@ class DisplayHub:
         self._status = ""
         self._cursor: dict | None = None
         self._cursor_at = 0.0  # time.monotonic() of the last cursor message
-        self._lesson: dict | None = None
-        self._lesson_version = 0
         self._session: dict = {"type": "session", "active": False}
         self._practice: dict | None = None
         self._atlas: dict | None = None
@@ -314,8 +312,7 @@ class DisplayHub:
         self._broadcast(msg)
 
     def cursor(self, beat: float, beats_per_sec: float = 0.0, live: bool = False, until: float | None = None) -> None:
-        """live=True: a practice session drives the cursor (the visualizer then lets it
-        override Learn Mode's own scrolling); otherwise it's just positioning.
+        """live=True: a practice session drives the cursor; otherwise it's just positioning.
         until: the cursor moves at beats_per_sec from beat and parks there (Learn mode
         flowing through a rest to the chord it waits for)."""
         msg = {"type": "cursorBeat", "beat": round(beat, 4), "bps": round(beats_per_sec, 4), "live": live}
@@ -335,18 +332,6 @@ class DisplayHub:
             return None
         beat = cur["beat"] + cur["bps"] * min(time.monotonic() - at, 2.0)
         return min(beat, cur["until"]) if "until" in cur else beat
-
-    def lesson(self, payload: dict) -> int:
-        """Publish a lesson for the visualizer's Learn Mode (title, xml, events, mode...)."""
-        with self._lock:
-            self._lesson_version += 1
-            self._lesson = {**payload, "version": self._lesson_version}
-        self._broadcast({"type": "lesson", "version": self._lesson_version, "title": payload.get("title"), "autostart": payload.get("autostart", False)})
-        return self._lesson_version
-
-    def lesson_payload(self) -> dict | None:
-        with self._lock:
-            return self._lesson
 
     def session(self, active: bool, mode: str | None = None) -> None:
         msg = {"type": "session", "active": active, "mode": mode}
@@ -427,13 +412,11 @@ class DisplayHub:
 
     def snapshot(self) -> list[dict]:
         with self._lock:
-            # A page that connects late gets the latest lesson, but never auto-started.
-            lesson = [{"type": "lesson", "version": self._lesson_version, "title": self._lesson.get("title"), "autostart": False}] if self._lesson else []
             practice = [self._practice] if self._practice else []
             practice += [self._atlas] if self._atlas else []
             if not self._score_payload:
-                return lesson + practice + [{"type": "status", "text": "Pick a lesson, or ask the Maestro for one."}]
-            out = [self._score_message(self._score_payload["path"])] + lesson + practice + [self._session]
+                return practice + [{"type": "status", "text": "Pick a lesson, or ask the Maestro for one."}]
+            out = [self._score_message(self._score_payload["path"])] + practice + [self._session]
             if self._marks:
                 out.append({"type": "marks", "reset": True, "marks": [{"beat": b, "pitch": p, "status": s} for (b, p), s in self._marks.items()]})
             if self._heat:
@@ -547,11 +530,6 @@ def _make_handler(hub: DisplayHub):
                 return self._tts(path)
             if path == "/version":  # for midi_coach.launch: is this copy older than the code on disk?
                 return self._send(200, json.dumps({"started": hub.started, "pid": os.getpid()}).encode(), "application/json")
-            if path == "/lesson":
-                payload = hub.lesson_payload()
-                if not payload:
-                    return self._send(404, b'{"error":"no lesson"}', "application/json")
-                return self._send(200, json.dumps(payload).encode(), "application/json")
             if path == "/score":
                 payload = hub.score_payload()
                 if not payload:

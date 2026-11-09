@@ -727,8 +727,7 @@ your answer. From a terminal: `python -m midi_coach.bugs answer <id> 2` (or your
 ## Custom lessons, pushed live
 
 Ask Claude for an exercise and it appears on the coach page **immediately** — no file to
-save or load. Ask for it "in the visualizer" too and it is also pushed into the visualizer's
-Learn Mode (falling notes plus sheet music). For example:
+save or load. For example:
 
 - *"Write me a 4-bar left-hand exercise for the jump in bar 12."*
 - *"Make a lesson out of my three worst bars from that take, right hand only."*
@@ -840,12 +839,6 @@ bar — the one leaving the fewest accidentals — and only change it where the 
 key for a while: about six bars for a modulation that lasts (a last chorus a step up), twice that
 for a passage that comes back. A borrowed chord or a short excursion gets accidentals instead, as
 a printed score would.
-
-For the visualizer push (`to_visualizer=True`) the visualizer must be connected (Settings →
-Hardware → *Practice Coach* → Connect; it
-reconnects automatically after a reload). A lesson that arrives while you're in the middle
-of something replaces the current Learn Mode song; a page that connects later receives the
-latest lesson without auto-starting it.
 
 ## Live sheet music
 
@@ -988,8 +981,7 @@ Good to know:
   reload the YouTube tab (the YouTube tab in the coach says when that's needed).
 
 **In the web visualizer:** Settings → Hardware → *Practice Coach (Claude)* → Connect. The
-sheet-music strip then mirrors the coach (it takes over the strip from Learn Mode while
-connected). When the visualizer runs from GitHub Pages, Chrome may ask to allow access to
+sheet-music strip then mirrors the coach while connected. When the visualizer runs from GitHub Pages, Chrome may ask to allow access to
 devices on your local network — allow it, since the coach runs on `127.0.0.1`.
 
 ## Setup (Windows)
@@ -1072,8 +1064,8 @@ this and leave `MIDI_COACH_INPUT` unset — the JUNO is picked automatically.
 | `maestro_inbox` | Questions you asked the Maestro at the keyboard that couldn't be answered then (Claude Code missing, signed out, usage limit), each with what you were practicing; empties the inbox once read |
 | `say` | Speak a short comment aloud on the coach page (browser voice; mute with the page's Voice switch) |
 | `transcribe_take` | Write a take out as sheet music (a two-staff lesson): Record-mode takes use their metronome grid, others get an estimated tempo or the `bpm` you give |
-| `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and show it on the coach page (`to_visualizer` also pushes it into Learn Mode) |
-| `send_lesson` | Show an existing lesson or reference on the coach page (`to_visualizer`: Learn Mode too) |
+| `create_lesson` | Write a lesson (tinyNotation / MusicXML / excerpt) and show it on the coach page |
+| `send_lesson` | Show an existing lesson or reference on the coach page |
 | `organize_lesson` | Move a lesson or reference into a category of the page's Songs / Lessons panel (optionally renaming it); takes and part choices follow |
 | `start_exam` | Start (or resume) a mock exam for a grade (`initial`, `g1`..`g8`) on the coach page; see [Mock exams](#mock-exams) |
 | `exam_report` | Marks and written report of a finished mock exam (the latest, or of a grade or id), and the exam in progress |
@@ -1116,7 +1108,7 @@ there's a keyboard part for the hands — the sung line of a song lesson is neve
 piano. The piano sheet puts the vocals on a staff above the piano and the pedals on one below.
 
 Your answer is saved with `set_parts` (in `<home>/part_choices.json`), and recording,
-comparison, playback, the score and Learn Mode all use those parts from then on. Drums are
+comparison, playback and the score all use those parts from then on. Drums are
 always left out unless asked for by part number. If the file changes so its parts no longer
 match, the saved choice is ignored and you're asked again.
 

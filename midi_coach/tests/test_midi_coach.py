@@ -1552,11 +1552,10 @@ def test_build_lesson_two_hands(ref):
     lines = lessons.describe(score, side)
     assert lines[0] == "1: RH G4@1 A4@2 B4@3 C5@4 | LH G2+B2+D3@1"
     assert lines[1] == "2: RH D5@1 D5@4 C5@4.5 | LH G2@1"  # rest on beat 3 respected
-    events = lessons.learn_events(score, side)
-    d5 = [e for e in events if e["note"] == 74]
-    assert [e["ms"] for e in d5] == [2000.0, 3500.0]  # 120 bpm: bar 2 starts at 2 s
-    assert [e["beat"] for e in d5] == [4.0, 7.0]  # the sheet's beats, for the visualizer's cursor
-    assert {e["channel"] for e in events} == {0, 1}
+    d5 = [n for n in score.notes if n.pitch == 74]
+    assert [round(n.start * 1000, 1) for n in d5] == [2000.0, 3500.0]  # 120 bpm: bar 2 starts at 2 s
+    assert [round(n.beat, 4) for n in d5] == [4.0, 7.0]  # the sheet's beats
+    assert {side(n) for n in score.notes} == {"right", "left"}
     # Lessons live in the reference library.
     assert library.resolve_reference("g warm-up").name == "g-warm-up.musicxml"
 
@@ -1739,20 +1738,16 @@ def test_create_lesson_tool_publishes(ref, monkeypatch):
     monkeypatch.setattr(server, "hub", display.DisplayHub())
 
     async def run():
-        page_only = await server.create_lesson("Scale", right="c4 d e f g a b c'")
-        assert page_only["sent"]["lesson_version"] is None and server.hub.lesson_payload() is None
-        assert server.hub.score_path == page_only["path"]  # on the coach page, ready for its menu
-        out = await server.create_lesson("Scale", right="c4 d e f g a b c'", practice_mode="rehearsal", tempo_percent=70, to_visualizer=True)
+        out = await server.create_lesson("Scale", right="c4 d e f g a b c'")
+        assert "viewers_connected" in out["sent"]
+        assert server.hub.score_path == out["path"]  # on the coach page, ready for its menu
         assert out["notes"] == {"right": 8, "left": 0} and out["bars"] == 2, out
-        lesson = json.loads(urllib.request.urlopen(server.hub.url + "lesson").read())
-        assert lesson["learn_mode"] == "freeplay" and lesson["speed"] == 0.7 and lesson["autostart"]
-        assert len(lesson["events"]) == 8 and lesson["xml"].lstrip().startswith("<?xml")
+        score = json.loads(urllib.request.urlopen(server.hub.url + "score").read())
+        assert score["xml"].lstrip().startswith("<?xml")
         bad = await server.create_lesson("Bad", right="c4 x9")
         assert "error" in bad
-        again = await server.send_lesson("etude", to_visualizer=True)  # a MIDI reference becomes a lesson too
-        assert again["sent"]["lesson_version"] == 2
-        lesson = json.loads(urllib.request.urlopen(server.hub.url + "lesson").read())
-        assert lesson["xml"].lstrip().startswith("<?xml")
+        again = await server.send_lesson("etude")  # a MIDI reference shows on the page too
+        assert "viewers_connected" in again["sent"] and server.hub.score_path == again["path"]
 
     try:
         asyncio.run(run())
