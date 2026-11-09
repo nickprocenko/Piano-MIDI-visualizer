@@ -494,7 +494,10 @@ def test_live_wait_mode_names_the_right_key_after_the_same_wrong_one(ref):
     sess.on_message(0.1, _on(63))  # a different wrong key: no hint yet
     sess.on_message(0.2, _on(63))  # the same one again: the flash names C5
     flashes = [e for e in hub.events if e[0] == "flash"]
-    assert flashes == [("flash", "C#4"), ("flash", "Eb4"), ("flash", "Eb4", "C5")]
+    from midi_coach import fingering
+
+    finger = {k[1]: f for k, (_, f) in fingering.score_fingers(ref).items() if k[0] == round(notes[0].start, 4)}[72]
+    assert flashes == [("flash", "C#4"), ("flash", "Eb4"), ("flash", "Eb4", f"C5 ({finger})")]  # with its finger
 
 
 def test_live_wait_mode(ref):
@@ -2299,11 +2302,12 @@ def test_falling_notes_come_with_the_score(ref, monkeypatch):
     notes = hub.score_payload()["notes"]
     assert len(notes) == len(ref.notes)
     by_start = {(round(n.beat, 3), n.pitch): n for n in ref.notes}
-    for beat, length, pitch, role in notes:
+    for beat, length, pitch, role, finger in notes:  # each hand's note with its finger (fingering.py)
         n = by_start[(beat, pitch)]
         assert role == ("right" if pitch >= 60 else "left")
         assert length == pytest.approx(ref.beat_of(n.end) - n.beat, abs=1e-3)
-    assert {length for _, length, pitch, _ in notes if pitch >= 60} == {0.5}  # eighth notes
+        assert 1 <= finger <= 5
+    assert {length for _, length, pitch, *_ in notes if pitch >= 60} == {0.5}  # eighth notes
 
 
 def _write_drifting_band(path, bars=24):

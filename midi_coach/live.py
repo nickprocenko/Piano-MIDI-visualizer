@@ -28,6 +28,7 @@ import statistics
 import threading
 import time
 
+from . import fingering
 from .analysis import REF_GROUP_TOL, group_onsets
 from .display import DisplayHub
 from .midi_io import Accompanist, build_events
@@ -112,6 +113,7 @@ class LiveSession:
         self.bar_stats: dict[int, dict] = {}
         self.slips: list[dict] = []  # wait mode: wrong key vs the chord it was waiting for
         self._wrong_run: tuple[tuple[int, int], int] | None = None  # ((chord, key), times in a row)
+        self._fingers: dict | None = None  # fingering.score_fingers, on the first hint
         # wait mode
         self._idx = 0
         self._pending: dict[int, list[Note]] = {}
@@ -151,9 +153,32 @@ class LiveSession:
         times = self._wrong_run[1] + 1 if self._wrong_run and self._wrong_run[0] == key else 1
         self._wrong_run = (key, times)
         if times >= HINT_AFTER and expected:
-            self.hub.flash(note_name(pitch), hint=" ".join(note_name(p) for p in sorted(set(expected))))
+            fingers = self._fingers_for(chord, expected)
+            self.hub.flash(note_name(pitch), hint=" ".join(
+                note_name(p) + (f" ({fingers[p][1]})" if p in fingers else "") for p in sorted(set(expected))))
+            # Said once per chord, and only when the page asked for it (Sheet ▸ Say the fingering)
+            if times == HINT_AFTER and fingers and getattr(self.hub, "speak_fingers", False):
+                p = min(fingers)
+                self.hub.say(fingering.correction(note_name(p), *fingers[p]))
         else:
             self.hub.flash(note_name(pitch))
+
+    def _fingers_for(self, chord: int, expected: list[int]) -> dict[int, tuple[str, int]]:
+        """{pitch: (hand, finger)} for the keys chord idx waits for (fingering.py), worked out
+        once per run, the same as the falling notes show; empty for a named part (flute...)."""
+        if self._fingers is None:
+            try:
+                self._fingers = fingering.score_fingers(self.score)
+            except Exception:  # fingering is a help; it never breaks a run
+                self._fingers = {}
+        if not self._fingers or not 0 <= chord < len(self.groups):
+            return {}
+        out = {}
+        for n in self.groups[chord].notes:
+            f = self._fingers.get((round(n.start, 4), n.pitch))
+            if f and n.pitch in expected:
+                out[n.pitch] = f
+        return out
 
     def beat_at(self, ref_t: float) -> tuple[float, float]:
         """(beat, beats per reference second) at a reference time."""

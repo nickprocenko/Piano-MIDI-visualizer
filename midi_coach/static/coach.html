@@ -1200,6 +1200,9 @@
     <button data-show="both" title="The sheet above, the falling notes under it">Both</button>
   </span></span>
   <label class="roll-only" title="The letter name printed inside each falling note (sharps or flats as the piece's key suggests). Pick Falling notes or Both to see them."><input type="checkbox" id="roll-names"> Note names on falling notes</label>
+  <label class="roll-only" title="The finger the coach suggests for each note of the hands (1 = thumb ... 5 = little finger), on the falling note. Pick Falling notes or Both to see them."><input type="checkbox" id="roll-fingers"> Finger numbers on falling notes</label>
+  <label class="roll-only" title="A pair of hands plays the piece on the falling notes' keyboard with those fingers, so you can see the fingering before you try it"><input type="checkbox" id="roll-hands"> Hands on the keys</label>
+  <label title="In Learn and Rehearse, when you press the same wrong key twice, the coach says which hand and finger plays the right one"><input type="checkbox" id="say-fingers"> Say the fingering</label>
   <span id="sheet-only-note">The settings below change the sheet: pick Sheet or Both to see them.</span>
   <span class="menu-row sheet-only">Labels <span class="seg" id="aid-level" aria-label="How much the sheet is labeled">
     <button data-aid="all" title="Note names and counting on every bar. The quickest start, but lean on it and you learn to read the labels, not the music">Easy</button>
@@ -3767,6 +3770,16 @@ document.querySelectorAll('#view button').forEach(b => b.addEventListener('click
 setView(store.get('show', 'sheet'));
 $('roll-names').checked = coachRoll.names();
 $('roll-names').addEventListener('change', e => coachRoll.showNames(e.target.checked));
+$('roll-fingers').checked = coachRoll.fingers();
+$('roll-fingers').addEventListener('change', e => coachRoll.showFingers(e.target.checked));
+$('roll-hands').checked = coachRoll.hands();
+$('roll-hands').addEventListener('change', e => coachRoll.showHands(e.target.checked));
+// Say the fingering: the server's live run speaks it (display.speak_fingers), told on load and on change
+$('say-fingers').checked = store.get('sayFingers', '1') === '1';
+const sendSayFingers = () => fetch('cmd/speak_fingers', {method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({on: $('say-fingers').checked})}).catch(() => {});
+$('say-fingers').addEventListener('change', e => { store.set('sayFingers', e.target.checked ? '1' : ''); sendSayFingers(); });
+sendSayFingers();
 
 // The Maestro's page_control: the controls are set as if clicked, so their own handlers run.
 function pageControl(msg) {

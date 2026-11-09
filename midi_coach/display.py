@@ -109,7 +109,9 @@ def roll_notes(score: Score) -> list[list]:
     """The notes for the coach page's falling-notes view, as [beat, length in beats, pitch, role]
     with the role the Playing menu shows and hides (right, left, pedals, vocals, a named part,
     or 'track:<index>' for a backing track: the page draws those only when shown). Drums are
-    left out, as on the sheet."""
+    left out, as on the sheet. A hand's note has a fifth item, its finger (fingering.py: 1 =
+    thumb ... 5), for the finger numbers and the animated hands."""
+    from . import fingering
     from .analysis import side_resolver
     from .notes import HAND_ROLES, effective_roles, playable_parts, select_notes
 
@@ -122,6 +124,7 @@ def roll_notes(score: Score) -> list[list]:
                  if n.part not in mine and n.part not in drums and not is_hand(score.roles.get(n.part))])
     roles = effective_roles(score) or {p.index: "both" for p in playable_parts(score)}
     side = side_resolver(score)
+    fingers = fingering.score_fingers(score)
     out = []
     for n in score.notes:
         role = roles.get(n.part)
@@ -131,6 +134,10 @@ def roll_notes(score: Score) -> list[list]:
             role = f"track:{n.part}"
         elif role in HAND_ROLES:
             role = side(n)
+            finger = fingers.get((round(n.start, 4), n.pitch))
+            if finger and finger[0] == role:
+                out.append([round(n.beat, 3), length(n), n.pitch, role, finger[1]])
+                continue
         out.append([round(n.beat, 3), length(n), n.pitch, role])
     return out
 
@@ -177,7 +184,10 @@ class DisplayHub:
         self._practice: dict | None = None
         self._atlas: dict | None = None
         # name -> callable(body: dict) -> dict, for the coach page's POST /cmd/<name>
-        self.commands: dict = {}
+        self.commands: dict = {"speak_fingers": self._speak_fingers}
+        # Learn mode: the coach says which finger plays the key you keep missing (live.py), when
+        # the page's Sheet ▸ Say the fingering is on
+        self.speak_fingers = False
         # callable(audio: bytes) -> dict, for POST /voice (push-to-talk recordings)
         self.voice_handler = None
         # callable(audio: bytes) -> {heard}, for POST /voice/transcribe (an answer said aloud, no chat)
@@ -396,6 +406,11 @@ class DisplayHub:
         """New songs turned up in the song folders or Downloads (songwatch.py): [{title, path,
         folder}]. The page refreshes its Songs list and offers to open them. Not replayed."""
         self._broadcast({"type": "songs_added", "songs": songs})
+
+    def _speak_fingers(self, body: dict) -> dict:
+        """POST /cmd/speak_fingers {on}: the page's Say the fingering box."""
+        self.speak_fingers = bool(body.get("on"))
+        return {"ok": True, "on": self.speak_fingers}
 
     def flash(self, text: str, hint: str | None = None) -> None:
         """A short message over the sheet (a wrong key's name). hint: the key(s) to play instead,

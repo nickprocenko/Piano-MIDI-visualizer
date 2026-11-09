@@ -94,7 +94,7 @@ def test_clean_is_saved_per_file_and_redraws_the_sheet(band):
     payload = hub.score_payload()
     assert payload["playable"]["on"] and payload["playable"]["warning"] is None
     assert "cleaned for two hands" in payload["xml"]
-    assert all(role in ("right", "left") for *_, role in payload["notes"])
+    assert all(role in ("right", "left") for _, _, _, role, *_ in payload["notes"])
 
     library.save_hands(score, {0: "right", 1: "left"})  # a new part choice keeps Clean on
     assert library.playable_chosen(band)
