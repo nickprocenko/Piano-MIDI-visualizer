@@ -215,7 +215,7 @@ class LedOutput:
             enabled=bool(data.get("enabled", False)),
             transport=transport,
             port=str(data.get("port", "COM5")),
-            baudrate=int(data.get("baudrate", 115200)),
+            baudrate=int(data.get("baudrate", 921600)),
             ble_address=str(data.get("ble_address", "")).strip(),
             ble_service_uuid=str(data.get("ble_service_uuid", "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")).strip(),
             ble_char_uuid=str(data.get("ble_char_uuid", "6E400002-B5A3-F393-E0A9-E50E24DCCA9E")).strip(),

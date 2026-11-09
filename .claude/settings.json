@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pwd -W)",
+      "Bash(\"C:/Program Files/Google/Chrome/Application/chrome.exe\" --headless=new --disable-gpu --allow-file-access-from-files --virtual-time-budget=30000 --dump-dom \"file:///$\\(pwd -W\\)/probe.html\")",
+      "Bash(python -c ' *)"
+    ]
+  }
+}

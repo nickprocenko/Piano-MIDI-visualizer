@@ -11,7 +11,7 @@ import time
 
 import mido
 
-from .notes import MIDI_SUFFIXES, MUSICXML_SUFFIXES, Note, Score, load_score
+from .notes import HAND_ROLES, MIDI_SUFFIXES, ROLES, MUSICXML_SUFFIXES, Note, Score, load_score
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 REF_SUFFIXES = MIDI_SUFFIXES | MUSICXML_SUFFIXES
@@ -26,18 +26,91 @@ def home() -> pathlib.Path:
     return path
 
 
-def reference_folders() -> list[pathlib.Path]:
-    folders: list[pathlib.Path] = []
-    config_path = pathlib.Path(os.environ.get("MIDI_COACH_CONFIG") or REPO_ROOT / "config.json")
+def profile_home() -> pathlib.Path:
+    """The active profile's own data folder (see profiles.py): <home> itself for the Default profile."""
+    from . import profiles
+
+    return profiles.data_dir()
+
+
+def derived_path(source: pathlib.Path | str, kind: str, extra: str = "") -> pathlib.Path:
+    """Cache file for something worked out from a reference (a recovered beat grid, a piano
+    sheet...). Named after the source's path, size and date plus `extra` (e.g. the part
+    choice), so editing the file or changing the choice gives a new name and the old result
+    is simply never used again. The folder is always safe to delete."""
+    import hashlib
+
+    p = pathlib.Path(source)
+    st = p.stat()
+    key = hashlib.sha1(f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}|{extra}".encode()).hexdigest()[:12]
+    folder = home() / "derived"
+    folder.mkdir(exist_ok=True)
+    stem = re.sub(r"[^A-Za-z0-9]+", "-", p.stem).strip("-")[:40] or "file"
+    return folder / f"{stem}-{key}.{kind}"
+
+
+def _config_path() -> pathlib.Path:
+    return pathlib.Path(os.environ.get("MIDI_COACH_CONFIG") or REPO_ROOT / "config.json")
+
+
+def _read_config() -> dict:
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-        folders += [pathlib.Path(f) for f in data.get("search_folders", [])]
+        data = json.loads(_config_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        pass
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def song_sources() -> dict:
+    """Where songs come from (the page's File → Song folders): the folders the user chose
+    (config.json `search_folders`, shared with the desktop visualizer), the ones always
+    searched, whether the Songs panel may also look on bitmidi.com, and whether new songs in
+    Downloads are taken into the library as they arrive (songwatch.py)."""
+    from . import songfind
+
+    data = _read_config()
+    chosen = [str(f) for f in data.get("search_folders", [])]
+    extra = os.environ.get("MIDI_COACH_REFERENCE_DIRS", "")
+    fixed = [p for p in extra.split(os.pathsep) if p.strip()] + [str(home() / "references"), str(profile_home() / "lessons")]
+    return {"folders": [{"path": f, "found": pathlib.Path(f).is_dir()} for f in chosen],
+            "always": fixed, "online": bool(data.get("online_search", True)),
+            "downloads": str(home() / "references" / "bitmidi"),
+            "watch_downloads": bool(data.get("watch_downloads", True)),
+            "downloads_folder": str(songfind.downloads_dir())}
+
+
+def set_song_sources(folders: list[str] | None = None, online: bool | None = None,
+                     watch_downloads: bool | None = None) -> dict:
+    """Save the chosen folders and the online and Downloads switches into config.json, keeping
+    its other settings."""
+    data = _read_config()
+    if folders is not None:
+        clean: list[str] = []
+        for f in folders:
+            f = str(f).strip().strip('"')
+            if not f:
+                continue
+            if not pathlib.Path(f).expanduser().is_dir():
+                raise FileNotFoundError(f"There's no folder at {f}.")
+            f = str(pathlib.Path(f).expanduser().resolve()).replace("\\", "/")
+            if f.lower() not in {c.lower() for c in clean}:
+                clean.append(f)
+        data["search_folders"] = clean
+    if online is not None:
+        data["online_search"] = bool(online)
+    if watch_downloads is not None:
+        data["watch_downloads"] = bool(watch_downloads)
+    path = _config_path()
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return song_sources()
+
+
+def reference_folders() -> list[pathlib.Path]:
+    folders = [pathlib.Path(f) for f in _read_config().get("search_folders", [])]
     extra = os.environ.get("MIDI_COACH_REFERENCE_DIRS", "")
     folders += [pathlib.Path(p) for p in extra.split(os.pathsep) if p.strip()]
     folders.append(home() / "references")
-    folders.append(home() / "lessons")
+    folders.append(profile_home() / "lessons")
     seen, out = set(), []
     for f in folders:
         key = str(f).lower()
@@ -47,11 +120,14 @@ def reference_folders() -> list[pathlib.Path]:
     return out
 
 
+BROKEN_DIR = "_broken"  # unreadable downloads are moved into a folder of this name and skipped
+
+
 def scan_references() -> list[pathlib.Path]:
     files: dict[str, pathlib.Path] = {}
     for folder in reference_folders():
         for f in folder.rglob("*"):
-            if f.is_file() and f.suffix.lower() in REF_SUFFIXES:
+            if f.is_file() and f.suffix.lower() in REF_SUFFIXES and BROKEN_DIR not in f.relative_to(folder).parts:
                 files.setdefault(str(f).lower(), f)
     return sorted(files.values(), key=lambda p: p.name.lower())
 
@@ -84,6 +160,8 @@ def resolve_reference(ref: str) -> pathlib.Path:
     path = pathlib.Path(ref).expanduser()
     if path.is_file():
         return path
+    if path.is_absolute():  # a file that was there: a title search could land on a different piece
+        raise FileNotFoundError(f"{path.name} isn't in {path.parent} any more (moved or deleted).")
     hits = find_references(ref, limit=5)
     if not hits:
         folders = [str(f) for f in reference_folders()]
@@ -105,9 +183,200 @@ def get_score(ref: str) -> Score:
         score = cached[1]
     else:
         score = load_score(path)
+        if path.suffix.lower() in MIDI_SUFFIXES and score.played_live:
+            score = _regridded(score, path)
         _score_cache[str(path)] = (mtime, score)
-    score.hands = load_hands(score)
+    if score.played_live and path.suffix.lower() in MIDI_SUFFIXES and cleanup_chosen(score.path):
+        cached = _score_cache.get(f"{path}|cleaned")
+        if cached and cached[0] == mtime:
+            score = cached[1]
+        else:
+            score = _cleaned(score, path) or score
+            _score_cache[f"{path}|cleaned"] = (mtime, score)
+    score.roles = load_roles(score)
+    score.hands = {i: r for i, r in score.roles.items() if r in HAND_ROLES}
+    if score.playing not in score.roles.values():
+        score.playing = default_part(score)
+    if path.suffix.lower() in MIDI_SUFFIXES and playable_chosen(score.path):
+        from . import playable
+
+        key = (mtime, id(score), tuple(sorted(score.roles.items())))
+        cached = _score_cache.get(f"{path}|playable")
+        if cached and cached[0] == key:
+            return cached[1]
+        score = playable.apply(score)
+        _score_cache[f"{path}|playable"] = (key, score)
     return score
+
+
+def _regridded(score: Score, path: pathlib.Path) -> Score:
+    """The score on its recovered beat grid, if one can be found (cached on disk)."""
+    from . import regrid
+
+    cache = derived_path(path, "beatmap.json", f"regrid-v{regrid.VERSION}")
+    try:
+        data = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        found = regrid.track(score.notes, score.tempos[0][1] if score.tempos else 120.0)
+        data = {"failed": True} if found is None else {"map": found[0].to_json(), "quality": found[1]}
+        try:
+            cache.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            pass
+    if data.get("failed"):
+        return score  # truly free playing: stays played_live
+    return regrid.apply(score, regrid.BeatMap.from_json(data["map"]), data["quality"])
+
+
+def _cleaned(score: Score, path: pathlib.Path) -> Score | None:
+    """Auto clean: the score on a beat followed from the playing although it isn't steady
+    enough to trust unasked (cached on disk). None if that fits no better than the file's
+    own grid. Like any regrid it changes the notation only; notes keep their real times."""
+    from . import regrid
+
+    cache = derived_path(path, "beatmap.json", f"cleanup-v{regrid.VERSION}.{CLEANUP_PICK}")
+    try:
+        data = json.loads(cache.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        floor = regrid.file_grid_share(score)
+        found = [f for f in regrid.track_free(score.notes, score.tempos[0][1] if score.tempos else 120.0)
+                 if f[1]["within_35ms"] > floor]
+        if not found:
+            data = {"failed": True}
+        else:
+            beat_map, quality = _most_readable(score, found)
+            data = {"map": beat_map.to_json(), "quality": {**quality, "cleaned": True}}
+        try:
+            cache.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            pass
+    if data.get("failed"):
+        return None
+    return regrid.apply(score, regrid.BeatMap.from_json(data["map"]), data["quality"])
+
+
+CLEANUP_PICK = 2  # bump when the choice between Auto clean maps changes, so cached maps are re-picked
+
+
+def _most_readable(score: Score, found: list) -> tuple:
+    """Of maps that fit the playing about equally well (best fit first), the one whose sheet
+    reads best: fewest engraving rules broken, then the plainest rhythms (regrid.rhythm_cost:
+    the same notes can be dotted eighths tied over the beat on one grid and plain eighths on
+    another, and no rule sees that). Ties keep the better fit."""
+    if len(found) == 1:
+        return found[0]
+    from . import engraving, regrid, sheet
+
+    ranked = []
+    for i, (beat_map, quality) in enumerate(found):
+        cleaned = regrid.apply(score, beat_map, quality)
+        cleaned.roles = load_roles(cleaned)
+        cleaned.hands = {k: r for k, r in cleaned.roles.items() if r in HAND_ROLES}
+        try:
+            problems = sum(engraving.lint(sheet.build(cleaned)["xml"])["counts"].values())
+        except ValueError:  # no notes in the chosen parts: nothing to compare
+            return found[0]
+        ranked.append((problems, round(regrid.rhythm_cost([n.beat for n in cleaned.notes]), 2), i))
+    problems, cost, i = min(ranked)
+    return found[i][0], {**found[i][1], "engraving_problems": problems, "rhythm_cost": cost, "choices": len(found)}
+
+
+def cleanup_chosen(path: str) -> bool:
+    """Whether the user turned on Auto clean for this file (saved with its part choice)."""
+    return bool(_load_choices().get(path, {}).get("cleanup"))
+
+
+def set_cleanup(path: str, on: bool) -> None:
+    _set_flag(path, "cleanup", on)
+
+
+def playable_chosen(path: str) -> bool:
+    """Whether the user turned on Clean for this file: the hands' parts made playable
+    (playable.py), saved with its part choice."""
+    return bool(_load_choices().get(path, {}).get("playable"))
+
+
+def set_playable(path: str, on: bool) -> None:
+    _set_flag(path, "playable", on)
+
+
+FLAGS = ("cleanup", "playable")  # per-file switches kept with the part choice
+# Per-file settings for playing a named part over the rest as backing, kept with the part choice:
+# lead_in (bars of backing before the part comes in, 0-8), lead_in_every_pass (on a loop),
+# gains ({part name: 0..1}, the backing's faders) and played ({named part: runs}, what's usually played).
+# practice: how the Session was last set up for the file ({from, to, tempo, loop, mode}; see practice_settings).
+SETTINGS = ("lead_in", "lead_in_every_pass", "gains", "played", "tracks", "play", "practice")  # gains: the old band faders (tracks.py)
+LEAD_IN_BARS = 2
+LEAD_IN_MAX = 8
+PRACTICE_MODES = ("learn", "rehearse", "listen")
+TEMPO_RANGE = (30, 150)  # the page's tempo slider
+
+
+def _clean_practice(value) -> dict | None:
+    """A practice entry with only what the page can show: bars from/to (1+, or None for the
+    start / the end), tempo % within the slider, loop, and Learn / Rehearse / Listen."""
+    if not isinstance(value, dict):
+        return None
+    out = {}
+    for key in ("from", "to"):
+        try:
+            bar = int(value.get(key) or 0)
+        except (TypeError, ValueError):
+            bar = 0
+        out[key] = bar if bar >= 1 else None
+    if out["from"] and out["to"] and out["to"] < out["from"]:
+        out["to"] = out["from"]
+    try:
+        out["tempo"] = max(TEMPO_RANGE[0], min(TEMPO_RANGE[1], int(round(float(value["tempo"])))))
+    except (KeyError, TypeError, ValueError):
+        pass
+    if "loop" in value:
+        out["loop"] = bool(value["loop"])
+    if value.get("mode") in PRACTICE_MODES:
+        out["mode"] = value["mode"]
+    return out
+
+
+def practice_settings(path: str | None) -> dict | None:
+    """How the Session was last set up for this file (bars, tempo, loop, mode), or None."""
+    if not path:
+        return None
+    try:
+        return _clean_practice(_load_choices().get(path, {}).get("practice"))
+    except Exception:  # an unreadable choices file mustn't stop a sheet showing
+        return None
+
+
+def song_settings(path: str) -> dict:
+    """The SETTINGS saved for a file, with the defaults filled in."""
+    saved = _load_choices().get(path, {})
+    return {"lead_in": LEAD_IN_BARS, "lead_in_every_pass": True, "gains": {}, "played": {}, "tracks": {}, "play": None,
+            "practice": None, **{k: v for k, v in saved.items() if k in SETTINGS}}
+
+
+def save_song_settings(path: str, **changes) -> dict:
+    """Change some of a file's SETTINGS (lead_in is kept to 0-LEAD_IN_MAX); returns them all."""
+    if "lead_in" in changes:
+        changes["lead_in"] = max(0, min(LEAD_IN_MAX, int(changes["lead_in"])))
+    if "practice" in changes:
+        changes["practice"] = _clean_practice(changes["practice"])
+    choices = _load_choices()
+    entry = choices.pop(path, {})
+    entry.update({k: v for k, v in changes.items() if k in SETTINGS})
+    choices[path] = entry
+    _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
+    return song_settings(path)
+
+
+def _set_flag(path: str, flag: str, on: bool) -> None:
+    choices = _load_choices()
+    entry = choices.pop(path, {})
+    entry.pop(flag, None)
+    if on:
+        entry[flag] = True
+    if entry:
+        choices[path] = entry
+    _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +385,7 @@ def get_score(ref: str) -> Score:
 
 
 def _choices_path() -> pathlib.Path:
-    return home() / "part_choices.json"
+    return profile_home() / "part_choices.json"
 
 
 def _load_choices() -> dict:
@@ -127,32 +396,78 @@ def _load_choices() -> dict:
 
 
 def load_hands(score: Score) -> dict[int, str]:
-    """The saved part -> hand choice for a score; empty if none, or if the file's parts changed."""
+    """The saved part -> hand choice for a score (the parts the hands play)."""
+    return {i: r for i, r in load_roles(score).items() if r in HAND_ROLES}
+
+
+def load_roles(score: Score) -> dict[int, str]:
+    """The saved part -> role choice for a score (a hand, 'pedals', 'vocals' or a named part); empty if
+    none, or if the file's parts changed."""
     saved = _load_choices().get(score.path)
     if not saved:
         return {}
     names = {p.index: p.name for p in score.parts}
     hands = {}
-    for key, entry in saved["parts"].items():
+    for key, entry in saved.get("parts", {}).items():
         if names.get(int(key)) != entry["name"]:
             return {}
         hands[int(key)] = entry["hand"]
     return hands
 
 
+def default_part(score: Score) -> str | None:
+    """The named part to play when none is said: the one named for the profile's instrument,
+    else the one played most on this file, else the first. None without named parts, and on
+    a file whose hands are chosen too unless one is named for the instrument (a pianist plays
+    the hands unless they say otherwise)."""
+    from . import instruments
+
+    named = list(dict.fromkeys(r for _, r in sorted(score.roles.items()) if r not in ROLES))
+    if not named:
+        return None
+    mine = instruments.current()
+    words = {"voice": ("voice", "vocal"), "fiddle": ("fiddle", "violin"), "guitar": ("guitar",),
+             "bass": ("bass",)}.get(mine, (mine,))
+    match = next((r for r in named if any(w in r for w in words)), None)
+    if match or score.hands:
+        return match
+    played = song_settings(score.path)["played"]
+    return max(named, key=lambda r: (played.get(r, 0), -named.index(r)))
+
+
+def name_part(score: Score, name: str, index: int, keep_hands: bool) -> str:
+    """Save part `index` as the named part `name` ('flute', stored lower case), in place of any
+    part that had the name. Without keep_hands, the hand choices go (the parts they named
+    become backing). Returns the role."""
+    role = name.strip().lower()
+    roles = {i: r for i, r in score.roles.items() if r != role and i != index and (keep_hands or r not in HAND_ROLES)}
+    save_hands(score, {**roles, index: role})
+    score.playing = role
+    return role
+
+
 def save_hands(score: Score, hands: dict[int, str]) -> None:
-    """Save (or with an empty dict, forget) the part -> hand choice for a score."""
+    """Save (or with an empty dict, forget) the part -> role choice for a score: the hands
+    ('right' / 'left' / 'both'), and the parts played with the feet ('pedals') or sung ('vocals')."""
     choices = _load_choices()
+    keep = {flag: True for flag in FLAGS if choices.get(score.path, {}).get(flag)}
+    keep.update({k: v for k, v in choices.get(score.path, {}).items() if k in SETTINGS})
     if hands:
         names = {p.index: p.name for p in score.parts}
         choices[score.path] = {
             "saved": time.strftime("%Y-%m-%d %H:%M:%S"),
             "parts": {str(i): {"name": names[i], "hand": h} for i, h in sorted(hands.items())},
+            **keep,
         }
+    elif keep:
+        choices[score.path] = keep
     else:
         choices.pop(score.path, None)
     _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
-    score.hands = dict(hands)
+    score.roles = dict(hands)
+    score.hands = {i: r for i, r in hands.items() if r in HAND_ROLES}
+    if score.playing not in score.roles.values():
+        score.playing = default_part(score)
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +478,10 @@ def save_hands(score: Score, hands: dict[int, str]) -> None:
 def save_take(events: list[tuple[float, list[int]]], meta: dict) -> dict:
     """Write a recorded take to <home>/takes/<id>.mid plus <id>.json."""
     take_id = time.strftime("%Y%m%d-%H%M%S")
-    folder = home() / "takes"
+    folder = profile_home() / "takes"
     while (folder / f"{take_id}.mid").exists():
         take_id += "b"
+    events = sorted(events, key=lambda e: e[0])  # a MIDI file can't step back in time (stable: same-time order kept)
     t0 = events[0][0] if events else 0.0
     mid = mido.MidiFile(ticks_per_beat=TAKE_PPQ)
     track = mido.MidiTrack()
@@ -189,7 +505,7 @@ def save_take(events: list[tuple[float, list[int]]], meta: dict) -> dict:
 
 def list_takes() -> list[dict]:
     out = []
-    for f in sorted((home() / "takes").glob("*.json")):
+    for f in sorted((profile_home() / "takes").glob("*.json")):
         try:
             out.append(json.loads(f.read_text(encoding="utf-8")))
         except (OSError, ValueError):
@@ -215,7 +531,7 @@ def get_take(take: str | None) -> dict:
 def update_take(meta: dict) -> None:
     if meta.get("external"):
         return
-    path = home() / "takes" / f"{meta['id']}.json"
+    path = profile_home() / "takes" / f"{meta['id']}.json"
     path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 

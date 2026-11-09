@@ -1,0 +1,18 @@
+Id	Description	Qty	Unit	Designators
+1	Cable, 1 x 18 AWG	0	m	W_FUSE_IN, W_FUSE_OUT, W_GND
+2	Cable, 2 x 18 AWG	0	m	W_BUS_OUT
+3	Cable, 2 x 24 AWG	0	m	W_LS_OUT
+4	Cable, 4 x 24 AWG	0	m	W_LOGIC
+5	Cable, 4-core cable to strip, 1-2 m, 4 x 18 AWG	0	m	W_MAIN
+6	Cable, injection run to far end, 2 x 18 AWG	0	m	W_INJECT
+7	Connector, 74AHCT125 level shifter, 3.3V to 5V, on carrier board, 6 pins	1		LS
+8	Connector, ESP32-S3 DevKit, powered by USB-C from the PC, 4 pins	1		ESP
+9	Connector, GX16-4 panel socket, strip output, on enclosure, 4 pins	1		OUT
+10	Connector, Inline blade fuse holder, 5A ATO/ATC, 2 pins	1		FUSE
+11	Connector, Mean Well GST60A05 (5V 6A brick), 5.5x2.1 barrel plug, 2 pins	1		PSU
+12	Connector, Panel barrel jack 5.5x2.1, on enclosure, rated 5A+, 2 pins	1		JACK
+13	Connector, SK9822 strip, far end (C8), power injection only, 2 pins	1		STRIP_END
+14	Connector, SK9822 strip, input end (A0), 144/m, 177 LEDs, 1000uF cap across 5V/GND, 4 pins	1		STRIP_IN
+15	Connector, Terminal block / WAGO 221, 5V and GND bus, 4 pins	1		TB
+16	Wire, 18 AWG, BK	0	m	W_PSU
+17	Wire, 18 AWG, RD	0	m	W_PSU

@@ -1,0 +1,371 @@
+// Main menu (who is practicing) and the top dash bar. Loaded after atlas.js, which owns the Atlas view.
+(function () {
+  const menuEl = $('mainmenu');
+  const SEEN = 'coach.menu-seen';  // per browser tab, so a reload goes straight back to practice
+  let view = {active: 'default', profiles: [], busy: false};
+  let editing = false;
+
+  const initial = p => (p.name.trim()[0] || '?').toUpperCase();
+  const INSTRUMENTS = [{id: 'piano', name: 'Piano', glyph: '🎹'}, {id: 'flute', name: 'Flute', glyph: '🎶'},
+                       {id: 'sax', name: 'Alto sax', glyph: '🎷'}, {id: 'voice', name: 'Vocals', glyph: '🎤'},
+                       {id: 'fiddle', name: 'Fiddle', glyph: '🎻'}, {id: 'guitar', name: 'Electric guitar', glyph: '🎸'},
+                       {id: 'bass', name: 'Bass guitar', glyph: '🎸'}];
+  const instName = id => (INSTRUMENTS.find(i => i.id === id) || INSTRUMENTS[0]).name;
+
+  function renderChip() {
+    const p = view.profiles.find(x => x.id === view.active) || {name: 'Profile'};
+    $('chip-name').textContent = p.name;
+    $('chip-avatar').textContent = initial(p);
+    document.body.dataset.instrument = p.instrument || 'piano';  // flute, sax, voice: the microphone, and their Roadmap
+    // How flute.js hears it: pitch limits, and the sax's written pitch (+9). Sent with the profiles.
+    if (view.instrument) {
+      window.coachInstrument = view.instrument;
+      window.dispatchEvent(new CustomEvent('coach:instrument'));
+    }
+    document.body.dataset.young = p.young ? '1' : '';  // a child: steps read aloud, in big print
+    $('home-atlas').textContent = 'Open the Roadmap';
+    renderInstruments(p);
+  }
+
+  // Home's course selector: one drop-down with the instruments this profile learns ("Your
+  // courses"), then "+ Learn <name>" for the rest (each its own Roadmap, like a course).
+  function renderInstruments(p) {
+    const box = $('home-inst');
+    if (!p.id) { box.innerHTML = ''; return; }
+    const now = p.instrument || 'piano';
+    const learnt = p.instruments || [now];
+    box.innerHTML = '';
+    const label = document.createElement('label');
+    label.htmlFor = 'home-course';
+    label.textContent = 'Course';
+    const sel = document.createElement('select');
+    sel.id = 'home-course';
+    sel.title = `You're learning ${instName(now).toLowerCase()} now. Pick another of your courses to switch ` +
+                `(its own Roadmap, input and Maestro), or + Learn … to start a new one; your progress stays.`;
+    const mine = document.createElement('optgroup'), more = document.createElement('optgroup');
+    mine.label = 'Your courses';
+    more.label = 'Start a new course';
+    for (const inst of INSTRUMENTS) {
+      const o = document.createElement('option');
+      const has = learnt.includes(inst.id) || inst.id === now;
+      o.value = inst.id;
+      o.textContent = has ? `${inst.glyph} ${inst.name}` : `+ Learn ${inst.name.toLowerCase()}`;
+      o.selected = inst.id === now;
+      (has ? mine : more).appendChild(o);
+    }
+    sel.appendChild(mine);
+    if (more.children.length) sel.appendChild(more);
+    box.append(label, sel);
+    if (now === 'voice') {  // a singer's octave: the Roadmap in the treble clef, or an octave down
+      const v = document.createElement('button');
+      v.dataset.voice = p.voice === 'low' ? 'high' : 'low';
+      v.className = 'voice';
+      v.textContent = p.voice === 'low' ? 'Low voice' : 'High voice';
+      v.title = `You sing with a ${p.voice || 'high'} voice. Switch to a ${v.dataset.voice} voice: the same Roadmap and progress, ` +
+                (v.dataset.voice === 'low' ? 'an octave lower (tenor, baritone, bass)' : 'in the treble clef (soprano, alto)');
+      box.appendChild(v);
+    }
+  }
+
+  $('home-inst').addEventListener('click', e => {
+    const p = view.profiles.find(x => x.id === view.active);
+    const v = e.target.closest('button[data-voice]');
+    if (v && p) change('profile_voice', {id: p.id, voice: v.dataset.voice});
+  });
+  $('home-inst').addEventListener('change', async e => {
+    const p = view.profiles.find(x => x.id === view.active);
+    const sel = e.target.closest('#home-course');
+    if (!sel || !p) return;
+    const to = sel.value, now = p.instrument || 'piano';
+    if (to === now) return;
+    if (!(p.instruments || [now]).includes(to) &&
+        !confirm(`Start learning ${instName(to).toLowerCase()} on "${p.name}"? It gets its own Roadmap ${to === 'piano' ? '(the keyboard over MIDI)' : to === 'voice' ? '(the microphone hears you sing)' : '(the microphone hears you play)'}; your ${instName(now).toLowerCase()} progress stays.`)) {
+      sel.value = now;  // said no: the drop-down goes back to the course you're on
+      return;
+    }
+    if (!(await change('profile_instrument', {id: p.id, instrument: to}))) sel.value = now;
+  });
+
+  function renderMenu() {
+    const list = $('mm-list');
+    list.innerHTML = '';
+    for (const p of view.profiles) {
+      const card = document.createElement('button');
+      card.className = 'mm-card' + (p.id === view.active ? ' current' : '');
+      card.dataset.id = p.id;
+      card.innerHTML = `<span class="avatar">${esc(initial(p))}</span><span class="mm-name">${esc(p.name)}</span>` +
+                       `<span class="mm-inst">${(p.instruments || [p.instrument]).map(instName).join(' · ')}${p.young ? ' · young learner' : ''}</span>`;
+      const tools = document.createElement('span');
+      tools.className = 'mm-tools';
+      tools.innerHTML = '<span data-do="rename" title="Rename">✎</span>' +
+                        `<span data-do="young" title="${p.young ? 'Not a young learner any more' : 'Young learner: simple words, steps read aloud, starts at First steps'}">☺</span>` +
+                        (p.id === 'default' ? '' : '<span data-do="delete" title="Remove (its data stays on disk)">✕</span>');
+      card.appendChild(tools);
+      list.appendChild(card);
+    }
+    menuEl.classList.toggle('editing', editing);
+    $('mm-edit').textContent = editing ? 'Done' : 'Edit';
+    renderChip();
+  }
+
+  function message(text) { $('mm-msg').textContent = text || ''; }
+
+  async function load() {
+    try { view = await cmd('profiles'); } catch (err) { message(err.message); }
+    renderMenu();
+  }
+
+  function enter() {
+    try { sessionStorage.setItem(SEEN, '1'); } catch (e) {}
+    menuEl.hidden = true;
+  }
+
+  async function change(name, body) {
+    message('');
+    try {
+      view = await cmd(name, body);
+    } catch (err) {
+      message(err.message);
+      if (menuEl.hidden) alert(err.message);  // from Home's instrument switcher
+      return false;
+    }
+    try { sessionStorage.setItem(SEEN, '1'); } catch (e) {}
+    location.reload();  // everything on the page belongs to the profile: start it fresh
+    return true;
+  }
+
+  function open() {
+    editing = false;
+    message('');
+    menuEl.hidden = false;
+    load();
+    const current = menuEl.querySelector('.mm-card.current');
+    if (current) current.focus();
+  }
+
+  $('mm-list').addEventListener('click', async e => {
+    const card = e.target.closest('.mm-card');
+    if (!card) return;
+    const id = card.dataset.id;
+    const act = e.target.dataset && e.target.dataset.do;
+    const p = view.profiles.find(x => x.id === id);
+    if (act === 'rename') {
+      const name = prompt('Rename profile', p.name);
+      if (name === null) return;
+      try { view = await cmd('profile_rename', {id, name}); message(''); } catch (err) { message(err.message); }
+      renderMenu();
+    } else if (act === 'young') {
+      const on = !p.young;
+      if (confirm(on ? `Make "${p.name}" a young learner's profile? The Maestro will use simple words, lesson steps are read aloud in big print, and a piano profile with no goal starts at First steps.`
+                     : `"${p.name}" is no longer a young learner: the usual Maestro and step panel.`)) {
+        change('profile_young', {id, young: on});
+      }
+    } else if (act === 'delete') {
+      if (confirm(`Remove the profile "${p.name}"? Its files stay in your MidiCoach folder, but it won't be listed.`)) change('profile_delete', {id});
+    } else if (editing) {
+      return;
+    } else if (id === view.active) {
+      enter();
+    } else {
+      change('profile_select', {id});
+    }
+  });
+
+  $('mm-new').addEventListener('submit', e => {
+    e.preventDefault();
+    const name = $('mm-name').value.trim();
+    if (name) change('profile_new', {name, instrument: $('mm-instrument').value, young: $('mm-young').checked, voice: $('mm-voice').value});
+  });
+  const showVoice = () => { $('mm-voice').hidden = $('mm-instrument').value !== 'voice'; };
+  $('mm-instrument').addEventListener('change', showVoice);
+  showVoice();
+  $('mm-edit').addEventListener('click', () => { editing = !editing; renderMenu(); });
+  $('mm-continue').addEventListener('click', enter);
+  $('dash-brand').addEventListener('click', () => go('home'));
+  $('profile-chip').addEventListener('click', open);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !menuEl.hidden) enter(); });
+
+  // -- the dash bar ----------------------------------------------------------------------
+
+  // The bar has Home, Ask Maestro and the name of the mode you're in: to change modes you go
+  // back to Home, and leaving a mode stops whatever it was running.
+  const tabs = [...document.querySelectorAll('#dash .dtab')];
+  const WHERE = {practice: 'Session', explore: 'Explore', record: 'Record a new idea', progress: 'Roadmap', youtube: 'YouTube', visualizer: 'Visualizer'};
+  function mark(which) {
+    tabs.forEach(t => {
+      if (t.dataset.dash === which) t.setAttribute('aria-current', 'page');
+      else t.removeAttribute('aria-current');
+    });
+    $('dash-where').textContent = WHERE[which] || '';
+  }
+  // The view each place opens in (Explore, Songs and Lessons are the search on the Session's page).
+  const VIEW = {home: 'home', practice: 'practice', explore: 'practice', songs: 'practice', lessons: 'practice',
+                record: 'record', progress: 'progress', place: 'progress', youtube: 'youtube', visualizer: 'visualizer'};
+
+  // The Visualizer: the web visualizer's own page, loaded only while its view is open. On Windows
+  // only one program can hold the keyboard's input, so leaving removes the page and frees it for
+  // practice runs; its settings are saved by the page itself, so coming back restores them.
+  // ← Home shows when the mouse moves and fades after a few seconds of stillness.
+  let visTimer = 0;
+  function visOpen() {
+    const view = $('vis-view');
+    if (!$('vis-frame')) {
+      const f = document.createElement('iframe');
+      f.id = 'vis-frame';
+      f.title = 'Piano visualizer';
+      f.allow = 'midi; serial; autoplay; fullscreen; microphone';
+      f.src = 'visualizer.html';
+      f.addEventListener('load', () => {  // same origin: its mouse moves wake ← Home too
+        try { f.contentWindow.addEventListener('mousemove', visWake); } catch (e) {}
+      });
+      view.prepend(f);
+    }
+    visWake();
+  }
+  function visClose() {
+    const f = $('vis-frame');
+    if (f) { f.src = 'about:blank'; f.remove(); }
+  }
+  function visWake() {
+    $('vis-view').classList.add('awake');
+    clearTimeout(visTimer);
+    visTimer = setTimeout(() => $('vis-view').classList.remove('awake'), 3000);
+  }
+  $('vis-view').addEventListener('mousemove', visWake);
+  $('vis-back').addEventListener('click', () => go('home'));
+
+  // A Session plays the piece; recording is Record's own mode, so a Session opens on its last play mode.
+  function sessionMode() {
+    if (mode !== 'record') return;
+    const last = store.get('mode', 'learn');
+    setMode(last === 'record' ? 'learn' : last);
+  }
+
+  // Explore is the song and lesson search. Coming from Home or the Atlas you're choosing a new
+  // piece, so it fills the page; from a Session it opens beside the sheet, so you can look for the
+  // next piece while this one stays on the stand. ⇤ / ⤢ switch between the two.
+  function explore() {
+    const full = document.body.dataset.view !== 'practice';
+    atlasShow(false);
+    document.body.dataset.view = 'practice';
+    sessionMode();
+    showLibrary(true);
+    libraryFull(full);
+    mark(full ? 'explore' : 'practice');
+    $('lib-search').focus();
+  }
+
+  // Returns false when it stayed put: going elsewhere would stop a run and the answer was no.
+  // Asked whoever wants to go (a click or the Maestro), except: unguarded (the Maestro bringing up
+  // the Session for a run it was asked to start), and up from a lesson, which asks for itself.
+  async function go(which, {unguarded = false} = {}) {
+    const from = document.body.dataset.view === 'lesson' ? 'progress' : document.body.dataset.view;
+    const stops = running && VIEW[which] && VIEW[which] !== from;
+    const ownAsk = document.body.dataset.view === 'lesson' && VIEW[which] === 'progress';
+    if (stops && !unguarded && !ownAsk && !(await askSwitch(which))) return false;
+    if (stops && !ownAsk) cmd('stop').catch(() => {});
+    if (which !== 'explore' && which !== 'songs' && which !== 'lessons') libraryFull(false);
+    if (which !== 'visualizer') visClose();
+    if (which === 'visualizer') {
+      atlasShow(false);
+      document.body.dataset.view = 'visualizer';
+      mark(which);
+      visOpen();
+      return;
+    }
+    if (which === 'home') {
+      atlasShow(false);
+      document.body.dataset.view = 'home';
+      mark(which);
+      window.dispatchEvent(new CustomEvent('coach:viewchange'));  // Today ticks off what you just did
+      return;
+    }
+    if (which === 'practice') {
+      atlasShow(false);
+      document.body.dataset.view = 'practice';
+      showLibrary(false);
+      sessionMode();
+      mark(which);
+      return;
+    }
+    if (which === 'record') {
+      atlasShow(false);
+      document.body.dataset.view = 'record';
+      showLibrary(false);
+      if (vid.ready) vid.player.pauseVideo();  // the Session's video stays set up, out of sight
+      setMode('record');
+      mark(which);
+      $('go').focus();
+      return;
+    }
+    if (which === 'explore') {
+      explore();
+      return;
+    }
+    if (which === 'progress' || which === 'place') {  // place: the map with Where to start open
+      if (document.body.dataset.view === 'lesson') {  // up from the lesson to the map, as ← Roadmap does
+        if (history.state && history.state.lesson) history.back(); else stepBack();
+        return;
+      }
+      document.body.dataset.view = 'progress';
+      await atlasShow(true);
+      mark('progress');
+      (which === 'place' ? atlasPlaceForm : pathShow)();
+      const last = store.get('atlasLastLesson', '');  // left for the Session from See in the song
+      if (last && which === 'progress') { store.set('atlasLastLesson', ''); atlasActivate(last); }
+      return;
+    }
+    if (which === 'youtube') {
+      atlasShow(false);
+      document.body.dataset.view = 'youtube';
+      mark(which);
+      youtubeShow();
+      return;
+    }
+    if (which === 'songs' || which === 'lessons') {
+      setTab(which);
+      explore();
+      return;
+    }
+  }
+  tabs.forEach(t => t.addEventListener('click', () => go(t.dataset.dash)));
+  window.addEventListener('coach:navigate', e => go(e.detail.view, e.detail));
+  window.coachGo = go;  // the same, awaited (the Maestro opening a menu on another view)
+  // A lesson is part of the Atlas: its label stays Roadmap.
+  window.addEventListener('coach:viewchange', () => {
+    const v = document.body.dataset.view;
+    mark(v === 'lesson' ? 'progress' : v === 'practice' && document.body.classList.contains('lib-full') ? 'explore' : v);
+  });
+  $('pick-piece').addEventListener('click', () => go('explore'));
+  $('home-practice').addEventListener('click', () => {
+    const title = $('title').textContent.trim();
+    go(title && title !== 'no score yet' ? 'practice' : 'explore');
+  });
+  $('home-explore').addEventListener('click', () => go('explore'));
+  $('home-record').addEventListener('click', () => go('record'));
+  $('home-progress').addEventListener('click', () => go('progress'));
+  $('home-youtube').addEventListener('click', () => go('youtube'));
+  $('home-visualizer').addEventListener('click', () => go('visualizer'));
+  // Ask Maestro (Home's and the bar's): opens the Maestro panel where you are, so nothing
+  // running stops and the view stays put.
+  $('home-ask').addEventListener('click', openMaestro);
+  $('dash-ask').addEventListener('click', openMaestro);
+
+  const syncHomePiece = () => {
+    const title = $('title').textContent.trim();
+    const hasPiece = title && title !== 'no score yet';
+    $('home-piece').textContent = hasPiece
+      ? `Continue with ${title}`
+      : 'Choose a song or lesson to begin.';
+    $('home-practice').querySelector('.home-card-action').textContent =
+      hasPiece ? 'Open the Session →' : 'Browse songs & lessons →';
+  };
+  new MutationObserver(syncHomePiece).observe($('title'), {childList: true, characterData: true, subtree: true});
+  syncHomePiece();
+
+  mark('home');
+  load();
+  let seen = false;
+  try { seen = sessionStorage.getItem(SEEN) === '1'; } catch (e) {}
+  if (seen) menuEl.hidden = true;
+})();

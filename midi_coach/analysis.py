@@ -21,7 +21,7 @@ import statistics
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 
-from .notes import Note, Score, note_name, pedal_intervals, playable_parts, _name_side
+from .notes import Note, Score, effective_hands, note_name, pedal_intervals, playable_parts, split_resolver, _name_side
 
 REF_GROUP_TOL = 0.03
 TAKE_GROUP_TOL = 0.07
@@ -238,18 +238,26 @@ def _pearson(xs: list[float], ys: list[float]) -> float | None:
 
 
 def side_resolver(score: Score, split_note: int = 60):
-    """Return a function Note -> 'right'/'left' for reference notes."""
-    if score.hands:
-        hands = score.hands
-        return lambda n: hands[n.part] if hands.get(n.part) in ("right", "left") else ("right" if n.pitch >= split_note else "left")
+    """Return a function Note -> 'right'/'left' for reference notes: the hand Clean gave a
+    note (Note.hand), else its part's."""
+    side = _part_side_resolver(score, split_note)
+    return lambda n: n.hand or side(n)
+
+
+def _part_side_resolver(score: Score, split_note: int = 60):
+    hands = effective_hands(score)
+    if hands:
+        shared = split_resolver(score, {i for i, h in hands.items() if h == "both"}, split_note)
+        return lambda n: hands[n.part] if hands.get(n.part) in ("right", "left") else shared(n)
     playable = playable_parts(score)
     sides = {p.index: _name_side(p.name) for p in playable}
     if any(s == "right" for s in sides.values()) and any(s == "left" for s in sides.values()):
-        return lambda n: sides.get(n.part) or ("right" if n.pitch >= split_note else "left")
+        unnamed = split_resolver(score, {i for i, s in sides.items() if not s}, split_note)
+        return lambda n: sides.get(n.part) or unnamed(n)
     if len(playable) == 2:
         hi, lo = sorted(playable, key=lambda p: -p.mean_pitch)
         return lambda n: "right" if n.part == hi.index else "left"
-    return lambda n: "right" if n.pitch >= split_note else "left"
+    return split_resolver(score, {p.index for p in playable}, split_note)
 
 
 def _pedal_coverage(intervals: list[tuple[float, float]], t0: float, t1: float) -> tuple[float, int]:

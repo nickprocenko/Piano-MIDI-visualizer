@@ -1,0 +1,39 @@
+{
+  "source": "Made-up sample syllabus for the tests (not any exam board's requirements).",
+  "version": 1,
+  "speeds": {"scale": {"initial": 100, "g1": 120}, "arpeggio": {"initial": 90, "g1": 110}},
+  "grades": [
+    {
+      "id": "initial", "title": "Initial", "order": 0,
+      "technique": [
+        {"type": "scale", "quality": "major", "keys": ["C"], "octaves": 1, "hands": "separate"},
+        {"type": "arpeggio", "quality": "major", "keys": ["C"], "octaves": 1, "hands": "separate"}
+      ],
+      "sight": {"bars": "4", "times": ["4/4"], "keys": ["C"], "hands": "", "features": ["crotchets and minims"]},
+      "aural": [{"test": "A", "id": "pulse", "title": "Tap the pulse", "skills": ["pulse"]}]
+    },
+    {
+      "id": "g1", "title": "Grade 1", "order": 1, "entry": ["theory:initial"],
+      "technique": [
+        {"type": "scale", "quality": "major", "keys": ["C", "G"], "octaves": 1, "hands": "together"},
+        {"type": "scale", "quality": "minor", "forms": ["harmonic", "melodic"], "keys": ["A"], "octaves": 1,
+         "hands": "together", "artic": ["legato", "staccato"]}
+      ],
+      "sight": {"bars": "8", "times": ["3/4"], "keys": ["G"], "hands": "", "features": ["tied notes"]},
+      "aural": [
+        {"test": "A", "id": "pulse", "title": "Tap the pulse, strong beats", "skills": ["pulse", "strong-beats"]},
+        {"test": "B", "id": "sing-echo", "title": "Sing back a phrase", "skills": ["sing-echo"]}
+      ]
+    }
+  ],
+  "theory": [
+    {"grade": "initial", "topics": [
+      {"id": "key-c", "title": "C major", "covers": ["key:C"]},
+      {"id": "slurs-ties", "title": "Slurs and ties"}
+    ]},
+    {"grade": "g1", "topics": [
+      {"id": "key-g", "title": "G major and A minor", "covers": ["key:G", "key:Am"]},
+      {"id": "time-3-4", "title": "3/4 time", "covers": ["time:3/4"]}
+    ]}
+  ]
+}

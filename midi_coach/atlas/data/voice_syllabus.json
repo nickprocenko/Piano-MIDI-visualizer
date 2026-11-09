@@ -1,0 +1,24 @@
+{
+ "source": "The coach's own vocal course (not any exam board's syllabus): a beginner's path from matching single notes to Grade 2-level scales, sight-singing and songs. Written for a high voice; a low voice sings it an octave down. The aural tests are added from the local flute syllabus when there is one.",
+ "version": 1,
+ "instrument": "voice",
+ "speeds": {"scale": {"g1": 50, "g2": 56}, "arpeggio": {"g1": 66, "g2": 72}},
+ "grades": [
+  {"id": "g1", "title": "Grade 1", "order": 1,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["C", "D", "F"], "range": "octave"},
+    {"type": "scale", "quality": "minor", "keys": ["A"], "range": "octave"},
+    {"type": "arpeggio", "quality": "major", "keys": ["C", "D", "F"], "range": "octave"},
+    {"type": "arpeggio", "quality": "minor", "keys": ["A"], "range": "octave"}],
+   "sight": {"bars": 4, "times": ["4/4", "3/4"], "keys": ["C", "F"], "range": ["C4", "C5"],
+             "features": ["minims, crotchets and steps", "leaps of a third"]}},
+  {"id": "g2", "title": "Grade 2", "order": 2,
+   "technique": [
+    {"type": "scale", "quality": "major", "keys": ["Bb", "Eb"], "range": "octave"},
+    {"type": "scale", "quality": "minor", "keys": ["E", "D"], "range": "octave"},
+    {"type": "arpeggio", "quality": "major", "keys": ["Bb", "Eb"], "range": "octave"},
+    {"type": "arpeggio", "quality": "minor", "keys": ["E", "D"], "range": "octave"}],
+   "sight": {"bars": 6, "times": ["2/4"], "keys": ["D", "Am"], "range": ["A3", "D5"],
+             "features": ["leaps up to a fifth", "quaver pairs", "f and p"]}}
+ ]
+}

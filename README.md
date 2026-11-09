@@ -8,9 +8,12 @@ Live deployment: <a href="https://nickprocenko.github.io/Piano-MIDI-visualizer/"
 ## Features
 
 - Real-time MIDI input via the **Web MIDI API** (USB MIDI devices — tested with Roland JUNO-DS)
+- **Instrument Input** — use a microphone or audio interface for monophonic voice and instrument pitch detection, with per-instrument tuning, sensitivity, and octave shift
 - Rising-note highway with full visual customisation (colour, glow, sparks, smoke, halo pulse, and more)
 - **Learn Mode** — drop a MIDI or MusicXML file, choose tracks and hands, and follow along at your own pace (Wait or Free-play)
 - **Freeplay** — just plug in and play, no file needed
+- **Sound** — Watch Play plays MIDI files out loud with a player bar (play/pause, seek, speed); a built-in synth with 12 instruments plus a drum kit, picked automatically from each track's General MIDI program or chosen per track
+- **Output routing** — send each track (and your live keyboard) to the built-in synth or any MIDI output on its own channel, to drive hardware synths or a VST through loopMIDI
 - Animated fluid ink effects (GPU-accelerated via WebGL)
 - **Shader Notes** — render the falling notes with GLSL fragment shaders (built-in presets like Twisty Ribbons and Neon Glow Bars, or paste your own Shadertoy-style `mainImage`)
 - Animated background image / GIF slideshow
@@ -53,11 +56,15 @@ Open **SETTINGS** from the main menu. Tabs:
 | Shader | GPU note rendering — presets or custom Shadertoy-style GLSL (WebGL2) |
 | Keyboard | Piano height, brightness, visibility |
 | Display | Background slides, frame rate cap |
+| Instrument Input | Choose MIDI or microphone/audio input, supported instrument, sensitivity, audio device, octave shift, and per-profile practice progress |
 | Hardware | MIDI CC mappings |
+| Sound | Synth volume and reverb, where new songs and your live keyboard play, Learn mode play-along, MIDI outputs and All notes off |
 | LED Output | ESP32 serial / BLE config |
 | Audience | WebSocket URL for live audience colour votes |
 | Themes | Save / load / delete colour presets |
 | Scenes & Profiles | Full visual snapshots |
+
+For microphone input, use **Settings → Instrument Input → Instrument via audio**, choose an instrument, and press **Start listening**. Audio capture requires a secure browser context (HTTPS or localhost) and microphone permission. This mode tracks one note at a time; use headphones when sending detected notes to speakers to avoid feedback. Guitar, bass, bowed and wind instruments, voice, ukulele, and whistle are supported.
 
 ## Learn Mode
 
@@ -68,6 +75,27 @@ Open **SETTINGS** from the main menu. Tabs:
 5. Click **▶ Start Learning**.
 
 A floating transport HUD lets you pause, loop, and adjust speed without leaving the highway.
+
+Learn mode plays the parts you set to **—** (not yours) along with you, on each track's output. Change this under **Settings → Sound → Play along**.
+
+## Sound and MIDI output routing
+
+**▶ Watch Play** plays the file out loud. The bottom bar has play/pause (Space), stop, seek, speed, the synth volume and a **♪ Sound** button that opens the routing settings.
+
+Each track row (on the track screen and in the sidebar **Tracks** tab) has a destination:
+
+- **Built-in synth**: choose an instrument (Grand Piano, Electric Piano, Organ, Strings, Warm Pad, Brass, Synth Lead, Flute, Guitar / Pluck, Bass, Marimba / Vibes, Bells, Drum Kit) and a level. **Auto** follows the file's General MIDI program changes, and channel 10 is the drum kit.
+- **MIDI → *port***: send the track to a hardware synth or a virtual port. Pick the channel (or keep the file's) and a program change (or pass the file's own). The file's pedal, controllers and pitch bend go too, and they are brought up to date when you seek.
+- **Off**.
+
+Routes are saved for each song. **Settings → Sound** also sets:
+
+- where new songs play;
+- **all tracks** of the open song at once;
+- where your live keyboard goes (Off by default, because the keyboard has its own sound), on any channel;
+- **All notes off**.
+
+To play a VST, create a virtual port with [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html), select it as the MIDI input in your plugin host or DAW, then choose it in the visualizer. If the live keyboard's output loops back into the selected input, the thru turns itself off.
 
 ## Practice Coach for Claude (`midi_coach/`)
 
@@ -89,7 +117,7 @@ Add an `led_output` block to `config.json` (persisted in `localStorage` when run
     "enabled": true,
     "transport": "serial",
     "port": "COM5",
-    "baudrate": 115200,
+    "baudrate": 921600,
     "ble_address": "AA:BB:CC:DD:EE:FF",
     "ble_service_uuid": "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
     "ble_char_uuid": "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
@@ -118,7 +146,7 @@ BLE transport: set `transport` to `"ble"` and fill in the address. Same frame fo
 `firmware/esp32_fastled_bridge/esp32_fastled_bridge.ino` — ready to flash.
 
 Defaults:
-- `LED_COUNT 176`, `SERIAL_BAUD 115200`
+- `LED_COUNT 176`, `SERIAL_BAUD 921600`
 - Accepts BLE writes on service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` (characteristic `6E400002-…`)
 - Install `NimBLE-Arduino` for BLE support
 

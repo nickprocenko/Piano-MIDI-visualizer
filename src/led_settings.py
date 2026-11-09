@@ -168,7 +168,7 @@ class LedSettingsScreen:
         self._values = {
             "enabled": bool(data.get("enabled", False)),
             "port": str(data.get("port", "COM5")),
-            "baudrate": int(data.get("baudrate", 115200)),
+            "baudrate": int(data.get("baudrate", 921600)),
             "led_count": int(data.get("led_count", 176)),
             "fps_limit": int(data.get("fps_limit", 30)),
             "mirror_per_key": int(data.get("mirror_per_key", 2)),

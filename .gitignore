@@ -24,3 +24,6 @@ config.json
 
 # Crash logs are local only
 crash_logs/
+
+# Downloaded reference MIDI library (large, third-party files)
+reference/

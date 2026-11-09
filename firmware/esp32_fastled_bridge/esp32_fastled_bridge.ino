@@ -1,6 +1,12 @@
 #include <FastLED.h>
 #include <string.h>
 
+// USB serial is the main transport. Set to 1 to also accept frames over BLE
+// (needs the NimBLE-Arduino library). BLE radio activity can glitch the
+// WS2812B strip, so it is off by default.
+#define ENABLE_BLE 0
+
+#if ENABLE_BLE
 // Fix for arduino-esp32 >= 3.3.7: core now calls btInUse() before startup
 // to decide whether to reserve BT controller memory. NimBLE-Arduino doesn't
 // register with this check, so memory gets freed before NimBLE::init() runs
@@ -9,6 +15,9 @@ extern "C" bool btInUse(void) { return true; }
 
 #include <NimBLEDevice.h>
 #define HAS_NIMBLE 1
+#else
+#define HAS_NIMBLE 0
+#endif
 
 // ---------------- User Config ----------------
 #define DATA_PIN    33
@@ -17,15 +26,20 @@ extern "C" bool btInUse(void) { return true; }
 #define COLOR_ORDER BGR
 #define LED_COUNT   177
 #define BRIGHTNESS  128
+#define MAX_MILLIAMPS 1500     // USB-C test (2026-11-07); was 2000
 
 // WS2812B second strip (mirrored). FastLED uses RMT on ESP32-S3 for WS2812B
 // so BLE radio interrupts cannot corrupt its output.
 #define DATA_PIN_2   18
 #define LED_COUNT_2  144         // 1m 144-pixel WS2812B strip
 
-#define SERIAL_BAUD 115200
+// Must match the sender (Python app's "baudrate" setting, web app's Web Serial).
+// The CH343 USB-serial chip handles 921600 comfortably.
+#define SERIAL_BAUD 921600
+// A full 177-LED frame is ~1-2 KB and arrives while FastLED.show() is busy,
+// so the default 256-byte receive buffer would overflow at this speed.
+#define SERIAL_RX_BUFFER 8192
 #define MAX_LINE_LEN 4096
-#define ENABLE_BLE 1
 
 // BLE UART-style write characteristic (Nordic UART UUIDs)
 static const char* BLE_DEVICE_NAME = "Piano-LED-Bridge";
@@ -35,13 +49,22 @@ static const char* BLE_WRITE_UUID   = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E";
 // Minimum ms between FastLED.show() calls. Caps RMT output rate so the 4.3 ms
 // WS2812B transmission window opens less frequently, reducing the chance that a
 // BLE connection event fires mid-frame and corrupts the signal.
+// Only needed to dodge BLE; serial-only can refresh at ~60 fps.
+#if ENABLE_BLE
 #define MIN_SHOW_INTERVAL_MS 40   // ~25 fps max
+#else
+#define MIN_SHOW_INTERVAL_MS 16   // ~60 fps max
+#endif
 
 CRGB leds[LED_COUNT];
 CRGB leds2[LED_COUNT_2];
 char lineBuf[MAX_LINE_LEN];
 size_t lineLen = 0;
 static uint32_t lastShowMs = 0;
+// A frame that arrived too soon after the last show. The sender only sends on
+// change, so dropping it could leave a key lit forever; loop() shows it once
+// the interval has passed.
+static bool showPending = false;
 
 // Ring buffer for bytes arriving from the BLE callback (NimBLE FreeRTOS task,
 // Core 0). loop() (Core 1) drains it — FastLED.show() only ever runs in loop().
@@ -109,13 +132,17 @@ bool applyFrame(char* line) {
     leds2[i] = CRGB::Black;
   }
 
-  uint32_t now = millis();
-  if (now - lastShowMs < MIN_SHOW_INTERVAL_MS) {
-    return true;  // frame accepted but suppressed — too soon after last show
-  }
-  lastShowMs = now;
-  FastLED.show();
+  showPending = true;  // loop() shows it as soon as the interval allows
   return true;
+}
+
+void showIfDue() {
+  if (!showPending) return;
+  uint32_t now = millis();
+  if (now - lastShowMs < MIN_SHOW_INTERVAL_MS) return;
+  lastShowMs = now;
+  showPending = false;
+  FastLED.show();
 }
 
 void processIncomingByte(char c) {
@@ -215,12 +242,13 @@ void setup() {
   FastLED.addLeds<LED_TYPE, DATA_PIN, CLOCK_PIN, COLOR_ORDER>(leds, LED_COUNT);
   FastLED.addLeds<WS2812B, DATA_PIN_2, GRB>(leds2, LED_COUNT_2);
   FastLED.setBrightness(BRIGHTNESS);
-  // Clamp total current draw so the 5V rail doesn't sag and corrupt WS2812B data.
-  // Raise the milliamps limit if your PSU can supply more cleanly.
-  FastLED.setMaxPowerInVoltsAndMilliamps(5, 2000);
+  // Clamp total current draw (both strips together) so the 5V rail doesn't sag.
+  // Set to what the supply can give: 1500 mA = a USB-C port advertising 1.5 A.
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
   clearAll();
 
   delay(500);
+  Serial.setRxBufferSize(SERIAL_RX_BUFFER);  // must come before begin()
   Serial.begin(SERIAL_BAUD);
   Serial.println("=== Piano-LED-Bridge booting ===");
   Serial.print("HAS_NIMBLE = "); Serial.println(HAS_NIMBLE);
@@ -233,6 +261,9 @@ void setup() {
 #else
   Serial.println("BLE disabled: install NimBLE-Arduino library");
 #endif
+#else
+  Serial.print("BLE off; listening on USB serial at ");
+  Serial.println(SERIAL_BAUD);
 #endif
 }
 
@@ -252,4 +283,6 @@ void loop() {
   while (Serial.available() > 0) {
     processIncomingByte((char)Serial.read());
   }
+
+  showIfDue();
 }

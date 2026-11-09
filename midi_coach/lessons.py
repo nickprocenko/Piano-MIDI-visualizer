@@ -1,7 +1,8 @@
 """Custom lessons: build MusicXML from compact notation or excerpt a reference.
 
-Lessons are saved to <home>/lessons/<slug>.musicxml, so they are also normal
-references for recording, comparison and progress tracking.
+Lessons are saved to <home>/lessons/<category>/<slug>.musicxml, so they are also normal
+references for recording, comparison and progress tracking. Each category is a folder
+(CATEGORIES first, then any the user makes); files directly in <home>/lessons are 'Unsorted'.
 
 Notation (music21 tinyNotation, one string per hand)
 ----------------------------------------------------
@@ -18,19 +19,230 @@ Notation (music21 tinyNotation, one string per hand)
 
 from __future__ import annotations
 
+import json
+import pathlib
 import re
+import shutil
 import time
 
-from .library import home
-from .notes import Score, load_score, select_notes
+from .engraving import tidy_heading
+from .library import _choices_path, _load_choices, profile_home
+from .notes import MIDI_SUFFIXES, MUSICXML_SUFFIXES, Score, load_score, select_notes
 
 _KEY_RE = re.compile(r"^([A-Ga-g])([#b-]?)(m|min|minor)?$")
 
+# Groups in the coach page's Songs / Lessons panel, in order. Any other folder under lessons/ is a category too.
+# Needs review: lessons made from a file (e.g. songs converted from MIDI) nobody has checked yet.
+# Exercises: cut from real pieces. AI exercises: composed entirely by Claude or the Maestro.
+CATEGORIES = ("Needs review", "Solo piano", "Vocals & accompaniment", "Exercises", "AI exercises", "Recordings")
+NEEDS_REVIEW, EXERCISES, AI_EXERCISES, RECORDINGS = "Needs review", "Exercises", "AI exercises", "Recordings"
+# Categories holding lessons (teaching material) rather than songs; the coach page lists the
+# two apart.
+LESSON_CATEGORIES = (EXERCISES, AI_EXERCISES)
+UNSORTED = "Unsorted"
+LESSON_SUFFIXES = MUSICXML_SUFFIXES | MIDI_SUFFIXES
 
-def lessons_dir():
-    path = home() / "lessons"
+
+def lessons_dir(category: str | None = None) -> pathlib.Path:
+    path = profile_home() / "lessons"
+    if category and category != UNSORTED:
+        path = path / _category_folder(category)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _category_folder(category: str) -> str:
+    """The folder for a category: a known one matched without case, else the name made safe."""
+    for known in CATEGORIES:
+        if category.strip().lower() == known.lower():
+            return known
+    name = re.sub(r'[<>:"/\\|?*]+', "", category).strip(" .")
+    if not name:
+        raise ValueError(f"Not a usable category name: {category!r}")
+    return name
+
+
+def list_lessons() -> list[dict]:
+    """Every lesson, newest first, with its category (the folder it's in). A playlist folder's
+    pieces come in the playlist's order instead, each with its `track` number."""
+    root = lessons_dir()
+    found = []
+    for p in [root, *sorted(d for d in root.iterdir() if d.is_dir())]:
+        category = UNSORTED if p == root else p.name
+        found += [(f, category) for f in p.iterdir() if f.is_file() and f.suffix.lower() in LESSON_SUFFIXES]
+    found.sort(key=lambda fc: -fc[0].stat().st_mtime)
+    listed = [{"title": f.stem, "path": str(f), "category": c, "source": source_note(f)} for f, c in found]
+    for category in {item["category"] for item in listed} - {UNSORTED}:
+        tracks = playlist_files(root / category)
+        if not tracks:
+            continue
+        slots = [i for i, item in enumerate(listed) if item["category"] == category]
+        rank = {str(f): n for n, f in enumerate(tracks)}
+        mine = sorted((listed[i] for i in slots), key=lambda item: rank[item["path"]])
+        for n, (i, item) in enumerate(zip(slots, mine), 1):
+            listed[i] = {**item, "track": n}
+    return listed
+
+
+# A category folder holding this file is a playlist: {"name", "entries": [{"file", "song", "part",
+# "source"}], "missing": [...]}, its pieces in order (midi_coach.playlist writes it).
+PLAYLIST_FILE = "playlist.json"
+
+
+def read_playlist(folder) -> dict | None:
+    try:
+        return json.loads((pathlib.Path(folder) / PLAYLIST_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def playlist_files(folder) -> list[pathlib.Path]:
+    """A playlist folder's pieces in order: those it lists, then any others by name. Empty if
+    the folder isn't a playlist."""
+    folder = pathlib.Path(folder)
+    playlist = read_playlist(folder)
+    if playlist is None:
+        return []
+    listed = [folder / e["file"] for e in playlist.get("entries", [])]
+    here = {f.name for f in folder.iterdir() if f.is_file() and f.suffix.lower() in LESSON_SUFFIXES}
+    named = [f for f in listed if f.name in here]
+    return named + sorted((folder / n for n in here - {f.name for f in named}), key=lambda f: f.name.lower())
+
+
+def playlist_position(path) -> dict | None:
+    """Where a piece sits in its folder's playlist: {"playlist", "track", "total", "previous",
+    "next"} (previous / next are paths or None), or None if it isn't in one."""
+    p = pathlib.Path(path)
+    files = playlist_files(p.parent)
+    keys = [str(f).lower() for f in files]
+    if str(p).lower() not in keys:
+        return None
+    i = keys.index(str(p).lower())
+    playlist = read_playlist(p.parent) or {}
+    return {"playlist": playlist.get("name") or p.parent.name, "track": i + 1, "total": len(files),
+            "previous": str(files[i - 1]) if i else None, "next": str(files[i + 1]) if i + 1 < len(files) else None}
+
+
+_SOURCE_RE = re.compile(r"<source>(.*?)</source>", re.S)
+
+
+def source_note(path) -> str | None:
+    """Where a lesson came from (MusicXML <identification><source>), e.g. 'X.mid, converted
+    from MIDI: ...', or None. Only the file's head is read."""
+    import html
+
+    p = pathlib.Path(path)
+    if p.suffix.lower() not in (".xml", ".musicxml"):
+        return None
+    try:
+        with p.open(encoding="utf-8", errors="replace") as f:
+            head = f.read(8192)
+    except OSError:
+        return None
+    m = _SOURCE_RE.search(head)
+    return html.unescape(" ".join(m.group(1).split())) if m else None
+
+
+def made_from(source: str | None) -> str | None:
+    """A short tag for the menu: 'from MIDI' when the notes were converted from a MIDI file."""
+    return "from MIDI" if source and "from MIDI" in source else None
+
+
+def categories(listed: list[dict]) -> list[str]:
+    """Menu order: the standard categories, then the user's own, then Unsorted (empty ones left out)."""
+    used = {item["category"] for item in listed}
+    extra = sorted(used - set(CATEGORIES) - {UNSORTED}, key=str.lower)
+    return [c for c in (*CATEGORIES, *extra, UNSORTED) if c in used]
+
+
+def move_lesson(source: str, category: str, title: str | None = None) -> str:
+    """Move a lesson (or any reference file) into a category, optionally renaming it. Takes and
+    the saved part choice that point at the old path are updated, so progress history follows."""
+    old = pathlib.Path(source).resolve()
+    if not old.is_file():
+        raise FileNotFoundError(f"No lesson file {source}")
+    name = re.sub(r'[<>:"/\\|?*]+', "", title).strip(" .") if title else old.stem
+    new = lessons_dir(category).resolve() / f"{name or old.stem}{old.suffix}"
+    if new.exists() and new.resolve() == old:  # the same file: nothing to do, or only its capitals change
+        if new.name == old.name:
+            return str(old)
+        step = old.with_name(old.name + ".renaming")  # Windows won't rename to a name differing only in case
+        old.rename(step)
+        step.rename(new)
+    elif new.exists():
+        raise FileExistsError(f"{new.name} is already in {category}.")
+    else:
+        old.rename(new)
+    _repoint(str(old), str(new))
+    return str(new)
+
+
+def _file_name(title: str | None, fallback: str) -> str:
+    return (re.sub(r'[<>:"/\\|?*]+', "", title).strip(" .") if title else "") or fallback
+
+
+def copy_lesson(source: str, category: str, title: str | None = None) -> str:
+    """Save a copy of a lesson or reference into a category (the coach page's File → Save as).
+    The copy takes the original's part choice; its practice history starts empty."""
+    old = pathlib.Path(source).resolve()
+    if not old.is_file():
+        raise FileNotFoundError(f"No lesson file {source}")
+    new = lessons_dir(category).resolve() / f"{_file_name(title, old.stem)}{old.suffix}"
+    if new.exists():
+        raise FileExistsError(f"{new.name} is already in {category}.")
+    shutil.copy2(old, new)
+    choices = _load_choices()
+    if str(old) in choices:
+        choices[str(new)] = choices[str(old)]
+        _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
+    return str(new)
+
+
+def import_file(name: str, data: bytes, category: str = UNSORTED) -> str:
+    """Keep a MIDI or MusicXML file opened from the computer (File → Open) among the lessons.
+    Opening the same file again reuses the copy; a different file with the same name gets ' (2)'."""
+    p = pathlib.Path(name)
+    if p.suffix.lower() not in LESSON_SUFFIXES:
+        raise ValueError(f"{p.name} isn't a MIDI or MusicXML file.")
+    folder = lessons_dir(category).resolve()
+    stem = _file_name(p.stem, "Opened file")
+    for n in range(1, 100):
+        new = folder / f"{stem}{f' ({n})' if n > 1 else ''}{p.suffix.lower()}"
+        if not new.exists():
+            new.write_bytes(data)
+            return str(new)
+        if new.read_bytes() == data:
+            return str(new)
+    raise FileExistsError(f"Too many files called {p.name} in {category}.")
+
+
+def _repoint(old: str, new: str) -> None:
+    def swap(value):
+        if isinstance(value, str):
+            return new if value == old else value
+        if isinstance(value, list):
+            return [swap(v) for v in value]
+        if isinstance(value, dict):
+            return {k: swap(v) for k, v in value.items()}
+        return value
+
+    for f in (profile_home() / "takes").glob("*.json"):
+        text = f.read_text(encoding="utf-8")
+        if json.dumps(old)[1:-1] not in text:
+            continue
+        f.write_text(json.dumps(swap(json.loads(text)), indent=2), encoding="utf-8")
+    choices = _load_choices()
+    if old in choices:
+        choices[new] = choices.pop(old)
+        _choices_path().write_text(json.dumps(choices, indent=2), encoding="utf-8")
+    old_p, new_p = pathlib.Path(old), pathlib.Path(new)
+    playlist = read_playlist(old_p.parent)
+    if playlist and any(e.get("file") == old_p.name for e in playlist.get("entries", [])):
+        # Renamed in place: the entry follows it. Moved to another folder: it leaves the playlist.
+        same = new_p.parent == old_p.parent
+        playlist["entries"] = [{**e, "file": new_p.name} if e.get("file") == old_p.name and same else e
+                               for e in playlist["entries"] if same or e.get("file") != old_p.name]
+        (old_p.parent / PLAYLIST_FILE).write_text(json.dumps(playlist, indent=2), encoding="utf-8")
 
 
 def _slug(title: str) -> str:
@@ -56,7 +268,8 @@ def validate_tiny(text: str) -> None:
     if bad:
         raise ValueError(
             f"Unrecognized notes {bad} in {text!r}. Octaves: c = C4, c' = C5, C = C3, CC = C2; "
-            "sharps f#, flats b-, durations 1 2 4 8 16 with dots, rests r4, chords chord{c4 e g}."
+            "sharps f#, flats b- (after octave marks: c'#, not c#'), durations 1 2 4 8 16 with dots, "
+            "rests r4, chords chord{c4 e g}."
         )
 
 
@@ -98,12 +311,25 @@ def _key(key: str | int | None):
     return m21key.Key(tonic.lower() if m.group(3) else tonic)
 
 
-def _part(name: str, items, clef_name: str, time_signature: str, key: str | int | None, tempo_bpm: float | None, total_ql: float):
-    from music21 import clef, meter, note, stream, tempo
+CLEFS = {"treble": "TrebleClef", "bass": "BassClef", "treble8vb": "Treble8vbClef",  # a low voice's or a guitar's
+         "bass8vb": "Bass8vbClef"}  # a bass guitar's; both 8vb clefs sound an octave below the written notes
+
+
+def _part(name: str, items, clef_name: str, time_signature: str, key: str | int | None, tempo_bpm: float | None, total_ql: float,
+          written_above: int = 0):
+    """written_above: semitones a transposing instrument's music is written above how it sounds
+    (9 for an alto saxophone); the notes are written pitch and the file says how they sound."""
+    from music21 import clef, instrument, interval, meter, note, stream, tempo
 
     part = stream.Part()
     part.partName = name
-    part.insert(0, clef.TrebleClef() if clef_name == "treble" else clef.BassClef())
+    if written_above:
+        inst = instrument.Instrument()
+        inst.partName = name
+        inst.transposition = interval.Interval(-written_above)
+        part.insert(0, inst)
+        part.atSoundingPitch = False
+    part.insert(0, getattr(clef, CLEFS[clef_name])())
     part.insert(0, meter.TimeSignature(time_signature))
     key_obj = _key(key)
     if key_obj is not None:
@@ -127,12 +353,26 @@ def build_lesson(
     key: str | int | None = "C",
     tempo_bpm: float = 80,
     musicxml: str | None = None,
+    category: str = AI_EXERCISES,
+    out_dir: str | pathlib.Path | None = None,
+    filename: str | None = None,
+    part_name: str | None = None,
+    clef: str = "treble",
+    octave: int = 0,
+    written_above: int = 0,
 ) -> tuple[str, Score]:
-    """Create and save a lesson. Returns (path, parsed score)."""
+    """Create and save a lesson. Returns (path, parsed score). out_dir: write it there (e.g.
+    the Atlas's lesson folder) instead of a category of the page's lesson panel; filename: its
+    name there (without .musicxml) when the title isn't one. part_name: the treble part's
+    name when it isn't a right hand (a flute line is 'Flute'). For the treble part: clef
+    (a low voice's 'treble8vb'), octave (semitones to move its notes: -12 for a low voice) and
+    written_above (a transposing instrument's, see _part)."""
     from music21 import converter, metadata, meter, stream
     from music21.musicxml.m21ToXml import GeneralObjectExporter
 
-    path = lessons_dir() / f"{_slug(title)}.musicxml"
+    folder = pathlib.Path(out_dir) if out_dir else lessons_dir(category)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{filename or _slug(title)}.musicxml"
     if musicxml:
         converter.parseData(musicxml)  # raises if it isn't valid MusicXML
         path.write_text(musicxml, encoding="utf-8")
@@ -140,6 +380,10 @@ def build_lesson(
         if not right and not left:
             raise ValueError("Give at least one hand (right/left) or musicxml.")
         rh = _tiny(right, time_signature) if right else []
+        if octave:
+            for n in rh:
+                if n.isNote:
+                    n.pitch.octave += octave // 12  # keeps the spelling
         lh = _tiny(left, time_signature) if left else []
         bar_ql = meter.TimeSignature(time_signature).barDuration.quarterLength
         total = max(sum(n.quarterLength for n in rh), sum(n.quarterLength for n in lh))
@@ -148,18 +392,21 @@ def build_lesson(
         score = stream.Score()
         score.metadata = metadata.Metadata(title=title)
         if rh:
-            score.insert(0, _part("Right Hand", rh, "treble", time_signature, key, tempo_bpm, total))
+            score.insert(0, _part(part_name or "Right Hand", rh, clef, time_signature, key, tempo_bpm, total, written_above))
         if lh:
             score.insert(0, _part("Left Hand", lh, "bass", time_signature, key, tempo_bpm if not rh else None, total))
+        from .transcribe import _print_accidentals
+
         for part in score.parts:
             part.makeMeasures(inPlace=True)
             part.makeNotation(inPlace=True)
-        xml = GeneralObjectExporter(score).parse().decode("utf-8")
+            _print_accidentals(part)  # music21 prints a sharp again on a repeat in the bar; the standard rule doesn't
+        xml = tidy_heading(GeneralObjectExporter(score).parse().decode("utf-8"))
         path.write_text(xml, encoding="utf-8")
     return str(path), load_score(path)
 
 
-def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title: str) -> tuple[str, Score]:
+def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title: str, category: str = EXERCISES) -> tuple[str, Score]:
     """Cut bars (and optionally one hand) out of a reference into a new lesson."""
     from music21 import converter, metadata, stream
     from music21.musicxml.m21ToXml import GeneralObjectExporter
@@ -178,16 +425,18 @@ def excerpt_lesson(reference_path: str, bars: tuple[int, int], hand: str, title:
         new.insert(0, keep)
         excerpt = new
     excerpt.metadata = metadata.Metadata(title=title)
-    xml = GeneralObjectExporter(excerpt).parse().decode("utf-8")
-    path = lessons_dir() / f"{_slug(title)}.musicxml"
+    xml = tidy_heading(GeneralObjectExporter(excerpt).parse().decode("utf-8"))
+    path = lessons_dir(category) / f"{_slug(title)}.musicxml"
     path.write_text(xml, encoding="utf-8")
     return str(path), load_score(path)
 
 
 def learn_events(score: Score, side) -> list[dict]:
-    """Note events for the visualizer's Learn Mode: channel 0 = right hand, 1 = left."""
+    """Note events for the visualizer's Learn Mode: channel 0 = right hand, 1 = left. beat (quarter
+    notes, as the sheet counts them) lets its sheet follow the music through tempo changes."""
     return [
-        {"ms": round(n.start * 1000, 1), "durationMs": round(max(50.0, n.duration * 1000), 1), "note": n.pitch, "channel": 0 if side(n) == "right" else 1}
+        {"ms": round(n.start * 1000, 1), "durationMs": round(max(50.0, n.duration * 1000), 1), "note": n.pitch,
+         "channel": 0 if side(n) == "right" else 1, "beat": round(n.beat, 4)}
         for n in select_notes(score)[0]  # drums and parts the user left out don't belong in Learn Mode
     ]
 

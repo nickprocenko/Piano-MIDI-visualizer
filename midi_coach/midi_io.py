@@ -1,11 +1,16 @@
-"""Live MIDI input recording and output playback via python-rtmidi."""
+"""Live MIDI input recording and output playback via python-rtmidi.
+
+The input can also be the microphone (MIC_PORT): the coach page tracks a flute's, a
+saxophone's or a voice's pitch and posts each note as a note-on / note-off, which Recorder.feed passes on exactly as if a
+keyboard had sent it, so recording, Learn and Rehearse don't know the difference."""
 
 from __future__ import annotations
 
+import heapq
 import os
 import threading
 import time
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 
 from .notes import Note
@@ -17,6 +22,9 @@ PORT_HELP = (
     "use MIDI-OX (or MIDIberry) to forward the JUNO input to both the visualizer's "
     "port and 'Coach'. Then set MIDI_COACH_INPUT=Coach in the Claude Desktop config."
 )
+
+
+MIC_PORT = "Microphone (flute)"  # the name predates the sax and voice; pages and tests use it
 
 
 class PortError(RuntimeError):
@@ -127,6 +135,7 @@ class Recorder:
         self.on_finish = None  # callback(state) run on the monitor thread
         self.listener = None  # callback(now, message) for live judging, run on the MIDI thread
         self.external_stop = None  # callable() -> stop reason or None
+        self.on_keys = None  # callback(held pitches) when a key goes down or up, for the displays
 
     @property
     def active(self) -> bool:
@@ -142,27 +151,45 @@ class Recorder:
     ) -> str:
         if self.active:
             raise RuntimeError("A recording is already running. Call stop_recording first.")
-        midi_in = _open_client("input")
-        names = midi_in.get_ports()
-        idx = resolve_port(names, port, "MIDI_COACH_INPUT", "input")
-        try:
-            midi_in.open_port(idx)
-        except Exception as exc:
-            raise PortError(f"Could not open '{names[idx]}' ({exc}). {PORT_HELP}") from exc
-        midi_in.ignore_types(sysex=True, timing=True, active_sense=True)
+        midi_in = None
+        if port == MIC_PORT:  # notes arrive through feed()
+            name = MIC_PORT
+        else:
+            midi_in = _open_client("input")
+            names = midi_in.get_ports()
+            idx = resolve_port(names, port, "MIDI_COACH_INPUT", "input")
+            name = names[idx]
+            try:
+                midi_in.open_port(idx)
+            except Exception as exc:
+                raise PortError(f"Could not open '{names[idx]}' ({exc}). {PORT_HELP}") from exc
+            midi_in.ignore_types(sysex=True, timing=True, active_sense=True)
         now = time.perf_counter()
-        self._state = RecordingState(port_name=names[idx], started_at=now, last_activity=now, current_timeout=silence_sec)
+        self._state = RecordingState(port_name=name, started_at=now, last_activity=now, current_timeout=silence_sec)
         self._done.clear()
         self._midi_in = midi_in
         self._params = (silence_sec, max_sec, lead_in_sec, rests)
-        midi_in.set_callback(self._on_message)
+        if midi_in is not None:
+            midi_in.set_callback(self._on_message)
         self._monitor = threading.Thread(target=self._watch, daemon=True)
         self._monitor.start()
-        return names[idx]
+        return name
 
-    def _on_message(self, event, _data=None) -> None:
+    @property
+    def on_mic(self) -> bool:
+        return self.active and self._state.port_name == MIC_PORT
+
+    def feed(self, message: list[int], at: float | None = None) -> bool:
+        """A note from the microphone (at: when it began, on the perf_counter clock, since the
+        page hears a note a little after it starts). False when no microphone run is going."""
+        if not self.on_mic:
+            return False
+        self._on_message((message, 0.0), at=at)
+        return True
+
+    def _on_message(self, event, _data=None, at: float | None = None) -> None:
         message, _delta = event
-        now = time.perf_counter()
+        now = time.perf_counter() if at is None else at
         st = self._state
         if st is None or st.stop_reason or not message:
             return
@@ -170,7 +197,12 @@ class Recorder:
         if status not in (0x80, 0x90, 0xB0):
             return
         with self._lock:
-            st.events.append((now, list(message)))
+            if st.events and now < st.events[-1][0]:
+                # A microphone note is timed from when it began, so it can land before one
+                # already heard; keep the take in time order (a MIDI file can't step back).
+                st.events.insert(bisect_right([t for t, _ in st.events], now), (now, list(message)))
+            else:
+                st.events.append((now, list(message)))
             if status == 0x90 and len(message) >= 3 and message[2] > 0:
                 st.held.add(message[1])
                 st.note_ons += 1
@@ -181,6 +213,8 @@ class Recorder:
             elif status == 0xB0 and len(message) >= 3 and message[1] == 64:
                 st.pedal_down = message[2] >= 64
             st.last_activity = now
+            held = list(st.held) if status != 0xB0 else None
+        self._keys(held)
         if self.listener:
             try:
                 self.listener(now, message)
@@ -241,12 +275,20 @@ class Recorder:
             except Exception:
                 pass
             self._midi_in = None
+        self._keys([])
         if self.on_finish:
             try:
                 self.on_finish(st)
             except Exception as exc:  # keep the error visible to wait()
                 st.stop_reason = f"{reason} (saving failed: {exc})"
         self._done.set()
+
+    def _keys(self, held: list[int] | None) -> None:
+        if self.on_keys and held is not None:
+            try:
+                self.on_keys(held)
+            except Exception:  # a display bug must never break recording
+                pass
 
     def stop(self, reason: str = "stopped by request") -> None:
         if self._state is None:
@@ -387,3 +429,110 @@ class Player:
 
     def status(self) -> dict:
         return dict(self._status)
+
+
+class Accompanist:
+    """Plays the parts you aren't playing on the MIDI output during a practice run, in pieces
+    as the run reaches them (Rehearse hands over the whole run, Learn one chord at a time).
+    Only notes are sent: the keyboard you play on is usually the one sounding them, so a
+    sustain pedal or all-notes-off from here would also catch the notes you hold. With
+    pedal=True (Listen mode, where nobody is playing) the sustain pedal is sent too.
+
+    Events scheduled with a lane (a role: 'right', 'left'...) sound at that lane's volume in
+    `gains` (1 as written, 0 muted), read as each note is sent, so a fader moved mid-run
+    is heard from the next note."""
+
+    def __init__(self, port: str | None = None, pedal: bool = False) -> None:
+        out = _open_client("output")
+        names = out.get_ports()
+        idx = resolve_port(names, port, "MIDI_COACH_OUTPUT", "output")
+        try:
+            out.open_port(idx)
+        except Exception as exc:
+            raise PortError(f"Could not open output '{names[idx]}' ({exc}).") from exc
+        self.port = names[idx]
+        self._out = out
+        self._pedal = pedal
+        self._queue: list[tuple[float, int, list[int], str | None]] = []  # (perf_counter time, order, message, lane)
+        self._order = 0
+        self.gains: dict[str, float] = {}
+        self._channels: dict[str, int] = {}
+        # (channel, pitch) -> how many scheduled notes hold it. The synth only ever has one
+        # voice per key from here: a key struck again while held is re-struck, and let go
+        # when the last note holding it ends (else on, on, off leaves a voice stuck).
+        self._sounding: dict[tuple[int, int], int] = {}
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def voices(self, lanes: dict[str, tuple[int, int | None]]) -> None:
+        """Give each lane its own MIDI channel and General MIDI instrument, {lane: (channel,
+        program or None)}, so a band backing sounds as its instruments (channel 9: drums)."""
+        with self._lock:
+            for lane, (channel, program) in lanes.items():
+                self._channels[lane] = channel & 0x0F
+                if program is not None and channel != 9:
+                    self._out.send_message([0xC0 | (channel & 0x0F), program & 0x7F])
+
+    def schedule(self, events: list[tuple[float, list[int]]], start: float, lane: str | None = None) -> None:
+        """Queue build_events output to begin at perf_counter time `start` (events already
+        past are dropped, except note-offs)."""
+        now = time.perf_counter()
+        with self._lock:
+            for t, msg in events:
+                kind = msg[0] & 0xF0
+                if kind not in (0x80, 0x90) and not (self._pedal and kind == 0xB0 and msg[1] == 64):
+                    continue
+                if kind == 0x90 and start + t < now - 0.03:
+                    continue
+                self._order += 1
+                heapq.heappush(self._queue, (start + t, self._order, msg, lane))
+        self._wake.set()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            with self._lock:
+                due = self._queue[0][0] - time.perf_counter() if self._queue else None
+                while self._queue and self._queue[0][0] <= time.perf_counter():
+                    _, _, msg, lane = heapq.heappop(self._queue)
+                    if lane in self._channels:
+                        msg = [(msg[0] & 0xF0) | self._channels[lane], *msg[1:]]
+                    key = (msg[0] & 0x0F, msg[1])
+                    if msg[0] & 0xF0 == 0xB0:
+                        pass  # the sustain pedal
+                    elif msg[0] & 0xF0 == 0x90 and msg[2] > 0:
+                        gain = self.gains.get(lane, 1.0) if lane else 1.0
+                        if gain <= 0:
+                            continue  # muted: its note-off is skipped too
+                        if gain != 1.0:
+                            msg = [msg[0], msg[1], max(1, min(127, round(msg[2] * gain)))]
+                        held = self._sounding.get(key, 0)
+                        if held:  # re-strike the key rather than stack a second voice on it
+                            self._out.send_message([0x80 | key[0], key[1], 0])
+                        self._sounding[key] = held + 1
+                    elif not self._sounding.get(key):
+                        continue  # its note-on was dropped
+                    elif self._sounding[key] > 1:
+                        self._sounding[key] -= 1
+                        continue  # a later note on this key still holds it
+                    else:
+                        del self._sounding[key]
+                    self._out.send_message(msg)
+            self._wake.wait(0.02 if due is None else max(0.0, min(due, 0.02)))
+            self._wake.clear()
+
+    def close(self) -> None:
+        """Stop, let go of every note still sounding, and close the port."""
+        self._stop.set()
+        self._wake.set()
+        self._thread.join(1)
+        with self._lock:
+            for ch, pitch in self._sounding:
+                self._out.send_message([0x80 | ch, pitch, 0])
+            self._sounding.clear()
+            self._queue.clear()
+            if self._pedal:
+                self._out.send_message([0xB0, 64, 0])
+        self._out.close_port()
