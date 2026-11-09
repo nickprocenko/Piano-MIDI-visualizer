@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shop — MusicFX</title>
-  <meta name="description" content="Shop MusicFX LED strips, controllers, accessories and complete kits for 25, 49, 61, 76 and 88-key keyboards.">
+  <meta name="description" content="Shop MusicFX LED strips, controllers, accessories and complete kits for keyboards, drum kits and guitars.">
   <meta name="theme-color" content="#0b0b10">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,14 +19,12 @@
       <div class="section-head">
         <span class="eyebrow">Shop</span>
         <h1 style="font-size:clamp(2rem,4.5vw,3rem)">Build your MusicFX setup</h1>
-        <p class="lead">Get a kit with everything included, or mix and match strips, controllers and accessories. Set your keyboard size once and every price updates.</p>
+        <p class="lead">Pick your instrument, then get a Complete Kit or mix and match lights, controllers and accessories. Everything runs from the same free MusicFX app.</p>
       </div>
 
+      <div class="inst-tabs" id="inst-tabs" role="tablist" aria-label="Instrument"></div>
       <div class="shop-toolbar">
         <div class="filter-tabs" id="filter-tabs" role="tablist" aria-label="Product category"></div>
-        <label class="global-size">Keyboard size
-          <select id="global-size"></select>
-        </label>
       </div>
 
       <div class="grid grid-3" id="shop-grid"></div>
@@ -38,15 +36,26 @@
       <div class="section-head">
         <span class="eyebrow">Size guide</span>
         <h2>Which size do I need?</h2>
-        <p class="lead">Count the keys on your keyboard, or check the model's spec sheet. Lengths are for full-size keys; for mini keys, choose by key count and trim the excess strip.</p>
+        <p class="lead">Each light is sized to your instrument. Strips can be trimmed, so if you're between sizes, choose the larger one.</p>
       </div>
-      <div class="table-wrap">
-        <table class="size-table">
-          <thead>
-            <tr><th>Keys</th><th>Typical keyboards</th><th>LEDs</th><th>Strip length</th><th>LightStrip</th><th>Complete Kit</th><th></th></tr>
-          </thead>
-          <tbody id="size-guide-body"></tbody>
-        </table>
+
+      <div class="guide-block" data-guide="keys">
+        <h3>Keys: count the keys on your keyboard</h3>
+        <p class="muted">Lengths are for full-size keys. For mini keys, choose by key count and trim the extra strip.</p>
+        <div class="table-wrap"><table class="size-table" data-guide-table="keys"></table></div>
+      </div>
+
+      <div class="guide-block" data-guide="drums">
+        <h3>Drums: measure each drum's head diameter</h3>
+        <p class="muted">One DrumRing per drum. Using an electronic kit? Skip the Hit Sensors, because the Drum Hub reads your module's MIDI.</p>
+        <div class="table-wrap"><table class="size-table" data-guide-table="drums"></table></div>
+        <div class="table-wrap" style="margin-top:16px"><table class="size-table" data-guide-table="drumkits"></table></div>
+      </div>
+
+      <div class="guide-block" data-guide="guitar">
+        <h3>Guitar: count the frets on your neck</h3>
+        <p class="muted">The FretStrip runs along the top (player-facing) edge of the fretboard, with a light at every fret.</p>
+        <div class="table-wrap"><table class="size-table" data-guide-table="guitar"></table></div>
       </div>
     </div>
   </section>
@@ -55,7 +64,7 @@
     <div class="container grid grid-3">
       <div class="card"><h3>Free shipping over $100</h3><p class="muted">On every kit, in supported regions.</p></div>
       <div class="card"><h3>30-day returns</h3><p class="muted">Not the right fit? Send it back unused for a full refund.</p></div>
-      <div class="card"><h3>1-year warranty</h3><p class="muted">Covers every strip, Hub and power supply.</p></div>
+      <div class="card"><h3>1-year warranty</h3><p class="muted">Covers every light, Hub and power supply.</p></div>
     </div>
   </section>
 

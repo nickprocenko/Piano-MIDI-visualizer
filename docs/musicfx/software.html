@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Software & Apps — MusicFX</title>
-  <meta name="description" content="Free MusicFX software: the browser visualizer with Learn Mode, the AI Practice Coach, Hub firmware and live-streaming tools.">
+  <meta name="description" content="Free MusicFX software: one app for keys, drums and guitar, with Learn Mode, Band Sync, the AI Practice Coach, Hub firmware and live-streaming tools.">
   <meta name="theme-color" content="#0b0b10">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,11 +18,11 @@
     <div class="container">
       <div class="section-head">
         <span class="eyebrow">Software & Apps</span>
-        <h1 style="font-size:clamp(2rem,4.5vw,3rem)">Free software that brings it all together</h1>
-        <p class="lead">Everything MusicFX runs on is free and open source. Use it with MusicFX hardware, or on its own with any MIDI keyboard.</p>
+        <h1 style="font-size:clamp(2rem,4.5vw,3rem)">One app for keys, drums and guitar</h1>
+        <p class="lead">Every MusicFX light is controlled from the same free, open-source app. Each instrument has its own mode, and Band Sync runs them all together.</p>
       </div>
       <div class="grid grid-4">
-        <a class="card" href="#visualizer" style="color:inherit"><h3>Visualizer</h3><p class="muted">Note highway and Learn Mode in your browser.</p></a>
+        <a class="card" href="#instruments" style="color:inherit"><h3>MusicFX App</h3><p class="muted">Keys, Drums and Guitar modes, Learn Mode and Band Sync.</p></a>
         <a class="card" href="#coach" style="color:inherit"><h3>Practice Coach</h3><p class="muted">AI feedback on your playing.</p></a>
         <a class="card" href="#firmware" style="color:inherit"><h3>Hub Firmware</h3><p class="muted">Open firmware for the MusicFX Hub.</p></a>
         <a class="card" href="#stream" style="color:inherit"><h3>Streaming Tools</h3><p class="muted">Audience voting and OBS overlays.</p></a>
@@ -30,20 +30,72 @@
     </div>
   </section>
 
-  <section class="section section-alt" id="visualizer">
+  <section class="section section-alt" id="instruments">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">Instrument modes</span>
+        <h2>A mode for every instrument</h2>
+        <p class="lead">Choose your instrument and the app sets up the right view, Learn Mode and lights for it.</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="card instrument-card">
+          <div class="product-media" data-art="keys"></div>
+          <div class="product-body">
+            <h3>Keys <span class="pill pill-live">AVAILABLE</span></h3>
+            <ul class="product-features">
+              <li>Rising-note highway & effects</li>
+              <li>Learn Mode for MIDI & MusicXML</li>
+              <li>Lights the next notes on your keys</li>
+            </ul>
+          </div>
+        </div>
+        <div class="card instrument-card">
+          <div class="product-media" data-art="drums"></div>
+          <div class="product-body">
+            <h3>Drums <span class="pill pill-dev">IN DEVELOPMENT</span></h3>
+            <ul class="product-features">
+              <li>Each drum flashes on every hit, brighter the harder you play</li>
+              <li>Groove view and timing feedback</li>
+              <li>Learn Mode lights the next drum to hit</li>
+            </ul>
+          </div>
+        </div>
+        <div class="card instrument-card">
+          <div class="product-media" data-art="guitar"></div>
+          <div class="product-body">
+            <h3>Guitar <span class="pill pill-dev">IN DEVELOPMENT</span></h3>
+            <ul class="product-features">
+              <li>Scales and chord shapes shown along the neck</li>
+              <li>Follows your playing through an audio interface or MIDI pickup</li>
+              <li>Learn Mode lights the next fret to play</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:22px;display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between">
+        <div style="max-width:720px">
+          <h3>Band Sync <span class="pill pill-dev">IN DEVELOPMENT</span></h3>
+          <p class="muted" style="margin:0">Connect the keys, drums and guitar Hubs to one MusicFX app. They share themes and scenes, follow the same song cues, and light the stage as one show.</p>
+        </div>
+        <a class="btn btn-ghost" href="shop.html">Shop all instruments</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="visualizer">
     <div class="container split">
       <div>
-        <span class="eyebrow">Visualizer · Web</span>
-        <h2>MusicFX Visualizer</h2>
-        <p class="lead">A full-screen, real-time note highway that runs in Chrome or Edge. No install, no account.</p>
+        <span class="eyebrow">MusicFX App · Web</span>
+        <h2>Visualizer & light control</h2>
+        <p class="lead">A full-screen, real-time visualizer that runs in Chrome or Edge, with no install and no account.</p>
         <ul class="check-list">
           <li><b>Freeplay:</b> plug in and play, no file needed</li>
           <li><b>Learn Mode:</b> load MIDI or MusicXML, choose tracks and hands, and play along in Wait or Free-play mode</li>
           <li><b>Effects:</b> glow, sparks, smoke, WebGL fluid ink and GLSL shader notes</li>
           <li><b>Themes & scenes:</b> save full looks and switch them per song</li>
-          <li><b>Hardware:</b> map MIDI CCs to any control and stream to your MusicFX Hub over USB or Bluetooth</li>
+          <li><b>Hardware:</b> map MIDI CCs to any control and send lights to every MusicFX Hub over USB or Bluetooth</li>
         </ul>
-        <a class="btn btn-primary" href="../">Launch the visualizer</a>
+        <a class="btn btn-primary" href="../">Launch the app</a>
       </div>
       <div class="screen" style="display:grid;place-items:center;padding:24px">
         <div style="text-align:center">
@@ -54,7 +106,7 @@
     </div>
   </section>
 
-  <section class="section" id="coach">
+  <section class="section section-alt" id="coach">
     <div class="container split reverse">
       <div>
         <span class="eyebrow">App · Desktop</span>
@@ -79,12 +131,12 @@
     </div>
   </section>
 
-  <section class="section section-alt" id="firmware">
+  <section class="section" id="firmware">
     <div class="container split">
       <div>
         <span class="eyebrow">Firmware · Hub</span>
         <h2>Open Hub firmware</h2>
-        <p class="lead">The MusicFX Hub ships ready to use. The firmware is open, so you can update it or adapt it to your own builds.</p>
+        <p class="lead">Every MusicFX Hub ships ready to use. The firmware is open, so you can update it or adapt it to your own builds.</p>
         <ul class="check-list">
           <li>Receives frames over USB serial or Bluetooth LE</li>
           <li>Drives a per-key strip and a mirrored ambient strip at the same time</li>
@@ -101,7 +153,7 @@
     </div>
   </section>
 
-  <section class="section" id="stream">
+  <section class="section section-alt" id="stream">
     <div class="container">
       <div class="section-head">
         <span class="eyebrow">Streaming</span>
@@ -115,12 +167,12 @@
     </div>
   </section>
 
-  <section class="section" style="padding-top:0">
+  <section class="section">
     <div class="container">
       <div class="cta-band">
         <h2>Add lights to your setup</h2>
-        <p class="lead">The software is free. Add a MusicFX Complete Kit to put the light show on your keyboard.</p>
-        <a class="btn btn-primary" href="shop.html?cat=bundle">Shop kits</a>
+        <p class="lead">The software is free. Add a Complete Kit to put the light show on your keys, drums or guitar.</p>
+        <a class="btn btn-primary" href="shop.html?cat=bundle">Shop Complete Kits</a>
       </div>
     </div>
   </section>
