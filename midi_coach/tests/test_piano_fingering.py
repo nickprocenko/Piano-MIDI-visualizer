@@ -46,6 +46,54 @@ def test_every_note_gets_a_finger_even_in_a_big_chord_with_a_doubled_key():
     assert fingering.finger_hand([]) == []
 
 
+def _busy(seq, fingers):
+    """Notes given a finger that is still holding another key down."""
+    out = []
+    for i, (s, p, e) in enumerate(seq):
+        for j, (s2, p2, e2) in enumerate(seq[:i]):
+            if fingers[j] == fingers[i] and p2 != p and e2 > s + fingering.HELD_AFTER:
+                out.append((p, fingers[i]))
+    return out
+
+
+# Debussy's Reverie, bar 10: the right hand holds A4 while an arpeggio moves under it
+HELD_A = [(0.0, 69, 4.5), (0.6, 57, 0.88), (0.9, 65, 1.18), (1.2, 62, 1.48), (1.5, 57, 1.78), (1.8, 60, 2.08), (2.1, 65, 2.38)]
+
+
+def test_a_held_key_keeps_its_finger():
+    fingers = fingering.finger_hand(HELD_A)
+    assert fingers == [5, 1, 3, 2, 1, 2, 4]
+    assert _busy(HELD_A, fingers) == []
+    # the pedal would hold the A, but the hand still holds it when it can
+    assert fingering.finger_hand(HELD_A, pedal=[(0.0, 5.0)]) == fingers
+    # without ends (or a note let go at once) the old path is unchanged
+    assert fingering.finger_hand([s[:2] for s in HELD_A])[0] == 5
+
+
+def test_a_key_out_of_reach_is_let_go_on_the_pedal():
+    # a long bass note, then the left hand leaps two octaves up: it can't hold both
+    seq = [(0.0, 36, 3.0), (0.5, 64, 0.9), (1.0, 67, 1.4), (1.5, 72, 1.9)]
+    fingers = fingering.finger_hand(seq, mirrored=True)
+    assert all(fingers) and len(set(fingers[1:])) == 3
+
+
+def test_fast_notes_never_put_one_finger_on_two_keys_in_a_row():
+    # Piano Man's left hand: sixteenths over a twelfth, where the thumb used to jump a fourth
+    seq = [(i * 0.19, p, i * 0.19 + 0.18) for i, p in enumerate([43, 52, 57, 60] * 2)]
+    fingers = fingering.finger_hand(seq, mirrored=True)
+    assert all(a != b for a, b in zip(fingers, fingers[1:]))
+    assert fingers[0] == 5
+
+
+def test_a_bass_note_before_a_leap_takes_the_little_finger():
+    # past a fifth the hand leaps, and a leap costs how far the hand travels, not the stretch
+    leap = [(0.0, 36, 0.4), (0.5, 55, 0.9), (1.0, 48, 1.4), (1.5, 36, 1.9), (2.0, 48, 2.4)]
+    assert fingering.finger_hand(leap, mirrored=True)[0] == 5
+    oompah = [(0.0, 43, 0.45)] + [(0.5, p, 0.95) for p in (59, 62, 67)] + [(1.0, 43, 1.45)] + [(1.5, p, 1.95) for p in (59, 62, 67)]
+    fingers = fingering.finger_hand(oompah, mirrored=True)
+    assert fingers[0] == fingers[4] == 5 and fingers[1:4] == [4, 2, 1]
+
+
 def test_thumb_avoids_black_keys_in_a_flat_scale():
     b_flat = [70, 72, 74, 75, 77, 79, 81, 82]
     fingers = fingering.finger_hand(melody(b_flat))
