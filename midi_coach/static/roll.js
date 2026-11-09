@@ -7,8 +7,10 @@
 // arrive through coachRoll.event().
 // Learn with hands (Sheet ▸ Finger numbers / Hands on the keys): each hand's note carries the
 // finger the coach suggests (fingering.py, 1 = thumb ... 5), printed on the falling note, and a
-// stylized pair of hands plays the piece on the keyboard with those fingers, moving ahead to the
-// keys coming up and pressing each one as the cursor reaches it.
+// pair of hands plays the piece on the keyboard with those fingers, moving ahead to the keys
+// coming up and pressing each one as the cursor reaches it. This file works out where each finger
+// goes; hands3d.js draws the hands in 3D (three.js and open-source hand models), with flat 2D
+// hands here as the fallback.
 "use strict";
 window.coachRoll = (() => {
   const canvas = document.getElementById('roll');
@@ -398,13 +400,14 @@ window.coachRoll = (() => {
   canvas.addEventListener('pointercancel', endDrag);
 
   // -- the hands ---------------------------------------------------------------
-  // Stylized, lit from the upper left, seen from the player's seat: fingertips on the keys,
-  // palms on the player's side. Each finger goes to the key of its note sounding now, or leans
+  // Fingertips on the keys, the backs of the hands on the player's side, drawn in 3D by
+  // hands3d.js (or flat, below, when it can't load). Each finger goes to the key of its note sounding now, or leans
   // toward its next note; the hand sits where its fingers' keys put it, opens as wide as they ask
   // (an octave, up to a tenth), and glides between positions. Fingers without a note rest evenly
   // between; fingers 2 to 5 never cross or lie on each other. All of it eased per frame.
 
-  const HAND_ROOM = 0.75;  // keyboard heights under the keys, for the palms
+  const HAND_ROOM = 0.9;  // keyboard heights under the keys, for the backs of the hands
+  const TIP_WHITE = 0.7, TIP_BLACK = 0.42;  // where a fingertip plays a white / black key, down from its far end
   const LOOK = 1.5;  // beats ahead a finger leans toward its next note
   const SPREAD = [0.8, 2.3];  // white keys between neighbouring fingers: closed up, to a tenth across the hand
   const PALM_GIVE = 0.4;  // how much of the fingers' stretch widens the palm
@@ -414,7 +417,8 @@ window.coachRoll = (() => {
   const handState = {right: newHand(), left: newHand()};
   let lastFrame = 0;
 
-  function newHand() { return {anchor: null, spread: null, x: [0, 0, 0, 0, 0, 0], y: [0, 0, 0, 0, 0, 0], press: [0, 0, 0, 0, 0, 0]}; }
+  // on: how much each finger is going to a key (0 = resting between, 1 = on its way or there)
+  function newHand() { return {anchor: null, spread: null, x: [0, 0, 0, 0, 0, 0], y: [0, 0, 0, 0, 0, 0], press: [0, 0, 0, 0, 0, 0], on: [0, 0, 0, 0, 0, 0]}; }
 
   // The hand that best fits points {f, x, w}: x = anchor + dir·(f−1)·spread, by weighted least
   // squares. With spread given only the anchor is fitted; without, both, when two fingers or more
@@ -509,7 +513,7 @@ window.coachRoll = (() => {
     const ease = tau => 1 - Math.exp(-dt / tau);
     st.anchor = st.anchor === null ? anchor : st.anchor + (anchor - st.anchor) * ease(110);
     st.spread = st.spread === null ? spread : st.spread + (spread - st.spread) * ease(110);
-    const whiteY = floor + keyH * 0.8, blackY = floor + keyH * 0.45;
+    const whiteY = floor + keyH * TIP_WHITE, blackY = floor + keyH * TIP_BLACK;
     const want = [0, 0, 0, 0, 0, 0], hit = [null, null, null, null, null, null];
     for (let f = 1; f <= 5; f++) {
       const natural = st.anchor + dir * (f - 1) * st.spread;
@@ -535,18 +539,58 @@ window.coachRoll = (() => {
       st.x[f] += (x - st.x[f]) * ease(t && t.press ? 45 : 80);
       st.y[f] += (y - st.y[f]) * ease(80);
       st.press[f] += ((t ? t.press : 0) - st.press[f]) * ease(35);
+      st.on[f] += ((t ? 1 : 0) - st.on[f]) * ease(80);
     }
     return true;
+  }
+
+  // The 3D hands (hands3d.js: three.js and the WebXR hand models) load the first time hands
+  // are drawn. Nothing is drawn while they load; if they can't (no WebGL, a file missing) the
+  // 2D hands below stand in.
+  let hands3d, loading3d = false;
+  function threeD() {
+    if (hands3d === undefined && !loading3d) {
+      loading3d = true;
+      import('./hands3d.js').then(m => m.create()).then(h => { hands3d = h; }, e => {
+        console.warn('3D hands unavailable, drawing flat ones:', e);
+        hands3d = null;
+      });
+    }
+    return hands3d;
   }
 
   function drawHands(now, keys, ww, floor, keyH, at) {
     const dt = lastFrame ? Math.min(100, now - lastFrame) : 16;
     lastFrame = now;
+    const list = [];
     for (const hand of ['left', 'right']) {
       if (!byFinger[hand] || hidden.has(hand)) continue;
       if (!updateHand(hand, keys, ww, floor, keyH, at, dt)) continue;
-      drawHand(hand, ww, floor, keyH, played.has(hand) ? 0.95 : 0.42);
+      list.push({hand, alpha: played.has(hand) ? 1 : 0.42});
     }
+    const three = threeD();
+    if (three === undefined) return;
+    if (!three) {
+      for (const h of list) drawHand(h.hand, ww, floor, keyH, h.alpha);
+      return;
+    }
+    const view = {w: width, h: height, dpr: window.devicePixelRatio || 1, floor, keyH, ww, seatX: width / 2,
+                  whiteY: floor + keyH * TIP_WHITE, blackY: floor + keyH * TIP_BLACK};
+    const labels = three.draw(ctx, view, list.map(({hand, alpha}) => {
+      const st = handState[hand];
+      const tips = [null];
+      for (let f = 1; f <= 5; f++) tips.push({x: st.x[f], y: st.y[f], press: st.press[f], on: st.on[f]});
+      return {hand, alpha, tint: COLORS[hand] || OTHER, tips};
+    }));
+    // each finger's number on its first bone
+    const size = Math.round(Math.max(9, Math.min(14, ww * 0.34)));
+    ctx.font = `700 ${size}px "Segoe UI", Arial, sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const l of labels) {
+      ctx.fillStyle = `rgba(58,30,20,${0.72 * l.alpha})`;
+      ctx.fillText(String(l.f), l.x, l.y);
+    }
+    ctx.textBaseline = 'alphabetic';
   }
 
   const shade = (c, k) => c.map(v => Math.max(0, Math.min(255, Math.round(v + k))));

@@ -39,6 +39,13 @@ STATIC_FILES = {
     "/file.js": (pathlib.Path(__file__).parent / "static" / "file.js", "application/javascript; charset=utf-8"),
     "/prefs.js": (pathlib.Path(__file__).parent / "static" / "prefs.js", "application/javascript; charset=utf-8"),
     "/roll.js": (pathlib.Path(__file__).parent / "static" / "roll.js", "application/javascript; charset=utf-8"),
+    # the 3D hands on the falling notes: three.js and the WebXR hand models (both MIT, unmodified)
+    "/hands3d.js": (pathlib.Path(__file__).parent / "static" / "hands3d.js", "application/javascript; charset=utf-8"),
+    "/vendor/three/three.module.min.js": (pathlib.Path(__file__).parent / "static" / "vendor" / "three" / "three.module.min.js", "application/javascript; charset=utf-8"),
+    "/vendor/three/loaders/GLTFLoader.js": (pathlib.Path(__file__).parent / "static" / "vendor" / "three" / "loaders" / "GLTFLoader.js", "application/javascript; charset=utf-8"),
+    "/vendor/three/utils/BufferGeometryUtils.js": (pathlib.Path(__file__).parent / "static" / "vendor" / "three" / "utils" / "BufferGeometryUtils.js", "application/javascript; charset=utf-8"),
+    "/hands/left.glb": (pathlib.Path(__file__).parent / "static" / "hands" / "left.glb", "model/gltf-binary"),
+    "/hands/right.glb": (pathlib.Path(__file__).parent / "static" / "hands" / "right.glb", "model/gltf-binary"),
     "/coach.png": (pathlib.Path(__file__).parent / "static" / "coach.png", "image/png"),
     "/favicon.ico": (pathlib.Path(__file__).parent / "static" / "coach.ico", "image/x-icon"),
     "/visualizer.html": (REPO_ROOT / "docs" / "index.html", "text/html; charset=utf-8"),  # the Visualizer card
