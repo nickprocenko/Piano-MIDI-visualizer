@@ -1,7 +1,7 @@
 """Labels on the sheet where the player needs them: note names and counting.
 
 The coach page's Sheet ▸ Labels picks the level, like a game's difficulty: Easy labels every
-bar, Hard none, and Coached (this module) puts them only on the bars you slip on and takes
+bar, Original none, and Coached (this module) puts them only on the bars you slip on and takes
 them off again once you've played those bars clean. Labels are a crutch: the falling notes
 with every key named are the quickest start but teach following lights, not reading, so the
 help here goes as soon as it isn't needed.
@@ -136,5 +136,5 @@ def remark(changes: dict) -> str | None:
     if removed:
         said.append(f"Labels off {_bars_text(removed)}: you've got {'it' if len(removed) == 1 else 'them'}.")
         if not changes.get("left"):
-            said.append("No labels left on this piece. Try Hard under Sheet, Labels.")
+            said.append("No labels left on this piece. Try Original under Sheet, Labels.")
     return " ".join(said) or None

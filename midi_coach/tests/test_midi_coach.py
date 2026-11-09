@@ -613,7 +613,7 @@ def test_aids_label_bars_where_you_slip_and_take_them_off(ref):
     assert clean_pass()["removed"] == {}
     changes = clean_pass()
     assert changes == {"added": {}, "removed": {"counts": [3]}, "left": 0}
-    assert aids.remark(changes) == "Labels off bar 3: you've got it. No labels left on this piece. Try Hard under Sheet, Labels."
+    assert aids.remark(changes) == "Labels off bar 3: you've got it. No labels left on this piece. Try Original under Sheet, Labels."
     assert pushed[-1] == []
 
     a.slip(1, "pitch")

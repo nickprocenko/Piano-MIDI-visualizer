@@ -1207,7 +1207,7 @@
   <span class="menu-row sheet-only">Labels <span class="seg" id="aid-level" aria-label="How much the sheet is labeled">
     <button data-aid="all" title="Note names and counting on every bar. The quickest start, but lean on it and you learn to read the labels, not the music">Easy</button>
     <button data-aid="coach" title="Labels only where you slip: note names on a bar where you play wrong keys or hunt for them, counting where you play off the beat. They come off once you play that bar clean twice">Coached</button>
-    <button data-aid="off" title="No labels: read the music yourself">Hard</button>
+    <button data-aid="off" title="No labels: the music as written, read it yourself">Original</button>
   </span></span>
   <span class="menu-row sheet-only">
     <label title="The letter name on each notehead, filled or hollow like the note; a sharp or flat beside it, from the key signature too"><input type="checkbox" id="aid-names"> Note names</label>
@@ -3721,7 +3721,7 @@ $('dynamics').addEventListener('change', e => {
   forward({type: 'dynamics', show: e.target.checked});  // the sheet redraws with them shown or hidden
 });
 // Sheet ▸ Labels, like a game's difficulty: Easy labels every bar, Coached only the bars the
-// Maestro sees you slip on (aids.py, until you play them clean), Hard none.
+// Maestro sees you slip on (aids.py, until you play them clean), Original none.
 function aidSettings() {
   const level = store.get('aids', 'coach');
   return {level: ['all', 'coach', 'off'].includes(level) ? level : 'coach',
@@ -3791,7 +3791,7 @@ function pageControl(msg) {
   }
   if (msg.show) setView(msg.show);
   if (msg.mode && MODE_HINTS[msg.mode] && msg.mode !== 'record') set('mode', msg.mode, 'change');
-  if (msg.labels) document.querySelector(`#aid-level [data-aid="${{easy: 'all', coached: 'coach', hard: 'off'}[msg.labels]}"]`)?.click();
+  if (msg.labels) document.querySelector(`#aid-level [data-aid="${{easy: 'all', coached: 'coach', original: 'off', hard: 'off'}[msg.labels]}"]`)?.click();
   if ('note_names' in msg) set('aid-names', msg.note_names, 'change');
   if ('counting' in msg) set('aid-counts', msg.counting, 'change');
   if ('dynamics' in msg) set('dynamics', msg.dynamics, 'change');
