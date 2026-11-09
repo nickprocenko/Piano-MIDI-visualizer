@@ -1,4 +1,4 @@
-"""The Music Coach logo: a beamed pair of notes over a keyboard, in the coach page's teal.
+"""The Music Hub logo: a beamed pair of notes over a keyboard, in the coach page's teal.
 
     python -m midi_coach.icon        (rewrites static/coach.ico and static/coach.png)
 

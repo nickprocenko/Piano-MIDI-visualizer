@@ -1,0 +1,126 @@
+# Piano LED system: proposed wiring (phase 1, no custom PCB).
+# Render:  wireviz led_system.yml  makes led_system.svg / .png / .html / .bom.tsv
+# Power rule: the ESP32 is powered by USB only. LED 5V never touches the ESP32's 5V pin;
+# only GND is shared, so the PC and the brick never back-feed each other.
+
+connectors:
+  PSU:
+    type: Mean Well GST60A05 (5V 6A brick)
+    subtype: 5.5x2.1 barrel plug
+    pins: [+, '-']
+    pinlabels: [+5V, GND]
+  JACK:
+    type: Panel barrel jack 5.5x2.1
+    subtype: on enclosure, rated 5A+
+    pins: [+, '-']
+    pinlabels: [+5V, GND]
+  FUSE:
+    type: Inline blade fuse holder
+    subtype: 5A ATO/ATC
+    pins: [in, out]
+  TB:
+    type: Terminal block / WAGO 221
+    subtype: 5V and GND bus
+    pins: [1, 2, 3, 4]
+    pinlabels: [5V_A, 5V_B, GND_A, GND_B]
+  ESP:
+    type: ESP32-S3 DevKit
+    subtype: powered by USB-C from the PC
+    pins: [GND, GPIO33, GPIO21, 3V3]
+    pinlabels: [GND, DATA (33), CLOCK (21), 3V3]
+  LS:
+    type: 74AHCT125 level shifter
+    subtype: 3.3V to 5V, on carrier board
+    pins: [VCC, GND, 1A, 1Y, 2A, 2Y]
+    pinlabels: [VCC 5V, GND, DATA in, DATA out, CLK in, CLK out]
+  OUT:
+    type: GX16-4 panel socket
+    subtype: strip output, on enclosure
+    pins: [1, 2, 3, 4]
+    pinlabels: [+5V, GND, DATA, CLOCK]
+  STRIP_IN:
+    type: SK9822 strip, input end (A0)
+    subtype: 144/m, 177 LEDs, 1000uF cap across 5V/GND
+    pins: [1, 2, 3, 4]
+    pinlabels: [+5V, GND, DI, CI]
+  STRIP_END:
+    type: SK9822 strip, far end (C8)
+    subtype: power injection only
+    pins: [1, 2]
+    pinlabels: [+5V, GND]
+
+cables:
+  W_PSU:
+    category: bundle
+    wirecount: 2
+    gauge: 18 AWG
+    colors: [RD, BK]
+  W_FUSE_IN:
+    wirecount: 1
+    gauge: 18 AWG
+    colors: [RD]
+  W_FUSE_OUT:
+    wirecount: 1
+    gauge: 18 AWG
+    colors: [RD]
+  W_GND:
+    wirecount: 1
+    gauge: 18 AWG
+    colors: [BK]
+  W_LOGIC:
+    wirecount: 4
+    gauge: 24 AWG
+    colors: [BK, GN, YE, RD]
+    notes: ESP GND to shifter GND; 33/21 to shifter inputs; 5V bus to shifter VCC
+  W_LS_OUT:
+    wirecount: 2
+    gauge: 24 AWG
+    colors: [GN, YE]
+    notes: add 33-100 ohm series resistor on each line
+  W_BUS_OUT:
+    wirecount: 2
+    gauge: 18 AWG
+    colors: [RD, BK]
+  W_MAIN:
+    type: 4-core cable to strip, 1-2 m
+    wirecount: 4
+    gauge: 18 AWG
+    colors: [RD, BK, GN, YE]
+    shield: false
+  W_INJECT:
+    type: injection run to far end
+    wirecount: 2
+    gauge: 18 AWG
+    colors: [RD, BK]
+
+connections:
+  - - PSU: [+, '-']
+    - W_PSU: [1, 2]
+    - JACK: [+, '-']
+  - - JACK: [+]
+    - W_FUSE_IN: [1]
+    - FUSE: [in]
+  - - FUSE: [out]
+    - W_FUSE_OUT: [1]
+    - TB: [1]
+  - - JACK: ['-']
+    - W_GND: [1]
+    - TB: [3]
+  - - ESP: [GND, GPIO33, GPIO21]
+    - W_LOGIC: [1, 2, 3]
+    - LS: [GND, 1A, 2A]
+  - - TB: [2]
+    - W_LOGIC: [4]
+    - LS: [VCC]
+  - - LS: [1Y, 2Y]
+    - W_LS_OUT: [1, 2]
+    - OUT: [3, 4]
+  - - TB: [2, 4]
+    - W_BUS_OUT: [1, 2]
+    - OUT: [1, 2]
+  - - OUT: [1, 2, 3, 4]
+    - W_MAIN: [1, 2, 3, 4]
+    - STRIP_IN: [1, 2, 3, 4]
+  - - TB: [1, 3]
+    - W_INJECT: [1, 2]
+    - STRIP_END: [1, 2]

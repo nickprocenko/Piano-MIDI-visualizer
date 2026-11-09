@@ -1,8 +1,8 @@
-"""Put "Music Coach" in the Start menu (so Windows search finds it) and on the Desktop.
+"""Put "Music Hub" in the Start menu (so Windows search finds it) and on the Desktop.
 
     python -m midi_coach.shortcut
 
-Both shortcuts run "Launch Music Coach.bat" from the repo with the coach logo
+Both shortcuts run "Launch Music Hub.bat" from the repo with the coach logo
 (static/coach.ico). Running it again rewrites them in place, so they keep pointing at this
 copy of the repo. The launcher behind them always opens the current code (midi_coach.launch).
 """
@@ -14,7 +14,7 @@ import subprocess
 
 STATIC = pathlib.Path(__file__).resolve().parent / "static"
 REPO = STATIC.parent.parent
-NAME = "Music Coach"
+NAME = "Music Hub"
 DESCRIPTION = "Practice piano, flute, saxophone, singing, fiddle, guitar or bass with the coach page"
 
 
@@ -22,7 +22,7 @@ def _script(lnk: str) -> str:
     q = lambda s: "'" + str(s).replace("'", "''") + "'"
     return "\n".join([
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut(" + lnk + ")",
-        f"$s.TargetPath = {q(REPO / 'Launch Music Coach.bat')}",
+        f"$s.TargetPath = {q(REPO / 'Launch Music Hub.bat')}",
         f"$s.WorkingDirectory = {q(REPO)}",
         f"$s.IconLocation = {q(str(STATIC / 'coach.ico') + ',0')}",
         f"$s.Description = {q(DESCRIPTION)}",
@@ -44,4 +44,4 @@ def install() -> list[str]:
 if __name__ == "__main__":
     for path in install():
         print("wrote", path)
-    print("Windows can take a minute to show the new icon; search the Start menu for \"Music Coach\".")
+    print("Windows can take a minute to show the new icon; search the Start menu for \"Music Hub\".")

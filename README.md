@@ -117,7 +117,7 @@ Add an `led_output` block to `config.json` (persisted in `localStorage` when run
     "enabled": true,
     "transport": "serial",
     "port": "COM5",
-    "baudrate": 115200,
+    "baudrate": 921600,
     "ble_address": "AA:BB:CC:DD:EE:FF",
     "ble_service_uuid": "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
     "ble_char_uuid": "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",
@@ -146,7 +146,7 @@ BLE transport: set `transport` to `"ble"` and fill in the address. Same frame fo
 `firmware/esp32_fastled_bridge/esp32_fastled_bridge.ino` — ready to flash.
 
 Defaults:
-- `LED_COUNT 176`, `SERIAL_BAUD 115200`
+- `LED_COUNT 176`, `SERIAL_BAUD 921600`
 - Accepts BLE writes on service `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` (characteristic `6E400002-…`)
 - Install `NimBLE-Arduino` for BLE support
 

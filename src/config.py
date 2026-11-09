@@ -27,7 +27,7 @@ _DEFAULTS: dict[str, Any] = {
         "enabled": False,
         "transport": "serial",
         "port": "COM5",
-        "baudrate": 115200,
+        "baudrate": 921600,
         "ble_address": "",
         "ble_service_uuid": "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
         "ble_char_uuid": "6E400002-B5A3-F393-E0A9-E50E24DCCA9E",

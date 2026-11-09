@@ -1,6 +1,6 @@
 """Open the coach page from the Windows shortcut, always on the code that's on disk.
 
-    python -m midi_coach.launch [piece]        (what "Launch Music Coach.bat" runs)
+    python -m midi_coach.launch [piece]        (what "Launch Music Hub.bat" runs)
 
 If a coach is already answering on the display port and it started after the newest source
 file changed, the page just opens in it. If it's older (started before an update), a practice
@@ -100,7 +100,7 @@ def supervise(args: list[str]) -> int:
             return 0
         if code != RESTART_EXIT:
             return code
-        print("Restarting the Music Coach on the updated code...")
+        print("Restarting the Music Hub on the updated code...")
         args = []  # practice.main reopens the piece that was on the page (restart.json)
 
 
@@ -153,10 +153,10 @@ def main() -> int:
             return 0
         pid = info.get("pid") or listener_pid(p)
         if not pid or not is_practice(command_line(pid)):
-            print("The Music Coach running on port %d is out of date (it was started before an update)." % p)
+            print("The Music Hub running on port %d is out of date (it was started before an update)." % p)
             print("It looks like Claude Desktop's midi-coach: quit Claude Desktop (File > Exit), then use the shortcut again.")
             return 1
-        print("Restarting the Music Coach: the copy that was running started before an update.")
+        print("Restarting the Music Hub: the copy that was running started before an update.")
         if not stop(pid, p):
             print(f"Couldn't stop the old copy (process {pid}). Close its window, then use the shortcut again.")
             return 1

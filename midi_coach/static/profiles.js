@@ -190,7 +190,7 @@
   // The bar has Home, Ask Maestro and the name of the mode you're in: to change modes you go
   // back to Home, and leaving a mode stops whatever it was running.
   const tabs = [...document.querySelectorAll('#dash .dtab')];
-  const WHERE = {practice: 'Session', explore: 'Explore', record: 'Record a new idea', progress: 'Roadmap', youtube: 'YouTube'};
+  const WHERE = {practice: 'Session', explore: 'Explore', record: 'Record a new idea', progress: 'Roadmap', youtube: 'YouTube', visualizer: 'Visualizer'};
   function mark(which) {
     tabs.forEach(t => {
       if (t.dataset.dash === which) t.setAttribute('aria-current', 'page');
@@ -200,7 +200,39 @@
   }
   // The view each place opens in (Explore, Songs and Lessons are the search on the Session's page).
   const VIEW = {home: 'home', practice: 'practice', explore: 'practice', songs: 'practice', lessons: 'practice',
-                record: 'record', progress: 'progress', place: 'progress', youtube: 'youtube'};
+                record: 'record', progress: 'progress', place: 'progress', youtube: 'youtube', visualizer: 'visualizer'};
+
+  // The Visualizer: the web visualizer's own page, loaded only while its view is open. On Windows
+  // only one program can hold the keyboard's input, so leaving removes the page and frees it for
+  // practice runs; its settings are saved by the page itself, so coming back restores them.
+  // ← Home shows when the mouse moves and fades after a few seconds of stillness.
+  let visTimer = 0;
+  function visOpen() {
+    const view = $('vis-view');
+    if (!$('vis-frame')) {
+      const f = document.createElement('iframe');
+      f.id = 'vis-frame';
+      f.title = 'Piano visualizer';
+      f.allow = 'midi; serial; autoplay; fullscreen; microphone';
+      f.src = 'visualizer.html';
+      f.addEventListener('load', () => {  // same origin: its mouse moves wake ← Home too
+        try { f.contentWindow.addEventListener('mousemove', visWake); } catch (e) {}
+      });
+      view.prepend(f);
+    }
+    visWake();
+  }
+  function visClose() {
+    const f = $('vis-frame');
+    if (f) { f.src = 'about:blank'; f.remove(); }
+  }
+  function visWake() {
+    $('vis-view').classList.add('awake');
+    clearTimeout(visTimer);
+    visTimer = setTimeout(() => $('vis-view').classList.remove('awake'), 3000);
+  }
+  $('vis-view').addEventListener('mousemove', visWake);
+  $('vis-back').addEventListener('click', () => go('home'));
 
   // A Session plays the piece; recording is Record's own mode, so a Session opens on its last play mode.
   function sessionMode() {
@@ -233,6 +265,14 @@
     if (stops && !unguarded && !ownAsk && !(await askSwitch(which))) return false;
     if (stops && !ownAsk) cmd('stop').catch(() => {});
     if (which !== 'explore' && which !== 'songs' && which !== 'lessons') libraryFull(false);
+    if (which !== 'visualizer') visClose();
+    if (which === 'visualizer') {
+      atlasShow(false);
+      document.body.dataset.view = 'visualizer';
+      mark(which);
+      visOpen();
+      return;
+    }
     if (which === 'home') {
       atlasShow(false);
       document.body.dataset.view = 'home';
@@ -305,6 +345,7 @@
   $('home-record').addEventListener('click', () => go('record'));
   $('home-progress').addEventListener('click', () => go('progress'));
   $('home-youtube').addEventListener('click', () => go('youtube'));
+  $('home-visualizer').addEventListener('click', () => go('visualizer'));
   // Ask Maestro (Home's and the bar's): opens the Maestro panel where you are, so nothing
   // running stops and the view stays put.
   $('home-ask').addEventListener('click', openMaestro);

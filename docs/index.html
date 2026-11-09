@@ -114,7 +114,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .bg-item-x:hover{background:rgba(180,60,60,.9)}
 .bg-item-sliders{display:grid;gap:3px}
 .bg-slider-row{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)}
-.bg-slider-row label{width:36px;text-align:right;flex-shrink:0}
+.bg-slider-row label{width:44px;text-align:right;flex-shrink:0}
 .bg-slider-row input[type=range]{flex:1;height:4px;accent-color:#0cc}
 .bg-slider-row .bg-sv{width:30px;text-align:right;color:var(--text);flex-shrink:0}
 /* Track config screen */
@@ -187,6 +187,8 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 #player-hud.visible{display:flex}
 #player-hud button{padding:4px 12px;border-radius:5px;border:1px solid var(--border);background:var(--btn-bg);color:var(--text);cursor:pointer;font-family:inherit;font-size:13px}
 #player-hud button:hover{background:var(--btn-hover)}
+#player-hud button.on{background:var(--accent,#2a7);color:#fff}
+#ph-a-t,#ph-b-t{font-size:11px;opacity:.75;min-width:30px}
 #player-hud label{font-size:11px;opacity:.7;white-space:nowrap}
 #player-hud select{background:var(--btn-bg);border:1px solid var(--border);color:var(--text);border-radius:4px;font-size:12px;padding:2px 4px}
 #ph-time{font-size:11px;opacity:.7;white-space:nowrap;font-variant-numeric:tabular-nums;min-width:76px}
@@ -316,6 +318,9 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 <div id="player-hud">
   <button id="ph-play" title="Play / pause (Space)">▶</button>
   <button id="ph-stop" title="Stop and go back to the start">■</button>
+  <button id="ph-loop" title="Repeat from A to B (L)">⟳ Loop</button>
+  <button id="ph-a" title="Loop start: set to where the song is now">A</button><span id="ph-a-t">0:00</span>
+  <span>→</span><button id="ph-b" title="Loop end: set to where the song is now">B</button><span id="ph-b-t">end</span>
   <span id="ph-time">0:00 / 0:00</span>
   <input type="range" id="ph-seek" min="0" max="1000" value="0" title="Seek">
   <label for="ph-speed">Speed</label>
@@ -1286,7 +1291,9 @@ const SceneManager={
       bgImages.push({id,name:e.name,isGif:e.isGif,
         slide_ms:e.slide_ms??Config.ds.bg_slide_ms,
         fade_ms:e.fade_ms??Config.ds.bg_fade_ms,
-        gif_speed_pct:e.gif_speed_pct??100});
+        gif_speed_pct:e.gif_speed_pct??100,
+        isVideo:!!e.isVideo,video_volume:e.video_volume,video_tune_cents:e.video_tune_cents,
+        video_start_s:e.video_start_s,video_wait_note:e.video_wait_note,video_follow:e.video_follow});
     }
     const scene={id:crypto.randomUUID(),name,created:new Date().toLocaleDateString(),data:snap,bgImages};
     profile.scenes.push(scene);Config.save();return scene;
@@ -1317,7 +1324,14 @@ const SceneManager={
         e.slide_ms=x.meta.slide_ms;
         e.fade_ms=x.meta.fade_ms;
         e.gif_speed_pct=x.meta.gif_speed_pct;
+        if(e.isVideo){
+          for(const k of['video_volume','video_tune_cents','video_start_s','video_wait_note','video_follow'])
+            if(x.meta[k]!==undefined)e[k]=x.meta[k];
+          app._applyBgVideoSettings(e);
+          if(e._started)app._bgVideoRewind(e);
+        }
       });
+      app._refreshBgThumbs();
     }
     app.fluid.setEnabled(Config.ns.effect_fluid_enabled);
     app.fluid.updateConfig(Config.ns);
@@ -1869,7 +1883,7 @@ class LedOutput{
     if(!navigator.serial){this._lastError='Web Serial not available — use Chrome or Edge.';return false;}
     try{
       const p=await navigator.serial.requestPort();
-      await p.open({baudRate:115200});
+      await p.open({baudRate:921600});
       this._ser=p; this._writer=p.writable.getWriter();
       this._reader=p.readable.getReader();
       const dec=new TextDecoder(); let partial='';
@@ -2596,7 +2610,7 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <div class="row" style="flex-wrap:wrap;gap:6px">
   <label>Images</label>
   <button class="action-btn" id="btn-bg-add">+ Add…</button>
-  <input type="file" id="bg-file-input" accept="image/*" multiple style="display:none">
+  <input type="file" id="bg-file-input" accept="image/*,video/*" multiple style="display:none">
   <button class="action-btn" id="btn-bg-shuffle" title="Shuffle order">⇄ Shuffle</button>
   <span id="bg-img-count" style="font-size:11px;color:var(--muted);align-self:center"></span>
 </div>
@@ -5067,6 +5081,13 @@ class App{
     document.getElementById('main-canvas').addEventListener('keydown',e=>{
       if(e.key==='Escape')this.showMenu();
       else if(e.code==='Space'&&document.getElementById('player-hud').classList.contains('visible')){e.preventDefault();this._togglePlayback();}
+      // Video background: K plays/pauses, Backspace rewinds to its start point
+      // (neither is a note on the computer-keyboard piano)
+      else if(e.code==='KeyK'&&!e.ctrlKey&&!e.metaKey&&!e.altKey)this._bgVideoToggle();
+      else if(e.code==='Backspace'){
+        const v=this._bgVideoEntry();
+        if(v){e.preventDefault();this._bgVideoRewind(v);this._showToast?.(v._armed?'Rewound — starts on your first note':'Rewound — press K to play');}
+      }
     });
     // MIDI outputs: list them now only if permission was already given (no prompt at load)
     navigator.permissions?.query({name:'midi'}).then(p=>{if(p.state==='granted')this.router.ensureAccess();}).catch(()=>{});
@@ -5145,7 +5166,15 @@ class App{
     const activeNotes=this._activeNotes;
     activeNotes.clear();
     if(this._mode==='file'){
+      const L=this._phLoop,mf=this.midiFile;
+      if(L?.on&&mf.playing){
+        const end=L.b>0?L.b:mf.durationMs-30;
+        if(mf.positionMs>=end)mf.seek(L.a);
+      }
       this.midiFile.update();
+      if(L?.on&&!mf.playing&&mf.pos===0&&this._phWasPlaying){mf.seek(L.a);mf.play();}  // ran off the end: go round again
+      this._phWasPlaying=mf.playing;
+      this._bgVideoFollow();
       for(const n of this.midiFile.activeNotes) activeNotes.add(n);
       this._hudSong.textContent=this.midiFile.filename+(this.midiFile.playing?' ▶':'');
       this._playerHudTick();
@@ -5175,6 +5204,7 @@ class App{
     }
     this.led.reattack(this.midi.reattackedNotes,this.lastTime);
     this.midi.reattackedNotes.clear();
+    this._bgVideoOnNotes(newly);
     const nc=ns.note_colors;
     if(nc&&typeof nc==='object'&&!Array.isArray(nc)){
       const src=this._mode==='file'?this.midiFile:this.midi;
@@ -5361,6 +5391,16 @@ class App{
       blob:file,
       name:file.name,
       isGif:/\.gif$/i.test(file.name),
+      isVideo:/^video\//.test(file.type||'')||/\.(mp4|webm|mov|m4v|mkv|ogv)$/i.test(file.name),
+      // Video backgrounds: sound level, tuning (cents; also nudges speed, like a record), where the
+      // clip starts, and whether it waits for your first note to start from there.
+      video_volume:100,
+      video_tune_cents:0,
+      video_start_s:0,
+      video_wait_note:true,
+      // Learn mode drives the clip: song time 0 = the start point, loops and seeks move the clip too
+      video_follow:true,
+      _video:null,
       slide_ms:Math.max(500,Config.ds.bg_slide_ms??5000),
       fade_ms:Math.max(0,Config.ds.bg_fade_ms??1000),
       gif_speed_pct:Math.max(10,Math.min(300,Config.ds.gif_speed_percent??100)),
@@ -5435,6 +5475,83 @@ class App{
     if(ctx)ctx.clearRect(0,0,canvas.width,canvas.height);
     canvas.style.display='none';
     layer.style.backgroundImage='none';
+    layer.querySelectorAll('video').forEach(v=>{v.pause();v.remove();});
+  }
+  // ─── Video backgrounds ───────────────────────────────────────────────────────
+  // The video entry on screen now (the slideshow's front layer), if any.
+  _bgVideoEntry(){
+    for(const key of['a','b']){
+      const st=this._bgLayerState[key];
+      if(st.mode==='video'&&st.entry?._video)return st.entry;
+    }
+    return null;
+  }
+  _applyBgVideoSettings(entry){
+    const v=entry?._video;if(!v)return;
+    v.volume=Math.max(0,Math.min(1,(entry.video_volume??100)/100));
+    v.preservesPitch=false; // tuning shifts pitch the way a record played faster does
+    v.playbackRate=Math.pow(2,(entry.video_tune_cents??0)/1200);
+  }
+  // Rewind to the start point. With "wait for first note" it then waits for your first note.
+  _bgVideoRewind(entry,{play=false}={}){
+    const v=entry?._video;if(!v)return;
+    v.pause();
+    this._applyBgVideoSettings(entry);
+    v.currentTime=Math.max(0,entry.video_start_s??0);
+    entry._armed=!!entry.video_wait_note;
+    if(play&&!entry._armed)this._bgVideoPlay(entry);
+  }
+  _bgVideoPlay(entry){
+    const v=entry?._video;if(!v)return;
+    entry._armed=false;
+    this._applyBgVideoSettings(entry);
+    v.play().catch(()=>this._showToast?.('Click the page once, then press K — the browser blocks sound until you do'));
+  }
+  _bgVideoToggle(){
+    const e=this._bgVideoEntry();if(!e){this._showToast?.('No video background');return;}
+    if(e._video.paused){this._bgVideoPlay(e);this._showToast?.('Video playing');}
+    else{e._video.pause();this._showToast?.('Video paused');}
+  }
+  // "Follow the song": while a Learn song is loaded, the clip sits at start point + song time.
+  // It plays while the song moves, pauses while Learn waits for you or is stopped, and jumps
+  // when the song jumps (loop back, seek). Speed below 100 % slows the clip with pitch kept.
+  // Which song the clip follows: Learn mode when its bar is up, otherwise the file player.
+  _bgVideoSource(){
+    if(document.getElementById('learn-hud')?.classList.contains('visible')&&this._learn?._events?.length){
+      const l=this._learn;
+      return{ms:l.cursorMs,speed:Config.lrn.speed||1,
+        moving:l.active&&l.cursorMs>=0&&(Config.lrn.mode==='freeplay'||l.cursorMs<l._currentNoteMs)};
+    }
+    if(this._mode==='file'&&this.midiFile?.events.length){
+      const mf=this.midiFile;
+      return{ms:mf.positionMs,speed:mf.speed||1,moving:mf.playing};
+    }
+    return null;
+  }
+  _bgVideoFollowing(){
+    const e=this._bgVideoEntry();
+    return e&&e.video_follow&&this._bgVideoSource()?e:null;
+  }
+  _bgVideoFollow(){
+    const e=this._bgVideoFollowing();if(!e)return;
+    const v=e._video,src=this._bgVideoSource();
+    e._armed=false;
+    const tune=Math.pow(2,(e.video_tune_cents??0)/1200),speed=src.speed;
+    v.volume=Math.max(0,Math.min(1,(e.video_volume??100)/100));
+    v.preservesPitch=speed!==1;
+    if(Math.abs(v.playbackRate-tune*speed)>1e-3)v.playbackRate=tune*speed;
+    const target=Math.max(0,(e.video_start_s??0)+src.ms/1000*tune);
+    const moving=src.moving;
+    if(Math.abs(v.currentTime-target)>0.25)v.currentTime=target;
+    if(moving&&v.paused)v.play().catch(()=>{});
+    else if(!moving&&!v.paused)v.pause();
+  }
+  // Called with the notes struck this frame: an armed video starts on the first one.
+  _bgVideoOnNotes(newly){
+    if(!newly.length)return;
+    if(this._bgVideoFollowing())return;
+    const e=this._bgVideoEntry();
+    if(e?._armed)this._bgVideoPlay(e);
   }
   _disposeBgGifCache(entry){
     if(!entry)return;
@@ -5444,6 +5561,7 @@ class App{
     entry._gifFrames=null;
     entry._gifDurations=null;
     entry._gifDecodePromise=null;
+    if(entry._video){entry._video.pause();entry._video.remove();entry._video.removeAttribute('src');entry._video.load();entry._video=null;}
   }
   async _ensureGifDecoded(entry){
     if(!entry?.isGif||entry._gifDecodeFailed)return null;
@@ -5499,6 +5617,25 @@ class App{
     state.frameMs=0;
     state.lastTs=0;
     canvas.style.display='none';
+    layer.querySelectorAll('video').forEach(v=>{v.pause();v.remove();});
+    if(entry?.isVideo){
+      layer.style.backgroundImage='none';
+      if(!entry._video){
+        const v=document.createElement('video');
+        v.src=entry.url;
+        v.playsInline=true;
+        v.preload='auto';
+        v.style.cssText='position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none';
+        entry._video=v;
+        // The clip stays on its last frame at the end; Backspace rewinds.
+        v.addEventListener('loadedmetadata',()=>{if(!entry._started){entry._started=true;this._bgVideoRewind(entry);}});
+      }
+      layer.appendChild(entry._video);
+      state.mode='video';
+      this._applyBgVideoSettings(entry);
+      if(entry._started)this._bgVideoRewind(entry);
+      return;
+    }
     layer.style.backgroundImage=`url("${entry.url}")`;
     if(!entry?.isGif)return;
     const decoded=await this._ensureGifDecoded(entry);
@@ -5613,7 +5750,12 @@ class App{
 
         const thumb=document.createElement('div');
         thumb.className='bg-thumb-mini';
-        thumb.style.backgroundImage=`url(${e.url})`;
+        if(e.isVideo){
+          const tv=document.createElement('video');
+          tv.src=e.url+'#t=1';tv.muted=true;tv.preload='metadata';
+          tv.style.cssText='width:100%;height:100%;object-fit:cover;border-radius:3px';
+          thumb.appendChild(tv);
+        }else thumb.style.backgroundImage=`url(${e.url})`;
         top.appendChild(thumb);
 
         const name=document.createElement('span');
@@ -5622,9 +5764,9 @@ class App{
         name.title=e.name||`Image ${i+1}`;
         top.appendChild(name);
 
-        if(e.isGif){
+        if(e.isGif||e.isVideo){
           const tag=document.createElement('span');
-          tag.className='bg-thumb-gif';tag.textContent='GIF';
+          tag.className='bg-thumb-gif';tag.textContent=e.isVideo?'VIDEO':'GIF';
           top.appendChild(tag);
         }
 
@@ -5663,6 +5805,43 @@ class App{
           sliders.appendChild(mkRow('Speed',10,300,10,e.gif_speed_pct??100,'%',v=>{
             e.gif_speed_pct=v;
           }));
+        if(e.isVideo){
+          sliders.appendChild(mkRow('Volume',0,100,5,e.video_volume??100,'%',v=>{
+            e.video_volume=v;this._applyBgVideoSettings(e);
+          }));
+          sliders.appendChild(mkRow('Tune',-100,100,1,e.video_tune_cents??0,'¢',v=>{
+            e.video_tune_cents=v;this._applyBgVideoSettings(e);
+          }));
+          // Start point, to the tenth of a second, plus "set it to where the video is now"
+          const sr=document.createElement('div');sr.className='bg-slider-row';
+          const sl=document.createElement('label');sl.textContent='Start';
+          const si=document.createElement('input');si.type='number';si.min=0;si.step=0.1;
+          si.value=(e.video_start_s??0).toFixed(1);
+          si.style.cssText='width:64px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:1px 4px;border-radius:3px;font-size:10px';
+          si.addEventListener('change',()=>{e.video_start_s=Math.max(0,+si.value||0);});
+          const su=document.createElement('span');su.textContent='s';
+          const now=document.createElement('button');now.className='action-btn';now.textContent='Set to now';
+          now.title='Make the spot the video is paused on the start point';
+          now.style.cssText='font-size:10px;padding:1px 6px';
+          now.onclick=()=>{if(!e._video)return;e.video_start_s=Math.round(e._video.currentTime*10)/10;si.value=e.video_start_s.toFixed(1);};
+          sr.append(sl,si,su,now);sliders.appendChild(sr);
+          const br=document.createElement('div');br.className='bg-slider-row';br.style.flexWrap='wrap';
+          const wl=document.createElement('label');wl.style.cssText='width:auto;display:flex;align-items:center;gap:4px;cursor:pointer';
+          const wc=document.createElement('input');wc.type='checkbox';wc.checked=!!e.video_wait_note;
+          wc.onchange=()=>{e.video_wait_note=wc.checked;};
+          wl.append(wc,document.createTextNode('Start on my first note'));
+          const fl=document.createElement('label');fl.style.cssText='width:auto;display:flex;align-items:center;gap:4px;cursor:pointer';
+          fl.title='With a song in Learn mode, the clip follows it: song start = Start point; loops and seeking move the clip too';
+          const fc=document.createElement('input');fc.type='checkbox';fc.checked=!!e.video_follow;
+          fc.onchange=()=>{e.video_follow=fc.checked;if(fc.checked)this._bgVideoFollow();};
+          fl.append(fc,document.createTextNode('Follow the song (Learn or player)'));
+          br.appendChild(fl);
+          const mk=(txt,fn)=>{const b=document.createElement('button');b.className='action-btn';b.textContent=txt;b.style.cssText='font-size:10px;padding:1px 6px';b.onclick=fn;return b;};
+          br.append(wl,
+            mk('▶ / ❚❚ (K)',()=>{if(e._video){e._video.paused?this._bgVideoPlay(e):e._video.pause();}}),
+            mk('⟲ Rewind (Backspace)',()=>this._bgVideoRewind(e)));
+          sliders.appendChild(br);
+        }
 
         card.appendChild(sliders);
         list.appendChild(card);
@@ -6005,6 +6184,7 @@ class App{
       }
     }
     l._lastFrameWall=this._frameNow;
+    this._bgVideoFollow();
   }
 
   _learnAdvanceCursor(){
@@ -6032,6 +6212,7 @@ class App{
     const l=this._learn; l.active=false;
     this._learnSoundReset();
     document.getElementById('lhud-playpause').textContent='▶';
+    this._bgVideoFollow();
     // Keep HUD visible so the timeline remains accessible for replay/seeking
     this._updateNotationVisibility();
   }
@@ -6072,6 +6253,7 @@ class App{
       }
     }
     if(l.active)this._learnSoundTick();
+    this._bgVideoFollow();
   }
 
   _drawLearnNotes(ctx,layout){
@@ -6158,11 +6340,13 @@ class App{
     this._learnSoundReset();
     const pp=document.getElementById('lhud-playpause');
     if(pp)pp.textContent='▶';
+    this._bgVideoFollow();
   }
 
   resetLearn(){
     this.pauseLearn();
     this._learnResetCursor();
+    this._bgVideoFollow();
   }
 
   // ─── Sound: tracks, Learn mode and the live keyboard → synth or MIDI outputs ───
@@ -6273,6 +6457,16 @@ class App{
     this._phFmt=fmt;
     $('ph-play').onclick=()=>this._togglePlayback();
     $('ph-stop').onclick=()=>{mf.stop();this._playerHudTick(true);};
+    // A/B loop for the file player: at B (or the end) it jumps back to A
+    this._phLoop={on:false,a:0,b:0};
+    const loopLabels=()=>{const L=this._phLoop;
+      $('ph-loop').classList.toggle('on',L.on);
+      $('ph-a-t').textContent=this._phFmt(L.a);$('ph-b-t').textContent=L.b>0?this._phFmt(L.b):'end';};
+    this._phLoopLabels=loopLabels;
+    $('ph-loop').onclick=()=>{this._phLoop.on=!this._phLoop.on;loopLabels();};
+    $('ph-a').onclick=()=>{const L=this._phLoop;L.a=mf.positionMs;if(L.b>0&&L.b<=L.a+500)L.b=0;L.on=true;loopLabels();};
+    $('ph-b').onclick=()=>{const L=this._phLoop;const p=mf.positionMs;if(p>L.a+500){L.b=p;L.on=true;mf.seek(L.a);}loopLabels();this._playerHudTick(true);};
+    loopLabels();
     const seek=$('ph-seek');
     seek.oninput=()=>{this._phDrag=true;$('ph-time').textContent=fmt(seek.value/1000*mf.durationMs)+' / '+fmt(mf.durationMs);};
     seek.onchange=()=>{this._phDrag=false;mf.seek(seek.value/1000*mf.durationMs);this._playerHudTick(true);};

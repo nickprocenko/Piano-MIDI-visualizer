@@ -635,8 +635,9 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "view": {"type": "string", "enum": ["home", "session", "explore", "record", "roadmap", "youtube"],
-                         "description": "Where to go. Leaving a session stops a run that's going."},
+                "view": {"type": "string", "enum": ["home", "session", "explore", "record", "roadmap", "youtube", "visualizer"],
+                         "description": "Where to go. Leaving a session stops a run that's going. visualizer: the "
+                                        "full-screen piano visualizer (light show, LEDs, video backgrounds)."},
                 "show": {"type": "string", "enum": ["sheet", "notes", "both"],
                          "description": "Sheet music, the falling notes, or both."},
                 "labels": {"type": "string", "enum": ["easy", "coached", "hard"],

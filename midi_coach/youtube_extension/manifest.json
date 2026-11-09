@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Piano Coach for YouTube",
+  "name": "Music Hub for YouTube",
   "version": "1.1.0",
-  "description": "Plays along with a song on YouTube: the Piano Coach's sheet music follows the video, with your taps and loop.",
+  "description": "Plays along with a song on YouTube: the Music Hub's sheet music follows the video, with your taps and loop.",
   "icons": {"16": "icon16.png", "48": "icon48.png", "128": "icon128.png"},
   "background": {"service_worker": "background.js"},
   "host_permissions": ["http://127.0.0.1/*"],

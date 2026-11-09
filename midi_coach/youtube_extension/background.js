@@ -1,4 +1,4 @@
-// Piano Coach for YouTube: the go-between for the YouTube tab and the coach on this PC.
+// Music Hub for YouTube: the go-between for the YouTube tab and the coach on this PC.
 //
 // The tab's script can't call the coach itself (a YouTube page reaching into the local
 // network gets blocked or asks for permission), so it sends each command here and this

@@ -1,7 +1,7 @@
 // The YouTube tab: play along with a song's video on youtube.com. Loaded after video.js
 // (videoShow) and coach.html's script (cmd, esc); profiles.js opens it with youtubeShow().
 //
-// Videos that only play on youtube.com go through the Piano Coach for YouTube extension
+// Videos that only play on youtube.com go through the Music Hub for YouTube extension
 // (youtube_extension/), which follows the song open in the coach. This tab says whether the
 // extension is talking to the coach (cmd('youtube')), walks through loading it, and lists every
 // song synced to a video, each a click from playing along again. While the tab is open it asks
@@ -67,9 +67,9 @@ function ytSong(song) {
   $('ytv-pick').textContent = song ? 'Choose another song' : 'Choose a song';
   let detail;
   if (!song) detail = 'The extension follows whichever song is open in the coach, so open one first.';
-  else if (!v) detail = 'No video chosen yet. Find it on YouTube, then press <b>Use this video for this song</b> in the Piano Coach box there.';
+  else if (!v) detail = 'No video chosen yet. Find it on YouTube, then press <b>Use this video for this song</b> in the Music Hub box there.';
   else if (!song.taps) {
-    detail = `Video: <b>${esc(v.title || v.id)}</b>. Not synced yet: in the Piano Coach box on YouTube press <b>Tap to sync</b>, `
+    detail = `Video: <b>${esc(v.title || v.id)}</b>. Not synced yet: in the Music Hub box on YouTube press <b>Tap to sync</b>, `
       + 'then tap <b>T</b> on the first beat of each bar for 4 to 8 bars.';
   } else {
     const bpm = song.bpm ? `, about <b>${Math.round(song.bpm)} BPM</b>` : '';

@@ -32,7 +32,7 @@ def main() -> None:
         server.hub.status(f"{pathlib.Path(path).stem} · pick Listen, Learn or Rehearse and press Start")
     if not os.environ.get("MIDI_COACH_NO_BROWSER"):
         server.hub.open_browser()
-    print(f"Piano Coach practice page: {url}  (Ctrl+C to quit)")
+    print(f"Music Hub page: {url}  (Ctrl+C to quit)")
     try:
         threading.Event().wait()
     except KeyboardInterrupt:

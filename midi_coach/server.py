@@ -1607,6 +1607,9 @@ def _voice_context() -> str:
     view = _page_view.get("view")
     if view in tiles.VIEWS:
         lines.append(f"The page is on {tiles.VIEW_NAMES[view]} ({view}); its panel tiles: {', '.join(tiles.layouts()[view]) or 'none'}.")
+    elif view == "visualizer":
+        lines.append("The page is on the Visualizer (full screen, the web piano visualizer with LEDs and video; "
+                     "it has the keyboard, so practice runs start from the Session).")
     if instruments.uses_mic():
         lines.append(_instrument_line())
     about = atlas_welcome.about_line()

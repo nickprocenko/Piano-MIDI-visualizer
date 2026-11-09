@@ -184,7 +184,7 @@ async function videoLoad() {
       },
       onPlaybackRateChange: () => { resetClock(); $('video-speed').value = vid.clock.rate; videoTick(true); },
       onError: e => videoNote([101, 150].includes(e.data)
-        ? 'This video only plays on YouTube itself. Press <b>Open on YouTube</b>: with the Piano Coach extension '
+        ? 'This video only plays on YouTube itself. Press <b>Open on YouTube</b>: with the Music Hub extension '
           + 'installed, the sheet follows it there, with the same taps and loop. Or choose another video.'
         : 'YouTube could not play this video. Choose another one.'),
     },

@@ -1,4 +1,4 @@
-// Piano Coach for YouTube: runs inside youtube.com, for videos that only play there.
+// Music Hub for YouTube: runs inside youtube.com, for videos that only play there.
 //
 // The same as the coach page's video panel (midi_coach/static/video.js), with YouTube's own
 // <video> as the clock: every few seconds it reads the song open in the coach and its sync
@@ -118,7 +118,7 @@ root.innerHTML = `
   #msg b { color: #e6e9f2; font-weight: 600; }
 </style>
 <div class="box" id="box">
-  <div class="head"><b>𝄞 Piano Coach</b><span class="song" id="song"></span><button id="min" title="Shrink / grow">–</button></div>
+  <div class="head"><b>𝄞 Music Hub</b><span class="song" id="song"></span><button id="min" title="Shrink / grow">–</button></div>
   <div class="body">
     <div id="msg"></div>
     <button id="use" hidden></button>
@@ -166,8 +166,8 @@ function render() {
   $('song').textContent = info ? info.title : '';
   $('sync-row').hidden = $('loop-row').hidden = !on;
   $('use').hidden = !(pc.state === 'ok' && id && !matched());
-  if (pc.state === 'offline') return note('The Piano Coach isn’t running. Start it, and this box connects by itself.');
-  if (pc.state === 'nosong') return note('Pick a song in the Piano Coach, then come back to its video here.');
+  if (pc.state === 'offline') return note('The Music Hub isn’t running. Start it, and this box connects by itself.');
+  if (pc.state === 'nosong') return note('Pick a song in the Music Hub, then come back to its video here.');
   if (!matched()) {
     $('use').textContent = 'Use this video for this song';
     return note(info.video

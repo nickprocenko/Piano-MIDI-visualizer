@@ -41,6 +41,7 @@ STATIC_FILES = {
     "/roll.js": (pathlib.Path(__file__).parent / "static" / "roll.js", "application/javascript; charset=utf-8"),
     "/coach.png": (pathlib.Path(__file__).parent / "static" / "coach.png", "image/png"),
     "/favicon.ico": (pathlib.Path(__file__).parent / "static" / "coach.ico", "image/x-icon"),
+    "/visualizer.html": (REPO_ROOT / "docs" / "index.html", "text/html; charset=utf-8"),  # the Visualizer card
     "/notation.html": (REPO_ROOT / "docs" / "notation.html", "text/html; charset=utf-8"),
     "/fingering.js": (REPO_ROOT / "docs" / "fingering.js", "application/javascript; charset=utf-8"),
     "/opensheetmusicdisplay.min.js": (REPO_ROOT / "src" / "static" / "opensheetmusicdisplay.min.js", "application/javascript"),

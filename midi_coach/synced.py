@@ -99,7 +99,7 @@ def set_video(path: str, vid: str, title: str | None = None) -> dict:
 
 
 # -- the extension -------------------------------------------------------------------
-# The Piano Coach for YouTube extension (youtube_extension/) talks to the coach while a
+# The Music Hub for YouTube extension (youtube_extension/) talks to the coach while a
 # YouTube tab is open. Its last visit is kept in <home>/youtube_extension.json, so the
 # YouTube tab can tell "installed, no YouTube tab open" from "never seen" after a restart.
 

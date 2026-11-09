@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Piano Coach</title>
+<title>Music Hub</title>
 <link rel="icon" href="favicon.ico" sizes="16x16 24x24 32x32 48x48">
 <link rel="icon" href="coach.png" type="image/png" sizes="256x256">
 <style>
@@ -687,6 +687,13 @@
   .home-coach p { color: var(--muted); font-size: 13px; }
   .home-coach-action { flex: none; margin-left: auto; padding: 8px 12px; border: 1px solid rgba(0,180,180,.5); border-radius: 6px; background: transparent; color: var(--accent); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
   .home-coach-action:disabled { opacity: .5; cursor: default; }
+  /* Visualizer (profiles.js): the web piano visualizer (docs/index.html), full screen over the hub.
+     Its page is loaded only while this view is open, so it lets go of the keyboard when you leave. */
+  #vis-view { display: none; position: fixed; inset: 0; z-index: 900; background: #000; }
+  body[data-view=visualizer] #vis-view { display: block; }
+  #vis-frame { width: 100%; height: 100%; border: 0; display: block; }
+  #vis-back { position: absolute; top: 10px; right: 10px; padding: 6px 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 6px; background: rgba(13,16,24,.85); color: var(--text); font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; opacity: 0; transition: opacity .3s; }
+  #vis-view.awake #vis-back, #vis-back:hover, #vis-back:focus-visible { opacity: 1; }
   /* YouTube (youtube.js): play along with a video on youtube.com, through the extension */
   #youtube-view { display: none; flex: 1; width: min(1040px, 100%); margin: 0 auto; padding: clamp(24px, 5vh, 52px) 28px 36px; overflow-y: auto; flex-direction: column; align-items: center; gap: 18px; }
   #youtube-view > * { width: 100%; max-width: 860px; }
@@ -997,7 +1004,7 @@
 </head>
 <body data-view="home">
 <nav id="dash" aria-label="Main navigation">
-  <button class="brand" id="dash-brand" title="Go to Home">Piano <b>Coach</b></button>
+  <button class="brand" id="dash-brand" title="Go to Home">Music <b>Hub</b></button>
   <span id="file-wrap">
     <button id="file-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="file-menu">File ▾</button>
     <div id="file-menu" role="menu" aria-label="File" hidden>
@@ -1068,11 +1075,17 @@
       <span class="home-card-detail">Your learning path: explore skills, set a goal, or see where to start.</span>
       <span class="home-card-action">Open the map <b aria-hidden="true">→</b></span>
     </button>
-    <button class="home-card wide" id="home-youtube">
+    <button class="home-card" id="home-youtube">
       <span class="home-card-icon" aria-hidden="true">▶</span>
       <span class="home-card-title">Play along on YouTube</span>
       <span class="home-card-detail">Play a song’s video on youtube.com: the sheet follows it.</span>
       <span class="home-card-action">Open YouTube play-along <b aria-hidden="true">→</b></span>
+    </button>
+    <button class="home-card" id="home-visualizer">
+      <span class="home-card-icon" aria-hidden="true">✦</span>
+      <span class="home-card-title">Visualizer</span>
+      <span class="home-card-detail">Play freely with the light show: notes, LEDs and video backgrounds, full screen.</span>
+      <span class="home-card-action">Open the visualizer <b aria-hidden="true">→</b></span>
     </button>
   </section>
   </div>
@@ -1085,6 +1098,9 @@
     <button class="home-coach-action" id="home-ask"><span id="home-ask-label">Ask Maestro</span> <span aria-hidden="true">→</span></button>
   </aside>
 </main>
+<div id="vis-view" role="region" aria-label="Visualizer">
+  <button id="vis-back" type="button" title="Back to the hub's Home (closes the visualizer and frees the keyboard)">← Home</button>
+</div>
 <main id="youtube-view" aria-label="Play along on YouTube">
   <section class="home-intro">
     <p class="eyebrow">PLAY ALONG ON YOUTUBE</p>
@@ -1118,13 +1134,13 @@
       <li>Turn on <b>Developer mode</b> (a switch at the top right in Chrome, on the left in Edge).</li>
       <li>Press <b>Load unpacked</b> and choose this folder:
         <span class="ytv-path"><code id="ytv-folder">…</code><button class="ytv-btn" data-copy="ytv-folder">Copy</button><button class="ytv-btn" id="ytv-reveal">Show in Explorer</button></span></li>
-      <li>Open any video on youtube.com. A small <b>𝄞 Piano Coach</b> box appears at its top right, and the light above turns green.</li>
+      <li>Open any video on youtube.com. A small <b>𝄞 Music Hub</b> box appears at its top right, and the light above turns green.</li>
     </ol>
     <p>When the extension’s files change, press its reload button (↻) on the extensions page, then reload the YouTube tab.</p>
   </details>
   <section class="ytv-card" aria-label="Songs synced to a video">
     <h2>Your synced videos</h2>
-    <p id="ytv-empty">None yet. Open a song, find its video on YouTube and press <b>Use this video for this song</b> in the Piano Coach box.</p>
+    <p id="ytv-empty">None yet. Open a song, find its video on YouTube and press <b>Use this video for this song</b> in the Music Hub box.</p>
     <ul class="ytv-list" id="ytv-list"></ul>
   </section>
 </main>
@@ -1383,7 +1399,7 @@
         <div class="v-row">
           <label title="Repeat these bars while the video plays (a second before the first bar, for a run-up)"><input type="checkbox" id="video-loop"> Loop bars</label>
           <input id="video-from" type="number" min="0" aria-label="Loop from bar"> – <input id="video-to" type="number" min="0" aria-label="Loop to bar">
-          <a id="video-yt" target="_blank" rel="noopener" title="Play it on YouTube itself: with the Piano Coach extension the sheet follows it there too" hidden>Open on YouTube ↗</a>
+          <a id="video-yt" target="_blank" rel="noopener" title="Play it on YouTube itself: with the Music Hub extension the sheet follows it there too" hidden>Open on YouTube ↗</a>
         </div>
         <p id="video-note" aria-live="polite"></p>
       </div>
@@ -1871,7 +1887,7 @@ function connect() {
     let msg = JSON.parse(ev.data);
     if (msg.type === 'score') {
       titleEl.textContent = msg.title;
-      document.title = 'Piano Coach · ' + msg.title;
+      document.title = 'Music Hub · ' + msg.title;
       if (msg.path) restorePractice(msg.path, msg.practice);  // before anything else sets the bars
       if (msg.version !== scoreVersion) { scoreVersion = msg.version; loadScore(msg.version); loadParts(); loadLessons(); if (typeof videoScoreChanged === 'function') videoScoreChanged(); }
       return;
@@ -3931,7 +3947,7 @@ connect();
 <script src="youtube.js"></script>
 <div id="mainmenu" role="dialog" aria-modal="true" aria-label="Choose a profile">
   <div class="mm-box">
-    <h1>Piano <b>Coach</b></h1>
+    <h1>Music <b>Hub</b></h1>
     <p class="mm-sub">Who is practicing?</p>
     <div id="mm-list"></div>
     <form id="mm-new">
