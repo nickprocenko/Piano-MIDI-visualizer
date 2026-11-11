@@ -29,7 +29,8 @@ def repo() -> pathlib.Path:
 
 
 def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-    out = subprocess.run(["git", *args], cwd=repo(), capture_output=True, text=True, encoding="utf-8")
+    out = subprocess.run(["git", *args], cwd=repo(), capture_output=True, text=True, encoding="utf-8",
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if check and out.returncode:
         raise RuntimeError(f"git {' '.join(args)}: {(out.stderr or out.stdout).strip()}")
     return out
@@ -111,7 +112,8 @@ def worktree(name: str) -> pathlib.Path:
         git("worktree", "prune")
         git("worktree", "add", "-q", "-B", branch, str(path), head)
     else:
-        run = lambda *a: subprocess.run(["git", *a], cwd=path, capture_output=True, text=True, check=True)
+        run = lambda *a: subprocess.run(["git", *a], cwd=path, capture_output=True, text=True, check=True,
+                                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         run("checkout", "-q", "-B", branch, head)
         run("reset", "-q", "--hard", head)
         run("clean", "-q", "-fd")
