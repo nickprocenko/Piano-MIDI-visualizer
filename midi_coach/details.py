@@ -6,7 +6,7 @@ The coach page's Details button. Two passes, both cached per file in
 local(score)       straight away, from the file: the chord in each bar (or half bar) named from
                    the notes (harmony.py), and the karaoke lyrics when the MIDI file has them.
 research(...)      on the pianist's subscription (claude_run, a few minutes): the song's published
-                   chords and section names (Ultimate Guitar's best-rated chart, checked against
+                   chords and section names (Hooktheory TheoryTab; Ultimate Guitar no longer works, checked against
                    Hooktheory TheoryTab) and its lyrics (LRCLIB, else the chart's words), laid onto
                    this file's bars and tune by Claude Code. Each published chord is checked
                    against the notes: one they contradict is kept out and reported, and the
@@ -501,11 +501,14 @@ def _same_song(a: str, b: str) -> bool:
 
 
 def fetch_chart(song: str, artist: str | None, file_chords: list[str], search=None, tab=None) -> dict | None:
-    """The best-rated Ultimate Guitar chords chart, transposed to the file's key when the
-    harmony shows a shift: {text, url, key, capo, transpose}, or None."""
+    """A published chords chart, transposed to the file's key when the harmony shows a shift:
+    {text, url, key, capo, transpose}, or None. Ultimate Guitar no longer answers, so with no
+    `search`/`tab` given there is no chart and the sheet's chords come from the notes, checked
+    against Hooktheory TheoryTab by the research step (open sources only)."""
     from . import web
 
-    search, tab = search or web.ug_search, tab or web.ug_tab
+    if search is None or tab is None:
+        return None
     try:
         tabs = search(f"{artist} {song}" if artist else song, ["chords"])
         tabs = sorted(tabs, key=lambda t: -(t.get("votes") or 0) * (t.get("rating") or 0))
@@ -649,7 +652,8 @@ def research(score: Score, data: dict, run=claude_run.run, lyrics=fetch_lyrics, 
         shift = f", transposed {sheet['transpose']:+d} semitones to this file's key" if sheet["transpose"] else ""
         parts += [f"\nChord chart ({sheet['url']}; key {sheet['key'] or '?'}, capo {sheet['capo']}{shift}):", sheet["text"]]
     else:
-        parts.append("\nNo chord chart was found: use TheoryTab and the notes.")
+        parts.append("\nNo chord chart is supplied: use TheoryTab (the Roman-numeral progression per section, in the "
+                     "key given) and the notes. Don't use Ultimate Guitar or other copyrighted chord sheets.")
     if words:
         parts += [f"\nLyrics ({words['url']}):", words["text"]]
     elif not has_own_lyrics:

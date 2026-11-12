@@ -912,9 +912,10 @@ sight-reading), which has no chart or lyrics to look up.
    with inversions (*V⁶*, *I⁶₄*, *ii⁴₂*) and secondary dominants (*V⁷/IV*). A karaoke MIDI
    file's own lyrics go under the vocal line.
 2. **Then the song is looked up, on your Claude subscription.** This takes a few minutes
-   and uses no API credits. The coach fetches the best-rated chord chart (Ultimate Guitar)
-   and the lyrics (LRCLIB, an open lyrics database). Claude Code then lays them onto this
-   file's bars and tune, checks Hooktheory TheoryTab for the sections, and the sheet is
+   and uses no API credits. The coach fetches the lyrics (LRCLIB, an open lyrics database).
+   Ultimate Guitar no longer works, so there is no chord-sheet scrape: Claude Code lays the
+   lyrics onto this file's bars and tune and takes the sections and chord progression from
+   Hooktheory TheoryTab, checked against the chords the notes suggest. The sheet is
    redrawn when it's done (after the current run, if you're playing). What comes back is
    checked against the file. A published chord the notes contradict is left out and the
    file's own chord is kept: hover over the note beside the button to see where that
