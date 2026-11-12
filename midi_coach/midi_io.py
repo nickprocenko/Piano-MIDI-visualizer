@@ -82,6 +82,29 @@ def _open_output(port: str | None):
     return out, names[idx]
 
 
+def _open_input(port: str | None):
+    """(an open MidiIn-like client, its name): a Bluetooth keyboard or a MIDI port."""
+    if ble_midi.is_port(port):  # notes arrive on the Bluetooth thread, each with its time
+        return _bluetooth("input", port), port
+    midi_in = _open_client("input")
+    names = midi_in.get_ports()
+    idx = resolve_port(names, port, "MIDI_COACH_INPUT", "input")
+    try:
+        midi_in.open_port(idx)
+    except Exception as exc:
+        raise PortError(f"Could not open '{names[idx]}' ({exc}). {PORT_HELP}") from exc
+    midi_in.ignore_types(sysex=True, timing=True, active_sense=True)
+    return midi_in, names[idx]
+
+
+def _close(client) -> None:
+    try:
+        client.cancel_callback()
+        client.close_port()
+    except Exception:
+        pass
+
+
 def resolve_port(names: list[str], query: str | None, env_var: str, kind: str) -> int:
     """Pick a port index by substring: explicit query > env var > 'JUNO' > only port."""
     query = query or os.environ.get(env_var) or ""
@@ -149,7 +172,7 @@ class RecordingState:
     first_note_at: float | None = None
     last_activity: float = 0.0
     events: list[tuple[float, list[int]]] = field(default_factory=list)
-    held: set[int] = field(default_factory=set)
+    held: set[tuple[int, int]] = field(default_factory=set)  # (channel, pitch): two keyboards can hold one pitch
     pedal_down: bool = False
     note_ons: int = 0
     stop_reason: str | None = None
@@ -161,7 +184,7 @@ class Recorder:
         self._lock = threading.Lock()
         self._done = threading.Event()
         self._state: RecordingState | None = None
-        self._midi_in = None
+        self._midi_ins: list = []
         self._monitor: threading.Thread | None = None
         self.on_finish = None  # callback(state) run on the monitor thread
         self.listener = None  # callback(now, message) for live judging, run on the MIDI thread
@@ -179,34 +202,55 @@ class Recorder:
         max_sec: float = 600.0,
         lead_in_sec: float = 120.0,
         rests: RestProfile | None = None,
+        keyboards: list | None = None,
     ) -> str:
+        """Listen on `port`, or with `keyboards` (keyboards.Keyboard, two or more, none off) on
+        all of them at once: each note is stamped with its keyboard's slot as its channel."""
         if self.active:
             raise RuntimeError("A recording is already running. Call stop_recording first.")
-        midi_in = None
-        if port == MIC_PORT:  # notes arrive through feed()
-            name = MIC_PORT
-        elif ble_midi.is_port(port):  # notes arrive on the Bluetooth thread, each with its time
-            midi_in, name = _bluetooth("input", port), port
-        else:
-            midi_in = _open_client("input")
-            names = midi_in.get_ports()
-            idx = resolve_port(names, port, "MIDI_COACH_INPUT", "input")
-            name = names[idx]
+        opened: list = []
+        if keyboards:
             try:
-                midi_in.open_port(idx)
-            except Exception as exc:
-                raise PortError(f"Could not open '{names[idx]}' ({exc}). {PORT_HELP}") from exc
-            midi_in.ignore_types(sysex=True, timing=True, active_sense=True)
+                for port_name in dict.fromkeys(k.port for k in keyboards):  # a port with two channels opens once
+                    client, _ = _open_input(port_name)
+                    opened.append(client)
+                    client.set_callback(self._from_keyboard(port_name, keyboards))
+            except PortError:
+                for client in opened:
+                    _close(client)
+                raise
+            name = " + ".join(k.id for k in keyboards)
+        elif port == MIC_PORT:  # notes arrive through feed()
+            name = MIC_PORT
+        else:
+            client, name = _open_input(port)
+            opened.append(client)
         now = time.perf_counter()
         self._state = RecordingState(port_name=name, started_at=now, last_activity=now, current_timeout=silence_sec)
         self._done.clear()
-        self._midi_in = midi_in
+        self._midi_ins = opened
         self._params = (silence_sec, max_sec, lead_in_sec, rests)
-        if midi_in is not None:
-            midi_in.set_callback(self._on_message)
+        if not keyboards:
+            for client in opened:
+                client.set_callback(self._on_message)
         self._monitor = threading.Thread(target=self._watch, daemon=True)
         self._monitor.start()
         return name
+
+    def _from_keyboard(self, port: str, kbs):
+        """The callback for one port of several keyboards: a message goes to the keyboard it
+        belongs to (by port and channel) and is restamped with that keyboard's slot."""
+        from .keyboards import slot_of
+
+        def on_message(event, _data=None, at: float | None = None) -> None:
+            message, delta = event
+            if not message or message[0] >= 0xF0:
+                return
+            slot = slot_of(kbs, port, message[0] & 0x0F)
+            if slot is None:
+                return  # a channel of this port no keyboard listens to
+            self._on_message(([(message[0] & 0xF0) | slot, *message[1:]], delta), at=at)
+        return on_message
 
     @property
     def on_mic(self) -> bool:
@@ -236,17 +280,18 @@ class Recorder:
                 st.events.insert(bisect_right([t for t, _ in st.events], now), (now, list(message)))
             else:
                 st.events.append((now, list(message)))
+            key = (message[0] & 0x0F, message[1]) if len(message) >= 2 else None
             if status == 0x90 and len(message) >= 3 and message[2] > 0:
-                st.held.add(message[1])
+                st.held.add(key)
                 st.note_ons += 1
                 if st.first_note_at is None:
                     st.first_note_at = now
             elif status in (0x80, 0x90) and len(message) >= 3:
-                st.held.discard(message[1])
+                st.held.discard(key)
             elif status == 0xB0 and len(message) >= 3 and message[1] == 64:
                 st.pedal_down = message[2] >= 64
             st.last_activity = now
-            held = list(st.held) if status != 0xB0 else None
+            held = sorted({p for _, p in st.held}) if status != 0xB0 else None
         self._keys(held)
         if self.listener:
             try:
@@ -301,13 +346,9 @@ class Recorder:
         with self._lock:
             if st.stop_reason is None:
                 st.stop_reason = reason
-        if self._midi_in is not None:
-            try:
-                self._midi_in.cancel_callback()
-                self._midi_in.close_port()
-            except Exception:
-                pass
-            self._midi_in = None
+        for client in self._midi_ins:
+            _close(client)
+        self._midi_ins = []
         self._keys([])
         if self.on_finish:
             try:

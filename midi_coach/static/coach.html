@@ -99,7 +99,7 @@
   #tracks-note[hidden] { display: none; }
   #parts-ok { margin-left: auto; padding: 3px 14px; border: 0; border-radius: 5px; background: var(--accent); color: #031414; font: 600 12.5px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
   #tracks { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
-  #tracks col.c-part { width: 150px; } #tracks col.c-show { width: 46px; } #tracks col.c-mute { width: 42px; } #tracks col.c-vol { width: 150px; }
+  #tracks col.c-part { width: 150px; } #tracks col.c-kb { width: 150px; } #tracks col.c-show { width: 46px; } #tracks col.c-mute { width: 42px; } #tracks col.c-vol { width: 150px; }
   #tracks thead th { position: sticky; top: 0; z-index: 1; padding: 4px 6px; background: var(--panel); color: var(--muted);
                      font: 11.5px 'Segoe UI', Arial, sans-serif; text-align: left; border-bottom: 1px solid rgba(255,255,255,.08); }
   #tracks thead th.c-show, #tracks thead th.c-mute { text-align: center; }
@@ -108,7 +108,9 @@
   #tracks .t-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
   #tracks small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
   #tracks tr.yours .t-name { color: var(--accent); }
-  #tracks .t-part { width: 100%; }
+  #tracks .t-part, #tracks .t-kb { width: 100%; }
+  #tracks:not(.kb) .c-kb { display: none; }  /* one keyboard: no Keyboard column */
+  #tracks:not(.kb) col.c-kb { visibility: collapse; width: 0; }
   #tracks td.c-show, #tracks td.c-mute { text-align: center; }
   #tracks .c-vol { white-space: nowrap; }
   .t-mute { width: 30px; padding: 2px 0; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
@@ -537,6 +539,16 @@
   #conn-server.live i { background: var(--hit); }
   /* Bluetooth keyboards (prefs.js): the warning shows whenever one is picked, or being looked for */
   .conn-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  /* Keyboards (prefs.js): one row each; two or more are heard at once, each playing its hand */
+  #kb-box { display: flex; flex-direction: column; gap: 6px; }
+  .kb-title { color: var(--muted); font-size: 12.5px; }
+  .kb-row { display: flex; align-items: center; gap: 6px; }
+  .kb-row select { min-width: 0; }
+  .kb-row .kb-port { flex: 1; }
+  .kb-row .kb-role { flex: none; width: 190px; }
+  .kb-row .kb-chan { flex: none; width: 112px; }
+  .kb-row .kb-remove { flex: none; padding: 4px 9px; }
+  #kb-box.one .kb-role, #kb-box.one .kb-chan, #kb-box.one .kb-remove { display: none; }
   .bt-warn { margin: 0; padding: 9px 12px; border: 1px solid rgba(227,179,65,.55); border-left-width: 4px; border-radius: 6px; background: rgba(227,179,65,.1); color: var(--text); font-size: 12.5px; line-height: 1.45; }
   .bt-warn[hidden] { display: none; }
   .bt-warn b { color: #e3b341; }
@@ -1181,9 +1193,10 @@
         </div>
         <div id="tracks-note" class="play-only" hidden>Suggested parts for this file: check them. <button id="parts-ok" title="These parts are right: keep them for this file">OK</button></div>
         <div id="tracks-box" class="play-only"><table id="tracks">
-          <colgroup><col><col class="c-part"><col class="c-show"><col class="c-mute"><col class="c-vol"></colgroup>
+          <colgroup><col><col class="c-part"><col class="c-kb"><col class="c-show"><col class="c-mute"><col class="c-vol"></colgroup>
           <thead><tr><th>Track</th>
             <th class="c-part" title="What the track is for you: a hand, both hands (split by register), the pedals, the sung line, an instrument part, or the backing">Part</th>
+            <th class="c-kb" title="With two keyboards (Preferences → Connections): the one you play this track on. Its notes are written with the track's hand.">Keyboard</th>
             <th class="c-show" title="Drawn on the sheet and the falling notes">Show</th>
             <th class="c-mute" title="Mute a track you don't play (Listen has its own)">Mute</th>
             <th class="c-vol" title="How loud a track you don't play sounds (Listen has its own)">Volume</th></tr></thead>
@@ -2059,8 +2072,12 @@ async function loadPorts(body) {
     const {inputs, default: dflt, outputs, default_output: dfltOut} = out;
     const saved = store.get('port', '');
     portSel.innerHTML = '';
+    // Two or more keyboards set up (Preferences → Connections): the first choice hears them all.
+    if (out.several) portSel.add(new Option(keyboardsLabel(out.keyboards), ''));
     for (const name of inputs) portSel.add(new Option(name, name));
-    portSel.value = inputs.includes(saved) ? saved : (dflt || inputs[0] || '');
+    portSel.value = out.several && (saved === '' || !inputs.includes(saved)) ? ''
+      : inputs.includes(saved) ? saved : (dflt || inputs[0] || '');
+    window.coachPorts = out;  // prefs.js draws the keyboards from it
     const savedOut = store.get('output', '');
     outSel.innerHTML = '';
     for (const name of outputs) outSel.add(new Option(name, name));
@@ -2068,6 +2085,13 @@ async function loadPorts(body) {
     btTitle(portSel); btTitle(outSel);
     return out;
   } catch (err) { statusEl.textContent = 'Could not list MIDI inputs: ' + err.message; }
+}
+
+// "Keyboards: Upper + Lower" for the input that hears every keyboard set up.
+function keyboardsLabel(kbs) {
+  const on = (kbs || []).filter(k => k.role !== 'off');
+  const name = {upper: 'Upper', lower: 'Lower', both: 'Both hands', pedals: 'Pedals'};
+  return `All keyboards: ${on.map(k => name[k.role] || k.role).join(' + ')}`;
 }
 
 // A Bluetooth MIDI keyboard (midi_coach/ble_midi.py) works like a cable but less reliably:
@@ -2314,7 +2338,7 @@ $('lib-search').addEventListener('input', e => {
 const ROLES = ['right', 'left', 'pedals', 'vocals'];
 const PART_CHOICES = [['backing', 'Backing'], ['right', 'Right hand'], ['left', 'Left hand'], ['both', 'Both hands (split)'],
                       ['pedals', 'Pedals (feet)'], ['vocals', 'Vocals (sung)']];
-const trk = {path: null, tracks: [], choices: [], play: 'both', confirmed: true, named: [], playing: null, song: null};
+const trk = {path: null, tracks: [], choices: [], play: 'both', confirmed: true, named: [], playing: null, song: null, keyboards: []};
 const cap = s => String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1);
 
 // 'right+pedals' -> "Right hand + pedals"; a named part by its name.
@@ -2370,8 +2394,22 @@ function partOptions(current) {
     .map(([v, text]) => `<option value="${esc(v)}" ${v === current ? 'selected' : ''}>${esc(text)}</option>`).join('');
 }
 
+// With two or more keyboards (Preferences → Connections, keyboards.py): the keyboard a track is
+// played on. Auto is the track's hand's keyboard (right on the upper, left on the lower).
+function keyboardCell(t, lock) {
+  if (!trk.keyboards.length) return '<td class="c-kb"></td>';
+  if (t.part === 'backing' || t.part === 'vocals') return '<td class="c-kb"></td>';
+  const auto = trk.keyboards.find(k => k.id === t.keyboard_auto);
+  const opts = [['', auto ? `Auto (${auto.label})` : 'Auto (split by pitch)'], ...trk.keyboards.map(k => [k.id, k.label])];
+  if (t.keyboard && !trk.keyboards.some(k => k.id === t.keyboard)) opts.push([t.keyboard, `${t.keyboard} (not connected)`]);
+  return `<td class="c-kb"><select class="t-kb" ${lock} aria-label="${esc(t.name)}: keyboard">` +
+    opts.map(([v, text]) => `<option value="${esc(v)}" ${v === (t.keyboard || '') ? 'selected' : ''}>${esc(text)}</option>`).join('') +
+    '</select></td>';
+}
+
 function drawTracks() {
   const listen = listening(), rows = $('track-rows');
+  $('tracks').classList.toggle('kb', trk.keyboards.length > 1 && !listen);
   const you = $('you-play');
   you.innerHTML = trk.choices.map(c => `<option value="${esc(c)}" ${c === trk.play ? 'selected' : ''}>${esc(playLabel(c))}</option>`).join('');
   you.disabled = running || trk.choices.length < 2;
@@ -2388,6 +2426,7 @@ function drawTracks() {
     return `<tr data-i="${t.index}" class="${t.yours && !listen ? 'yours' : ''}">` +
       `<th scope="row"><span class="t-name">${esc(t.name)}</span><small>${esc(t.instrument)} · ${t.notes.toLocaleString()} notes · ${esc(t.range)}</small></th>` +
       `<td class="c-part"><select class="t-part" ${lock} aria-label="${esc(t.name)}: part">${partOptions(t.part)}</select></td>` +
+      keyboardCell(t, lock) +
       `<td class="c-show"><input type="checkbox" class="t-show" ${t.show ? 'checked' : ''} ${lock} aria-label="Show ${esc(t.name)}"></td>` +
       sound + '</tr>';
   }).join('');
@@ -2429,7 +2468,8 @@ function showParts(out) {
   if (!out || out.error) { if (out && out.error) statusEl.textContent = out.error; return; }
   const hiddenBefore = hiddenRoles().join();
   Object.assign(trk, {path: out.path, tracks: out.tracks || [], choices: out.choices || [], play: out.play || 'both',
-                      confirmed: out.confirmed !== false, named: out.named || [], playing: out.playing || null, song: out.song || null});
+                      confirmed: out.confirmed !== false, named: out.named || [], playing: out.playing || null, song: out.song || null,
+                      keyboards: out.keyboards || []});
   drawTracks();
   if (hiddenRoles().join() !== hiddenBefore) forward({type: 'visibility', hidden: hiddenRoles()});
 }
@@ -2462,6 +2502,7 @@ $('track-rows').addEventListener('change', e => {
     }
     return trackChange(index, {part});
   }
+  if (e.target.classList.contains('t-kb')) return trackChange(index, {keyboard: e.target.value || null});
   if (e.target.classList.contains('t-show')) return trackChange(index, {show: e.target.checked});
   if (e.target.classList.contains('t-vol')) return trackChange(index, {[volKey()]: Number(e.target.value)});  // let go: saved
 });
@@ -4260,7 +4301,13 @@ connect();
       <section data-pane="connections" role="tabpanel" hidden>
         <h3>Connections</h3>
         <div id="conn-server"><i aria-hidden="true"></i><span id="conn-server-text"></span></div>
-        <label>MIDI input (your keyboard) <select id="conn-port"></select></label>
+        <div id="kb-box" role="group" aria-labelledby="kb-title">
+          <span id="kb-title" class="kb-title">MIDI input (your keyboard)</span>
+          <div id="kb-rows"></div>
+          <button type="button" class="pref-btn" id="kb-add" title="Play on two keyboards, like an organ: the upper for the right hand, the lower for the left">+ Add a keyboard</button>
+          <p class="dlg-hint" id="kb-hint" hidden>Every keyboard here is heard at once. A note's hand is the keyboard it's played on (Upper = right, Lower = left), so your recordings are written that way; grading goes by pitch, so a note counts on either keyboard. Change which keyboard plays a track under Playing ▾ → Keyboard.</p>
+          <p class="dlg-msg" id="kb-msg" role="alert"></p>
+        </div>
         <label>Sound out (parts you don't play, and Listen) <select id="conn-out"></select></label>
         <p class="dlg-hint">Keyboard missing? Plug it in and press Refresh. Only one program can use it at a time, so close other piano apps first.</p>
         <p class="bt-warn" id="conn-bt-warn" role="note" hidden><b>⚠ Bluetooth is less reliable than a USB cable.</b> Notes can arrive late or in bursts (more when Wi-Fi, wireless headphones or other Bluetooth devices are busy), so grading in Rehearse may mark good notes late, and the connection can drop mid-song. Keep the keyboard close to the PC, and use a cable when timing matters.</p>

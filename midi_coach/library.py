@@ -536,5 +536,13 @@ def update_take(meta: dict) -> None:
 
 
 def take_notes(meta: dict) -> tuple[list[Note], list[tuple[float, int]]]:
+    """A take's notes and pedal. A take played on several keyboards (keyboards.py) has each
+    keyboard on its own channel, and each note gets the hand its keyboard played (meta inputs)."""
     score = load_score(meta["file"])
+    hands = [k.get("hand") for k in meta.get("inputs") or []]
+    if hands:
+        channel = {p.index: p.channel for p in score.parts}
+        for n in score.notes:
+            c = channel.get(n.part, 0)
+            n.hand = hands[c] if c < len(hands) else None
     return score.notes, score.pedal

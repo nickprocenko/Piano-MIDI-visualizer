@@ -32,6 +32,7 @@
     tabs.find(t => t.dataset.pane === pane).focus();
     await loadPorts();
     syncMirrors();
+    drawKeyboards();
   }
   window.openPreferences = openPrefs;
 
@@ -53,7 +54,7 @@
   // it's shown; a change to the copy is set on the original and its own events fired.
 
   const mirrors = [
-    [$('conn-port'), portSel], [$('conn-out'), outSel],
+    [$('conn-out'), outSel],
     [$('pref-style'), $('style')], [$('pref-talk-greet'), $('talk-greet')], [$('pref-talk-passes'), $('talk-passes')],
     [$('pref-talk-signoff'), $('talk-signoff')], [$('pref-voice'), $('voice')], [$('pref-voice-name'), $('voice-name')],
     [$('pref-voice-vol'), $('voice-vol')],
@@ -95,7 +96,105 @@
     $('conn-refresh').disabled = true;
     await loadPorts();
     syncMirrors();
+    drawKeyboards();
     $('conn-refresh').disabled = false;
+  });
+
+  // -- Keyboards ----------------------------------------------------------------------------
+  // One row per keyboard (keyboards.py, saved by cmd/keyboards). With one row it is simply the
+  // MIDI input, the Playing menu's (portSel). Add a keyboard and both are heard at once, each
+  // with a role: Upper (the right hand), Lower (the left), Both hands, Pedals, or Off; an organ
+  // sending both manuals down one cable has one row per channel. The Playing menu's input then
+  // starts with "All keyboards", which every run uses.
+
+  const KB_ROLES = [['upper', 'Upper (right hand)'], ['lower', 'Lower (left hand)'], ['both', 'Both hands (split by pitch)'],
+                    ['pedals', 'Pedalboard (feet)'], ['off', 'Off']];
+  let kbRows = [];
+
+  const midiInputs = () => (window.coachPorts?.inputs || []).filter(n => n !== 'Microphone (flute)');
+
+  function kbFromServer() {
+    const saved = window.coachPorts?.keyboards || [];
+    kbRows = saved.length > 1 ? saved.map(k => ({port: k.port, role: k.role, channel: k.channel}))
+      : [{port: portSel.value || saved[0]?.port || midiInputs()[0] || '', role: 'both', channel: null}];
+  }
+
+  function drawKeyboards() {
+    kbFromServer();
+    renderKeyboards();
+  }
+
+  function renderKeyboards() {
+    const inputs = midiInputs(), one = kbRows.length < 2;
+    $('kb-box').classList.toggle('one', one);
+    $('kb-title').textContent = one ? 'MIDI input (your keyboard)' : 'Keyboards (heard together)';
+    $('kb-hint').hidden = one;
+    $('kb-add').disabled = !inputs.length || kbRows.length >= 16;
+    $('kb-rows').innerHTML = kbRows.map((k, i) => {
+      const ports = inputs.includes(k.port) || !k.port ? inputs : [...inputs, k.port];
+      const portOpts = ports.length
+        ? ports.map(n => `<option value="${esc(n)}" ${n === k.port ? 'selected' : ''}>${esc(n)}${inputs.includes(n) ? '' : ' (not connected)'}</option>`).join('')
+        : '<option value="">none found</option>';
+      const roleOpts = KB_ROLES.map(([v, t]) => `<option value="${v}" ${v === k.role ? 'selected' : ''}>${t}</option>`).join('');
+      const chanOpts = ['<option value="">All channels</option>',
+        ...Array.from({length: 16}, (_, c) => `<option value="${c}" ${k.channel === c ? 'selected' : ''}>Channel ${c + 1}</option>`)].join('');
+      return `<div class="kb-row" data-i="${i}">` +
+        `<select class="kb-port" aria-label="Keyboard ${i + 1}: MIDI input" ${ports.length ? '' : 'disabled'}>${portOpts}</select>` +
+        `<select class="kb-role" aria-label="Keyboard ${i + 1}: what it plays">${roleOpts}</select>` +
+        `<select class="kb-chan" aria-label="Keyboard ${i + 1}: MIDI channel" title="Only this channel of the input: for an organ that sends both manuals down one cable">${chanOpts}</select>` +
+        `<button type="button" class="pref-btn kb-remove" aria-label="Remove keyboard ${i + 1}" title="Remove this keyboard">✕</button></div>`;
+    }).join('');
+    btWarn();
+  }
+
+  async function saveKeyboards() {
+    $('kb-msg').textContent = '';
+    if (kbRows.length < 2) {  // one keyboard: just the MIDI input, as before
+      const port = kbRows[0]?.port || '';
+      if (port && portSel.value !== port) {
+        if (![...portSel.options].some(o => o.value === port)) portSel.add(new Option(port, port));
+        portSel.value = port;
+        portSel.dispatchEvent(new Event('change'));
+      }
+    }
+    try {
+      const out = await cmd('keyboards', {keyboards: kbRows.length > 1 ? kbRows : []});
+      if (out.error) { $('kb-msg').textContent = out.error; return; }
+      if (out.several) store.set('port', '');
+      else if (portSel.value === '') store.set('port', kbRows.find(k => k.role !== 'off')?.port || kbRows[0]?.port || '');
+      await loadPorts();
+      syncMirrors();
+      if (typeof loadParts === 'function') loadParts();  // the Playing menu's Keyboard column
+    } catch (err) { $('kb-msg').textContent = 'Could not save the keyboards: ' + err.message; }
+  }
+
+  $('kb-rows').addEventListener('change', e => {
+    const row = e.target.closest('.kb-row');
+    if (!row) return;
+    const k = kbRows[Number(row.dataset.i)];
+    if (e.target.classList.contains('kb-port')) k.port = e.target.value;
+    if (e.target.classList.contains('kb-role')) k.role = e.target.value;
+    if (e.target.classList.contains('kb-chan')) k.channel = e.target.value === '' ? null : Number(e.target.value);
+    btWarn();
+    saveKeyboards();
+  });
+  $('kb-rows').addEventListener('click', e => {
+    const b = e.target.closest('.kb-remove');
+    if (!b) return;
+    kbRows.splice(Number(b.closest('.kb-row').dataset.i), 1);
+    if (kbRows.length === 1) kbRows[0].role = 'both';
+    renderKeyboards();
+    saveKeyboards();
+  });
+  $('kb-add').addEventListener('click', () => {
+    const inputs = midiInputs();
+    const free = inputs.find(n => !kbRows.some(k => k.port === n)) || inputs[0] || '';
+    // An organ's second keyboard: the first plays the right hand, the new one the left.
+    if (kbRows.length === 1 && kbRows[0].role === 'both') kbRows[0].role = 'upper';
+    const taken = new Set(kbRows.map(k => k.role));
+    kbRows.push({port: free, role: !taken.has('lower') ? 'lower' : !taken.has('upper') ? 'upper' : 'pedals', channel: null});
+    renderKeyboards();
+    saveKeyboards();
   });
 
   // -- Bluetooth keyboards ------------------------------------------------------------------
@@ -104,10 +203,10 @@
 
   let btLooking = false;
   function btWarn() {
-    $('conn-bt-warn').hidden = !(btLooking || isBluetooth($('conn-port').value) || isBluetooth($('conn-out').value));
+    const bt = kbRows.some(k => isBluetooth(k.port)) || isBluetooth($('conn-out').value);
+    $('conn-bt-warn').hidden = !(btLooking || bt);
   }
-  for (const sel of [$('conn-port'), $('conn-out')]) sel.addEventListener('change', btWarn);
-  new MutationObserver(btWarn).observe($('conn-port'), {childList: true});
+  $('conn-out').addEventListener('change', btWarn);
 
   function btSay(text, error = false) {
     $('conn-bt-msg').textContent = text;
@@ -128,7 +227,8 @@
       else if (!bt.found?.length) btSay('None found. Is the keyboard on, with its Bluetooth on, and not connected to a phone or tablet?', true);
       else {
         // The first one found becomes the input, unless a Bluetooth keyboard is already picked.
-        if (!isBluetooth(portSel.value)) { portSel.value = bt.found[0]; portSel.dispatchEvent(new Event('change')); syncMirrors(); }
+        if (kbRows.length < 2 && !isBluetooth(portSel.value)) { portSel.value = bt.found[0]; portSel.dispatchEvent(new Event('change')); syncMirrors(); }
+        drawKeyboards();
         btSay(`Found ${bt.found.map(n => n.replace('Bluetooth: ', '')).join(', ')}. It connects when a run starts, which can take a few seconds the first time.`);
       }
     } finally {

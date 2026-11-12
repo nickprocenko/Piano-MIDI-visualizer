@@ -42,6 +42,13 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .device-item{padding:13px 18px;background:var(--btn-bg);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:14px;transition:background .1s}
 .device-item:hover{background:var(--btn-hover)}
 .device-item.selected{border-color:var(--accent);color:var(--accent)}
+.kb-pair{max-width:420px;width:100%;margin-top:10px;padding:10px 14px;border:1px solid var(--border);border-radius:6px;font-size:13px}
+.kb-pair summary{cursor:pointer;color:var(--muted)}
+.kb-pair[open] summary{margin-bottom:8px;color:inherit}
+.kb-pair p{margin:0 0 8px;color:var(--muted);font-size:12px;line-height:1.45}
+.kb-pair label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:6px 0}
+.kb-pair select{flex:1;max-width:240px;background:var(--btn-bg);color:inherit;border:1px solid var(--border);border-radius:4px;padding:4px}
+.kb-pair.selected{border-color:var(--accent)}
 .screen-back{margin-top:22px;padding:8px 24px;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit}
 .screen-back:hover{color:var(--text);border-color:var(--text)}
 .midi-note{font-size:12px;color:var(--muted);margin-top:10px;text-align:center}
@@ -356,6 +363,13 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 <div class="screen" id="screen-device">
   <div class="screen-title">Select MIDI Input</div>
   <div class="device-list" id="device-list"></div>
+  <details class="kb-pair" id="kb-pair">
+    <summary>Two keyboards (like an organ)…</summary>
+    <p>Play on two keyboards at once: the upper for the right hand, the lower for the left. Both are heard together; each lights in its channel's colour (upper = channel 1, lower = channel 2).</p>
+    <label>Upper (right hand) <select id="kb-upper"></select></label>
+    <label>Lower (left hand) <select id="kb-lower"></select></label>
+    <button class="browse-btn" id="kb-use">Use both keyboards</button>
+  </details>
   <p class="midi-note" id="midi-api-note"></p>
   <p class="bt-warn" id="midi-bt-warn" role="note" hidden><b>⚠ Bluetooth MIDI is less reliable than a USB cable.</b> Notes can light up late or in bursts (more when Wi-Fi, wireless headphones or other Bluetooth devices are busy), and the connection can drop mid-song; it reconnects by itself when it can. Keep the keyboard close, and use a cable when timing matters.</p>
   <button class="screen-back" id="btn-device-back">← Back</button>
@@ -908,6 +922,8 @@ class MidiHandler{
     this.connected=false;
     this._access=null;
     this._port=null;
+    this._ports=[];  // several keyboards at once (initKeyboards)
+    this._kbs=null;
     this._qwerty=false;
     this._app=null;
     this._onLearn=null;
@@ -924,8 +940,38 @@ class MidiHandler{
       this._access.onstatechange=()=>this._connect(portId);
     }catch(e){this._startQwerty();}
   }
+  // Two or more keyboards at once, like an organ's manuals (as the coach's keyboards.py): each
+  // keyboard's notes are restamped with its slot as the channel (upper = channel 1, lower = 2...),
+  // so channel colours light each keyboard its own way. list: [{id, name, role}], role
+  // 'upper' (right hand), 'lower' (left hand), 'both' or 'pedals'. Learn mode waits for a
+  // note's pitch on either keyboard.
+  async initKeyboards(list){
+    this._stopQwerty();this._bleClose();
+    if(!this._access)this._access=await navigator.requestMIDIAccess({sysex:false});
+    this._kbs=list;
+    this._connectKeyboards();
+    this._access.onstatechange=()=>this._connectKeyboards();
+  }
+  _connectKeyboards(){
+    this._detach();
+    const found=[];
+    this._kbs.forEach((k,slot)=>{
+      const p=[...this._access.inputs.values()].find(x=>x.id===k.id)||[...this._access.inputs.values()].find(x=>x.name===k.name);
+      if(!p||this._ports.includes(p))return;
+      p.onmidimessage=e=>{const d=e.data;if(d[0]>=0xF0)return;this._onMsg(Uint8Array.of((d[0]&0xF0)|slot,...d.slice(1)));};
+      this._ports.push(p);found.push(p.name);
+    });
+    this.connected=found.length>0;
+    this.portName=found.length?found.join(' + '):'Keyboards (not connected)';
+  }
+  _detach(){
+    for(const p of this._ports||[])p.onmidimessage=null;
+    this._ports=[];
+    if(this._port){this._port.onmidimessage=null;this._port=null;}
+  }
   _connect(portId){
-    if(this._port){this._port.onmidimessage=null;}
+    this._detach();
+    this._kbs=null;
     this._port=null; this.connected=false;
     if(!this._access)return;
     for(const p of this._access.inputs.values()){
@@ -1000,7 +1046,7 @@ class MidiHandler{
     try{this._access=await navigator.requestMIDIAccess({sysex:false});return true;}
     catch(e){return false;}
   }
-  close(){this._stopQwerty();this._bleClose();if(this._port)this._port.onmidimessage=null;this.activeNotes.clear();this.noteChannel.clear();}
+  close(){this._stopQwerty();this._bleClose();this._detach();this.activeNotes.clear();this.noteChannel.clear();}
   // Bluetooth MIDI: pick a keyboard in the browser's chooser (needs a click), then its notes
   // arrive as notifications. A dropped link lets go of every key and is retried for a while;
   // onBluetooth(state) hears 'lost', 'back' and 'gone'.
@@ -1008,7 +1054,7 @@ class MidiHandler{
     if(!navigator.bluetooth)throw new Error('Bluetooth MIDI needs Chrome or Edge.');
     const dev=await navigator.bluetooth.requestDevice({filters:[{services:[BLE_MIDI_SVC]}]});
     this._stopQwerty();this._bleClose();
-    if(this._port){this._port.onmidimessage=null;this._port=null;}
+    this._detach();
     if(this._access)this._access.onstatechange=null;
     this._bleDev=dev;
     dev.addEventListener('gattserverdisconnected',this._bleDrop=()=>this._bleLost(dev));
@@ -6718,6 +6764,7 @@ class App{
       };
       list.appendChild(item);
     });
+    this._drawKeyboardPair(ports.filter(p=>p.id!=='keyboard'));
     // Bluetooth MIDI: the browser's own chooser lists the keyboards nearby.
     document.getElementById('midi-bt-warn').hidden=!navigator.bluetooth;
     if(!navigator.bluetooth)return;
@@ -6744,6 +6791,36 @@ class App{
       this.showVisualizer();
     };
     list.appendChild(bt);
+  }
+
+  // Two keyboards: Upper and Lower picked from the MIDI ports, remembered by name (Config.hardware.keyboards).
+  _drawKeyboardPair(ports){
+    const box=document.getElementById('kb-pair');
+    box.hidden=ports.length<2;
+    if(ports.length<2)return;
+    const saved=Config.data.hardware?.keyboards||[];
+    const fill=(id,role,fallback)=>{
+      const sel=document.getElementById(id),want=saved.find(k=>k.role===role)?.name;
+      sel.innerHTML=ports.map(p=>`<option value="${escHtml(p.id)}">${escHtml(p.name)}</option>`).join('');
+      const hit=ports.find(p=>p.name===want)||ports[fallback];
+      sel.value=hit.id;
+    };
+    fill('kb-upper','upper',0);fill('kb-lower','lower',1);
+    box.classList.toggle('selected',this._selectedPortId==='keyboards');
+    document.getElementById('kb-use').onclick=async()=>{
+      const pick=role=>{const id=document.getElementById(role==='upper'?'kb-upper':'kb-lower').value;
+        return{id,name:ports.find(p=>p.id===id)?.name||'',role};};
+      const list=[pick('upper'),pick('lower')];
+      if(list[0].id===list[1].id){this._showToast('Pick two different keyboards');return;}
+      Config.data.hardware=Config.data.hardware||{};
+      Config.data.hardware.keyboards=list.map(({name,role})=>({name,role}));
+      Config.save();
+      this._selectedPortId='keyboards';
+      await this.midi.initKeyboards(list);
+      this.prevNotes.clear();this._activeNotes.clear();
+      this._hudDevice.textContent=this.midi.portName;
+      this.showVisualizer();
+    };
   }
 
   _refreshRecent(){

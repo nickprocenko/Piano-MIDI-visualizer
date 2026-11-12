@@ -15,7 +15,7 @@ import math
 import time
 from fractions import Fraction
 
-from .notes import Note, split_hands
+from .notes import Note, played_hands, split_hands
 
 STRAIGHT = Fraction(1, 4)  # sixteenths
 TRIPLET = Fraction(1, 3)  # triplet eighths
@@ -106,7 +106,7 @@ def transcribe(
         raise ValueError("Every note came before the count-in finished.")
     starts = [max(Fraction(0), to_beats(n.start)) for n in kept]
     grids = _beat_grids(starts, triplets)
-    sides = split_hands(kept, split_note)
+    sides = played_hands(kept, split_note)  # a note played on one hand's keyboard keeps that hand
     events = []  # (hand, onset, end, pitch)
     for n, s in zip(kept, starts):
         on = _quantize(s, grids)

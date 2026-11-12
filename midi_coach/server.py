@@ -22,12 +22,12 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import aids, analysis, autopilot, ble_midi, bugs, chat, deep, details, harmony, instruments, lessons, library, live, online, profiles, remarks, sheet, songfind, songwatch, stt, synced, tiles, tracks, transcribe, transcript, web
+from . import aids, analysis, autopilot, ble_midi, bugs, chat, deep, details, harmony, instruments, keyboards, lessons, library, live, online, profiles, remarks, sheet, songfind, songwatch, stt, synced, tiles, tracks, transcribe, transcript, web
 from .atlas import runtime as atlas_runtime
 from .atlas import welcome as atlas_welcome
 from .display import DisplayHub, sheet_problem
 from .midi_io import MIC_PORT, Accompanist, Player, PortError, Recorder, RestProfile, build_events, list_ports, resolve_port
-from .notes import ROLES, MIDI_SUFFIXES, MUSICXML_SUFFIXES, effective_roles, find_part, is_named, is_plain_piano, named_roles, note_name, notes_from_events, read_musicxml, parse_bars, select_notes, split_hands, suggest_hands
+from .notes import ROLES, MIDI_SUFFIXES, MUSICXML_SUFFIXES, effective_roles, find_part, is_named, is_plain_piano, named_roles, note_name, notes_from_events, read_musicxml, parse_bars, played_hands, select_notes, split_hands, suggest_hands
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s midi-coach %(message)s")
 log = logging.getLogger("midi-coach")
@@ -294,7 +294,7 @@ def _on_recording_finished(meta_base: dict, session: live.LiveSession | None = N
                                                     "(Settings), then press Start again.")
             _end_pass(state.stop_reason, None, None)
             return
-        notes, _ = notes_from_events(state.events)
+        notes, _ = notes_from_events(state.events, [k.get("hand") for k in meta_base.get("inputs") or []])
         try:
             meta = library.save_take(state.events, {
                 **meta_base,
@@ -637,9 +637,38 @@ def _gains(gains) -> dict[str, float]:
     return out
 
 
-def _start_input(port: str | None, *args) -> tuple[str, bool]:
+def _song_hands(kbs: list, score=None) -> list:
+    """The hand each keyboard plays in this song (keyboards.hands_for): every track of the user's
+    goes to the keyboard it's routed to (tracks.py), else its part's default keyboard; a keyboard
+    with one hand's tracks plays that hand, with both hands' it's split by pitch, with none its role's."""
+    routed: dict[str, set] = {}
+    if score is not None:
+        parts = effective_roles(score)
+        ids = {k.id for k in kbs}
+        for index, entry in tracks.mix(score).items():
+            part = parts.get(index)
+            if not part or part == "vocals":
+                continue
+            kid = entry.get("keyboard") if entry.get("keyboard") in ids else None
+            if kid is None:
+                auto = keyboards.default_keyboard(kbs, part)
+                kid = auto.id if auto else None
+            if kid:
+                routed.setdefault(kid, set()).add(keyboards.PART_HAND.get(part))
+    return keyboards.hands_for(kbs, {kid: next(iter(h)) if len(h) == 1 else "both" for kid, h in routed.items()})
+
+
+def _start_input(port: str | None, *args, meta: dict | None = None, score=None) -> tuple[str, bool]:
     """Open the MIDI input; if the keyboard is busy (e.g. the visualizer has it), use 'Coach'.
-    A flute, saxophone or voice profile listens on the microphone unless a port is named."""
+    A flute, saxophone or voice profile listens on the microphone unless a port is named.
+    With two or more keyboards set up (keyboards.py) and no port named, all of them: `meta`
+    (the take's) gets `inputs`, each keyboard in channel order with the hand it plays."""
+    if not port and not instruments.uses_mic() and keyboards.several():
+        kbs = keyboards.active()
+        hands = _song_hands(kbs, score)
+        if meta is not None:
+            meta["inputs"] = [{"port": k.id, "role": k.role, "hand": h} for k, h in zip(kbs, hands)]
+        return recorder.start(None, *args, keyboards=kbs), False
     port = port or (MIC_PORT if instruments.uses_mic() else None)
     if port == MIC_PORT or ble_midi.is_port(port):  # nothing else can stand in for these
         return recorder.start(port, *args), False
@@ -759,7 +788,7 @@ def _begin(
         recorder.on_finish = _on_recording_finished(meta, session)
         recorder.listener = session.on_message if session else None
         recorder.external_stop = session.should_stop if session else None
-        port, fell_back = _start_input(input_port, silence_sec, max_minutes * 60, 120.0, rests)
+        port, fell_back = _start_input(input_port, silence_sec, max_minutes * 60, 120.0, rests, meta=meta, score=score)
         if session and session.backing:
             try:
                 session.accompanist = Accompanist(output_port)
@@ -922,7 +951,17 @@ def _cmd_ports(body: dict) -> dict:
         default_output = outputs[resolve_port(outputs, None, "MIDI_COACH_OUTPUT", "output")]
     except PortError:
         default_output = None
-    return {"inputs": names, "default": default, "outputs": outputs, "default_output": default_output, "bluetooth": bluetooth}
+    return {"inputs": names, "default": default, "outputs": outputs, "default_output": default_output, "bluetooth": bluetooth,
+            "keyboards": keyboards.describe(), "several": keyboards.several()}
+
+
+def _cmd_keyboards(body: dict) -> dict:
+    """Preferences → Connections' keyboards: {"keyboards": [{port, role, channel}...]} saved
+    (keyboards.py); with two or more on, every run listens to all of them."""
+    if _busy():
+        return {"error": "Stop the run to change the keyboards."}
+    kbs = keyboards.save(body.get("keyboards") or [])
+    return {"keyboards": keyboards.describe(kbs), "several": keyboards.several(kbs)}
 
 
 def _cmd_bluetooth_release(_body: dict) -> dict:
@@ -1107,7 +1146,8 @@ def _cmd_parts(_body: dict) -> dict:
     song = library.song_settings(score.path)
     return {"path": score.path, "confirmed": bool(score.roles), "tracks": tracks.describe(score, play),
             "choices": _play_choices(score), "play": play, "named": named_roles(score), "playing": score.playing,
-            "song": {"lead_in": song["lead_in"], "lead_in_every_pass": song["lead_in_every_pass"]}}
+            "song": {"lead_in": song["lead_in"], "lead_in_every_pass": song["lead_in_every_pass"]},
+            "keyboards": keyboards.describe(keyboards.active()) if keyboards.several() else []}
 
 
 def _cmd_song_settings(body: dict) -> dict:
@@ -1160,7 +1200,7 @@ def _live_gain(index: int, mix: dict) -> None:
 
 def _cmd_track(body: dict) -> dict:
     """One track changed in the Playing menu: {"index": track, "part": a part or 'backing',
-    "show", "mute", "vol", "listen_mute", "listen_vol"} (any of them). Saved for the file at
+    "show", "mute", "vol", "listen_mute", "listen_vol", "keyboard"} (any of them). Saved for the file at
     once. The mix is heard live; the part and Show wait for the run to stop."""
     if not hub.score_path:
         return {"error": "Pick a song or lesson first."}
@@ -1170,7 +1210,7 @@ def _cmd_track(body: dict) -> dict:
         return {"error": "Which track?"}
     score = library.get_score(hub.score_path)
     changes = {k: body[k] for k in tracks.MIX_KEYS if k in body}
-    if ("part" in body or "show" in changes) and _busy():
+    if ("part" in body or "show" in changes or "keyboard" in changes) and _busy():
         return {"error": "Stop the run to change that."}
     try:
         if "part" in body:
@@ -1519,7 +1559,7 @@ def _cmd_record(body: dict) -> dict:
         recorder.on_finish = _on_record_finished(meta)
         recorder.listener = None
         recorder.external_stop = None
-        port, fell_back = _start_input(body.get("port") or None, RECORD_SILENCE_SEC, 30 * 60, 120.0, None)
+        port, fell_back = _start_input(body.get("port") or None, RECORD_SILENCE_SEC, 30 * 60, 120.0, None, meta=meta)
         lead = 0.05  # time for the event to reach the page
         _record_box.clear()
         _record_box.update(downbeat=time.perf_counter() + lead + count_in_beats * beat_sec, title=transcribe.default_title())
@@ -1548,7 +1588,7 @@ def _on_record_finished(meta_base: dict):
             hub.status("Nothing was recorded.")
             _publish_practice(running=False)
             return
-        notes, _ = notes_from_events(state.events)
+        notes, _ = notes_from_events(state.events, [k.get("hand") for k in meta_base.get("inputs") or []])
         downbeat = _record_box.get("downbeat", notes[0].start)
         meta = library.save_take(state.events, {
             **meta_base,
@@ -2374,7 +2414,7 @@ def _cmd_mic_note(body: dict) -> dict:
     return {"listening": recorder.feed(message, at)}
 
 
-PAGE_COMMANDS = {"ports": _cmd_ports, "bluetooth_release": _cmd_bluetooth_release, "mic_note": _cmd_mic_note,"lessons": _cmd_lessons, "songs": _cmd_songs, "parts": _cmd_parts,
+PAGE_COMMANDS = {"ports": _cmd_ports, "keyboards": _cmd_keyboards, "bluetooth_release": _cmd_bluetooth_release, "mic_note": _cmd_mic_note,"lessons": _cmd_lessons, "songs": _cmd_songs, "parts": _cmd_parts,
                  "songs_online": _cmd_songs_online, "fetch_online": _cmd_fetch_online,
                  "song_sources": lambda _body: library.song_sources(), "set_song_sources": _cmd_set_song_sources,
                  "pick_folder": _cmd_pick_folder, "rescan": _cmd_rescan,
@@ -3288,7 +3328,7 @@ def _take_segment(meta: dict, bars: tuple[int, int] | None, reference: str | Non
         t0, t1, slope = analysis.take_range_for_bars(score, ref_notes, notes, bars)
         t0 = max(notes[0].start, t0 - 0.05)
     if hand in ("right", "left"):
-        sides = split_hands(notes, split)
+        sides = played_hands(notes, split)
         notes = [n for n in notes if sides[(round(n.start, 4), n.pitch)] == hand]
     return notes, pedal, t0, t1, slope
 

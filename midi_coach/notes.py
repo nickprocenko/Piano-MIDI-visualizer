@@ -84,7 +84,7 @@ class Note:
     velocity: int
     part: int = 0
     beat: float = 0.0  # quarter notes from the start of the file (for score display)
-    hand: str | None = None  # 'right' | 'left' when Clean (playable.py) gave it to a hand other than its part's
+    hand: str | None = None  # 'right' | 'left' when Clean (playable.py) gave it to a hand other than its part's, or a take's note played on that hand's keyboard (keyboards.py)
 
     @property
     def duration(self) -> float:
@@ -727,6 +727,16 @@ def split_by_reach(notes: list[Note], split_note: int = 60, left_odds: dict[tupl
     return sides
 
 
+def played_hands(notes: list[Note], split_note: int = 60) -> dict[tuple[float, int], str]:
+    """split_hands for a take: a note played on one hand's keyboard (Note.hand, keyboards.py)
+    keeps that hand, whatever its pitch; the rest are split by pitch as usual."""
+    sides = {(round(n.start, 4), n.pitch): n.hand for n in notes if n.hand in ("right", "left")}
+    rest = [n for n in notes if (round(n.start, 4), n.pitch) not in sides]
+    if rest:
+        sides.update(split_hands(rest, split_note))
+    return sides
+
+
 def split_resolver(score: Score, parts: set[int], split_note: int = 60):
     """Note -> 'right' | 'left' for the notes of parts the hands share. The split is worked
     out over the whole piece, so one hand, a bar range and the sheet all agree. It is kept
@@ -1250,29 +1260,36 @@ def _suggest_hands(score: Score) -> dict:
     return out
 
 
-def notes_from_events(events: list[tuple[float, list[int]]]) -> tuple[list[Note], list[tuple[float, int]]]:
-    """Turn raw (seconds, midi bytes) events into notes + pedal list."""
+def notes_from_events(events: list[tuple[float, list[int]]], hands: list[str | None] | None = None) -> tuple[list[Note], list[tuple[float, int]]]:
+    """Turn raw (seconds, midi bytes) events into notes + pedal list. A note-off ends the note
+    of its own channel (with several keyboards, the channel is the keyboard: keyboards.py), and
+    with `hands` (the hand each channel's keyboard plays, by channel) each note gets its hand."""
     notes: list[Note] = []
     pedal: list[tuple[float, int]] = []
-    open_notes: dict[int, list[tuple[float, int]]] = {}
+    open_notes: dict[tuple[int, int], list[tuple[float, int]]] = {}
     last_t = 0.0
+
+    def hand(channel: int) -> str | None:
+        return hands[channel] if hands and channel < len(hands) else None
+
     for t, data in events:
         last_t = max(last_t, t)
         if not data:
             continue
         status = data[0] & 0xF0
+        key = (data[0] & 0x0F, data[1]) if len(data) >= 2 else None
         if status == 0x90 and len(data) >= 3 and data[2] > 0:
-            open_notes.setdefault(data[1], []).append((t, data[2]))
+            open_notes.setdefault(key, []).append((t, data[2]))
         elif status in (0x80, 0x90) and len(data) >= 3:
-            stack = open_notes.get(data[1])
+            stack = open_notes.get(key)
             if stack:
                 start, vel = stack.pop(0)
-                notes.append(Note(data[1], start, t, vel))
+                notes.append(Note(data[1], start, t, vel, hand=hand(key[0])))
         elif status == 0xB0 and len(data) >= 3 and data[1] == 64:
             pedal.append((t, data[2]))
-    for pitch, stack in open_notes.items():
+    for (channel, pitch), stack in open_notes.items():
         for start, vel in stack:
-            notes.append(Note(pitch, start, max(last_t, start + 0.05), vel))
+            notes.append(Note(pitch, start, max(last_t, start + 0.05), vel, hand=hand(channel)))
     notes.sort(key=lambda n: (n.start, n.pitch))
     return notes, pedal
 

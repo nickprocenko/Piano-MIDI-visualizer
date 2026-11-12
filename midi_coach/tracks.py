@@ -11,6 +11,8 @@ a backing track is simply not listed). Every track also has its own mix, saved w
     mute / vol   when the user plays: a track not played this run sounds on the MIDI output
                  at vol (0-100) unless muted
     listen_mute / listen_vol   the same for Listen, kept apart from the practice mix
+    keyboard     with several keyboards (keyboards.py): the id of the keyboard this track's
+                 part is played on, or None for the default (the right hand on the upper...)
 
 Defaults: a track in one of the user's parts is shown; a backing track is hidden; everything
 sounds at 100. A file saved before tracks had a mix, with its parts chosen and no named part,
@@ -20,11 +22,11 @@ old per-lane faders ('gains', {lane name: 0..1}) load as each track's volume.
 
 from __future__ import annotations
 
-from . import library
+from . import keyboards, library
 from .notes import HAND_ROLES, ROLES, Score, effective_roles, is_named, named_roles, note_name
 
 BACKING = "backing"
-MIX_KEYS = ("show", "mute", "vol", "listen_mute", "listen_vol")
+MIX_KEYS = ("show", "mute", "vol", "listen_mute", "listen_vol", "keyboard")
 
 
 def names(score: Score) -> dict[int, str]:
@@ -59,7 +61,8 @@ def mix(score: Score) -> dict[int, dict]:
     out = {}
     for index, name in names(score).items():
         mine = index in roles
-        entry = {"show": mine, "mute": not mine and was_off, "vol": 100, "listen_mute": not mine and was_off, "listen_vol": 100}
+        entry = {"show": mine, "mute": not mine and was_off, "vol": 100, "listen_mute": not mine and was_off, "listen_vol": 100,
+                 "keyboard": None}
         if name in legacy:
             gain = float(legacy[name])
             entry.update(mute=gain <= 0, vol=round(gain * 100) or 100)
@@ -84,6 +87,9 @@ def _clean(changes: dict) -> dict:
     for k in ("vol", "listen_vol"):
         if k in changes:
             out[k] = max(0, min(100, int(round(float(changes[k])))))
+    if "keyboard" in changes:
+        value = changes["keyboard"]
+        out["keyboard"] = (str(value).strip() or None) if value is not None else None
     return out
 
 
@@ -144,10 +150,13 @@ def describe(score: Score, play: str | None = None) -> list[dict]:
     parts = {p.index: p for p in score.parts}
     base, _, extra = (play or "both").partition("+")
     played = {"both": {"right", "left", "both"}, "right": {"right", "both"}, "left": {"left", "both"}}.get(base, {base}) | ({extra} if extra else set())
+    kbs = keyboards.active()
+    several = len(kbs) >= 2
     rows = []
     for index, name in names(score).items():
         p, part = parts[index], roles.get(index, BACKING)
-        rows.append({"index": index, "key": key(index), "name": name, "instrument": p.instrument, "notes": p.note_count,
+        auto = keyboards.default_keyboard(kbs, part) if several and part not in (BACKING, "vocals") else None
+        rows.append({"keyboard_auto": auto.id if auto else None, "index": index, "key": key(index), "name": name, "instrument": p.instrument, "notes": p.note_count,
                      "range": f"{note_name(p.low)}-{note_name(p.high)}", "part": part,
                      "yours": part in played, **entries[index]})
     rows.sort(key=lambda r: (not r["yours"], r["part"] == BACKING, r["index"]))

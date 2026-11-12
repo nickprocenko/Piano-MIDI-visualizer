@@ -70,7 +70,7 @@ def test_old_band_faders_become_track_volumes(band):
 def test_mix_values_are_kept_in_range_and_per_track_name(band):
     ix = _ix(band)
     assert tracks.set_mix(band, ix["Drums"], vol=140, listen_vol=-3, mute=1) == \
-        {"show": False, "mute": True, "vol": 100, "listen_mute": False, "listen_vol": 0}
+        {"show": False, "mute": True, "vol": 100, "listen_mute": False, "listen_vol": 0, "keyboard": None}
     saved = library.song_settings(band.path)["tracks"]
     saved[str(ix["Drums"])]["name"] = "Something else"  # the file's tracks changed since
     library.save_song_settings(band.path, tracks=saved)
@@ -179,3 +179,23 @@ def test_showing_a_backing_track_redraws_the_sheet_with_its_staff(band, monkeypa
         assert server.hub._score_payload["staves"][0] != f"track:{ix['Track 3']}"
     finally:
         server.hub.shutdown()
+
+
+def test_tracks_can_be_routed_to_a_keyboard(organ):
+    """Two keyboards set up: each track shows the keyboard it's played on by default, and a
+    track routed to the other keyboard makes that keyboard play the track's hand."""
+    from midi_coach import keyboards
+    ix = _ix(organ)
+    assert all(r["keyboard_auto"] is None for r in tracks.describe(organ))  # one keyboard: no column
+    keyboards.save([{"port": "Swell", "role": "upper"}, {"port": "Great", "role": "lower"}])
+    rows = {r["name"]: r for r in tracks.describe(organ)}
+    assert (rows["Upper"]["keyboard_auto"], rows["Lower"]["keyboard_auto"]) == ("Swell", "Great")
+    assert rows["Choir Vocals"]["keyboard_auto"] is None
+    kbs = keyboards.active()
+    assert server._song_hands(kbs, organ) == ["right", "left"]
+    tracks.set_mix(organ, ix["Upper"], keyboard="Great")  # the melody on the lower manual
+    assert tracks.mix(organ)[ix["Upper"]]["keyboard"] == "Great"
+    # The lower manual now plays both hands' tracks (split by pitch); the upper keeps its role.
+    assert server._song_hands(kbs, organ) == ["right", None]
+    tracks.set_mix(organ, ix["Upper"], keyboard=None)
+    assert server._song_hands(kbs, organ) == ["right", "left"]
