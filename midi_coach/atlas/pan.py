@@ -802,7 +802,7 @@ def write(syllabus: dict, out: pathlib.Path | None = None, tunes: list[dict] | N
         if lint:
             found = engraving.lint(pathlib.Path(path).read_text(encoding="utf-8"))["findings"]
             if found:
-                report["problems"].append(f"{folder}/{name}: " + "; ".join(sorted({f['rule'] for f in found})))
+                report["problems"].append(f"{folder}/{name}: " + "; ".join(sorted({f[0] for f in found})))
         report["scores"] += 1
         return f"{folder}/{name}.musicxml"
 

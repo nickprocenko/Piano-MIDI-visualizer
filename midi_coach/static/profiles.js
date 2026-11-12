@@ -113,6 +113,7 @@
   async function load() {
     try { view = await cmd('profiles'); } catch (err) { message(err.message); }
     renderMenu();
+    menuEl.classList.remove('loading');  // the list is real now: show the picker
   }
 
   function enter() {
@@ -213,8 +214,10 @@
       const f = document.createElement('iframe');
       f.id = 'vis-frame';
       f.title = 'Piano visualizer';
-      f.allow = 'midi; serial; autoplay; fullscreen; microphone';
+      f.allow = 'midi; serial; bluetooth; autoplay; fullscreen; microphone';  // bluetooth: its LEDs and keyboard
       f.src = 'visualizer.html';
+      // A Bluetooth keyboard the hub kept connected after a run is let go, so the visualizer can have it.
+      cmd('bluetooth_release').catch(() => {});
       f.addEventListener('load', () => {  // same origin: its mouse moves wake ← Home too
         try { f.contentWindow.addEventListener('mousemove', visWake); } catch (e) {}
       });
@@ -344,7 +347,6 @@
   $('home-explore').addEventListener('click', () => go('explore'));
   $('home-record').addEventListener('click', () => go('record'));
   $('home-progress').addEventListener('click', () => go('progress'));
-  $('home-youtube').addEventListener('click', () => go('youtube'));
   $('home-visualizer').addEventListener('click', () => go('visualizer'));
   // Ask Maestro (Home's and the bar's): opens the Maestro panel where you are, so nothing
   // running stops and the view stays put.
@@ -364,8 +366,9 @@
   syncHomePiece();
 
   mark('home');
-  load();
   let seen = false;
   try { seen = sessionStorage.getItem(SEEN) === '1'; } catch (e) {}
   if (seen) menuEl.hidden = true;
+  else menuEl.classList.add('loading');  // no empty "Who is practicing?" flash before the profiles arrive
+  load();
 })();

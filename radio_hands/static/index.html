@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radio Hands</title>
+<script type="importmap">{"imports": {"three": "./vendor/three/three.module.min.js"}}</script>
+<link rel="stylesheet" href="radio/app.css">
+</head>
+<body>
+<div id="splash" role="status" aria-live="polite"><div class="spin big"></div><b>Radio Hands</b><span id="splash-text">Starting up…</span><button id="splash-retry" class="ghost" hidden>Try again</button></div>
+<div id="banner" hidden></div>
+<div id="toasts" aria-live="polite"></div>
+<header>
+  <h1><span class="dot" id="onair"></span>Radio Hands</h1>
+  <button id="station" class="station" title="Choose a station">
+    <img id="st-icon" alt="" hidden>
+    <span><b id="st-name">Choose a station</b><small id="st-where"></small></span>
+    <span class="caret">▾</span>
+  </button>
+  <button id="play" class="primary" disabled>▶ Listen</button>
+  <label class="vol" title="Volume">🔊 <input id="volume" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+  <label class="delay" title="How far behind live the radio plays. The hands need about 8 seconds of a song to find their place, so with a delay they're ready from its first note.">
+    Delay <select id="delay">
+      <option value="0">Live</option><option value="5">5 s</option><option value="10">10 s</option>
+      <option value="15">15 s</option><option value="20">20 s</option><option value="30">30 s</option>
+    </select>
+  </label>
+  <span id="tuner" class="muted"></span>
+  <span class="grow"></span>
+  <div id="views" class="seg" role="group" aria-label="View"><button data-view="piano" class="on">🎹 Piano</button><button data-view="guitar">🎸 Guitar</button><button data-view="drums">🥁 Drums</button><button data-view="all">⊞ All</button></div>
+  <button id="gear" class="ghost" title="Settings" aria-expanded="false">⚙</button>
+</header>
+
+<section id="now">
+  <div class="title">
+    <small>On air</small>
+    <b id="on-air">—</b>
+  </div>
+  <div id="song-chip" class="chip" hidden></div>
+  <span id="song-msg" class="muted"></span>
+  <select id="versions" hidden title="Other files for this song"></select>
+  <span class="grow"></span>
+  <form id="typed" autocomplete="off">
+    <input id="typed-q" placeholder="Not right? Type the song…" title="Type what's playing (artist and title) when the station doesn't say, or says it wrong">
+  </form>
+  <button id="history-btn" class="ghost" aria-expanded="false">Played ▾</button>
+</section>
+
+<main>
+  <canvas id="roll"></canvas>
+  <canvas id="highway" hidden></canvas>
+  <canvas id="drumway" hidden></canvas>
+  <div id="chord" hidden><b id="chord-now"></b><span id="chord-next"></span><small id="chord-src"></small></div>
+  <div id="overlay"><div id="overlay-box"><span class="spin" id="overlay-spin" hidden></span><div id="overlay-text">Choose a station to start.</div></div><button id="overlay-btn" class="primary" hidden></button><button id="overlay-resume" class="ghost" hidden></button></div>
+  <aside id="history" hidden><h3>Played on this station</h3><ol id="history-list"></ol></aside>
+</main>
+
+<div id="settings" class="pop" hidden>
+  <label><input type="checkbox" id="set-online"> Look on bitmidi.com when a song isn't in the library</label>
+  <label><input type="checkbox" id="set-charts"> Use the song's chord chart (Ultimate Guitar) when there's no MIDI</label>
+  <label><input type="checkbox" id="set-fingers"> Finger numbers on the falling notes</label>
+  <label><input type="checkbox" id="set-names"> Note names on the falling notes</label>
+  <p class="muted small" id="set-lib"></p>
+  <p class="muted small">Scroll over the keyboard to change how fast the notes fall.</p>
+  <p class="muted small"><b>Keys:</b> Space listen/stop · S stations · H played · 1–4 views · M mute · ↑/↓ volume · F fullscreen · Esc close</p>
+</div>
+
+<div id="picker" class="modal" hidden>
+  <div class="sheet" role="dialog" aria-label="Choose a station">
+    <div class="sheet-head">
+      <nav>
+        <button data-tab="find" class="on">Find</button>
+        <button data-tab="favs">Favourites</button>
+        <button data-tab="recent">Recent</button>
+        <button data-tab="link">Link</button>
+      </nav>
+      <button class="ghost" id="picker-close" aria-label="Close">✕</button>
+    </div>
+    <div data-pane="find">
+      <div class="filters">
+        <input id="f-name" placeholder="Station name or call letters (e.g. CHFI, Virgin, Boom)">
+        <select id="f-country"><option value="">Any country</option></select>
+        <select id="f-state"><option value="">Any province / state</option></select>
+        <input id="f-tag" placeholder="Genre (rock, pop, jazz…)" list="tags">
+        <datalist id="tags"><option>pop</option><option>rock</option><option>classic rock</option><option>oldies</option>
+          <option>80s</option><option>top 40</option><option>country</option><option>jazz</option><option>classical</option>
+          <option>hits</option><option>adult contemporary</option><option>news</option></datalist>
+      </div>
+      <p class="muted small">Classic rock, oldies and 80s stations find the most songs in the library. Stations from <a href="https://www.radio-browser.info" target="_blank" rel="noopener">radio-browser.info</a>.</p>
+      <ul id="results" class="stations"></ul>
+    </div>
+    <div data-pane="favs" hidden><ul id="favs" class="stations"></ul></div>
+    <div data-pane="recent" hidden><ul id="recent" class="stations"></ul></div>
+    <div data-pane="link" hidden>
+      <form id="link-form" class="linkform">
+        <input id="link-url" placeholder="https://… (an MP3/AAC stream, .m3u, .pls or .m3u8 link)">
+        <input id="link-name" placeholder="Name (optional)">
+        <button class="primary">Tune in</button>
+      </form>
+      <p class="muted small">Most stations' websites have a "listen" link; the stream link is usually in the page's player or a .pls/.m3u file.</p>
+    </div>
+  </div>
+</div>
+
+<script src="roll.js"></script>
+<script src="radio/guitar.js"></script>
+<script src="radio/drums.js"></script>
+<script src="radio/app.js"></script>
+</body>
+</html>

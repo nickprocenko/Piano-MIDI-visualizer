@@ -20,6 +20,26 @@ import mido
 MUSICXML_SUFFIXES = {".xml", ".musicxml", ".mxl"}
 MIDI_SUFFIXES = {".mid", ".midi"}
 
+
+def read_musicxml(path: str | pathlib.Path) -> str:
+    """A MusicXML file's text as written: the file itself, or for a compressed .mxl the score
+    its META-INF/container.xml names (else the first .xml/.musicxml in the archive)."""
+    p = pathlib.Path(path)
+    if p.suffix.lower() != ".mxl":
+        return p.read_text(encoding="utf-8", errors="replace")
+    import zipfile
+
+    with zipfile.ZipFile(p) as z:
+        names = z.namelist()
+        root = None
+        if "META-INF/container.xml" in names:
+            m = re.search(r'<rootfile[^>]*full-path="([^"]+)"', z.read("META-INF/container.xml").decode("utf-8", "replace"))
+            root = m.group(1) if m and m.group(1) in names else None
+        root = root or next(n for n in names if not n.startswith("META-INF/") and n.lower().endswith((".xml", ".musicxml")))
+        data = z.read(root)
+    text = data.decode("utf-16") if data[:2] in (b"\xff\xfe", b"\xfe\xff") else data.decode("utf-8", "replace")
+    return text.lstrip("﻿")
+
 _NOTE_NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"]
 # General MIDI program names (program_change 0-127). Channel 10 is always drums.
 GM_PROGRAMS = [
@@ -243,6 +263,13 @@ def _load_musicxml(path: pathlib.Path) -> Score:
     # as a note left sounding until the next note-off of that pitch.
     for grace in [n for n in stream.recurse().notes if n.duration.isGrace]:
         grace.activeSite.remove(grace)
+    # A non-traditional key signature (MuseScore writes a key change as <key-step> naturals) has
+    # no sharp count, and music21 then fails writing the MIDI. Every note already carries its
+    # spelled pitch, so the converted MIDI loses nothing without it.
+    from music21 import key as m21key
+
+    for ks in [k for k in stream.recurse().getElementsByClass(m21key.KeySignature) if k.sharps is None]:
+        ks.activeSite.remove(ks)
     for part in stream.parts:
         _join_ties(part)
     pickup = _pickup_beats(stream)

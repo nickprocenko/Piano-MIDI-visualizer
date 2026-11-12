@@ -30,6 +30,8 @@ RULES = {
     "busy-rests": "more than four rests drawn in one staff's bar",
     "too-many-voices": "more than two voices on one staff",
     "needless-tie": "two tied notes inside one beat that could be written as one note",
+    "hidden-half-bar": "a note starting off the beat, or a rest short of the whole bar, drawn over the middle of a 4/4 bar (split it there with a tie, so the half bar shows: a held note in a run of eighths is two tied eighths)",
+    "pair-beams": "half of a 4/4 bar in plain eighths beamed in pairs (music21's default), not four under one beam as printed music does",
     "ledger-lines": "a note on five or more ledger lines, or three notes in a row on four (needs a clef change or 8va/8vb)",
     "brief-clef-change": "a clef kept for fewer than eight bars whose notes would read in the clef around it by the ledger-lines rule (a hand dipping low for a few bars is read on ledger lines)",
     "key-change-soon": "a key signature change less than six bars after the previous one",
@@ -272,6 +274,25 @@ def lint(score, profile: str = "full") -> dict:
                     joined = duration.Duration(end - oa)
                     if math.floor(oa) == math.floor(end - Fraction(1, 96)) and joined.type not in ("inexpressible", "complex") and joined.dots <= 1 and not joined.tuplets:
                         add("needless-tie", part, bar, f"beat {float(oa) + 1:g}: {a.duration.type} + {b.duration.type} = {joined.type}{'.' * joined.dots}")
+            # The middle of a 4/4 bar shows, and its eighths are beamed by the half bar.
+            ts = m.timeSignature or m.getContextByClass("TimeSignature")
+            if ts is not None and ts.ratioString == "4/4" and Fraction(m.duration.quarterLength).limit_denominator(96) == 4:
+                from .transcribe import half_bar_run
+
+                for v in (m.voices or [m]):
+                    seq = [x for x in v.notesAndRests if not x.duration.isGrace]
+                    for x in seq:
+                        on = Fraction(x.offset).limit_denominator(96)
+                        end = on + Fraction(x.duration.quarterLength).limit_denominator(96)
+                        if not on < 2 < end or (x.isRest and x.style.hideObjectOnPrint):
+                            continue
+                        if (x.isRest and (on, end) != (0, 4)) or (not x.isRest and on.denominator != 1):
+                            add("hidden-half-bar", part, bar, f"beat {float(on) + 1:g}: {'rest' if x.isRest else 'note'} {x.duration.type}{'.' * x.duration.dots} over beat 3")
+                    for half in (0, 2):
+                        run = half_bar_run(seq, half)
+                        types = [x.beams.beamsList[0].type if x.beams and x.beams.beamsList else None for x in run]
+                        if run and types != ["start"] + ["continue"] * (len(run) - 2) + ["stop"]:
+                            add("pair-beams", part, bar, f"beats {half + 1}-{half + 2}: {len(run)} eighths not under one beam")
     exempt = Counter()
     if profile == "published":
         exempt = Counter(r for r, *_ in found if r not in PUBLISHED_RULES)

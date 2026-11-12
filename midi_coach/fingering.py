@@ -47,6 +47,7 @@ RELEASE_MAX = 30.0
 RELEASE_PEDAL = 0.5
 RELEASE_FREE = 0.5
 RINGING = 3
+HOLD_REACH = 9  # semitones: a held key further than this from the next chord is let go for free
 SAME_FINGER = 10.0  # one finger on two keys in a row: the hand must let go and move between them
 LEAP_FROM = 7  # semitones: past a fifth the whole hand may shift instead of stretching or crossing
 LEAP = 7.0  # a leap, plus LEAP_STEP per semitone the hand travels
@@ -54,6 +55,21 @@ LEAP_STEP = 0.5
 BEAM = 64  # hand states kept per chord
 # where each finger sits in a hand at rest on five white keys (C D E F G), in semitones from the thumb
 OFFSET = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7}
+# Thumb-side hand (the left hand): a lone two-note chord inside an octave (a third)
+# is played with the first fingers, the thumb allowed on a black key, each finger number costing
+# a little and the little finger more, instead of reaching out to 3 and 5. Breathe's A + C# is 2-1.
+THUMB_SIDE_MAX = 2  # notes in the chord: a lone third or fourth; triads keep the textbook 5-3-1
+THUMB_SIDE_SPAN = 9  # semitones
+THUMB_SIDE_FINGER = 1.0  # per finger number
+THUMB_SIDE_PINKY = 3.0
+# A glissando (an organ's palm roll-up): this many notes or more, each within GLISS_GAP seconds of
+# the last, at GLISS_RATE notes a second or faster (a hand's fastest finger run is about 12), over
+# at least GLISS_SPAN semitones (a sixth)
+GLISS_MIN = 6
+GLISS_GAP = 0.07
+GLISS_RATE = 14.0
+GLISS_SPAN = 9
+GLISS_TIME = 0.06  # seconds it lasts at least: a wide chord struck at once is a chord
 
 # Parncutt's span table for the right hand, in semitones from the lower finger's key to the
 # higher finger's: (MinPrac, MinComf, MinRel, MaxRel, MaxComf, MaxPrac).
@@ -150,7 +166,7 @@ def key_cost(finger: int, pitch: int) -> float:
 
 
 @lru_cache(maxsize=None)
-def _options(pitches: tuple[int, ...], held: tuple[tuple[int, int], ...]) -> tuple[tuple[tuple[int, ...], float], ...]:
+def _options(pitches: tuple[int, ...], held: tuple[tuple[int, int], ...], thumb_side: bool = False) -> tuple[tuple[tuple[int, ...], float], ...]:
     """Every way to finger a chord's new keys (pitches, low to high) around the keys still held
     ((pitch, finger)...): a free finger each, in order across the hand with the held ones, as
     ((fingers, cost)...). The cost is the chord's own plus each held key with each new one."""
@@ -160,7 +176,7 @@ def _options(pitches: tuple[int, ...], held: tuple[tuple[int, int], ...]) -> tup
         down = sorted(list(zip(pitches, fingers)) + list(held))
         if any(a[1] >= b[1] for a, b in zip(down, down[1:])):
             continue  # fingers crossed over a held key
-        cost = _chord_cost(pitches, fingers)
+        cost = _chord_cost(pitches, fingers, thumb_side)
         for hp, hf in held:
             for p, f in zip(pitches, fingers):
                 cost += pair_cost(hf, hp, f, p, hold=True)
@@ -181,8 +197,11 @@ def _keep_options(held: dict[int, int]) -> list[dict[int, int]]:
     return [{k: held[k] for k in pick} for pick in picks]
 
 
-def _chord_cost(pitches: tuple[int, ...], fingers: tuple[int, ...]) -> float:
-    cost = sum(key_cost(f, p) for f, p in zip(fingers, pitches))
+def _chord_cost(pitches: tuple[int, ...], fingers: tuple[int, ...], thumb_side: bool = False) -> float:
+    small = thumb_side and len(pitches) == THUMB_SIDE_MAX and pitches[-1] - pitches[0] <= THUMB_SIDE_SPAN
+    cost = sum(key_cost(f, p) if not (small and f == 1) else 0.0 for f, p in zip(fingers, pitches))
+    if small:
+        cost += sum(THUMB_SIDE_FINGER * f + (THUMB_SIDE_PINKY if f == 5 else 0.0) for f in fingers)
     for i in range(len(pitches)):
         for j in range(i + 1, len(pitches)):
             cost += pair_cost(fingers[i], pitches[i], fingers[j], pitches[j], True)
@@ -239,12 +258,41 @@ def _pedal_down(pedal: list[tuple[float, float]], t: float) -> bool:
     return k >= 0 and pedal[k][0] <= t < pedal[k][1]
 
 
-def finger_hand(seq: list[tuple], mirrored: bool = False, pedal: list[tuple[float, float]] | None = None) -> list[int | None]:
+def find_sweeps(seq: list[tuple]) -> list[list[int]]:
+    """The glissandos in one hand's notes, [(start seconds, pitch, ...)] in any order: each is
+    the indices into seq of a run of GLISS_MIN notes or more, each starting within GLISS_GAP of
+    the one before, faster than fingers play (GLISS_RATE notes a second) and wider than a
+    sixth. An organ's palm roll-up is one (Breathe); no finger plays those notes one by one,
+    so they get no finger: the palm slides along the keys instead (static/roll.js)."""
+    order = sorted(range(len(seq)), key=lambda i: (seq[i][0], seq[i][1]))
+    runs: list[list[int]] = []
+    for i in order:
+        if runs and seq[i][0] - seq[runs[-1][-1]][0] <= GLISS_GAP:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    out = []
+    for run in runs:
+        if len(run) < GLISS_MIN:
+            continue
+        t0, t1 = seq[run[0]][0], seq[run[-1]][0]
+        pitches = [seq[i][1] for i in run]
+        if t1 - t0 >= GLISS_TIME and (len(run) - 1) / (t1 - t0) >= GLISS_RATE and max(pitches) - min(pitches) >= GLISS_SPAN:
+            out.append(run)
+    return out
+
+
+def finger_hand(seq: list[tuple], mirrored: bool = False, pedal: list[tuple[float, float]] | None = None,
+                thumb_side: bool | None = None) -> list[int | None]:
     """Fingers for one hand's notes, [(start seconds, pitch)] or [(start, pitch, end)] in any
     order, aligned with seq. Without an end a note is let go when the next one starts.
-    mirrored: a left hand. pedal: [(down, up) seconds] of the sustain pedal, sorted."""
+    mirrored: a left hand. pedal: [(down, up) seconds] of the sustain pedal, sorted.
+    The notes of a glissando (find_sweeps) get None, and the chords around it are fingered as
+    if it weren't there."""
     pedal = pedal or []
-    order = sorted(range(len(seq)), key=lambda i: (seq[i][0], seq[i][1]))
+    thumb_side = mirrored if thumb_side is None else thumb_side  # the left hand by default
+    swept = {i for run in find_sweeps(seq) for i in run}
+    order = sorted((i for i in range(len(seq)) if i not in swept), key=lambda i: (seq[i][0], seq[i][1]))
     items = [(seq[i][0], (MIRROR - seq[i][1]) if mirrored else seq[i][1], i) for i in order]
     groups = [(t, _five(notes)) for t, notes in _groups(items)]
     result: list[int | None] = [None] * len(seq)
@@ -267,7 +315,10 @@ def finger_hand(seq: list[tuple], mirrored: bool = False, pedal: list[tuple[floa
             # still held: down past this chord's start, and not the same key struck again
             held = {i: f for i, f in down.items() if ends[i] > t + HELD_AFTER and pitch_of[i] not in pitches}
             ringing, pedalled = len(held) >= RINGING, bool(held) and _pedal_down(pedal, t)
+            # a hand can't stay on a key it's too far from: the next chord more than HOLD_REACH
+            # away lets it go free (the pedal, or a short note, covers it)
             release = {i: RELEASE_FREE if ringing or t - seq[i][0] > HOLD_WINDOW
+                       or min(abs(p - pitch_of[i]) for p in pitches) > HOLD_REACH
                        else min(RELEASE_MAX, RELEASE + RELEASE_PER_SEC * (ends[i] - t)) * (RELEASE_PEDAL if pedalled else 1.0)
                        for i in held}
             for keep in _keep_options(held):
@@ -276,7 +327,7 @@ def finger_hand(seq: list[tuple], mirrored: bool = False, pedal: list[tuple[floa
                 gone = sorted((pitch_of[i], f) for i, f in down.items() if i in prev_new and i not in keep)
                 base = cost0 + sum(c for i, c in release.items() if i not in keep)
                 held_keys = tuple(sorted((pitch_of[i], f) for i, f in keep.items()))
-                for fingers, own in _options(pitches, held_keys):
+                for fingers, own in _options(pitches, held_keys, thumb_side):
                     c = base + own
                     if gone:
                         c += _move_cost(tuple(p for p, _ in gone), tuple(f for _, f in gone), pitches, fingers, gap)
@@ -333,6 +384,29 @@ def score_fingers(score) -> dict[tuple[float, int], tuple[str, int]]:
     pedal = sorted(pedal_intervals(score.pedal, score.duration)) if getattr(score, "pedal", None) else []
     fingers = finger_notes(hand_notes, lambda n: sides[id(n)], pedal)
     return {(round(n.start, 4), n.pitch): (sides[id(n)], fingers[id(n)]) for n in hand_notes if id(n) in fingers}
+
+
+def score_sweeps(score) -> dict[tuple[float, int], tuple[str, int]]:
+    """{(start rounded to 4 places, pitch): (hand, glissando number)} for the notes of a piano
+    score's glissandos (find_sweeps), numbered from 1 in the order found. The falling notes send
+    the number so the animated hands slide along the keys for them. Empty for a named part."""
+    from .analysis import side_resolver
+    from .notes import HAND_ROLES, effective_roles, playable_parts
+
+    if getattr(score, "playing", None):
+        return {}
+    roles = effective_roles(score) or {p.index: "both" for p in playable_parts(score)}
+    side = side_resolver(score)
+    hand_notes = [n for n in score.notes if roles.get(n.part) in HAND_ROLES]
+    out: dict[tuple[float, int], tuple[str, int]] = {}
+    number = 0
+    for hand in ("right", "left"):
+        mine = [n for n in hand_notes if side(n) == hand]
+        for run in find_sweeps([(n.start, n.pitch) for n in mine]):
+            number += 1
+            for i in run:
+                out[(round(mine[i].start, 4), mine[i].pitch)] = (hand, number)
+    return out
 
 
 HAND_WORDS = {"right": "right hand", "left": "left hand"}

@@ -395,11 +395,12 @@ def build_lesson(
             score.insert(0, _part(part_name or "Right Hand", rh, clef, time_signature, key, tempo_bpm, total, written_above))
         if lh:
             score.insert(0, _part("Left Hand", lh, "bass", time_signature, key, tempo_bpm if not rh else None, total))
-        from .transcribe import _print_accidentals
+        from .transcribe import _half_bar_beams, _print_accidentals
 
         for part in score.parts:
             part.makeMeasures(inPlace=True)
             part.makeNotation(inPlace=True)
+            _half_bar_beams(part)  # 4/4 eighths in fours, as the coach's other sheets
             _print_accidentals(part)  # music21 prints a sharp again on a repeat in the bar; the standard rule doesn't
         xml = tidy_heading(GeneralObjectExporter(score).parse().decode("utf-8"))
         path.write_text(xml, encoding="utf-8")

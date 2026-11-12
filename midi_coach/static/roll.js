@@ -44,6 +44,7 @@ window.coachRoll = (() => {
   // with a short ease from where it was drawn so a correction never jolts.
   const cur = {target: 0, bps: 0, at: 0, until: null, ease: EASE_MS.learn, offset: 0, seen: false};
   let shown = false, raf = 0, width = 0, height = 0;
+  let layout = null;  // where the last frame put the keys (for hands_render.py)
   let pan = 0, ppbShown = 0;  // beats dragged away from the cursor (as the sheet pans); pixels per beat drawn
 
   function cursorBase(now) {
@@ -57,7 +58,7 @@ window.coachRoll = (() => {
   }
 
   function score(payload) {
-    notes = (payload.notes || []).map(([b, d, p, role, f]) => ({b, d, p, role, f: f || 0, mark: ''}))
+    notes = (payload.notes || []).map(([b, d, p, role, f, g]) => ({b, d, p, role, f: f || 0, g: g || 0, mark: ''}))
       .sort((x, y) => x.b - y.b || x.p - y.p);
     indexFingers();
     bars = payload.bars || [];
@@ -81,6 +82,21 @@ window.coachRoll = (() => {
     }
     if (!cur.seen && notes.length) cur.target = notes[0].b;
     spelling = guessSpelling(notes);
+  }
+
+  // New notes for the same piece: like score(), but the hands, the keyboard's range and the key
+  // spelling stay as they are, so the hands carry on from where they are instead of starting over.
+  // For a live source whose notes are revised as it's heard (radio_hands).
+  function update(payload) {
+    notes = (payload.notes || []).map(([b, d, p, role, f, g]) => ({b, d, p, role, f: f || 0, g: g || 0, mark: ''}))
+      .sort((x, y) => x.b - y.b || x.p - y.p);
+    indexFingers(true);
+    byPitch = new Map();
+    for (const n of notes) {
+      if (!byPitch.has(n.p)) byPitch.set(n.p, []);
+      byPitch.get(n.p).push(n);
+    }
+    maxLen = notes.reduce((m, n) => Math.max(m, n.d), 1);
   }
 
   // The major key (or its relative minor) whose scale holds most of the music, by beats held;
@@ -154,14 +170,18 @@ window.coachRoll = (() => {
 
   // -- drawing ---------------------------------------------------------------
 
-  function keyboard(keyH) {
+  // The keys laid out as a piano's: a black key is 0.58 of a white key wide and sits off the
+  // edge between its white keys as on a real keyboard (C♯ and D♯ spread apart, F♯ and A♯
+  // spread from G♯), so at the back every key is about as wide, and B–C and E–F don't gape.
+  const BLACK_SHIFT = {1: -0.12, 3: 0.12, 6: -0.17, 8: 0, 10: 0.17};  // white keys, from the edge
+  function keyboard(keyH, lo, hi) {
     let whites = 0;
     for (let p = lo; p <= hi; p++) if (!BLACK.has(p % 12)) whites++;
-    const ww = width / whites, bw = ww * 0.6;
+    const ww = width / whites, bw = ww * 0.58;
     const keys = new Map();
     let i = 0;
     for (let p = lo; p <= hi; p++) {
-      if (BLACK.has(p % 12)) keys.set(p, {x: i * ww - bw / 2, w: bw, black: true, h: keyH * 0.62});
+      if (BLACK.has(p % 12)) keys.set(p, {x: (i + BLACK_SHIFT[p % 12]) * ww - bw / 2, w: bw, black: true, h: keyH * 0.62});
       else keys.set(p, {x: i++ * ww, w: ww, black: false, h: keyH});
     }
     return keys;
@@ -193,16 +213,28 @@ window.coachRoll = (() => {
       ctx.fillText('Pick a song or lesson to see its notes fall onto the keys.', w / 2, h / 2);
       return;
     }
-    let whites = 0;
-    for (let p = lo; p <= hi; p++) if (!BLACK.has(p % 12)) whites++;
     const withHands = handsOn && hasFingers();
-    const keyH = Math.max(50, Math.min(h * (withHands ? 0.2 : 0.26), (w / whites) * 5.2));
-    const room = withHands ? keyH * HAND_ROOM : 0;  // under the keys: where the palms rest
+    const countWhites = (a, b) => { let n = 0; for (let p = a; p <= b; p++) if (!BLACK.has(p % 12)) n++; return n; };
+    // With the hands on, the picture is a piano video's: keys in a piano's proportions (KEY_LONG
+    // white keys long) taking KEYS_TALL of the page, so the keyboard shows octaves beyond the
+    // piece's until its keys are narrow enough for that, and the hands and wrists below them.
+    let a = lo, b = hi;
+    if (withHands && !rangeSet) {
+      const need = 0.85 * w * KEY_LONG / (h * KEYS_TALL);
+      while (countWhites(a, b) < need && (a > 21 || b < 108)) {
+        if (a > 21) a = Math.max(21, a - 12);
+        if (countWhites(a, b) < need && b < 108) b = Math.min(108, b + 12);
+      }
+    }
+    const whites = countWhites(a, b);
+    const keyH = Math.max(50, withHands ? Math.min(h * KEYS_TALL, (w / whites) * KEY_LONG) : Math.min(h * 0.26, (w / whites) * 5.2));
+    const room = withHands ? Math.min(keyH * HAND_ROOM, h * 0.32) : 0;  // under the keys: the backs of the hands, the wrists
     const floor = h - keyH - room;
     const ppb = floor / span;  // pixels per beat
     ppbShown = ppb;
     const beat = cursorAt(now) + pan;
-    const keys = keyboard(keyH);
+    const keys = keyboard(keyH, a, b);
+    layout = {width: w, height: h, floor, keyH, ww: w / whites, lo: a, hi: b};
     const yOf = b => floor - (b - beat) * ppb;
 
     // Bars that went badly (the heat map), then bar lines with their numbers
@@ -401,24 +433,60 @@ window.coachRoll = (() => {
 
   // -- the hands ---------------------------------------------------------------
   // Fingertips on the keys, the backs of the hands on the player's side, drawn in 3D by
-  // hands3d.js (or flat, below, when it can't load). Each finger goes to the key of its note sounding now, or leans
-  // toward its next note; the hand sits where its fingers' keys put it, opens as wide as they ask
-  // (an octave, up to a tenth), and glides between positions. Fingers without a note rest evenly
-  // between; fingers 2 to 5 never cross or lie on each other. All of it eased per frame.
+  // hands3d.js (or flat, below, when it can't load). A finger goes to the key of its note
+  // sounding now and lets go of it when the note ends; shortly before its next note it reaches
+  // for that key; otherwise it rests beside its neighbours, a key or so apart, as a relaxed hand's
+  // fingers do. The hand sits where its fingers' keys put it, opens as wide as they ask (an
+  // octave, up to a tenth), and glides between positions; with nothing to play for a beat or so
+  // it rests, lifted off the keys. Fingers 2 to 5 never cross or lie on each other. All of it
+  // eased per frame.
 
-  const HAND_ROOM = 0.9;  // keyboard heights under the keys, for the backs of the hands
-  const TIP_WHITE = 0.7, TIP_BLACK = 0.42;  // where a fingertip plays a white / black key, down from its far end
-  const LOOK = 1.5;  // beats ahead a finger leans toward its next note
+  const HAND_ROOM = 1.3;  // keyboard heights under the keys, for the backs of the hands and the wrists
+  const KEY_LONG = 6.5, KEYS_TALL = 0.24;  // with the hands on: a key's length in white keys; the keys' share of the page's height
+  const TIP_WHITE = 0.58, TIP_BLACK = 0.38;  // where a fingertip plays a white / black key, down from its far end
+  const HAND_TAU = 220;  // ms: how slowly a hand making way for the other moves aside
+  // ms: how long the hand takes to a new position, to open or close, and a finger to a key or
+  // (slower) to where it rests. These are springs' times: a move starts gently, is quickest
+  // halfway and settles, as an arm's does, rather than jumping off and creeping in.
+  const HAND_TIME = 110, SPREAD_TIME = 140, FINGER_TIME = [60, 170];
+  const AHEAD = 0.5;  // how much the notes coming count against the keys held, in placing the hand
+  const HOLD_REACH = 1.2;  // white keys a finger holding a key lets the hand move on from under it
+  const STRIKE_MS = 40, DOWN_MS = 110;  // a finger starts down this long before its note; and stays down at least this long
+  const LIFT_BEATS = 0.25, LEAP_KEYS = 8;  // beats a finger is up before its next note; white keys past which a held key is let go
+  const LOOK = 1, ARRIVE = 0.15;  // beats before its next note a finger starts toward that key; and is over it
   const SPREAD = [0.8, 2.3];  // white keys between neighbouring fingers: closed up, to a tenth across the hand
+  const RELAXED = [0.9, 1.15];  // white keys between resting neighbours: closed up, opened
+  const THUMB_GAP = 2.2;  // white keys from the index to a resting thumb
+  const MIN_GAP = 0.8;  // white keys at least between neighbouring fingers (2 to 5) not on keys
+  const CLEAR = 3.0;  // white keys a hand making way keeps from the other's fingertips
+  const REST = [0.5, 1.5];  // beats from a hand's last note (or to its next) at which it starts to rest, and is at rest
   const PALM_GIVE = 0.4;  // how much of the fingers' stretch widens the palm
   const LENGTH = [0, 0.62, 0.9, 1.0, 0.94, 0.74];  // finger lengths, the middle finger's = 1
   const SKIN = [240, 200, 170];
+  const SWEEP_LEAD = 0.25, SWEEP_TAIL = 0.15;  // beats before a glissando the hand gets ready (flat, wrist up) at its first key; and eases out after
+  const SWEEP_TIME = 45;  // ms: how closely the palm follows the slide
+  let sweeps = {right: [], left: []};  // hand -> [{b0, b1, from, to}]: glissandos, first and last beat, first and last key
   let byFinger = {right: null, left: null};  // hand -> [finger] -> notes by beat
   const handState = {right: newHand(), left: newHand()};
-  let lastFrame = 0;
+  let lastFrame = 0, lastAt = 0, beatRate = 0;
+  let rangeSet = false;  // keyRange() chose the keys: don't widen them
+  const smooth = u => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
 
-  // on: how much each finger is going to a key (0 = resting between, 1 = on its way or there)
-  function newHand() { return {anchor: null, spread: null, x: [0, 0, 0, 0, 0, 0], y: [0, 0, 0, 0, 0, 0], press: [0, 0, 0, 0, 0, 0], on: [0, 0, 0, 0, 0, 0]}; }
+  // on: how far each finger has gone to a key (0 = resting, 1 = over it or on it);
+  // rest: how far the hand is into a rest (0 = playing, 1 = lifted off the keys)
+  // va, vs, vx: how fast the anchor, the spread and each fingertip are moving (pixels a ms)
+  function newHand() {
+    return {anchor: null, spread: null, rest: 0, glide: 0, va: 0, vs: 0, x: [0, 0, 0, 0, 0, 0], vx: [0, 0, 0, 0, 0, 0],
+            y: [0, 0, 0, 0, 0, 0], press: [0, 0, 0, 0, 0, 0], on: [0, 0, 0, 0, 0, 0]};
+  }
+
+  // A critically damped spring: cur going to target at speed vel, to get there in about
+  // `time` ms; returns [where it is, how fast] dt ms on.
+  function spring(cur, target, vel, time, dt) {
+    const w = 2 / time, x = w * dt, e = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const change = cur - target, temp = (vel + w * change) * dt;
+    return [target + (change + temp) * e, (vel - w * temp) * e];
+  }
 
   // The hand that best fits points {f, x, w}: x = anchor + dir·(f−1)·spread, by weighted least
   // squares. With spread given only the anchor is fitted; without, both, when two fingers or more
@@ -442,14 +510,42 @@ window.coachRoll = (() => {
     return {anchor: mx - mf * spread, spread};
   }
 
-  function indexFingers() {
+  function indexFingers(keepHands = false) {
     byFinger = {right: null, left: null};
     for (const n of notes) {
       if (!n.f || (n.role !== 'right' && n.role !== 'left')) continue;
       const hand = byFinger[n.role] || (byFinger[n.role] = [[], [], [], [], [], []]);
       hand[n.f].push(n);  // notes are sorted by beat already
     }
-    handState.right = newHand(); handState.left = newHand();
+    // A glissando's notes (an organ's palm roll-up: no finger, the glissando's number in g) are
+    // one slide of the hand from where it starts to where it ends, not fingered notes.
+    sweeps = {right: [], left: []};
+    const runs = new Map();
+    for (const n of notes) {
+      if (!n.g || (n.role !== 'right' && n.role !== 'left')) continue;
+      const key = n.role + n.g;
+      if (!runs.has(key)) runs.set(key, []);
+      runs.get(key).push(n);
+    }
+    for (const list of runs.values()) {
+      const role = list[0].role, k = Math.max(1, Math.ceil(list.length / 5));
+      const mean = a => Math.round(a.reduce((s, n) => s + n.p, 0) / a.length);
+      sweeps[role].push({b0: list[0].b, b1: list[list.length - 1].b, from: mean(list.slice(0, k)), to: mean(list.slice(-k))});
+      if (!byFinger[role]) byFinger[role] = [[], [], [], [], [], []];
+    }
+    if (!keepHands) { handState.right = newHand(); handState.left = newHand(); }
+  }
+
+  // The glissando a hand is in at beat `at`, or null: how far along it is (u, 0 to 1), and how
+  // much the hand is in the glide (glide: it flattens and lifts its wrist as the slide starts and
+  // eases out as it ends).
+  function sweepAt(hand, at) {
+    for (const s of sweeps[hand]) {
+      if (at < s.b0 - SWEEP_LEAD || at > s.b1 + SWEEP_TAIL) continue;
+      const u = Math.max(0, Math.min(1, (at - s.b0) / Math.max(0.05, s.b1 - s.b0)));
+      return {s, u, glide: smooth((at - s.b0 + SWEEP_LEAD) / SWEEP_LEAD) * (1 - smooth((at - s.b1) / SWEEP_TAIL))};
+    }
+    return null;
   }
   const hasFingers = () => !!(byFinger.right || byFinger.left);
 
@@ -460,49 +556,96 @@ window.coachRoll = (() => {
     return a;
   }
 
-  // Where each finger of a hand is going now: {x, black, press, weight} or null (no note near).
-  function targets(hand, keys, at) {
+  // Where each finger of a hand is going now: {x, black, press, reach, weight} or null (no note
+  // near); reach is how far it has gone toward a coming note's key (1 for a note sounding).
+  // Also how far the hand is into a rest (out.rest).
+  function targets(hand, keys, at, ww) {
+    // in beats: a finger goes down a moment before its note, to be at the bottom of the key as
+    // it sounds, and stays down long enough to be seen, however short the note
+    const early = Math.max(0.02, Math.min(0.12, STRIKE_MS * beatRate)), down = Math.min(0.25, DOWN_MS * beatRate);
     const out = [null];
+    let lastEnd = -Infinity, nextStart = Infinity, sounding = false;
     for (let f = 1; f <= 5; f++) {
       const list = byFinger[hand][f];
-      const i = after(list, at + 0.02);
+      const i = after(list, at + early);
       const prev = list[i - 1], next = list[i];
-      let pick = null, press = 0, weight = 0;
+      if (prev) lastEnd = Math.max(lastEnd, prev.b + prev.d);
+      if (next) nextStart = Math.min(nextStart, next.b);
+      let pick = null, press = 0, weight = 0, reach = 0;
       let kind = '';
-      if (prev && at < prev.b + prev.d - 0.03) { pick = prev; press = 1; kind = 'now'; }  // sounding
-      else if (next && next.b - at <= LOOK) { pick = next; kind = 'next'; weight = 0.3 + 2 * (1 - (next.b - at) / LOOK); }
-      else if (prev && at - (prev.b + prev.d) <= 1) { pick = prev; kind = 'past'; weight = 0.25; }
+      // a note's finger lifts before the same finger's next note (a repeated key, fast notes),
+      // so the press is seen, not smeared into one long hold
+      const end = prev ? Math.min(Math.max(prev.b + prev.d, prev.b + down), next ? next.b - Math.min(LIFT_BEATS, 0.4 * (next.b - prev.b)) : Infinity) : 0;
+      if (prev && at < end - 0.03) { pick = prev; press = 1; reach = 1; kind = 'now'; sounding = true; }
+      else if (next && next.b - at <= LOOK) {
+        pick = next; kind = 'next';
+        weight = 0.3 + 2 * (1 - (next.b - at) / LOOK);
+        reach = smooth((LOOK - (next.b - at)) / (LOOK - ARRIVE));
+      }
       const k = pick && keys.get(pick.p);
-      out.push(k ? {x: k.x + k.w / 2, black: k.black, press, weight, kind, b: pick.b} : null);
+      out.push(k ? {x: k.x + k.w / 2, black: k.black, press, reach, weight, kind, b: pick.b} : null);
     }
-    // What places the hand: the keys it holds now; else the next chord it reaches for (notes
-    // a beat beyond that belong to the position after); else where it last played.
+    // What places the hand: the keys it holds now and the next chord it reaches for (notes a
+    // beat beyond that belong to the position after); with neither it stays where it was.
+    // A held key the hand can't stay on while it leaps to the next chord is let go as it goes.
+    for (let f = 1; f <= 5; f++) {
+      const t = out[f];
+      if (t && t.kind === 'now' && out.some(o => o && o.kind === 'next' && Math.abs(o.x - t.x) > LEAP_KEYS * ww)) out[f] = null;
+    }
     const live = out.filter(t => t && t.kind === 'now');
     const soon = out.filter(t => t && t.kind === 'next');
     const first = Math.min(...soon.map(t => t.b));
     for (const t of out) {
       if (!t) continue;
-      t.places = live.length ? t.kind === 'now' : soon.length ? t.kind === 'next' && t.b <= first + 1 : true;
+      t.places = t.kind === 'now' || t.b <= first + 1;
     }
+    const gap = sounding ? 0 : Math.min(at - lastEnd, nextStart - at);
+    out.rest = smooth((gap - REST[0]) / (REST[1] - REST[0]));
     return out;
   }
 
-  function updateHand(hand, keys, ww, floor, keyH, at, dt) {
+  function updateHand(hand, keys, ww, floor, keyH, at, dt, bound = null) {
     const st = handState[hand], dir = hand === 'right' ? 1 : -1;
-    const tg = targets(hand, keys, at);
+    const tg = targets(hand, keys, at, ww);
+    // In a glissando no finger plays a key: the hand lies flat, fingers together, and its palm
+    // slides along the keys from the first to the last (the coming chord's fingers wait until
+    // it's over, so they don't grab for their keys while the palm is still on its way).
+    const sw = sweepAt(hand, at), kFrom = sw && keys.get(sw.s.from), kTo = sw && keys.get(sw.s.to);
+    const gliding = !!(sw && kFrom && kTo);
+    if (gliding) { for (let f = 1; f <= 5; f++) tg[f] = null; tg.rest = 0; }
     // The keys that place the hand, weighted (notes sounding count most), and the ones coming
     // next, which say how far it opens when only one key is down (an arpeggio under a held note).
-    const place = [], near = [];
+    // The hand opens for the keys it holds (for the coming chord when it holds none). It sits
+    // where those and the coming chord's keys put it: on its way to the next position while it
+    // still holds this one, as far as the fingers holding keys can stay on them.
+    const held = [], coming = [], near = [];
     for (let f = 1; f <= 5; f++) {
       const t = tg[f];
       if (!t) continue;
-      if (t.places) place.push({f, x: t.x, w: t.kind === 'now' ? 1 : t.weight});
-      else if (t.kind === 'next') near.push({f, x: t.x, w: t.weight * 0.5});
+      if (t.kind === 'now') held.push({f, x: t.x, w: 1});
+      else if (t.places) coming.push({f, x: t.x, w: t.weight});
+      else near.push({f, x: t.x, w: t.weight * 0.5});
     }
-    const close = near.filter(p => place.some(q => Math.abs(p.x - q.x) <= 9 * ww));
-    const fitted = fitHand(place, dir) || fitHand(place.concat(close), dir);
-    const spread = Math.max(SPREAD[0] * ww, Math.min(SPREAD[1] * ww, fitted ? fitted.spread : ww));
+    const shape = held.length ? held : coming;
+    const others = (held.length ? coming.map(p => ({...p, w: p.w * 0.5})) : []).concat(near);
+    const close = others.filter(p => shape.some(q => Math.abs(p.x - q.x) <= 9 * ww));
+    const fitted = fitHand(shape, dir) || fitHand(shape.concat(close), dir);
+    let spread = Math.max(SPREAD[0] * ww, Math.min(SPREAD[1] * ww, fitted ? fitted.spread : ww));
+    const place = held.length ? held.concat(coming.map(p => ({...p, w: p.w * AHEAD}))) : coming;
     let anchor = place.length ? fitHand(place, dir, spread).anchor : st.anchor;
+    if (gliding) {  // the middle finger rides the slide, the others lie closed up beside it
+      const mid = kFrom.x + kFrom.w / 2 + (kTo.x + kTo.w / 2 - kFrom.x - kFrom.w / 2) * sw.u;
+      spread = SPREAD[0] * ww;
+      anchor = mid - dir * 2 * spread;
+    }
+    if (held.length && coming.length) {
+      let lo = -Infinity, hi = Infinity;
+      for (const p of held) {
+        const natural = p.x - dir * (p.f - 1) * spread;
+        lo = Math.max(lo, natural - HOLD_REACH * ww); hi = Math.min(hi, natural + HOLD_REACH * ww);
+      }
+      anchor = lo <= hi ? Math.max(lo, Math.min(hi, anchor)) : fitHand(held, dir, spread).anchor;
+    }
     if (anchor === null) {  // before the first note: over the hand's first keys
       for (let f = 1; f <= 5 && anchor === null; f++) {
         const n = byFinger[hand][f][0], k = n && keys.get(n.p);
@@ -511,10 +654,16 @@ window.coachRoll = (() => {
       if (anchor === null) return false;
     }
     const ease = tau => 1 - Math.exp(-dt / tau);
-    st.anchor = st.anchor === null ? anchor : st.anchor + (anchor - st.anchor) * ease(110);
-    st.spread = st.spread === null ? spread : st.spread + (spread - st.spread) * ease(110);
+    const was = st.anchor;
+    if (st.anchor === null) { st.anchor = anchor; st.spread = spread; }
+    else {
+      [st.anchor, st.va] = spring(st.anchor, anchor, st.va, gliding ? SWEEP_TIME : HAND_TIME, dt);
+      [st.spread, st.vs] = spring(st.spread, spread, st.vs, SPREAD_TIME, dt);
+    }
+    st.rest += (tg.rest - st.rest) * ease(150);
+    st.glide += ((gliding ? sw.glide : 0) - st.glide) * ease(60);
     const whiteY = floor + keyH * TIP_WHITE, blackY = floor + keyH * TIP_BLACK;
-    const want = [0, 0, 0, 0, 0, 0], hit = [null, null, null, null, null, null];
+    const hit = [null, null, null, null, null, null];
     for (let f = 1; f <= 5; f++) {
       const natural = st.anchor + dir * (f - 1) * st.spread;
       let t = tg[f];
@@ -522,24 +671,73 @@ window.coachRoll = (() => {
       // hand (or a finger going over it), which reaches further
       const off = (t ? t.x - natural : 0) * dir, reach = f === 1 ? (off > 0 ? 4.5 : 1.5) : (off < 0 ? 3.5 : 2);
       if (t && !t.press && Math.abs(off) > reach * ww) t = null;
-      want[f] = t ? t.x : natural;
       hit[f] = t;
     }
-    // fingers 2 to 5 never cross or lie on each other: a finger not pressing steps aside
-    const gap = 0.55 * Math.min(ww, st.spread);
-    for (let f = 3; f <= 5; f++) {
-      if (!(hit[f] && hit[f].press) && dir * (want[f] - want[f - 1]) < gap) want[f] = want[f - 1] + dir * gap;
+    // Resting fingers lie beside the ones on keys, a relaxed key or so apart (the thumb a little
+    // further from the index); with no key down, the hand closes up around where it is. A finger
+    // going to its next key leaves its resting place for it as the note comes.
+    const relaxed = Math.max(RELAXED[0] * ww, Math.min(RELAXED[1] * ww, st.spread));
+    const stepAfter = f => (f === 1 ? THUMB_GAP * ww : relaxed);  // from finger f to f + 1
+    const between = (a, b) => { let s = 0; for (let k = Math.min(a, b); k < Math.max(a, b); k++) s += stepAfter(k); return s; };
+    const closed = f => st.anchor + dir * (2.5 * st.spread - THUMB_GAP * ww - 1.5 * relaxed + between(1, f));
+    const resting = ref => {
+      const out = [0];
+      const known = [1, 2, 3, 4, 5].filter(f => ref[f] !== null);
+      for (let f = 1; f <= 5; f++) {
+        if (ref[f] !== null) { out.push(ref[f]); continue; }
+        const lo = known.filter(k => k < f).pop(), hi = known.find(k => k > f);
+        if (!known.length) out.push(closed(f));
+        else if (lo === undefined) out.push(ref[hi] - dir * between(f, hi));
+        else if (hi === undefined) out.push(ref[lo] + dir * between(lo, f));
+        else out.push(ref[lo] + (ref[hi] - ref[lo]) * between(lo, f) / between(lo, hi));
+      }
+      return out;
+    };
+    const ref = [null, null, null, null, null, null];
+    for (let f = 1; f <= 5; f++) if (hit[f] && hit[f].press) ref[f] = hit[f].x;
+    const first = resting(ref);
+    for (let f = 1; f <= 5; f++) {
+      if (hit[f] && !hit[f].press) ref[f] = first[f] + (hit[f].x - first[f]) * hit[f].reach;
     }
-    for (let f = 4; f >= 2; f--) {
-      if (!(hit[f] && hit[f].press) && dir * (want[f + 1] - want[f]) < gap) want[f] = want[f + 1] - dir * gap;
+    const want = resting(ref);
+    // Fingers 2 to 5 never cross or lie on each other: one not pressing steps aside (both
+    // halfway when neither is), and a resting thumb stays on its side of the index.
+    const fixed = f => !!(hit[f] && hit[f].press);
+    const gap = MIN_GAP * Math.min(ww, st.spread);
+    for (let pass = 0; pass < 4; pass++) {
+      for (let f = 2; f <= 4; f++) {
+        const short = gap - dir * (want[f + 1] - want[f]);
+        if (short <= 0 || (fixed(f) && fixed(f + 1))) continue;
+        const share = fixed(f) ? 0 : fixed(f + 1) ? 1 : 0.5;
+        want[f] -= dir * short * share;
+        want[f + 1] += dir * short * (1 - share);
+      }
+    }
+    if (!hit[1] && dir * (want[2] - want[1]) < gap) want[1] = want[2] - dir * gap;
+    // Keeping out of the other hand's way (bound: as near it as this hand's fingers may come):
+    // with no key down the whole hand moves aside, else the fingers not on keys keep back.
+    if (bound !== null) {
+      const past = f => dir * (bound - want[f]);
+      if (![1, 2, 3, 4, 5].some(fixed)) {
+        const most = Math.max(0, ...[1, 2, 3, 4, 5].map(past));
+        for (let f = 1; f <= 5; f++) want[f] += dir * most;
+        st.anchor += dir * most * ease(HAND_TAU);
+      } else {
+        for (let f = 1; f <= 5; f++) if (!fixed(f) && past(f) > 0) want[f] = bound;
+      }
     }
     for (let f = 1; f <= 5; f++) {
-      const t = hit[f], x = want[f], y = t && t.black ? blackY : whiteY;
+      const t = hit[f], x = want[f], y = t && t.black && t.reach > 0.5 ? blackY : whiteY;
       if (!st.x[f]) { st.x[f] = x; st.y[f] = y; }
-      st.x[f] += (x - st.x[f]) * ease(t && t.press ? 45 : 80);
+      // a finger going to a key or on one gets there quickly; one at rest is carried along
+      // with the hand and settles into its place slowly, so the fingers don't fidget
+      const busy = t ? Math.max(t.press, t.reach) : 0;
+      if (was !== null) st.x[f] += (st.anchor - was) * (1 - busy);
+      [st.x[f], st.vx[f]] = spring(st.x[f], x, st.vx[f], FINGER_TIME[1] + (FINGER_TIME[0] - FINGER_TIME[1]) * busy, dt);
       st.y[f] += (y - st.y[f]) * ease(80);
-      st.press[f] += ((t ? t.press : 0) - st.press[f]) * ease(35);
-      st.on[f] += ((t ? 1 : 0) - st.on[f]) * ease(80);
+      const press = t ? t.press : 0;
+      st.press[f] += (press - st.press[f]) * ease(press > st.press[f] ? 22 : 70);  // down fast, up slower
+      st.on[f] += ((t ? t.reach : 0) - st.on[f]) * ease(60);
     }
     return true;
   }
@@ -547,11 +745,10 @@ window.coachRoll = (() => {
   // The 3D hands (hands3d.js: three.js and the WebXR hand models) load the first time hands
   // are drawn. Nothing is drawn while they load; if they can't (no WebGL, a file missing) the
   // 2D hands below stand in.
-  let hands3d, loading3d = false;
+  let hands3d, loading3d = null;
   function threeD() {
     if (hands3d === undefined && !loading3d) {
-      loading3d = true;
-      import('./hands3d.js').then(m => m.create()).then(h => { hands3d = h; }, e => {
+      loading3d = import('./hands3d.js').then(m => m.create()).then(h => { hands3d = h; }, e => {
         console.warn('3D hands unavailable, drawing flat ones:', e);
         hands3d = null;
       });
@@ -559,17 +756,36 @@ window.coachRoll = (() => {
     return hands3d;
   }
 
+  let quietHands = false;  // frameAt's quiet frames: the hands move but aren't drawn
   function drawHands(now, keys, ww, floor, keyH, at) {
     const dt = lastFrame ? Math.min(100, now - lastFrame) : 16;
-    lastFrame = now;
+    // how fast the piece is going (beats a ms), from the frames that moved it forward
+    if (lastFrame && now > lastFrame && at > lastAt && at - lastAt < 1) {
+      beatRate += ((at - lastAt) / (now - lastFrame) - beatRate) * (beatRate ? 0.2 : 1);
+    }
+    lastFrame = now; lastAt = at;
+    // The hands keep out of each other's way: the one less busy (fewer fingers on or going to
+    // keys, last frame; a resting hand least) stays CLEAR white keys from the other's
+    // fingertips (unless they've crossed, as in a crossing passage); hands as busy as each
+    // other meet in 3D, one over the other.
+    const bound = {left: null, right: null};
+    const L = handState.left, R = handState.right;
+    if (['left', 'right'].every(h => byFinger[h] && !hidden.has(h) && handState[h].anchor !== null)) {
+      const tips = st => st.x.slice(1), mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+      const down = st => st.on.reduce((s, v) => s + v, 0) - 3 * st.rest;
+      if (mean(tips(L)) < mean(tips(R))) {
+        if (down(L) < down(R) - 0.5) bound.left = Math.min(...tips(R)) - CLEAR * ww;
+        else if (down(R) < down(L) - 0.5) bound.right = Math.max(...tips(L)) + CLEAR * ww;
+      }
+    }
     const list = [];
     for (const hand of ['left', 'right']) {
       if (!byFinger[hand] || hidden.has(hand)) continue;
-      if (!updateHand(hand, keys, ww, floor, keyH, at, dt)) continue;
+      if (!updateHand(hand, keys, ww, floor, keyH, at, dt, bound[hand])) continue;
       list.push({hand, alpha: played.has(hand) ? 1 : 0.42});
     }
     const three = threeD();
-    if (three === undefined) return;
+    if (three === undefined || quietHands) return;
     if (!three) {
       for (const h of list) drawHand(h.hand, ww, floor, keyH, h.alpha);
       return;
@@ -580,7 +796,7 @@ window.coachRoll = (() => {
       const st = handState[hand];
       const tips = [null];
       for (let f = 1; f <= 5; f++) tips.push({x: st.x[f], y: st.y[f], press: st.press[f], on: st.on[f]});
-      return {hand, alpha, tint: COLORS[hand] || OTHER, tips};
+      return {hand, alpha, tint: COLORS[hand] || OTHER, tips, rest: st.rest, glide: st.glide, speed: st.va * 1000};
     }));
     // each finger's number on its first bone
     const size = Math.round(Math.max(9, Math.min(14, ww * 0.34)));
@@ -703,6 +919,32 @@ window.coachRoll = (() => {
     }
   }
 
-  return {score, event, parts, show, showNames, names: () => names,
-          showFingers, fingers: () => fingerNumbers, showHands, hands: () => handsOn};
+  // -- drawing off the page (python -m midi_coach.hands_render) -----------------
+  // A frame of the piece at `beat`, drawn as if the clock read `now` (ms), so the hands ease
+  // between frames as they do while it plays; quiet frames move the hands without drawing them.
+  // Returns where the keys are and each hand's fingertips.
+  function frameAt(beat, now, quiet = false) {
+    Object.assign(cur, {target: beat, bps: 0, at: now, until: null, offset: 0, seen: true});
+    pan = 0;
+    quietHands = quiet;
+    try { draw(now); } finally { quietHands = false; }
+    if (quiet) return null;
+    const hands = {};
+    for (const hand of ['left', 'right']) {
+      const st = handState[hand];
+      if (!byFinger[hand] || st.anchor === null) continue;
+      const r = v => Math.round(v * 100) / 100;
+      hands[hand] = {anchor: r(st.anchor), spread: r(st.spread), rest: r(st.rest), tips: [1, 2, 3, 4, 5].map(f =>
+        ({f, x: r(st.x[f]), y: r(st.y[f]), press: r(st.press[f]), on: r(st.on[f])}))};
+    }
+    return {beat, layout, hands, misses: hands3d && hands3d.debug ? hands3d.debug.misses : []};
+  }
+  // The keyboard from lo to hi (MIDI pitches) instead of the piece's own range
+  function keyRange(a, b) { lo = a; hi = b; rangeSet = true; }
+  // Resolves to '3d' when the 3D hands are drawn, '2d' when the flat ones stand in
+  function handsLoaded() { threeD(); return loading3d.then(() => (hands3d ? '3d' : '2d')); }
+
+  return {score, update, event, parts, show, showNames, names: () => names,
+          showFingers, fingers: () => fingerNumbers, showHands, hands: () => handsOn,
+          frameAt, keyRange, handsLoaded};
 })();

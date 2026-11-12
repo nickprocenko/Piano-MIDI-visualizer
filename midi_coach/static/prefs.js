@@ -98,6 +98,46 @@
     $('conn-refresh').disabled = false;
   });
 
+  // -- Bluetooth keyboards ------------------------------------------------------------------
+  // Find looks for Bluetooth MIDI keyboards (the server's ble_midi, about 5 s); what it finds
+  // joins both lists as "Bluetooth: <name>". The warning shows while one is picked or looked for.
+
+  let btLooking = false;
+  function btWarn() {
+    $('conn-bt-warn').hidden = !(btLooking || isBluetooth($('conn-port').value) || isBluetooth($('conn-out').value));
+  }
+  for (const sel of [$('conn-port'), $('conn-out')]) sel.addEventListener('change', btWarn);
+  new MutationObserver(btWarn).observe($('conn-port'), {childList: true});
+
+  function btSay(text, error = false) {
+    $('conn-bt-msg').textContent = text;
+    $('conn-bt-msg').classList.toggle('err', error);
+  }
+
+  $('conn-bt-find').addEventListener('click', async () => {
+    const button = $('conn-bt-find');
+    button.disabled = true;
+    btLooking = true;
+    btWarn();
+    btSay('Looking for Bluetooth MIDI keyboards… (about 5 seconds)');
+    try {
+      const out = await loadPorts({bluetooth: true});
+      syncMirrors();
+      const bt = out?.bluetooth || {};
+      if (bt.error) btSay(bt.error, true);
+      else if (!bt.found?.length) btSay('None found. Is the keyboard on, with its Bluetooth on, and not connected to a phone or tablet?', true);
+      else {
+        // The first one found becomes the input, unless a Bluetooth keyboard is already picked.
+        if (!isBluetooth(portSel.value)) { portSel.value = bt.found[0]; portSel.dispatchEvent(new Event('change')); syncMirrors(); }
+        btSay(`Found ${bt.found.map(n => n.replace('Bluetooth: ', '')).join(', ')}. It connects when a run starts, which can take a few seconds the first time.`);
+      }
+    } finally {
+      btLooking = false;
+      btWarn();
+      button.disabled = false;
+    }
+  });
+
   // -- Microphone and speakers --------------------------------------------------------------
   // One microphone for everything that listens: talking to the Maestro, singing and spoken
   // answers in lessons, the flute. The speakers carry the page's own sounds. Windows only

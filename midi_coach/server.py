@@ -22,12 +22,12 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import aids, analysis, autopilot, bugs, chat, deep, details, harmony, instruments, lessons, library, live, online, profiles, remarks, sheet, songfind, songwatch, stt, synced, tiles, tracks, transcribe, transcript, web
+from . import aids, analysis, autopilot, ble_midi, bugs, chat, deep, details, harmony, instruments, lessons, library, live, online, profiles, remarks, sheet, songfind, songwatch, stt, synced, tiles, tracks, transcribe, transcript, web
 from .atlas import runtime as atlas_runtime
 from .atlas import welcome as atlas_welcome
 from .display import DisplayHub, sheet_problem
 from .midi_io import MIC_PORT, Accompanist, Player, PortError, Recorder, RestProfile, build_events, list_ports, resolve_port
-from .notes import ROLES, MIDI_SUFFIXES, MUSICXML_SUFFIXES, effective_roles, find_part, is_named, is_plain_piano, named_roles, note_name, notes_from_events, parse_bars, select_notes, split_hands, suggest_hands
+from .notes import ROLES, MIDI_SUFFIXES, MUSICXML_SUFFIXES, effective_roles, find_part, is_named, is_plain_piano, named_roles, note_name, notes_from_events, read_musicxml, parse_bars, select_notes, split_hands, suggest_hands
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s midi-coach %(message)s")
 log = logging.getLogger("midi-coach")
@@ -88,6 +88,7 @@ recorder = Recorder()
 player = Player()
 hub = DisplayHub()
 recorder.on_keys = hub.keys  # the falling-notes view lights the keys you hold
+ble_midi.on_status = hub.status  # a Bluetooth keyboard dropping out (and back) shows in the header
 _last_take: dict = {}
 _live: dict = {"session": None, "watcher": None}
 _seek_generation = 0
@@ -109,13 +110,26 @@ def _selection(score, hand: str, bars: str | None, split_note: int, parts: list[
 
 
 @mcp.tool()
-async def list_midi_ports() -> dict:
-    """List MIDI input and output ports. Inputs are used for recording, outputs for playback."""
+async def list_midi_ports(bluetooth: bool = False) -> dict:
+    """List MIDI input and output ports. Inputs are used for recording, outputs for playback.
+    Bluetooth MIDI keyboards found before are listed as "Bluetooth: <name>"; bluetooth=true
+    first looks for new ones (about 5 seconds). Bluetooth is less reliable than a cable."""
+    found = None
+    if bluetooth:
+        try:
+            found = await asyncio.to_thread(ble_midi.scan)
+        except ble_midi.BluetoothError as exc:
+            return _err(exc)
     try:
         ports = list_ports()
     except PortError as exc:
         return _err(exc)
-    return {**ports, "note": "Ports are chosen by name substring; defaults come from MIDI_COACH_INPUT / MIDI_COACH_OUTPUT, else the JUNO."}
+    out = {**ports, "note": "Ports are chosen by name substring; defaults come from MIDI_COACH_INPUT / MIDI_COACH_OUTPUT, else the JUNO."}
+    if found is not None:
+        out["bluetooth_found"] = found
+    if any(ble_midi.is_port(p) for p in ports["inputs"]):
+        out["bluetooth_warning"] = ble_midi.WARNING
+    return out
 
 
 @mcp.tool()
@@ -503,8 +517,11 @@ def _coach_context(score, hand: str, mode: str, tempo_percent: float) -> dict:
     """What the Maestro knows when you press Start: the piece, its key, your history on it."""
     path = pathlib.Path(score.path)
     title, fifths = None, None
-    if path.suffix.lower() in MUSICXML_SUFFIXES - {".mxl"}:
-        head = path.read_text(encoding="utf-8", errors="replace")[:20000]
+    if path.suffix.lower() in MUSICXML_SUFFIXES:
+        try:
+            head = read_musicxml(path)[:20000]
+        except (OSError, ValueError, StopIteration):
+            head = ""
         m = _TITLE_RE.search(head)
         title = m.group(1).strip() if m else None
         m = _FIFTHS_RE.search(head)
@@ -624,7 +641,7 @@ def _start_input(port: str | None, *args) -> tuple[str, bool]:
     """Open the MIDI input; if the keyboard is busy (e.g. the visualizer has it), use 'Coach'.
     A flute, saxophone or voice profile listens on the microphone unless a port is named."""
     port = port or (MIC_PORT if instruments.uses_mic() else None)
-    if port == MIC_PORT:
+    if port == MIC_PORT or ble_midi.is_port(port):  # nothing else can stand in for these
         return recorder.start(port, *args), False
     try:
         return recorder.start(port, *args), False
@@ -879,7 +896,16 @@ def _watch_listen(session) -> None:
         threading.Timer(1.5, _next_pass).start()
 
 
-def _cmd_ports(_body: dict) -> dict:
+def _cmd_ports(body: dict) -> dict:
+    """The ports for the page's MIDI input and Sound out. {bluetooth: true} first looks for
+    Bluetooth MIDI keyboards (about 5 seconds): bluetooth.found is what answered, or
+    bluetooth.error why it couldn't look."""
+    bluetooth: dict = {"available": ble_midi.available(), "warning": ble_midi.WARNING}
+    if body.get("bluetooth"):
+        try:
+            bluetooth["found"] = ble_midi.scan()
+        except ble_midi.BluetoothError as exc:
+            bluetooth["error"] = str(exc)
     try:
         ports = list_ports()
     except PortError:  # no MIDI at all: a flute, sax or voice still has the microphone
@@ -896,7 +922,13 @@ def _cmd_ports(_body: dict) -> dict:
         default_output = outputs[resolve_port(outputs, None, "MIDI_COACH_OUTPUT", "output")]
     except PortError:
         default_output = None
-    return {"inputs": names, "default": default, "outputs": outputs, "default_output": default_output}
+    return {"inputs": names, "default": default, "outputs": outputs, "default_output": default_output, "bluetooth": bluetooth}
+
+
+def _cmd_bluetooth_release(_body: dict) -> dict:
+    """The Visualizer is opening: let go of idle Bluetooth keyboards so it can connect to them."""
+    ble_midi.release_all()
+    return {"ok": True}
 
 
 def _path_key(path: str) -> str:
@@ -2342,7 +2374,7 @@ def _cmd_mic_note(body: dict) -> dict:
     return {"listening": recorder.feed(message, at)}
 
 
-PAGE_COMMANDS = {"ports": _cmd_ports, "mic_note": _cmd_mic_note, "lessons": _cmd_lessons, "songs": _cmd_songs, "parts": _cmd_parts,
+PAGE_COMMANDS = {"ports": _cmd_ports, "bluetooth_release": _cmd_bluetooth_release, "mic_note": _cmd_mic_note,"lessons": _cmd_lessons, "songs": _cmd_songs, "parts": _cmd_parts,
                  "songs_online": _cmd_songs_online, "fetch_online": _cmd_fetch_online,
                  "song_sources": lambda _body: library.song_sources(), "set_song_sources": _cmd_set_song_sources,
                  "pick_folder": _cmd_pick_folder, "rescan": _cmd_rescan,

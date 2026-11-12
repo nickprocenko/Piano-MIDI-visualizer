@@ -535,6 +535,12 @@
   #conn-server { display: flex; align-items: center; gap: 8px; font-size: 13px; }
   #conn-server i { width: 9px; height: 9px; border-radius: 50%; background: var(--miss); }
   #conn-server.live i { background: var(--hit); }
+  /* Bluetooth keyboards (prefs.js): the warning shows whenever one is picked, or being looked for */
+  .conn-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bt-warn { margin: 0; padding: 9px 12px; border: 1px solid rgba(227,179,65,.55); border-left-width: 4px; border-radius: 6px; background: rgba(227,179,65,.1); color: var(--text); font-size: 12.5px; line-height: 1.45; }
+  .bt-warn[hidden] { display: none; }
+  .bt-warn b { color: #e3b341; }
+  #conn-bt-msg:not(.err) { color: var(--muted); }
   /* Preferences (prefs.js): sections on the left, the chosen one on the right */
   #prefs-dlg { width: min(700px, calc(100vw - 32px)); padding: 0; accent-color: var(--accent); }
   #prefs-dlg > form { flex-direction: row; gap: 0; min-height: 440px; }
@@ -583,6 +589,7 @@
   /* Main menu: pick who is practicing */
   #mainmenu { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 30%, #152032, var(--bg) 70%); }
   #mainmenu[hidden] { display: none; }
+  #mainmenu.loading .mm-box { visibility: hidden; }
   #mainmenu .mm-box { width: min(560px, 92vw); text-align: center; }
   #mainmenu h1 { font-size: 30px; font-weight: 700; margin-bottom: 4px; }
   #mainmenu h1 b { color: var(--accent); }
@@ -782,6 +789,13 @@
   .report-kind label:has(input:checked) { border-color: var(--accent); background: rgba(255,255,255,.06); }
   #report-toast { position: fixed; right: 16px; bottom: 16px; z-index: 20; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--panel); color: var(--text); font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
   #report-toast[hidden] { display: none; }
+  #song-toast { position: fixed; right: 16px; bottom: 16px; z-index: 21; display: flex; align-items: center; gap: 10px; max-width: min(420px, calc(100vw - 32px)); padding: 10px 12px 10px 14px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel); color: var(--text); font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,.4); animation: song-toast-in .18s ease-out; }
+  #song-toast[hidden] { display: none; }
+  #song-toast .song-toast-text { flex: 1; min-width: 0; }
+  #song-toast .song-toast-text b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #song-toast button { flex: none; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: var(--panel); font: inherit; font-weight: 600; cursor: pointer; }
+  #song-toast button.song-toast-close { padding: 2px 6px; border-color: transparent; background: transparent; color: var(--text); font-weight: normal; opacity: .7; }
+  @keyframes song-toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
   #checks-list { display: flex; flex-direction: column; gap: 12px; max-height: min(70vh, 640px); overflow-y: auto; }
   .chk-item { display: grid; grid-template-columns: 220px 1fr; gap: 12px; padding: 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; }
   .chk-item img { width: 100%; border-radius: 4px; cursor: zoom-in; }
@@ -831,19 +845,12 @@
   .menu-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
                 width: max-content; max-width: calc(100vw - 40px); padding: 12px 14px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 24px rgba(0,0,0,.4); }
   .menu-row { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }  /* a label that holds buttons */
-  #settings-menu .menu-row { flex-wrap: wrap; }
   #fing-wrap[hidden], #tab-wrap[hidden] { display: none; }  /* .menu-row's and #menu label's display would show them for every instrument */
   /* Sheet ▸ the controls that only change the sheet, greyed while only the falling notes show */
   #sheet-only-note { display: none; color: var(--muted); font-size: 12px; font-style: italic; }
   body[data-show=notes] #sheet-only-note { display: block; }
   body[data-show=notes] #sheet-settings .sheet-only { opacity: .4; pointer-events: none; }
   body:not([data-show=notes]):not([data-show=both]) #sheet-settings .roll-only { opacity: .4; }
-  #settings-menu kbd, #actions-menu kbd { color: var(--muted); font: 11.5px 'Segoe UI', Arial, sans-serif; }
-  #actions-menu .menu-panel { align-items: stretch; gap: 0; min-width: 230px; padding: 5px; }
-  .act-item { display: flex; justify-content: space-between; gap: 18px; padding: 7px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; text-align: left; cursor: pointer; }
-  .act-item:hover:not(:disabled), .act-item:focus-visible { background: rgba(0,180,180,.14); outline: none; }
-  .act-item:disabled { color: var(--muted); opacity: .55; cursor: default; }
-  #actions-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid rgba(255,255,255,.1); }
   #transport-controls { display: grid; gap: 10px; width: min(640px, calc(100vw - 40px)); }
   .pb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; font-size: 12.5px; }
   .pb-row[hidden] { display: none; }
@@ -1014,6 +1021,7 @@
       <button role="menuitem" data-file="save-as" class="needs-score" title="Save a copy of this sheet under a new name, in a category of your Songs / Lessons">Save as… <kbd>Ctrl+Shift+S</kbd></button>
       <button role="menuitem" data-file="download" class="needs-score" title="Save the file this sheet comes from onto your computer (Downloads)">Download sheet file</button>
       <button role="menuitem" data-file="folders" title="Choose the folders where your songs are found, and whether new downloads are picked up">Song folders…</button>
+      <button role="menuitem" data-file="youtube" title="Play a song’s video on youtube.com: the sheet follows it (through the Music Hub extension)">Play along on YouTube…</button>
       <hr>
       <button role="menuitem" data-file="profile" title="Switch to another profile, or add one">Switch profile…</button>
     </div>
@@ -1077,13 +1085,7 @@
       <span class="home-card-detail">Your learning path: explore skills, set a goal, or see where to start.</span>
       <span class="home-card-action">Open the map <b aria-hidden="true">→</b></span>
     </button>
-    <button class="home-card" id="home-youtube">
-      <span class="home-card-icon" aria-hidden="true">▶</span>
-      <span class="home-card-title">Play along on YouTube</span>
-      <span class="home-card-detail">Play a song’s video on youtube.com: the sheet follows it.</span>
-      <span class="home-card-action">Open YouTube play-along <b aria-hidden="true">→</b></span>
-    </button>
-    <button class="home-card" id="home-visualizer">
+    <button class="home-card wide" id="home-visualizer">
       <span class="home-card-icon" aria-hidden="true">✦</span>
       <span class="home-card-title">Visualizer</span>
       <span class="home-card-detail">Play freely with the light show: notes, LEDs and video backgrounds, full screen.</span>
@@ -1297,34 +1299,6 @@
           <label class="setting" title="Play the lead-in before every loop pass, not just the first"><input type="checkbox" id="lead-every"> every loop pass</label>
         </div>
         <div id="bookmarks" hidden></div>
-      </div>
-    </details>
-    <details id="settings-menu">
-      <summary title="Settings that hold in every mode: where the sound goes, keeping the screen on, and the rest of Preferences">Settings ▾</summary>
-      <div class="menu-panel">
-  <label class="setting" title="MIDI output for Listen and for the parts you don't play (the same as Sound goes to, under Parts)">Sound out <select id="set-out"></select></label>
-  <label id="wake-wrap" title="Stop the screen dimming or locking while this page is open, so it's still there when your hands are on the keys"><input type="checkbox" id="wake-lock"> Keep the screen on</label>
-  <span class="menu-row">Preferences
-    <button type="button" class="t-btn" data-prefs="connections">Connections</button>
-    <button type="button" class="t-btn" data-prefs="audio">Mic &amp; speakers</button>
-    <button type="button" class="t-btn" data-prefs="keys">Shortcuts</button>
-    <button type="button" class="t-btn" data-prefs="">All… <kbd>Ctrl+,</kbd></button>
-  </span>
-      </div>
-    </details>
-    <details id="actions-menu">
-      <summary title="Things to do now, in any mode: jump back, bookmark, the metronome, a video, ask the Maestro, save, full screen">Actions ▾</summary>
-      <div class="menu-panel" role="menu" aria-label="Actions">
-        <button role="menuitem" class="act-item play-only" data-act="restart" data-target="timeline-restart" title="Back to the start of the selected bars (the start of the piece when none are chosen)">Back to the start</button>
-        <button role="menuitem" class="act-item play-only" data-act="bookmark" data-target="bm-add" title="Bookmark the bar you're on, or remove its bookmark">Bookmark this bar</button>
-        <button role="menuitem" class="act-item" data-act="metronome" data-target="m-go" title="Start or stop the metronome">Metronome on / off <kbd>M</kbd></button>
-        <button role="menuitem" class="act-item play-only" data-act="video" data-target="video-btn" title="Play along with a recording: a YouTube video plays and the sheet follows it">Play along with a video</button>
-        <button role="menuitem" class="act-item play-only" data-act="piece" data-target="pick-piece" title="Search your songs and lessons for another piece">Change piece…</button>
-        <hr>
-        <button role="menuitem" class="act-item" data-act="ask" data-target="ask" title="Type a question to the Maestro (or hold Space to talk)">Ask the Maestro…</button>
-        <button role="menuitem" class="act-item needs-score" data-act="save-as" title="Save a copy of this sheet under a new name, in a category of your Songs / Lessons">Save a copy… <kbd>Ctrl+Shift+S</kbd></button>
-        <button role="menuitem" class="act-item needs-score" data-act="download" title="Save the file this sheet comes from onto your computer (Downloads)">Download sheet file</button>
-        <button role="menuitem" class="act-item" data-act="fullscreen" id="act-fullscreen" title="Fill the screen with the coach (Esc to leave)">Full screen</button>
       </div>
     </details>
   <span id="metro-wrap">
@@ -2043,71 +2017,6 @@ document.addEventListener('keydown', e => {
 });
 window.addEventListener('resize', () => controlMenus.forEach(positionControlPanel));
 
-// Settings and Actions: what holds or works in every mode. Sound out is a copy of Playing's
-// "Sound goes to", refreshed each time the menu opens.
-$('settings-menu').addEventListener('toggle', e => {
-  if (!e.target.open) return;
-  const copy = $('set-out');
-  copy.innerHTML = outSel.innerHTML;
-  if (!outSel.options.length) copy.add(new Option('none found', ''));
-  copy.disabled = !outSel.options.length;
-  copy.value = outSel.value;
-});
-$('set-out').addEventListener('change', e => { outSel.value = e.target.value; outSel.dispatchEvent(new Event('change')); });
-document.querySelectorAll('[data-prefs]').forEach(b => b.addEventListener('click', () => {
-  $('settings-menu').open = false;
-  openPreferences(b.dataset.prefs || undefined);
-}));
-
-// Keep the screen on: a wake lock, taken again whenever the page comes back into view
-// (the browser drops it when the tab is hidden).
-let wakeLock = null;
-async function holdWake(on) {
-  store.set('wakeLock', on);
-  if (!on) { wakeLock?.release(); wakeLock = null; return; }
-  try { wakeLock = await navigator.wakeLock.request('screen'); }
-  catch (err) { statusEl.textContent = 'Could not keep the screen on: ' + err.message; }
-}
-if ('wakeLock' in navigator) {
-  $('wake-lock').checked = store.get('wakeLock') === 'true';
-  $('wake-lock').addEventListener('change', e => holdWake(e.target.checked));
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && $('wake-lock').checked) holdWake(true);
-  });
-  if ($('wake-lock').checked) holdWake(true);
-} else $('wake-wrap').hidden = true;
-
-// Actions run the page's own buttons, so each does exactly what its button does; an item is
-// off while its button is (no bar to bookmark, no Maestro, no sheet to save).
-const ACTS = {
-  'save-as': () => document.querySelector('#file-menu [data-file=save-as]').click(),
-  download: () => document.querySelector('#file-menu [data-file=download]').click(),
-  ask: () => openMaestro(),
-  fullscreen: () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen(),
-};
-const actItems = [...document.querySelectorAll('#actions-menu .act-item')];
-$('actions-menu').addEventListener('toggle', e => {
-  if (!e.target.open) return;
-  const t = $('title').textContent.trim(), hasScore = !!t && t !== 'no score yet';
-  actItems.forEach(b => {
-    b.disabled = (b.dataset.target && $(b.dataset.target).disabled) || (b.classList.contains('needs-score') && !hasScore);
-  });
-  $('act-fullscreen').textContent = document.fullscreenElement ? 'Leave full screen' : 'Full screen';
-});
-$('actions-menu').addEventListener('click', e => {
-  const item = e.target.closest('.act-item');
-  if (!item || item.disabled) return;
-  $('actions-menu').open = false;
-  (ACTS[item.dataset.act] || (() => $(item.dataset.target).click()))();
-});
-$('actions-menu').addEventListener('keydown', e => {
-  if (!['ArrowDown', 'ArrowUp'].includes(e.key)) return;
-  const all = actItems.filter(b => !b.disabled && b.offsetParent), i = all.indexOf(document.activeElement);
-  if (!all.length) return;
-  e.preventDefault();
-  all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length].focus();
-});
-
 async function cmd(name, body) {
   const res = await fetch('cmd/' + name, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
   const out = await res.json();
@@ -2143,9 +2052,11 @@ function showGo() {
   go.classList.toggle('rec', !running && mode === 'record');
 }
 
-async function loadPorts() {
+// body {bluetooth: true} looks for Bluetooth keyboards first (about 5 s); returns what the server said.
+async function loadPorts(body) {
   try {
-    const {inputs, default: dflt, outputs, default_output: dfltOut} = await cmd('ports');
+    const out = await cmd('ports', body);
+    const {inputs, default: dflt, outputs, default_output: dfltOut} = out;
     const saved = store.get('port', '');
     portSel.innerHTML = '';
     for (const name of inputs) portSel.add(new Option(name, name));
@@ -2154,7 +2065,17 @@ async function loadPorts() {
     outSel.innerHTML = '';
     for (const name of outputs) outSel.add(new Option(name, name));
     outSel.value = outputs.includes(savedOut) ? savedOut : (dfltOut || outputs[0] || '');
+    btTitle(portSel); btTitle(outSel);
+    return out;
   } catch (err) { statusEl.textContent = 'Could not list MIDI inputs: ' + err.message; }
+}
+
+// A Bluetooth MIDI keyboard (midi_coach/ble_midi.py) works like a cable but less reliably:
+// the page says so wherever one is picked.
+const BT_WARNING = 'Bluetooth is less reliable than a USB cable: notes can arrive late or in bursts, and the connection can drop mid-song.';
+const isBluetooth = name => (name || '').startsWith('Bluetooth: ');
+function btTitle(sel) {  // the warning as the select's tooltip (else its label's own shows)
+  if (isBluetooth(sel.value)) sel.title = BT_WARNING; else sel.removeAttribute('title');
 }
 
 // -- songs & lessons panel ------------------------------------------------------
@@ -2183,18 +2104,29 @@ async function searchSongs() {
   } catch (err) { statusEl.textContent = 'Could not search the library: ' + err.message; }
 }
 
-// songwatch.py noticed new files in a song folder or Downloads: refresh the list, offer to open one.
+// songwatch.py noticed new files in a song folder or Downloads: refresh the list and pop up a
+// little notice (Added …, Open now) that stays SONG_TOAST_MS, longer while the mouse is on it.
+const SONG_TOAST_MS = 15000;
+let songToastTimer = null;
 function songsAdded(songs) {
   if (!songs.length) return;
   searchSongs();
   const first = songs[0];
-  statusEl.textContent = songs.length > 1 ? `${songs.length} new songs found, ${first.title} among them. ` : `New song found: ${first.title}. `;
-  const open = document.createElement('button');
-  open.type = 'button';
-  open.className = 'status-open';
-  open.textContent = 'Open it';
-  open.addEventListener('click', () => loadPiece(first.path));
-  statusEl.appendChild(open);
+  const toast = document.getElementById('song-toast');
+  const text = toast.querySelector('.song-toast-text');
+  text.textContent = songs.length > 1 ? `Added ${songs.length} songs` : 'Added to your songs';
+  const name = document.createElement('b');
+  name.textContent = first.title + (songs.length > 1 ? ` and ${songs.length - 1} more` : '');
+  name.title = first.path;
+  text.appendChild(name);
+  const hide = () => { toast.hidden = true; clearTimeout(songToastTimer); };
+  const arm = () => { clearTimeout(songToastTimer); songToastTimer = setTimeout(hide, SONG_TOAST_MS); };
+  toast.querySelector('.song-toast-open').onclick = () => { hide(); loadPiece(first.path); };
+  toast.querySelector('.song-toast-close').onclick = hide;
+  toast.onmouseenter = () => clearTimeout(songToastTimer);
+  toast.onmouseleave = arm;
+  toast.hidden = false;
+  arm();
 }
 
 // bitmidi.com, only when asked (a button under the library's results); Preferences → Song folders turns it off.
@@ -2549,7 +2481,7 @@ $('track-rows').addEventListener('input', e => {
   clearTimeout(volTimer);
   volTimer = setTimeout(() => cmd('mix', {gains: {[lane]: Number(e.target.value) / 100}}).catch(() => {}), 60);
 });
-outSel.addEventListener('change', () => store.set('output', outSel.value));
+outSel.addEventListener('change', () => { store.set('output', outSel.value); btTitle(outSel); });
 
 // The run's settings, as the Maestro (autopilot, voice) or Claude last set them: the menu
 // shows where things stand, and Start picks up from there.
@@ -3668,7 +3600,7 @@ function esc(t) { return String(t).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': 
 
 $('mode').addEventListener('change', e => { setMode(e.target.value); savePractice(); });
 $('tempo').addEventListener('input', e => { $('tempo-val').textContent = e.target.value + '%'; store.set('tempo', e.target.value); savePractice(); });
-portSel.addEventListener('change', () => store.set('port', portSel.value));
+portSel.addEventListener('change', () => { store.set('port', portSel.value); btTitle(portSel); });
 $('style').addEventListener('change', async e => {
   try { await cmd('maestro', {style: e.target.value}); } catch (err) { statusEl.textContent = err.message; loadStyle(); }
 });
@@ -3844,7 +3776,7 @@ function askSwitch(to) {
 const MENUS = {
   playing: {open: 'playing-settings'}, sheet: {open: 'sheet-settings'}, maestro: {open: 'maestro-settings'},
   voice: {open: 'maestro-settings', light: '#voice-wrap'}, playback: {open: 'screen-controls'},
-  settings: {open: 'settings-menu'}, sound_out: {open: 'settings-menu', light: '#set-out'}, actions: {open: 'actions-menu'},
+  settings: {prefs: 'connections'}, sound_out: {open: 'playing-settings', light: '#out-port'}, actions: {open: 'screen-controls'},
   prefs_connections: {prefs: 'connections'}, prefs_audio: {prefs: 'audio'}, prefs_audio_to_midi: {prefs: 'audiomidi'},
   prefs_maestro: {prefs: 'maestro'}, prefs_sheet: {prefs: 'sheet'}, prefs_song_folders: {prefs: 'library'},
   prefs_shortcuts: {prefs: 'keys'},
@@ -3960,7 +3892,7 @@ connect();
 <script src="flute.js"></script>
 <script src="video.js"></script>
 <script src="youtube.js"></script>
-<div id="mainmenu" role="dialog" aria-modal="true" aria-label="Choose a profile">
+<div id="mainmenu" class="loading" role="dialog" aria-modal="true" aria-label="Choose a profile">
   <div class="mm-box">
     <h1>Music <b>Hub</b></h1>
     <p class="mm-sub">Who is practicing?</p>
@@ -3985,6 +3917,7 @@ connect();
     <p id="mm-msg" role="alert"></p>
   </div>
 </div>
+<script>try { if (sessionStorage.getItem('coach.menu-seen') === '1') document.getElementById('mainmenu').hidden = true; } catch (e) {}</script>
 <dialog id="switch-dlg" class="file-dlg" aria-labelledby="switch-title">
   <form method="dialog">
     <h2 id="switch-title"></h2>
@@ -4021,6 +3954,7 @@ connect();
   </form>
 </dialog>
 <div id="report-toast" hidden role="status"></div>
+<div id="song-toast" hidden role="status"><div class="song-toast-text"></div><button type="button" class="song-toast-open">Open now</button><button type="button" class="song-toast-close" title="Dismiss" aria-label="Dismiss">✕</button></div>
 <script>
 // F9: report a bug or an idea by typing (bugs.py, cmd/report). The box closes before the screenshot.
 (function () {
@@ -4329,7 +4263,13 @@ connect();
         <label>MIDI input (your keyboard) <select id="conn-port"></select></label>
         <label>Sound out (parts you don't play, and Listen) <select id="conn-out"></select></label>
         <p class="dlg-hint">Keyboard missing? Plug it in and press Refresh. Only one program can use it at a time, so close other piano apps first.</p>
-        <button type="button" class="pref-btn" id="conn-refresh">Refresh</button>
+        <p class="bt-warn" id="conn-bt-warn" role="note" hidden><b>⚠ Bluetooth is less reliable than a USB cable.</b> Notes can arrive late or in bursts (more when Wi-Fi, wireless headphones or other Bluetooth devices are busy), so grading in Rehearse may mark good notes late, and the connection can drop mid-song. Keep the keyboard close to the PC, and use a cable when timing matters.</p>
+        <div class="conn-buttons">
+          <button type="button" class="pref-btn" id="conn-refresh">Refresh</button>
+          <button type="button" class="pref-btn" id="conn-bt-find" title="Look for Bluetooth MIDI keyboards nearby (about 5 seconds). Turn the keyboard's Bluetooth on first.">Find Bluetooth keyboards</button>
+        </div>
+        <p class="dlg-hint" id="conn-bt-hint">Bluetooth MIDI keyboards show in both lists as “Bluetooth: …” once found. One that doesn't turn up may already be connected elsewhere: disconnect it from any phone or tablet, and remove it from Windows' Bluetooth settings if it's paired there.</p>
+        <p class="dlg-msg" id="conn-bt-msg" role="status"></p>
       </section>
       <section data-pane="audio" role="tabpanel" hidden>
         <h3>Microphone &amp; speakers</h3>

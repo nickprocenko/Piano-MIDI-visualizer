@@ -187,6 +187,7 @@ def grand_staff(
     last = max([e[2] for e in events] + [m[1] for m in tune] + [n[1] for _, notes in extra for n in notes])
     bar_starts, bar_sigs, total = _bar_grid(time_signature, last)
     bars = len(bar_starts)
+    middles = _middles(bar_starts, bar_sigs)
 
     def bar_of(at: Fraction) -> int:
         return max(0, min(bisect.bisect_right(bar_starts, at) - 1, bars - 1))
@@ -242,18 +243,19 @@ def grand_staff(
         voices = _voices(hand_events)
         for k, notes_in_voice in enumerate(voices):
             target = part if len(voices) == 1 else stream.Voice(id=str(k + 1))
-            written += _write_voice(target, notes_in_voice, legato_gap, total, spelled, chord, note, tie, bar_starts)
+            written += _write_voice(target, notes_in_voice, legato_gap, total, spelled, chord, note, tie, bar_starts, middles)
             if target is not part:
                 target.makeRests(fillGaps=True, inPlace=True, timeRangeFromBarDuration=False, refStreamOrTimeRange=[0, total])
-                _plain_rests(target, bar_starts)
+                _plain_rests(target, bar_starts, middles)
                 part.insert(0, target)
         if len(voices) == 1:
             part.makeRests(fillGaps=True, inPlace=True, timeRangeFromBarDuration=False, refStreamOrTimeRange=[0, total])
-            _plain_rests(part, bar_starts)
+            _plain_rests(part, bar_starts, middles)
         part.makeMeasures(inPlace=True)
         part.makeTies(inPlace=True)
         if shift:
             _pickup_bar(part, shift)
+        _half_bar_beams(part)
         for m in part.getElementsByClass("Measure"):
             # A voice with nothing to play in a bar is left out of it, rather than drawing a whole rest.
             idle = [v for v in m.voices if not v.notes]
@@ -287,18 +289,19 @@ def grand_staff(
         for at, bpm in tempo_marks or []:
             part.insert(at, tempo.MetronomeMark(number=round(bpm)))
         # A sung line is legato: a note let go up to an eighth before the next is held to it.
-        count += _write_voice(part, [(on, end, p) for on, end, p, _ in tune], max(legato_gap, TUNE_LEGATO), total, spelled, chord, note, tie, bar_starts)
+        count += _write_voice(part, [(on, end, p) for on, end, p, _ in tune], max(legato_gap, TUNE_LEGATO), total, spelled, chord, note, tie, bar_starts, middles)
         words = {on: lyric for on, _, _, lyric in tune if lyric}
         for item in part.notes:
             lyric = words.pop(Fraction(item.offset).limit_denominator(48), None)
             if lyric:
                 item.lyrics.append(note.Lyric(text=lyric[0], syllabic=lyric[1]))
         part.makeRests(fillGaps=True, inPlace=True, timeRangeFromBarDuration=False, refStreamOrTimeRange=[0, total])
-        _plain_rests(part, bar_starts)
+        _plain_rests(part, bar_starts, middles)
         part.makeMeasures(inPlace=True)
         part.makeTies(inPlace=True)
         if shift:
             _pickup_bar(part, shift)
+        _half_bar_beams(part)
         accidentals(part)
         _beat_triplets(part)
         score.insert(0, part)
@@ -532,7 +535,7 @@ def _beat_triplets(part) -> None:
                     el.duration = d
 
 
-def _write_voice(target, events, legato_gap: Fraction, limit: Fraction, spelled, chord, note, tie, bar_starts=None) -> int:
+def _write_voice(target, events, legato_gap: Fraction, limit: Fraction, spelled, chord, note, tie, bar_starts=None, middles=None) -> int:
     """Insert one voice's notes into a Part or Voice as chords, none past `limit` (the end of
     the last bar); returns how many notes."""
     chords: dict[Fraction, list[tuple[Fraction, int]]] = {}
@@ -553,7 +556,7 @@ def _write_voice(target, events, legato_gap: Fraction, limit: Fraction, spelled,
                 and end - on < Fraction(1, 2) <= nxt - on:
             end = on + Fraction(1, 2)
         pitches = sorted({p for _, p in chords[on]})
-        pieces = _pieces(on, end - on, bar_starts)
+        pieces = _pieces(on, end - on, bar_starts, middles)
         for k, (start, length) in enumerate(pieces):
             item = chord.Chord([spelled(p, on) for p in pitches]) if len(pitches) > 1 else note.Note(spelled(pitches[0], on))
             item.quarterLength = length
@@ -810,19 +813,67 @@ def _print_accidentals(part) -> None:
         before = {s: a for (s, _), a in state.items() if a != key_alter.get(s, 0.0)}
 
 
-def _plain_rests(target, bar_starts: list[Fraction] | None = None) -> None:
+def _middles(bar_starts: list[Fraction], bar_sigs: list[str]) -> list[Fraction]:
+    """The middle of every 4/4 bar: printed music keeps it visible (no note from off the beat,
+    no rest short of the whole bar, drawn over it) and beams eighths up to it."""
+    return [start + 2 for start, sig in zip(bar_starts, bar_sigs) if sig == "4/4"]
+
+
+def _half_bar_beams(part) -> None:
+    """Beam a 4/4 bar's eighths by the half bar (four under one beam), as printed music does,
+    not by the beat in pairs (music21's default): a half bar holding only plain eighths, the
+    notes in one run (rests only before or after it), at least three of them."""
+    from music21 import beam
+
+    # Every part is beamed here, not left to the export: music21 beams on export only a score
+    # with no beams at all, so a part beamed by hand would leave the others unbeamed.
+    try:
+        part.makeBeams(inPlace=True)
+    except Exception:  # an unusual bar music21 can't beam is left to the export, as before
+        return
+    for m in part.getElementsByClass("Measure"):
+        ts = m.timeSignature or m.getContextByClass("TimeSignature")
+        if ts is None or ts.ratioString != "4/4" or Fraction(m.duration.quarterLength) != 4:
+            continue
+        for layer in list(m.voices) or [m]:
+            items = [el for el in layer.notesAndRests if not el.duration.isGrace]
+            for half in (0, 2):
+                run = half_bar_run(items, half)
+                for k, el in enumerate(run):
+                    el.beams = beam.Beams()
+                    el.beams.append("start" if k == 0 else "stop" if k == len(run) - 1 else "continue")
+
+
+def half_bar_run(items: list, half: int) -> list:
+    """The notes of a 4/4 bar's half (from beat `half`, 0 or 2, of one voice's `items`) that
+    go under one beam: the half holds only plain eighths, the notes in one run (rests only
+    before or after it), at least three of them. [] when the half isn't like that. Shared by
+    the writer and the engraving lint's pair-beams rule."""
+    group = [el for el in items if half <= el.offset < half + 2]
+    if len(group) != 4 or any(el.duration.type != "eighth" or el.duration.dots or el.duration.tuplets for el in group):
+        return []
+    if [Fraction(el.offset).limit_denominator(48) for el in group] != [half + Fraction(k, 2) for k in range(4)]:
+        return []
+    notes = [k for k, el in enumerate(group) if not el.isRest]
+    if len(notes) < 3 or notes != list(range(notes[0], notes[-1] + 1)):
+        return []
+    return [group[k] for k in notes]
+
+
+def _plain_rests(target, bar_starts: list[Fraction] | None = None, middles: list[Fraction] | None = None) -> None:
     """Split rests no plain value can show (a gap from a 16th into a triplet beat, 23/12 of a
-    beat) into plain pieces, as notes are - else MusicXML draws them as 24:23 tuplets."""
+    beat) into plain pieces, as notes are - else MusicXML draws them as 24:23 tuplets - and
+    rests over the middle of a 4/4 bar at it (a half rest and a quarter, not a dotted half)."""
     from music21 import note
 
     for r in list(target.getElementsByClass("Rest")):
         length = Fraction(r.quarterLength).limit_denominator(96)
         start = Fraction(r.offset).limit_denominator(96)
-        if len(_pieces(start, length, bar_starts)) == 1:
+        if len(_pieces(start, length, bar_starts, middles, rest=True)) == 1:
             continue
         hidden = r.style.hideObjectOnPrint
         target.remove(r)
-        for at, piece in _pieces(start, length, bar_starts):
+        for at, piece in _pieces(start, length, bar_starts, middles, rest=True):
             fill = note.Rest(quarterLength=piece)
             fill.style.hideObjectOnPrint = hidden
             target.insert(at, fill)
@@ -839,20 +890,28 @@ def _plain(length: Fraction) -> bool:
     return not d.tuplets or (len(d.tuplets) == 1 and (d.tuplets[0].numberNotesActual, d.tuplets[0].numberNotesNormal) == (3, 2) and length < 1)
 
 
-def _pieces(start: Fraction, length: Fraction, bar_starts: list[Fraction] | None = None) -> list[tuple[Fraction, Fraction]]:
+def _pieces(start: Fraction, length: Fraction, bar_starts: list[Fraction] | None = None,
+            middles: list[Fraction] | None = None, rest: bool = False) -> list[tuple[Fraction, Fraction]]:
     """Split a duration into tied plain pieces: first at barlines (bar_starts), so cutting a
-    note into bars never leaves a remainder like 3.5 beats (a double-dotted half); then each
-    piece that isn't one plain note (a 16th tied into a triplet beat, two and a half beats) up
-    to the next beat, whole beats in the biggest plain values (a half, a dotted half...), and
-    what is left."""
+    note into bars never leaves a remainder like 3.5 beats (a double-dotted half); then at the
+    middle of a 4/4 bar (middles) for a note starting off the beat, or a rest (a whole-bar rest
+    never crosses it: it starts at the barline), so the half bar shows - a note held in a run
+    of eighths is two tied eighths across it, as printed music writes it; then each piece that
+    isn't one plain note (a 16th tied into a triplet beat, two and a half beats) up to the next
+    beat, whole beats in the biggest plain values (a half, a dotted half...), and what is left."""
     end = start + length
     cuts = [b for b in (bar_starts or []) if start < b < end]
     if cuts:
         out, pos = [], start
         for b in cuts + [end]:
-            out += _pieces(pos, b - pos)
+            out += _pieces(pos, b - pos, None, middles, rest)
             pos = b
         return out
+    middle = next((m for m in middles or [] if start < m < end), None)
+    if middle is not None and (start - middle).denominator == 1 and start == middle - 2 and end == middle + 2:
+        middle = None  # a whole bar
+    if middle is not None and (rest or (start - middle).denominator != 1):
+        return _pieces(start, middle - start, None, None, rest) + _pieces(middle, end - middle, None, None, rest)
     if _plain(length):
         return [(start, length)]
     out = []

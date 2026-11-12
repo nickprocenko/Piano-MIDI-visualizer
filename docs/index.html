@@ -45,6 +45,10 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
 .screen-back{margin-top:22px;padding:8px 24px;background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit}
 .screen-back:hover{color:var(--text);border-color:var(--text)}
 .midi-note{font-size:12px;color:var(--muted);margin-top:10px;text-align:center}
+/* Bluetooth (MIDI keyboard, LEDs): shown wherever it's picked, it's less reliable than a cable */
+.bt-warn{width:480px;max-width:100%;margin-top:12px;padding:9px 12px;border:1px solid rgba(227,179,65,.55);border-left-width:4px;border-radius:6px;background:rgba(227,179,65,.1);color:var(--text);font-size:12px;line-height:1.45}
+.bt-warn b{color:#e3b341}
+.device-item.bt small{display:block;margin-top:3px;color:var(--muted);font-size:11px}
 #drop-zone{width:480px;height:160px;border:2px dashed var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;cursor:pointer;transition:border-color .15s}
 #drop-zone:hover,#drop-zone.drag-over{border-color:var(--accent)}
 #drop-zone p{color:var(--muted);font-size:13px}
@@ -353,6 +357,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',Arial,sans-se
   <div class="screen-title">Select MIDI Input</div>
   <div class="device-list" id="device-list"></div>
   <p class="midi-note" id="midi-api-note"></p>
+  <p class="bt-warn" id="midi-bt-warn" role="note" hidden><b>⚠ Bluetooth MIDI is less reliable than a USB cable.</b> Notes can light up late or in bursts (more when Wi-Fi, wireless headphones or other Bluetooth devices are busy), and the connection can drop mid-song; it reconnects by itself when it can. Keep the keyboard close, and use a cable when timing matters.</p>
   <button class="screen-back" id="btn-device-back">← Back</button>
 </div>
 
@@ -859,6 +864,38 @@ const QWERTY={
   Digit9:73,KeyO:74,Digit0:75,KeyP:76,BracketLeft:77,
 };
 
+// Bluetooth MIDI (the BLE-MIDI spec, over Web Bluetooth): a keyboard with no cable, which
+// Web MIDI on Windows doesn't list. Less reliable than a cable; the device screen says so.
+const BLE_MIDI_SVC='03b80e5a-ede8-4b33-a751-6ce34ec4c700',BLE_MIDI_CHAR='7772e5db-3868-4112-a1a9-f2669d106bf3';
+const BLE_MIDI_LEN={0x80:2,0x90:2,0xA0:2,0xB0:2,0xC0:1,0xD0:1,0xE0:2};
+// The channel messages in one BLE-MIDI packet: a header byte, then each message led by a
+// timestamp byte (both with bit 7 set) unless it continues the last one by running status.
+// SysEx, system common and real-time messages are skipped. Mirrors midi_coach/ble_midi.py.
+function parseBleMidi(d){
+  const out=[];if(d.length<2||!(d[0]&0x80))return out;
+  let st=null,sysex=false,i=1;
+  while(i<d.length){
+    let b=d[i];
+    if(sysex){if(b&0x80&&i+1<d.length&&d[i+1]&0x80){sysex=d[i+1]!==0xF7;i+=2;}else i++;continue;}
+    if(b&0x80){
+      if(++i>=d.length)break;
+      b=d[i];
+      if(b&0x80){
+        i++;
+        if(b===0xF0){sysex=true;st=null;continue;}
+        if(b>=0xF8)continue;
+        if(b>=0xF0){i+=({0xF1:1,0xF2:2,0xF3:1})[b]||0;st=null;continue;}
+        st=b;
+      }
+    }
+    if(st===null){i++;continue;}
+    const len=BLE_MIDI_LEN[st&0xF0],body=d.slice(i,i+len);
+    if(body.length<len||body.some(x=>x&0x80))break;
+    out.push(Uint8Array.of(st,...body));i+=len;
+  }
+  return out;
+}
+
 class MidiHandler{
   constructor(){
     this.activeNotes=new Set();
@@ -877,6 +914,7 @@ class MidiHandler{
   }
   async init(portId){
     this._stopQwerty();
+    this._bleClose();
     if(portId==='keyboard'||!navigator.requestMIDIAccess){
       this._startQwerty(); return;
     }
@@ -962,7 +1000,60 @@ class MidiHandler{
     try{this._access=await navigator.requestMIDIAccess({sysex:false});return true;}
     catch(e){return false;}
   }
-  close(){this._stopQwerty();if(this._port)this._port.onmidimessage=null;this.activeNotes.clear();this.noteChannel.clear();}
+  close(){this._stopQwerty();this._bleClose();if(this._port)this._port.onmidimessage=null;this.activeNotes.clear();this.noteChannel.clear();}
+  // Bluetooth MIDI: pick a keyboard in the browser's chooser (needs a click), then its notes
+  // arrive as notifications. A dropped link lets go of every key and is retried for a while;
+  // onBluetooth(state) hears 'lost', 'back' and 'gone'.
+  async connectBluetooth(){
+    if(!navigator.bluetooth)throw new Error('Bluetooth MIDI needs Chrome or Edge.');
+    const dev=await navigator.bluetooth.requestDevice({filters:[{services:[BLE_MIDI_SVC]}]});
+    this._stopQwerty();this._bleClose();
+    if(this._port){this._port.onmidimessage=null;this._port=null;}
+    if(this._access)this._access.onstatechange=null;
+    this._bleDev=dev;
+    dev.addEventListener('gattserverdisconnected',this._bleDrop=()=>this._bleLost(dev));
+    try{await this._bleOpen();}
+    catch(e){this._bleClose();throw e;}
+    this.portName=dev.name||'Bluetooth MIDI';
+  }
+  async _bleOpen(){
+    const srv=await this._bleDev.gatt.connect();
+    const ch=await(await srv.getPrimaryService(BLE_MIDI_SVC)).getCharacteristic(BLE_MIDI_CHAR);
+    if(this._bleChar&&this._bleNote)this._bleChar.removeEventListener('characteristicvaluechanged',this._bleNote);
+    ch.addEventListener('characteristicvaluechanged',this._bleNote=e=>{
+      const v=e.target.value;
+      for(const m of parseBleMidi(new Uint8Array(v.buffer,v.byteOffset,v.byteLength)))this._onMsg(m);
+    });
+    await ch.startNotifications();
+    this._bleChar=ch;this.connected=true;
+  }
+  _letGo(){  // a dropped link can't send the note-offs: nothing may stay lit or sounding
+    this._sustain=false;this.sustainedNotes.clear();
+    this._app?._liveMidi(Uint8Array.of(0xB0,64,0));  // not through _onMsg: a CC being learned would take it
+    for(const n of [...this.activeNotes])this._onMsg(Uint8Array.of(0x80,n,0));
+  }
+  async _bleLost(dev){
+    if(this._bleDev!==dev)return;  // we let go of it
+    this.connected=false;this._letGo();
+    this.onBluetooth?.('lost');
+    for(let i=0;i<8;i++){
+      await new Promise(r=>setTimeout(r,Math.min(1000*(i+1),5000)));
+      if(this._bleDev!==dev)return;
+      try{await this._bleOpen();this.onBluetooth?.('back');return;}catch(e){}
+    }
+    if(this._bleDev===dev){this._bleClose();this.onBluetooth?.('gone');}
+  }
+  _bleClose(){
+    const dev=this._bleDev;this._bleDev=null;
+    if(this._bleChar&&this._bleNote)this._bleChar.removeEventListener('characteristicvaluechanged',this._bleNote);
+    this._bleChar=null;this._bleNote=null;
+    if(dev){
+      dev.removeEventListener('gattserverdisconnected',this._bleDrop);
+      try{dev.gatt.disconnect();}catch(e){}
+      this._letGo();this.connected=false;
+    }
+  }
+  get bluetooth(){return !!this._bleDev;}
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1901,13 +1992,47 @@ class LedOutput{
     if(location.protocol!=='https:'&&location.hostname!=='localhost'&&location.hostname!=='127.0.0.1'){
       this._lastError='Requires HTTPS or localhost (current: '+location.protocol+'//'+location.hostname+')';return false;}
     if(!navigator.bluetooth){this._lastError='Web Bluetooth not available — use Chrome or Edge.';return false;}
+    this.disconnect();
     try{
-      const dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:[svcUuid.toLowerCase()]});
-      const srv=await dev.gatt.connect();
-      const svc=await srv.getPrimaryService(svcUuid.toLowerCase());
-      this._char=await svc.getCharacteristic(charUuid.toLowerCase());
+      const svc=svcUuid.toLowerCase();
+      // Only LED controllers in the chooser: the bridge advertises its service (and its name, in the scan response)
+      const dev=await navigator.bluetooth.requestDevice({filters:[{services:[svc]},{namePrefix:'Piano-LED'}],optionalServices:[svc]});
+      this._ble=dev; this._bleIds=[svc,charUuid.toLowerCase()];
+      dev.addEventListener('gattserverdisconnected',this._bleDrop=()=>this._bleLost(dev));
+      await this._bleOpen();
       this.connected=true; this._lastError=''; return true;
-    }catch(e){this._lastError=e.message||String(e);return false;}
+    }catch(e){
+      this._dropBle();
+      this._lastError=e.name==='NotFoundError'?'No LED controller picked. Not in the list? Its firmware needs Bluetooth turned on (ENABLE_BLE), and it must not be connected to another device.'
+        :(e.message||String(e));
+      return false;
+    }
+  }
+  async _bleOpen(){
+    const srv=await this._ble.gatt.connect();
+    this._char=await(await srv.getPrimaryService(this._bleIds[0])).getCharacteristic(this._bleIds[1]);
+  }
+  // A dropped Bluetooth link: frames stop (nothing queues up to flash late), and it is retried
+  // for a while. onStatus(state) hears 'lost', 'back' and 'gone'.
+  async _bleLost(dev){
+    if(this._ble!==dev)return;  // we let go of it
+    this._char=null; this.connected=false; this._pendingBle=null;
+    this._lastError='Bluetooth link lost. Reconnecting…';
+    this.onStatus?.('lost');
+    for(let i=0;i<8;i++){
+      await new Promise(r=>setTimeout(r,Math.min(1000*(i+1),5000)));
+      if(this._ble!==dev)return;
+      try{await this._bleOpen();this.connected=true;this._lastError='';this.onStatus?.('back');return;}catch(e){}
+    }
+    if(this._ble===dev){
+      this._dropBle();
+      this._lastError='Bluetooth link lost. Check the controller is on and close by, then Connect again.';
+      this.onStatus?.('gone');
+    }
+  }
+  _dropBle(){
+    const dev=this._ble; this._ble=null; this._char=null;
+    if(dev){dev.removeEventListener('gattserverdisconnected',this._bleDrop);try{dev.gatt.disconnect();}catch(e){}}
   }
   disconnect(){
     this.stopSweep();
@@ -1915,7 +2040,7 @@ class LedOutput{
     if(this._reader){try{this._reader.cancel();}catch(e){} this._reader=null;}
     if(this._writer){try{this._writer.releaseLock();}catch(e){} this._writer=null;}
     if(this._ser){try{this._ser.close();}catch(e){} this._ser=null;}
-    this._ble=null;this._char=null;this.connected=false;
+    this._dropBle();this.connected=false;
     this._serSending=false;this._bleSending=false;this._pendingBle=null;
   }
   reattack(notes,now){for(const n of notes)this._gapUntil[n]=now+50;}
@@ -2641,6 +2766,7 @@ ${krow('Brightness %','r-kb',15,150,5,'brightness')}
 <option value="serial"${lo.transport==='serial'?' selected':''}>Web Serial (USB)</option>
 <option value="bluetooth"${lo.transport==='bluetooth'?' selected':''}>Web Bluetooth (BLE)</option>
 </select></div>
+<p class="bt-warn" id="led-bt-warn" role="note" style="width:auto;margin:0 0 10px"${lo.transport==='bluetooth'?'':' hidden'}><b>⚠ Bluetooth LEDs are less reliable than USB.</b> The lights can lag behind your playing or skip frames (more with many LEDs, a high FPS limit, or busy Wi-Fi), and the link can drop mid-song; it reconnects by itself when it can. The controller's Bluetooth radio can also make the strip flicker. Use Web Serial (USB) for the steadiest light.</p>
 <div class="row"><label>LED Count</label><input type="number" id="led-count" value="${lo.led_count}" min="1" max="512" style="width:70px;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
 <div class="row"><label>FPS Limit</label><input type="number" id="led-fps" value="${lo.fps_limit||30}" min="1" max="60" style="width:70px;background:var(--btn-bg);border:1px solid var(--border);color:var(--text);padding:4px;border-radius:4px"></div>
 <div class="row"><label>Sustain Pedal</label><div class="toggle-btn${lo.led_sustain?' on':''}" id="btn-led-sustain">LED Sustain</div></div>
@@ -3781,9 +3907,13 @@ function wireSettings(root, app){
     updateLedStatus(root,app);
     if(Config.lo.transport==='serial'&&app.led.connected)attachConsole(); else detachConsole();
     app.led._onError=(msg)=>{const diag=root.querySelector('#led-diag');if(diag)diag.textContent=msg;};
+    app.led.onStatus=state=>{  // a Bluetooth drop: the panel is usually closed while playing, so a toast too
+      updateLedStatus(root,app);
+      app._showToast(state==='lost'?'LEDs: Bluetooth link lost. Reconnecting…':state==='back'?'LEDs: reconnected':'LEDs: Bluetooth link lost. Connect again in Settings ▸ LED Output.');
+    };
   });
   const btnDisc=root.querySelector('#btn-led-disconnect');
-  if(btnDisc) btnDisc.addEventListener('click',()=>{app.led.disconnect();app.led._onError=null;updateLedStatus(root,app);detachConsole();});
+  if(btnDisc) btnDisc.addEventListener('click',()=>{app.led.disconnect();app.led._onError=null;app.led.onStatus=null;updateLedStatus(root,app);detachConsole();});
   const btnSweep=root.querySelector('#btn-led-sweep');
   if(btnSweep) btnSweep.addEventListener('click',()=>{
     if(app.led._sweepTimer){app.led.stopSweep(Config.lo);btnSweep.textContent='Sweep LEDs';}
@@ -4095,8 +4225,9 @@ function updateLedStatus(root,app){
   const dot=root.querySelector('#led-status-dot');
   const txt=root.querySelector('#led-status-txt');
   const diag=root.querySelector('#led-diag');
+  root.querySelectorAll('#led-bt-warn').forEach(w=>{w.hidden=Config.lo.transport!=='bluetooth';});  // the panel and the screen each have one
   if(dot)dot.classList.toggle('connected',app.led.connected);
-  if(txt)txt.textContent=app.led.connected?'Connected':'Disconnected';
+  if(txt)txt.textContent=app.led.connected?'Connected':app.led._ble?'Reconnecting…':'Disconnected';
   if(diag){
     if(app.led.connected){diag.textContent='';}
     else{
@@ -6587,6 +6718,32 @@ class App{
       };
       list.appendChild(item);
     });
+    // Bluetooth MIDI: the browser's own chooser lists the keyboards nearby.
+    document.getElementById('midi-bt-warn').hidden=!navigator.bluetooth;
+    if(!navigator.bluetooth)return;
+    const bt=document.createElement('div');
+    bt.className='device-item bt'+(this.midi.bluetooth?' selected':'');
+    bt.innerHTML=this.midi.bluetooth?`Bluetooth: ${escHtml(this.midi.portName)}<small>Connected over Bluetooth. Click to pick another.</small>`
+      :'Bluetooth MIDI keyboard…<small>Less reliable than a cable: see below</small>';
+    bt.onclick=async()=>{
+      try{await this.midi.connectBluetooth();}
+      catch(e){
+        if(e.name!=='NotFoundError')this._showToast('Bluetooth: '+(e.message||e));  // NotFoundError: the chooser was closed
+        return;
+      }
+      this._selectedPortId='bluetooth';
+      this.midi.onBluetooth=state=>{
+        const name=this.midi.portName;
+        this._showToast(state==='lost'?`Bluetooth: lost ${name}. Reconnecting…`
+          :state==='back'?`Bluetooth: ${name} is back`
+          :`Bluetooth: couldn't reach ${name}. Check it's on and close by, or use a USB cable.`);
+        this._hudDevice.textContent=state==='lost'?name+' (reconnecting…)':state==='gone'?name+' (disconnected)':name;
+      };
+      this.prevNotes.clear();this._activeNotes.clear();
+      this._hudDevice.textContent=this.midi.portName;
+      this.showVisualizer();
+    };
+    list.appendChild(bt);
   }
 
   _refreshRecent(){

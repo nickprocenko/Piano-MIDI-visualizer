@@ -5,3 +5,4 @@ music21>=9.0.0
 kokoro-onnx>=0.6  # natural coach voice; model download: python -m midi_coach.tts
 anthropic>=1.0  # optional voice chat with the Maestro (needs an API key)
 faster-whisper>=1.2  # speech recognition for the voice chat, runs locally
+bleak>=0.22  # Bluetooth MIDI keyboards (optional: without it they aren't listed)

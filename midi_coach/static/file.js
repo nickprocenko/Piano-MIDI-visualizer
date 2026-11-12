@@ -1,5 +1,5 @@
 // File menu beside Home: open a file from the computer, save a copy of the sheet, download it,
-// choose the song folders.
+// choose the song folders, open the YouTube play-along.
 // The song folders dialog lives here too; Preferences (prefs.js) opens it. Loaded after profiles.js.
 (function () {
   const btn = $('file-btn'), list = $('file-menu');
@@ -49,6 +49,7 @@
       a.click();
     },
     folders: () => openFolders(),
+    youtube: () => navigate('youtube'),
     profile: () => $('profile-chip').click(),
   };
 

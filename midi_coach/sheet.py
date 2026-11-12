@@ -22,7 +22,7 @@ from .notes import MIDI_SUFFIXES, OTHER_ROLES, SPLIT_VERSION, Score, effective_r
 from .regrid import snap
 from .transcribe import grand_staff
 
-VERSION = 9  # bump when the output changes, so cached sheets are rewritten
+VERSION = 10  # bump when the output changes, so cached sheets are rewritten
 MIN_TEMPO_CHANGE = 2.0  # BPM: smaller drifts don't get a new tempo mark
 
 

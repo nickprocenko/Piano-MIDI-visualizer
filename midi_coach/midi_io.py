@@ -13,6 +13,7 @@ import time
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 
+from . import ble_midi
 from .notes import Note
 
 PORT_HELP = (
@@ -48,7 +49,37 @@ def _open_client(kind: str):
 
 
 def list_ports() -> dict:
-    return {"inputs": _open_client("input").get_ports(), "outputs": _open_client("output").get_ports()}
+    """Every MIDI port, then the Bluetooth keyboards found so far ("Bluetooth: <name>", both
+    an input and an output: see ble_midi)."""
+    bluetooth = ble_midi.ports()
+    try:
+        inputs, outputs = _open_client("input").get_ports(), _open_client("output").get_ports()
+    except PortError:
+        if not bluetooth:
+            raise
+        inputs, outputs = [], []
+    return {"inputs": inputs + bluetooth, "outputs": outputs + bluetooth}
+
+
+def _bluetooth(kind: str, port: str):
+    try:
+        return ble_midi.Input(port) if kind == "input" else ble_midi.Output(port)
+    except ble_midi.BluetoothError as exc:
+        raise PortError(str(exc)) from exc
+
+
+def _open_output(port: str | None):
+    """(an open MidiOut-like client, its name): a Bluetooth keyboard or a MIDI port."""
+    if ble_midi.is_port(port):
+        return _bluetooth("output", port), port
+    out = _open_client("output")
+    names = out.get_ports()
+    idx = resolve_port(names, port, "MIDI_COACH_OUTPUT", "output")
+    try:
+        out.open_port(idx)
+    except Exception as exc:
+        raise PortError(f"Could not open output '{names[idx]}' ({exc}).") from exc
+    return out, names[idx]
 
 
 def resolve_port(names: list[str], query: str | None, env_var: str, kind: str) -> int:
@@ -154,6 +185,8 @@ class Recorder:
         midi_in = None
         if port == MIC_PORT:  # notes arrive through feed()
             name = MIC_PORT
+        elif ble_midi.is_port(port):  # notes arrive on the Bluetooth thread, each with its time
+            midi_in, name = _bluetooth("input", port), port
         else:
             midi_in = _open_client("input")
             names = midi_in.get_ports()
@@ -377,19 +410,13 @@ class Player:
     def play(self, segments: list[tuple[str, list[tuple[float, list[int]]]]], port: str | None, gap_sec: float = 1.5) -> str:
         """Play labelled event lists one after another on a background thread."""
         self.stop()
-        out = _open_client("output")
-        names = out.get_ports()
-        idx = resolve_port(names, port, "MIDI_COACH_OUTPUT", "output")
-        try:
-            out.open_port(idx)
-        except Exception as exc:
-            raise PortError(f"Could not open output '{names[idx]}' ({exc}).") from exc
+        out, name = _open_output(port)
         self._stop.clear()
         total = sum(seg[-1][0] for _, seg in segments if seg) + gap_sec * (len(segments) - 1)
-        self._status = {"state": "playing", "port": names[idx], "segments": [label for label, _ in segments], "total_sec": round(total, 1)}
+        self._status = {"state": "playing", "port": name, "segments": [label for label, _ in segments], "total_sec": round(total, 1)}
         self._thread = threading.Thread(target=self._run, args=(out, segments, gap_sec), daemon=True)
         self._thread.start()
-        return names[idx]
+        return name
 
     def _run(self, out, segments, gap_sec) -> None:
         sounding: set[tuple[int, int]] = set()
@@ -443,15 +470,7 @@ class Accompanist:
     is heard from the next note."""
 
     def __init__(self, port: str | None = None, pedal: bool = False) -> None:
-        out = _open_client("output")
-        names = out.get_ports()
-        idx = resolve_port(names, port, "MIDI_COACH_OUTPUT", "output")
-        try:
-            out.open_port(idx)
-        except Exception as exc:
-            raise PortError(f"Could not open output '{names[idx]}' ({exc}).") from exc
-        self.port = names[idx]
-        self._out = out
+        self._out, self.port = _open_output(port)
         self._pedal = pedal
         self._queue: list[tuple[float, int, list[int], str | None]] = []  # (perf_counter time, order, message, lane)
         self._order = 0

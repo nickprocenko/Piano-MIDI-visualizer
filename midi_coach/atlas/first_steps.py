@@ -830,7 +830,7 @@ class Writer:
         if self.lint:
             found = engraving.lint(path.read_text(encoding="utf-8"))["findings"]
             if found:
-                self.report["problems"].append(f"{folder}/{name}: " + "; ".join(sorted({f['rule'] for f in found})))
+                self.report["problems"].append(f"{folder}/{name}: " + "; ".join(sorted({f[0] for f in found})))
         self.report["scores"] += 1
         return f"{folder}/{name}.musicxml"
 

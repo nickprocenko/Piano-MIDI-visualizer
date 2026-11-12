@@ -179,3 +179,34 @@ def test_the_page_turns_spoken_fingering_on_and_off():
     assert hub.speak_fingers is False
     assert hub.commands["speak_fingers"]({"on": True}) == {"ok": True, "on": True}
     assert hub.speak_fingers is True
+
+
+def _roll_up():
+    """A right hand: a C chord, a 24-note glissando from C4 up two octaves in 0.7 s, a G chord."""
+    before = [Note(p, 0.0, 0.8, 80, part=0, beat=0.0) for p in (60, 64, 67)]
+    roll = [Note(60 + i, 1.0 + i * 0.03, 1.4 + i * 0.03, 80, part=0, beat=2.0 + i * 0.06) for i in range(24)]
+    after = [Note(p, 2.0, 2.8, 80, part=0, beat=4.0) for p in (67, 71, 74)]
+    return before + roll + after
+
+
+def test_a_glissando_gets_no_fingers_and_the_chords_around_it_do():
+    seq = [(n.start, n.pitch, n.end) for n in _roll_up()]
+    runs = fingering.find_sweeps(seq)
+    assert [len(r) for r in runs] == [24]
+    fingers = fingering.finger_hand(seq)
+    assert all(fingers[i] is None for i in runs[0])
+    assert all(f is not None for i, f in enumerate(fingers) if i not in runs[0])
+    # fast fingered runs and slow scales are not glissandos
+    assert fingering.find_sweeps(melody(C_MAJOR, step=0.1)) == []
+    assert fingering.find_sweeps(melody(list(range(40, 70)), step=0.1)) == []
+
+
+def test_falling_notes_mark_a_glissando_for_the_hands(tmp_path):
+    from midi_coach.notes import load_score
+
+    path = tmp_path / "roll.mid"
+    _score(_roll_up()).save(path)
+    roll = display.roll_notes(load_score(str(path)))
+    swept = [r for r in roll if len(r) == 6]
+    assert len(swept) == 24 and {r[4] for r in swept} == {0} and {r[5] for r in swept} == {1}
+    assert all(len(r) == 5 and r[4] for r in roll if len(r) != 6 and r[3] == "right")

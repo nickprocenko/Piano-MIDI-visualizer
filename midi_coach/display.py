@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote
 
 from . import transcript
-from .notes import MUSICXML_SUFFIXES, Score
+from .notes import MUSICXML_SUFFIXES, Score, read_musicxml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 STATIC_FILES = {
@@ -117,7 +117,8 @@ def roll_notes(score: Score) -> list[list]:
     with the role the Playing menu shows and hides (right, left, pedals, vocals, a named part,
     or 'track:<index>' for a backing track: the page draws those only when shown). Drums are
     left out, as on the sheet. A hand's note has a fifth item, its finger (fingering.py: 1 =
-    thumb ... 5), for the finger numbers and the animated hands."""
+    thumb ... 5), for the finger numbers and the animated hands. A glissando's notes (an organ's
+    palm roll-up) have finger 0 and a sixth item, the glissando's number: the hand slides."""
     from . import fingering
     from .analysis import side_resolver
     from .notes import HAND_ROLES, effective_roles, playable_parts, select_notes
@@ -132,6 +133,7 @@ def roll_notes(score: Score) -> list[list]:
     roles = effective_roles(score) or {p.index: "both" for p in playable_parts(score)}
     side = side_resolver(score)
     fingers = fingering.score_fingers(score)
+    sweeps = fingering.score_sweeps(score)
     out = []
     for n in score.notes:
         role = roles.get(n.part)
@@ -141,9 +143,13 @@ def roll_notes(score: Score) -> list[list]:
             role = f"track:{n.part}"
         elif role in HAND_ROLES:
             role = side(n)
-            finger = fingers.get((round(n.start, 4), n.pitch))
+            key = (round(n.start, 4), n.pitch)
+            finger, sweep = fingers.get(key), sweeps.get(key)
             if finger and finger[0] == role:
                 out.append([round(n.beat, 3), length(n), n.pitch, role, finger[1]])
+                continue
+            if sweep and sweep[0] == role:  # a glissando's note: no finger (0), the glissando's number
+                out.append([round(n.beat, 3), length(n), n.pitch, role, 0, sweep[1]])
                 continue
         out.append([round(n.beat, 3), length(n), n.pitch, role])
     return out
@@ -157,10 +163,11 @@ def is_hand(role: str | None) -> bool:
 
 
 def score_to_musicxml(path: str) -> str:
-    """MusicXML text for OSMD: raw file for .xml/.musicxml, music21 export otherwise."""
+    """MusicXML text for OSMD: the file as written for .xml/.musicxml/.mxl (a round trip through
+    music21 loses the engraving: titles, slur placement, layout), a music21 export for MIDI."""
     p = pathlib.Path(path)
-    if p.suffix.lower() in MUSICXML_SUFFIXES - {".mxl"}:
-        return p.read_text(encoding="utf-8", errors="replace")
+    if p.suffix.lower() in MUSICXML_SUFFIXES:
+        return read_musicxml(p)
     from music21 import converter
     from music21.musicxml.m21ToXml import GeneralObjectExporter
 

@@ -1,0 +1,3 @@
+-r ../midi_coach/requirements.txt
+av>=12        # decodes the stations (MP3, AAC, HLS); also comes with faster-whisper
+numpy>=1.24
