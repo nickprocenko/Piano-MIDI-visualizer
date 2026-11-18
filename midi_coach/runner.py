@@ -5,7 +5,7 @@ workers on them whenever a worker slot is free, at any hour, with no daily cap.
   with bugs.take_batch, so two workers never change the same file.
 - Untriaged items are triaged first, by one worker, read-only.
 - Each worker builds in its own git worktree (fixgit.worktree): the user's folder is never touched,
-  and its fixes wait on a side branch until the user's ✅ on the coach page.
+  and its fixes wait on a side branch until the user's ✅ in Agent Quest's Workshop.
 - A worker only gets what fixing needs: read anything, edit files in its own worktree, the
   project's Python, and read-only git. Anything else is refused.
 - An item a worker couldn't finish is set aside as stuck (bugs.stuck), never retried by itself.
@@ -125,8 +125,8 @@ For each item, following CLAUDE.md (bug reports, triage and batches, the sheet m
 If building it would mean guessing what Nick wants (two fair readings of the report, or a choice
 that changes how he'd practise), throw away your edits for it and ask him instead:
 `{py} -m midi_coach.bugs ask <id> --question "<one question, in his terms>" --choice "<answer>" --choice "<answer>" --by {name}`
-(two to four choices, each one he could just pick). He answers on the coach page or to the
-Maestro, and the item comes back to a worker with his answer. Then go on to the next.
+(two to four choices, each one he could just pick). He answers in Agent Quest's Workshop,
+and the item comes back to a worker with his answer. Then go on to the next.
 If you can't finish an item for any other reason (you can't find or reproduce it, a command was
 refused, the tests won't pass), throw away your edits for it, run
 `{py} -m midi_coach.bugs stuck <id> "<why, one sentence>" --by {name}` and go on to the next.

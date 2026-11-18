@@ -675,35 +675,27 @@ type what's wrong, press Enter. The box closes before the screenshot is taken, a
 is saved exactly like a spoken one (screenshots from the seconds before, the practice on
 screen, the page's errors). F9 again or Escape closes it without saving.
 
-**Trying the fixes.** When something you reported has been fixed, a **👀 N fixes to try** button
-appears in the coach page's top bar, next to Ask Maestro, on every page (Home, Session, the
-Roadmap, YouTube). It lists each fix with your screenshot, what you said and
-where you were (page, song, bar, mode), and a line on what changed. Try it, then press
-**✅ Works** (it moves to `fixed/`, or `requests/done/`) or **↩️ Still wrong** and say what's
-still off (it goes back to `open/` with your words, to be fixed again). Each fix is its own git
-commit on this PC (never pushed by the coach). A fix made by a background worker waits on its own
-side branch, so it has a **🧪 Try it** button: that adds it to your code so you can see it (press
-Restart or Reload when the bar at the top asks), then Works keeps it and Still wrong takes it out
-again. Pressing Works without trying adds it too, and Still wrong without trying just drops it.
-Neither Try it nor Works adds a fix while you have unsaved changes in a file it changes: it says
-which, and you press it again once they're committed or undone. A fix made in your folder (or
-tried) is undone by Still wrong, which says so if it can't be undone cleanly. **↗ Go there** opens
-the piece you reported it on and sets the page up as it was: the view, the mode, the bars, the
-tempo, the loop and the cursor's bar (this becomes that piece's saved practice settings, as if
-you'd set them). It's off while a run is going. Opening
-`http://127.0.0.1:8765/#checks` opens the list straight away.
-
-**Test copies (being built).** A fix can also be tried in a *test copy* of the coach, so it never
-touches your own code until you say it works: `python -m midi_coach.preview open <report id>`
-starts one at `http://127.0.0.1:8766/` (about 10 seconds), running that fix's code with a copy of
-your songs, takes, lessons, Roadmap progress and settings (the voice and model folders are shared,
-since nothing writes to them). An orange frame and a **TEST COPY** label say what it's testing,
-and it opens on the piece and bar you reported from. Nothing you do there changes your real data.
-Anything you report from it (F9, or to the Maestro) joins your real list when it closes, marked as
-found in the test copy. **Close** on its label, `python -m midi_coach.preview close`, or 30 minutes
-with no page open ends it and deletes it. One test copy at a time. It can't take the keyboard while
-the Music Hub is in the middle of a run. Agent Quest's Workshop will drive this, and then checking
-fixes moves there from the 👀 button.
+**Trying the fixes: Agent Quest's Workshop.** Fixes are checked in Agent Quest, never in the
+Music Hub. Its **🔨 Workshop** button (on the realm and settlement bar, with *"N for you"* when
+something waits) opens a board: ❓ needs your answer, queued, being built, 🧪 ready to try,
+🟠 trying now, and what was done this week. Each fix shows your screenshot, what you said and where,
+and what changed. **🧪 Open test copy** starts a *test copy* of the Music Hub in a new tab: a second
+coach at `http://127.0.0.1:8766/` running that fix, with a copy of your songs, takes, lessons,
+Roadmap progress and settings (the voice and model folders are shared, since nothing writes to
+them). An orange frame and a **TEST COPY** label say what it's testing, and it opens on the piece
+and bar you reported from. Nothing you do there changes your real data or your code. Then press
+**✅ Works**, the only thing that puts a fix into your code (one git commit on this PC, never
+pushed; the Music Hub restarts with it when it has new Python code and isn't mid-run), or
+**↩️ Still wrong** with what's still off (the fix is dropped, so nothing needs undoing, and the item
+goes back to be fixed again with your words). If you have unsaved changes in a file the fix also
+changes, Works says which and offers **Save my changes first, then add the fix**: your edits are
+committed on their own ("Work in progress"), then the fix goes on top. If both changed the same
+lines, nothing is added and it says so. Anything you report from a test copy (F9, or to the
+Maestro) joins your real list when it closes, marked as found in the test copy. **Close** on its
+label, **Close it** in the Workshop, or 30 minutes with no page open ends it and deletes it. One
+test copy at a time, and it can't take the keyboard while the Music Hub is in the middle of a run.
+Fixes built before the test copy existed show no orange label, but are just as safe to open.
+From a terminal: `python -m midi_coach.preview open <report id>` / `close`.
 
 **The fix board.** `python -m midi_coach.fixes board` lists every item in the Workshop's columns
 (❓ question, queued, building, ready to try, trying, done in the last week). `open <id>` /
@@ -732,7 +724,7 @@ something queued, it starts up to two Claude Code workers (on your claude.ai acc
 day. One triages new reports first; then each takes a batch (one area of the app), never two that
 change the same file. Each works in its own copy of the code in `~/MidiCoach/workers/`, so your
 folder isn't touched, and may only read, edit its own copy, run the project's Python and use
-read-only git: no pushing, no other programs. Its fixes appear under 👀 like any other. One it
+read-only git: no pushing, no other programs. Its fixes appear in the Workshop like any other. One it
 can't finish is set aside as 🧱 Stuck in the backlog (`python -m midi_coach.bugs unstick <id>` puts
 it back). When your usage runs out it gives the work back and tries again 30 minutes later.
 `--install` starts it at every Windows login (`--uninstall` stops that), `--once` fills the free
@@ -740,11 +732,8 @@ slots once and waits for those workers. What it did: `~/MidiCoach/runner/<date>.
 
 **Questions for you (❓).** When building a report would mean guessing what you meant, it isn't
 built: it waits under ❓ Needs you with one question and two to four answers. Triage asks these,
-and so does a worker that finds two fair ways to read a report halfway through. The 👀 button then
-also says *"1 question"*. Its box lists the questions above the fixes: press an answer, or write
-your own and press **Use this**. Or ask the Maestro *"any questions?"*. It reads the first one out,
-with its answers numbered. Say *"answer two"* (or *"the first one"*, *"option 3"*), *"my answer
-is …"* in your own words, or *"skip"*, and it goes on to the next. That's free, with no API call.
+and so does a worker that finds two fair ways to read a report halfway through. They're answered
+in Agent Quest's Workshop, in the ❓ column: press an answer, or write your own.
 An answered item goes back in the queue, in its area's batch, and the worker building it reads
 your answer. From a terminal: `python -m midi_coach.bugs answer <id> 2` (or your own words).
 

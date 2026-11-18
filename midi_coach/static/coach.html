@@ -909,10 +909,7 @@
   #pick-piece { padding: 5px 11px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
   #pick-piece:hover { border-color: var(--accent); color: var(--text); }
   body:not([data-view=practice]) #pick-piece { display: none; }
-  #dash #checks-btn, #dash #update-bar { margin: 4px 0 4px 10px; }
-  #checks-btn { padding: 5px 11px; border: 1px solid var(--accent); border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
-  #checks-btn:hover { background: rgba(255,255,255,.06); }
-  #checks-btn[hidden] { display: none; }
+  #dash #update-bar { margin: 4px 0 4px 10px; }
   #update-bar { display: flex; align-items: center; gap: 8px; padding: 3px 4px 3px 10px; border: 1px solid var(--accent); border-radius: 5px; font-size: 12.5px; white-space: nowrap; }
   #update-bar[hidden] { display: none; }
   #update-bar button { padding: 3px 10px; border: 0; border-radius: 4px; background: var(--accent); color: #031414; font: inherit; font-weight: 600; cursor: pointer; }
@@ -926,7 +923,6 @@
   #preview-tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #preview-tag button { padding: 3px 10px; border: 0; border-radius: 4px; background: #1a0d00; color: #fff; font: inherit; font-weight: 600; cursor: pointer; flex: none; }
   #preview-frame[hidden], #preview-tag[hidden] { display: none; }
-  #checks-dlg { width: min(760px, calc(100vw - 32px)); }
   #report-dlg { width: min(480px, calc(100vw - 32px)); }
   #report-dlg textarea { min-height: 64px; padding: 6px 8px; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: var(--bg); color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; resize: vertical; }
   .report-kind { display: flex; gap: 6px; }
@@ -941,28 +937,6 @@
   #song-toast button { flex: none; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 5px; background: var(--accent); color: var(--panel); font: inherit; font-weight: 600; cursor: pointer; }
   #song-toast button.song-toast-close { padding: 2px 6px; border-color: transparent; background: transparent; color: var(--text); font-weight: normal; opacity: .7; }
   @keyframes song-toast-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
-  #checks-list { display: flex; flex-direction: column; gap: 12px; max-height: min(70vh, 640px); overflow-y: auto; }
-  .chk-item { display: grid; grid-template-columns: 220px 1fr; gap: 12px; padding: 10px; border: 1px solid rgba(255,255,255,.1); border-radius: 6px; }
-  .chk-item img { width: 100%; border-radius: 4px; cursor: zoom-in; }
-  .chk-item img.big { position: fixed; inset: 4vh 4vw; width: 92vw; height: 92vh; object-fit: contain; background: rgba(0,0,0,.85); z-index: 10; cursor: zoom-out; }
-  .chk-item .noshot { color: var(--muted); font-size: 12px; }
-  .chk-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 13px; }
-  .chk-said { font-weight: 600; }
-  .chk-where, .chk-id { color: var(--muted); font-size: 12px; }
-  .chk-fix { padding: 6px 8px; border-left: 3px solid var(--accent); background: rgba(255,255,255,.04); }
-  .chk-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
-  .chk-btns button { padding: 5px 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
-  .chk-btns button.ok { border-color: var(--hit); }
-  .chk-btns button.no { border-color: var(--miss); }
-  .chk-btns button.try { border-color: var(--accent); }
-  .chk-btns button[hidden], .chk-state[hidden] { display: none; }
-  .chk-state { color: var(--muted); font-size: 12px; }
-  .chk-note { display: flex; gap: 6px; }
-  .chk-note[hidden] { display: none; }
-  .chk-note input { flex: 1; min-width: 0; }
-  @media (max-width: 560px) { .chk-item { grid-template-columns: 1fr; } }
-  #asks-part[hidden] { display: none; }
-  #asks-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
   .ask-item { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--accent); border-radius: 6px; font-size: 13px; }
   .ask-q { font-weight: 600; font-size: 14px; }
   .ask-said { color: var(--muted); font-size: 12px; }
@@ -1145,7 +1119,7 @@
     #dash .brand { display: none; }
     #dash .dtab { padding: 9px 8px 7px; font-size: 12px; }
     #dash-ask { padding: 5px 8px 3px; font-size: 12px; }
-    #dash #checks-btn, #dash #update-bar { margin-left: 6px; }
+    #dash #update-bar { margin-left: 6px; }
     #profile-chip { margin-left: auto; padding-right: 6px; }
     #chip-name { display: none; }
     .home-grid { grid-template-columns: 1fr; gap: 10px; }
@@ -1180,7 +1154,6 @@
   <button id="dash-ask" title="Ask the Maestro"><span class="maestro-avatar" aria-hidden="true">𝄞</span>Ask Maestro</button>
   <span id="dash-where" title="The mode you're in. To change modes, go back to Home: that stops what's running"></span>
   <!-- In the nav, not the Session header, so they show on every page -->
-  <button id="checks-btn" hidden title="Bugs and ideas that have been fixed: try each one and say whether it works">👀 <span id="checks-n"></span></button>
   <div id="update-bar" hidden role="status"><span id="update-text"></span><button id="update-go" type="button"></button></div>
   <span class="spacer"></span>
   <button id="profile-chip" title="Switch profile"><span class="avatar" id="chip-avatar">?</span><span id="chip-name">Profile</span></button>
@@ -4178,20 +4151,6 @@ connect();
     <div class="dlg-row"><button value="">Cancel</button><button value="go" id="switch-go"></button></div>
   </form>
 </dialog>
-<dialog id="checks-dlg" class="file-dlg" aria-labelledby="checks-title">
-  <form method="dialog">
-    <div id="asks-part" hidden>
-      <h2>❓ Needs you</h2>
-      <p class="dlg-hint">Building these would mean guessing what you want. Pick an answer (or write your own) and each one goes back in the queue to be built that way.</p>
-      <div id="asks-list"></div>
-    </div>
-    <h2 id="checks-title">Fixes to try</h2>
-    <p class="dlg-hint">Each of these was fixed after you reported it. Try it, then say whether it works (a fix with 🧪 Try it isn’t in your code yet: press that first). “Still wrong” sends it back to be fixed again, with what you write.</p>
-    <div id="checks-list"></div>
-    <p class="dlg-msg" id="checks-msg" role="alert"></p>
-    <div class="dlg-row"><button value="close">Done</button></div>
-  </form>
-</dialog>
 <dialog id="report-dlg" class="file-dlg" aria-labelledby="report-title">
   <form method="dialog">
     <h2 id="report-title">Report (F9)</h2>
@@ -4252,240 +4211,22 @@ connect();
 })();
 </script>
 <script>
-// Fixes waiting for the user (bugs.py: bug_reports/check, requests/check). An agent puts them
-// there from another process, so the count is fetched every half minute and when the tab returns.
-(function () {
-  const btn = document.getElementById('checks-btn'), dlg = document.getElementById('checks-dlg');
-  const list = document.getElementById('checks-list'), msg = document.getElementById('checks-msg');
-  const asksPart = document.getElementById('asks-part'), asksList = document.getElementById('asks-list');
-  let fixes = 0, asks = 0;
-  function show(count, questions) {
-    fixes = count;
-    if (questions !== undefined) asks = questions;
-    btn.hidden = !fixes && !asks;
-    const bits = [];
-    if (asks) bits.push(asks === 1 ? '1 question' : `${asks} questions`);
-    if (fixes) bits.push(fixes === 1 ? '1 fix to try' : `${fixes} fixes to try`);
-    document.getElementById('checks-n').textContent = bits.join(' · ');
-    btn.title = asks ? 'Questions about your bugs and ideas, and fixes to try' : 'Bugs and ideas that have been fixed: try each one and say whether it works';
-  }
-  async function refresh() {
-    try { const out = await cmd('checks'); show(out.count, out.asks); } catch (e) { /* the coach is restarting */ }
-  }
-  function askRow(q) {
-    const item = el('div', 'ask-item');
-    item.append(el('div', 'ask-q', q.question));
-    item.append(el('div', 'ask-said', (q.kind === 'request' ? 'Idea: ' : 'Bug: ') + q.said + (q.where ? ' (' + q.where + ')' : '')));
-    const choices = el('div', 'ask-choices'), own = el('div', 'ask-own');
-    const input = el('input'), send = el('button', '', 'Use this');
-    input.type = 'text';
-    input.placeholder = 'Or your own answer…';
-    input.setAttribute('aria-label', 'Your own answer');
-    send.type = 'button';
-    own.append(input, send);
-    const buttons = [];
-    async function pick(choice) {
-      buttons.forEach(b => { b.disabled = true; });
-      try {
-        const out = await cmd('answer', {id: q.id, choice});
-        item.remove();
-        show(out.count, out.asks);
-        if (!out.asks) asksPart.hidden = true;
-        msg.textContent = `Thanks: “${out.answer}”. It's back in the queue (${out.area}).`;
-      } catch (e) {
-        msg.textContent = e.message;
-        buttons.forEach(b => { b.disabled = false; });
-      }
-    }
-    q.choices.forEach((c, i) => {
-      const b = el('button', '', `${i + 1}. ${c}`);
-      b.type = 'button';
-      b.addEventListener('click', () => pick(String(i + 1)));
-      choices.append(b);
-      buttons.push(b);
-    });
-    buttons.push(send);
-    send.addEventListener('click', () => { if (input.value.trim()) pick(input.value.trim()); else input.focus(); });
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send.click(); } });
-    item.append(choices, own, el('div', 'chk-id', q.id));
-    return item;
-  }
-  function el(tag, cls, text) {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text) e.textContent = text;
-    return e;
-  }
-  function row(it) {
-    const item = el('div', 'chk-item');
-    if (it.shot) {
-      const img = el('img');
-      img.src = it.shot;
-      img.alt = 'The screen when it was reported';
-      img.title = 'The screen when you reported it (click to enlarge)';
-      img.addEventListener('click', () => img.classList.toggle('big'));
-      item.append(img);
-    } else item.append(el('div', 'noshot', 'No screenshot'));
-    const body = el('div', 'chk-body');
-    body.append(el('div', 'chk-said', (it.kind === 'request' ? 'Idea: ' : 'Bug: ') + it.said));
-    if (it.where) body.append(el('div', 'chk-where', it.where));
-    body.append(el('div', 'chk-fix', it.fix ? 'Fixed: ' + it.fix : 'Fixed (no note on what changed).'));
-    const note = el('div', 'chk-note');
-    note.hidden = true;
-    const input = el('input');
-    input.type = 'text';
-    input.placeholder = 'What’s still wrong?';
-    input.setAttribute('aria-label', 'What’s still wrong');
-    const send = el('button', 'no', 'Send back');
-    send.type = 'button';
-    note.append(input, send);
-    const btns = el('div', 'chk-btns');
-    const ok = el('button', 'ok', '✅ Works'), no = el('button', 'no', '↩️ Still wrong');
-    const there = el('button', '', '↗ Go there');
-    // A worker's fix waits on its side branch: Try it puts it in your code first (fixgit.merge).
-    const tryIt = el('button', 'try', '🧪 Try it');
-    const state = el('div', 'chk-state', it.tried ? 'In your code now, to try. Still wrong takes it out again.' : '');
-    state.hidden = !it.tried;
-    ok.type = no.type = there.type = tryIt.type = 'button';
-    there.title = 'Open the piece, view and bar you reported this from, set up as it was, to try the fix';
-    tryIt.title = 'This fix isn’t in your code yet: put it there so you can see it (then Restart or Reload when the bar asks)';
-    tryIt.hidden = !it.try;
-    btns.append(tryIt, there, ok, no);
-    tryIt.addEventListener('click', async () => {
-      tryIt.disabled = true;
-      try {
-        await cmd('try_fix', {id: it.id});
-        tryIt.hidden = true;
-        state.textContent = 'In your code now. Restart or Reload when the bar at the top asks, try it, then say whether it works. Still wrong takes it out again.';
-        state.hidden = false;
-        msg.textContent = '';
-      } catch (e) {
-        msg.textContent = e.message;
-        tryIt.disabled = false;
-      }
-    });
-    there.addEventListener('click', async () => {
-      there.disabled = true;
-      try {
-        const out = await cmd('goto_report', {id: it.id});
-        dlg.close();
-        // A piece just opened applies its own saved settings as it arrives: set ours after that.
-        await new Promise(r => setTimeout(r, out.loaded ? 1800 : 0));
-        if (Object.keys(out.page).length) pageControl({...out.page, unguarded: true});
-        if (out.bar) setTimeout(() => cmd('seek', {bar: out.bar}).catch(() => {}), 400);
-        there.disabled = false;
-      } catch (e) {
-        msg.textContent = e.message;
-        there.disabled = false;
-      }
-    });
-    body.append(state, btns, note, el('div', 'chk-id', it.id));
-    item.append(body);
-    async function answer(works) {
-      ok.disabled = no.disabled = send.disabled = true;
-      try {
-        const out = await cmd('check', {id: it.id, works, note: input.value});
-        item.remove();
-        show(out.count, out.asks);
-        if (!out.count) list.append(el('p', 'dlg-hint', 'All checked. Thanks!'));
-        msg.textContent = out.merged ? 'Thanks! The fix is now in your code.'
-          : out.undone === true ? 'Sent back, and its change was undone.'
-          : out.undone === false ? 'Sent back. Its change couldn’t be undone automatically: the next fix will deal with it.' : '';
-      } catch (e) {
-        msg.textContent = e.message;
-        ok.disabled = no.disabled = send.disabled = false;
-      }
-    }
-    ok.addEventListener('click', () => answer(true));
-    no.addEventListener('click', () => { note.hidden = false; input.focus(); });
-    send.addEventListener('click', () => answer(false));
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); answer(false); } });
-    return item;
-  }
-  async function open() {
-    list.replaceChildren(el('p', 'dlg-hint', 'Loading…'));
-    msg.textContent = '';
-    dlg.showModal();
-    try {
-      const out = await cmd('checks', {full: true});
-      show(out.count, out.asks);
-      asksPart.hidden = !(out.questions || []).length;
-      asksList.replaceChildren(...(out.questions || []).map(askRow));
-      list.replaceChildren(...(out.items.length ? out.items.map(row) : [el('p', 'dlg-hint', 'Nothing to try right now.')]));
-    } catch (e) { msg.textContent = e.message; }
-  }
-  btn.addEventListener('click', open);
-  // The backlog note links to …/#checks: open the list straight away.
-  function fromHash() { if (location.hash === '#checks') { history.replaceState(null, '', location.pathname + location.search); open(); } }
-  window.addEventListener('hashchange', fromHash);
-  fromHash();
-  refresh();
-  setInterval(refresh, 30000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
-})();
-
-// The update bar: the page's own files changed (Reload), or the coach's code did (Restart; the
-// launcher starts it again in its window). A coach that restarted means this page is stale: reload.
-(function () {
-  const bar = document.getElementById('update-bar'), text = document.getElementById('update-text');
-  const go = document.getElementById('update-go');
-  let first = null, restarting = false;
-  function offer(message, label, title, disabled) {
-    text.textContent = message;
-    go.hidden = !label;
-    go.textContent = label || '';
-    go.title = title || '';
-    go.disabled = !!disabled;
-    go.dataset.what = label ? (label.startsWith('Restart') ? 'restart' : 'reload') : '';
-    bar.hidden = false;
-  }
-  async function poll() {
-    let s;
-    try { s = await cmd('code_status'); } catch (e) { return; }  // restarting, or the coach was closed
-    if (window.PREVIEW) { bar.hidden = true; return; }  // a test copy never updates or restarts
-    if (!first) first = s;
-    if (s.started !== first.started) { location.reload(); return; }
-    if (restarting) return;
-    if (s.code > s.started) {
-      if (s.restartable) offer('The coach was updated.', 'Restart coach',
-        s.busy ? 'Stop the run first' : 'Takes a few seconds; the same piece comes back', s.busy);
-      else offer('The coach was updated: quit Claude Desktop (File › Exit) and open it again to use it.');
-    } else if (s.page > first.page) {
-      offer('This page was updated.', 'Reload', 'Load the new version of the page');
-    } else bar.hidden = true;
-  }
-  go.addEventListener('click', async () => {
-    if (go.dataset.what === 'reload') { location.reload(); return; }
-    go.disabled = true;
-    try {
-      await cmd('restart');
-      restarting = true;
-      offer('Restarting the coach…');
-      const wait = setInterval(poll, 1500);
-      setTimeout(() => { clearInterval(wait); if (restarting) offer('The coach hasn’t come back: check its window.'); }, 60000);
-    } catch (e) { offer(e.message, 'Restart coach'); }
-  });
-  poll();
-  setInterval(poll, 20000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
-})();
-</script>
-<script>
-// A test copy of a fix (preview.py, started from Agent Quest's Workshop): say so plainly, hide the
-// fix-checking button (that happens in Agent Quest), and open where the fix's report was made.
+// A test copy of a fix (preview.py, started from Agent Quest's Workshop): say so plainly, and open
+// where the fix's report was made. Checking fixes happens in the Workshop, never on this page.
 (async function () {
   let info;
   try { info = (await cmd('preview')).preview; } catch (e) { return; }
   if (!info) return;
   window.PREVIEW = info;
-  document.title = 'TEST COPY · Music Hub';
+  // The page retitles itself as pieces load: keep the tab saying what it is.
+  const mark = () => { if (!document.title.startsWith('TEST COPY')) document.title = 'TEST COPY · ' + document.title; };
+  mark();
+  new MutationObserver(mark).observe(document.querySelector('title'), {childList: true, characterData: true, subtree: true});
   document.getElementById('preview-frame').hidden = false;
   const tag = document.getElementById('preview-tag');
   document.getElementById('preview-what').textContent = info.fixed || info.said || info.id;
   tag.title = 'This is a test copy running a fix that isn’t in your code yet. Your real songs and progress are copied in; nothing you do here changes them.' + (info.said ? '\n\nYou asked: ' + info.said : '');
   tag.hidden = false;
-  const checks = document.getElementById('checks-btn');
-  if (checks) { checks.hidden = true; new MutationObserver(() => { if (!checks.hidden) checks.hidden = true; }).observe(checks, {attributes: true}); }
   document.getElementById('preview-close').addEventListener('click', async (ev) => {
     ev.target.disabled = true;
     try { await cmd('preview_close'); document.getElementById('preview-what').textContent = 'Closing…'; }

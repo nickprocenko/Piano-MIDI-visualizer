@@ -795,47 +795,8 @@ def answer(report_id: str, choice: str, how: str = "on the coach page") -> dict:
     return {"answered": report_id, "answer": choice, "area": t["area"]}
 
 
-ASK_RE = re.compile(r"^(?:maestro\s+)?(?:(?:do you have |have you got |are there |any )+(?:any )?questions?(?: for me)?|"
-                    r"what (?:are|is) (?:your|the) questions?|(?:read me |ask me )?(?:the |your )?questions? for me|"
-                    r"ask me (?:your|the) questions?)$")
-SKIP_RE = re.compile(r"^(?:maestro\s+)?(?:skip(?: (?:it|that|this)(?: one)?)?(?: question)?|next question|ask me later|later)$")
-NUMBERS = {"one": 1, "won": 1, "first": 1, "two": 2, "to": 2, "too": 2, "second": 2, "three": 3, "third": 3,
-           "four": 4, "for": 4, "fourth": 4, "1": 1, "2": 2, "3": 3, "4": 4}
-PICK_RE = re.compile(r"^(?:maestro\s+)?(?:(?:answer|option|number|choice|choose|pick|go with|i'll go with|i pick|i choose)\s+)?"
-                     r"(?:the\s+)?(one|won|two|to|too|three|four|for|first|second|third|fourth|[1-4])(?:\s+(?:one|option|please))?$")
-OWN_RE = re.compile(r"^(?:maestro\s+)?(?:my )?answer(?: is)?\s+(.+)$")
-
-
-def heard_answer(heard: str, asking: bool) -> tuple[str, str] | None:
-    """Speech about the ❓ questions: ('ask', '') for "any questions?", and while one is being asked
-    ('skip', '') or ('answer', '2' | the user's own words). None for anything else."""
-    text = " ".join(re.sub(r"[^a-z0-9' ]+", " ", (heard or "").lower()).split())
-    if ASK_RE.match(text):
-        return "ask", ""
-    if not asking:
-        return None
-    if SKIP_RE.match(text):
-        return "skip", ""
-    m = PICK_RE.match(text)
-    if m:
-        return "answer", str(NUMBERS[m.group(1)])
-    m = OWN_RE.match(text)
-    if m:
-        return "answer", m.group(1)
-    return None
-
-
-def spoken_question(q: dict, n: int, total: int) -> str:
-    """One ❓ question as the Maestro says it, with its choices numbered."""
-    said = q["said"] if len(q["said"]) <= 110 else q["said"][:110].rsplit(" ", 1)[0] + "…"
-    head = f"Question {n} of {total}" if total > 1 else "One question"
-    choices = " ".join(f"{word}: {c}." for word, c in zip(("One", "Two", "Three", "Four"), q["choices"]))
-    return (f"{head}, about your {'idea' if q['kind'] == 'request' else 'bug'}: “{said}” {q['question']} {choices} "
-            "Say “answer” and its number, “my answer is” and your own words, or “skip”.")
-
-
 def questions() -> list[dict]:
-    """The ❓ items for the coach page and the Maestro, most urgent first: {id, kind, said, where,
+    """The ❓ items for Agent Quest's Workshop, most urgent first: {id, kind, said, where,
     question, choices, important}."""
     return [{"id": it["id"], "kind": it["kind"], "said": it["said"], "where": it["where"],
              "question": it["triage"]["question"], "choices": it["triage"]["choices"], "important": it["important"]}
@@ -967,6 +928,9 @@ def _backlog_lines(it: dict, mark: str, shots: pathlib.Path) -> list[str]:
     return ["  \n".join(out)]
 
 
+WORKSHOP_URL = "http://localhost:4445/"  # Agent Quest, where fixes are tried and questions answered
+
+
 def write_backlog() -> pathlib.Path | None:
     """Rewrite the vault's Backlog.md from the folders (never fails the caller)."""
     try:
@@ -978,8 +942,8 @@ def write_backlog() -> pathlib.Path | None:
         done = [it for it in items("done") if it["when"] >= cutoff][::-1]
         lines = ["---", "project: MidiCoach", "tags: [backlog]", "---", "", "# MidiCoach backlog", "",
                  "> Written by MidiCoach from `~/MidiCoach/bug_reports` and `requests`, so edits here are "
-                 "overwritten. Add to it by telling the Maestro “Bug: …” or “Idea: …”. Try fixes from the "
-                 "coach page's 👀 button.", ""]
+                 "overwritten. Add to it by telling the Maestro “Bug: …” or “Idea: …”. Try fixes and answer "
+                 "questions in Agent Quest's 🔨 Workshop.", ""]
         def section(title: str, rows: list, mark: str, intro: str = "") -> None:
             lines.extend([f"## {title}", ""] + ([intro, ""] if intro and rows else []))
             if not rows:
@@ -988,11 +952,10 @@ def write_backlog() -> pathlib.Path | None:
                 lines.extend(_backlog_lines(it, "↩️" if mark == "🆕" and it["reopened"] else mark, shots) + [""])
 
         section("👀 Ready to check", items("check"), "👀",
-                "[Try them on the coach page](http://127.0.0.1:8765/#checks) (on this PC, with the coach running)")
+                f"Try each in a test copy from [Agent Quest's Workshop]({WORKSHOP_URL}) (on this PC, with Agent Quest running)")
         plan = batches()
         section("❓ Needs you", plan["questions"], "❓",
-                "One answer each, then they join a batch. [Answer on the coach page](http://127.0.0.1:8765/#checks), "
-                "or ask the Maestro “any questions?”")
+                f"One answer each, then they join a batch. [Answer in Agent Quest's Workshop]({WORKSHOP_URL})")
         if plan["stuck"]:
             section("🧱 Stuck", plan["stuck"], "🧱",
                     "A worker couldn't finish these, so they're set aside. Ask an agent session to look, "

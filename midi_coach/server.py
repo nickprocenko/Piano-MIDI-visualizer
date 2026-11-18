@@ -1941,7 +1941,7 @@ def _cmd_page_error(body: dict) -> dict:
 
 
 def _report_state() -> dict:
-    """Where the page is, saved with a bug report for the check step's Go there."""
+    """Where the page is, saved with a bug report: a test copy of its fix opens there (preview.py)."""
     try:
         settings = _practice.get("settings") or {}
         state = {"score": hub.score_path, "view": _page_view.get("view")}
@@ -1995,15 +1995,6 @@ def _find_piece(place: dict) -> str | None:
         return None
 
 
-def _cmd_goto_report(body: dict) -> dict:
-    """The check step's Go there: open the piece a report was made on. The page then sets its
-    controls (view, mode, bars, tempo, loop) and the cursor's bar from what this returns."""
-    place = bugs.place(str(body.get("id") or ""))
-    if "error" in place:
-        return place
-    return _open_place(place)
-
-
 def _open_place(place: dict) -> dict:
     """Open the piece a report was made on, and say how to set the page up as it was."""
     if _busy():
@@ -2019,26 +2010,6 @@ def _open_place(place: dict) -> dict:
         return {"error": f"Couldn't find “{place['title']}” any more."}
     page = {k: place[k] for k in ("view", "mode", "bars", "tempo_percent", "loop") if place.get(k) not in (None, "")}
     return {"path": path, "loaded": loaded, "page": page, "bar": place.get("bar")}
-
-
-def _cmd_checks(body: dict) -> dict:
-    """Fixes waiting for the user to try (the page's 👀 button); with screenshots when it opens.
-    Also the ❓ questions waiting for an answer: how many, and (full) each one with its choices."""
-    asks = bugs.questions()
-    return {**bugs.to_check(with_shots=bool(body.get("full"))), "asks": len(asks),
-            **({"questions": asks} if body.get("full") else {})}
-
-
-def _cmd_check(body: dict) -> dict:
-    """The user tried a fix: it works (→ fixed) or it's still wrong (→ open, with what they said)."""
-    out = bugs.verify(str(body.get("id") or ""), bool(body.get("works")), str(body.get("note") or ""))
-    return out if "error" in out else {**out, **bugs.to_check(), "asks": len(bugs.questions())}
-
-
-def _cmd_answer(body: dict) -> dict:
-    """The user picked an answer to a ❓ question (or wrote their own): the item joins its batch."""
-    out = bugs.answer(str(body.get("id") or ""), str(body.get("choice") or ""))
-    return out if "error" in out else {**out, **bugs.to_check(), "asks": len(bugs.questions())}
 
 
 def _cmd_preview(_body: dict) -> dict:
@@ -2071,11 +2042,6 @@ def _cmd_preview_close(_body: dict) -> dict:
         return {"error": "This isn't a test copy."}
     preview.close_from_inside()
     return {"closing": True}
-
-
-def _cmd_try_fix(body: dict) -> dict:
-    """Try it: put a worker's fix into the user's code before they say whether it works."""
-    return bugs.try_fix(str(body.get("id") or ""))
 
 
 RESTART_NOTE = "restart.json"  # the piece on the page when Restart was pressed, for the fresh copy
@@ -2129,40 +2095,6 @@ def restarted_score() -> str | None:
         return None
     score = saved.get("score")
     return score if score and time.time() - float(saved.get("at") or 0) < 120 and pathlib.Path(score).exists() else None
-
-
-ASKING_SEC = 10 * 60  # how long after reading a question "answer two" still means it
-_asking: dict = {}     # the ❓ question the Maestro read out last: {id, at, skipped}
-
-
-def _asking_now() -> dict | None:
-    return _asking if _asking.get("id") and time.time() - _asking["at"] < ASKING_SEC else None
-
-
-def _voice_questions(what: str, value: str, asked: dict | None) -> str:
-    """"Any questions?" reads the first ❓ question; "answer two" / "my answer is …" answers the one
-    just read and goes on to the next; "skip" goes on without answering."""
-    skipped = set(asked.get("skipped", ())) if asked else set()
-    lead = ""
-    if what == "answer" and asked:
-        out = bugs.answer(asked["id"], value, "told the Maestro")
-        if "error" in out:
-            _asking.clear()
-            return out["error"]
-        lead = f"Got it: {out['answer']}. That one's back in the queue. "
-    elif what == "skip" and asked:
-        skipped.add(asked["id"])
-    waiting = bugs.questions()
-    left = [q for q in waiting if q["id"] not in skipped]
-    if not left:
-        _asking.clear()
-        if lead:
-            return lead + ("That's all my questions." if not waiting else "I'll ask the skipped ones another time.")
-        return "No questions right now." if not waiting else "That's all for now: I'll ask the rest another time."
-    q = left[0]
-    _asking.update(id=q["id"], at=time.time(), skipped=sorted(skipped))
-    hub.line("Maestro", "❓ " + q["question"] + "  " + "  ".join(f"{i}. {c}" for i, c in enumerate(q["choices"], 1)), "remark")
-    return lead + bugs.spoken_question(q, waiting.index(q) + 1, len(waiting))
 
 
 def _voice_request(description: str, add_to_last: bool = False, important: bool = False) -> dict:
@@ -2265,13 +2197,6 @@ def _answer(heard: str) -> dict:
         if text:
             _npc_say(lambda: text)
             return {"heard": heard, "reply": text, "actions": ["undo"], "cost": 0.0}
-    # "Any questions?": the backlog's ❓ questions, read out and answered here, with no API call.
-    asked = _asking_now()
-    said = bugs.heard_answer(heard, asking=asked is not None)
-    if said:
-        text = _voice_questions(*said, asked)
-        _npc_say(lambda: text)
-        return {"heard": heard, "reply": text, "actions": ["backlog_question"], "cost": 0.0}
     # "Bug: ..." / "Idea: ..." / "another screenshot" are saved here too, with no API call.
     command = bugs.heard_command(heard)
     if command:
@@ -2466,7 +2391,7 @@ PAGE_COMMANDS = {"ports": _cmd_ports, "keyboards": _cmd_keyboards, "bluetooth_re
                  "youtube": _cmd_youtube,
                  "record": _cmd_record, "maestro": _cmd_maestro, "stop_playback": lambda _body: _quiet(),
                  "voice_status": _cmd_voice_status, "talk": _cmd_talk, "page_error": _cmd_page_error,
-                 "checks": _cmd_checks, "check": _cmd_check, "try_fix": _cmd_try_fix, "preview": _cmd_preview, "preview_place": _cmd_preview_place, "preview_close": _cmd_preview_close, "code_status": _cmd_code_status, "restart": _cmd_restart, "goto_report": _cmd_goto_report, "report": _cmd_report, "chat": lambda body: _voice_reply(body.get("text", "")),
+                 "preview": _cmd_preview, "preview_place": _cmd_preview_place, "preview_close": _cmd_preview_close, "code_status": _cmd_code_status, "restart": _cmd_restart, "report": _cmd_report, "chat": lambda body: _voice_reply(body.get("text", "")),
                  "transcript": _cmd_transcript, "view": _cmd_view, "tiles": _cmd_tiles, "tiles_set": _cmd_tiles_set}
 def _atlas_show(path: str) -> dict:
     """A lesson's music on the sheet. Opening a lesson means leaving whatever was running
@@ -2484,7 +2409,6 @@ def _atlas_show(path: str) -> dict:
     return out
 
 
-PAGE_COMMANDS["answer"] = _cmd_answer  # the 👀 box's ❓ questions (bugs.answer)
 
 
 def _atlas_listen(path: str, hand: str = "both", bars: str | None = None, tempo_percent: float = 100.0) -> dict:
@@ -2533,8 +2457,7 @@ def _fix_commands() -> dict:
 
 PAGE_COMMANDS.update(_fix_commands())
 hub.commands.update(PAGE_COMMANDS)
-hub.local_only |= {"fixes", "fix_open", "fix_close", "fix_works", "fix_still_wrong", "fix_answer",
-                   "check", "try_fix", "answer"}
+hub.local_only |= {"fixes", "fix_open", "fix_close", "fix_works", "fix_still_wrong", "fix_answer"}
 hub.voice_handler = _voice_audio
 hub.extension_hook = synced.note_extension  # the YouTube tab knows it's installed after a restart
 hub.transcribe_handler = lambda audio: {"heard": stt.transcribe(audio)}  # quiz answers said aloud: Whisper only, no API
