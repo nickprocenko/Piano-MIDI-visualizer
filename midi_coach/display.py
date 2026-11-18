@@ -576,13 +576,16 @@ def _make_handler(hub: DisplayHub):
             name = path[len("/cmd/"):] if path.startswith("/cmd/") else ""
             handler = hub.commands.get(name) if name else None
             self._from_extension()
+            # Read the body before any answer, even a refusal: on a kept-open connection, unread
+            # bytes would be taken for the next request (which then fails with a 501).
+            length = min(int(self.headers.get("Content-Length") or 0), 20_000_000)
+            raw = self.rfile.read(length) if length else b""
             if handler is None:
                 return self._send(404, b'{"error":"unknown command"}', "application/json")
             if name in hub.local_only and not _local_origin(self.headers.get("Origin")):
                 return self._send(403, b'{"error":"only from this PC"}', "application/json")
             try:
-                length = int(self.headers.get("Content-Length") or 0)
-                body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+                body = json.loads(raw or b"{}") if raw else {}
                 result = handler(body)
             except Exception as exc:  # report to the page instead of dropping the connection
                 result = {"error": str(exc)}
