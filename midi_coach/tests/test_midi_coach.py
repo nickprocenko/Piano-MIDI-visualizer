@@ -457,7 +457,7 @@ class RecordingHub:
     def marks(self, updates, reset=False):
         self.events.append(("marks", list(updates), reset))
 
-    def cursor(self, beat, bps=0.0, live=False, until=None):
+    def cursor(self, beat, bps=0.0, live=False, until=None, speed=None):
         self.events.append(("cursor", beat, bps, until))
 
     def session(self, active, mode=None):

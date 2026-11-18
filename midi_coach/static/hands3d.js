@@ -25,13 +25,17 @@ const KEY_W = 2.0, KEY_LONG = 13;
 const SIN_MIN = Math.sin(45 * Math.PI / 180);  // the camera's lowest tilt
 // The fingers lie long and gently curved, as a pianist's do: the knuckles low over the keys and
 // well behind the fingertips.
-const KNUCKLES_UP = 2.7;    // the knuckles above the keys
-const KNUCKLES_BACK = 6.4;  // and behind the fingertips
-const PITCH = 0.17;         // the back of the hand rising from the wrist to the knuckles (radians)
+const KNUCKLES_UP = 3.3;    // the knuckles above the keys
+const KNUCKLES_BACK = 6.3;  // and behind the fingertips
+const PITCH = 0.1;          // the back of the hand rising from the wrist to the knuckles (radians)
 const TIP = 0.35, LIFT = 1.0, REST = 1.9, DIP = 0.6;  // tip on a key; over its next key; resting; a key pressed down
 const THUMB_AHEAD = 1.4;    // the thumb's tip on a white key, in front of the knuckles
-const THUMB_CURL = 1.0, CURL_IN = [0, 0.7, 1.0, 1.0];  // the thumb's turn in toward the fingers (radians, per joint)
+// The thumb bends at its two joints about their own axes in the model (across the palm, toward
+// the fingers, as a thumb's do): a little at rest, more to reach a key near its base or under the hand
+const THUMB_BEND = [-0.1, 1.25], THUMB_MID = 0.6;  // radians at the last joint: from, to; the middle joint's share
+const THUMB_TURN = 1.7;     // radians at most the thumb turns at its base from how the model holds it
 const THUMB_REACH = 2.6;    // and on a black key at most this far in front of them
+const THUMB_LOW = 0.8;      // cm lower than the fingers that a thumb at rest hangs
 // the shorter fingers play a little nearer the front than the middle one, as a curved hand's tips lie
 const DEPTH = [0, 0, 0.5, 0, 0.6, 2.6];
 const REST_UP = 2.2, REST_BACK = 1.5, REST_LIFT = 1.6;  // a hand at rest: knuckles up, drawn back, fingertips up
@@ -42,7 +46,25 @@ const ELBOW_OUT = 19, FOREARM = 30, ARM_DROP = 0.2;  // elbow beside the seat; f
 const ALONG_ARM = 0.6;      // how far the hand turns to lie along the forearm
 // The hand as it moves: striking, its weight sinks into the key and the fingers not playing come
 // up a little; travelling along the keys it lifts off them and its wrist leads the fingers.
-const SINK = 0.35, COUNTER = 0.45;  // cm: the knuckles down on a pressed key; the other fingers up
+const SINK = 0.35, COUNTER = 0.3;  // cm: the knuckles down on a pressed key; the other fingers up
+// A finger isn't free of its neighbours: one at rest goes part of the way down with a neighbour
+// that plays (the ring finger most, tied as it is to the middle and little fingers)
+const FOLLOW = [0, 0, 0.12, 0.22, 0.4, 0.28];
+// The hand rolls toward the side that's playing (the little finger's or the thumb's), as a
+// forearm turns to put its weight behind a finger
+const ROLL = 0.11;          // radians, with only the outermost finger down
+// Fingers side by side: their tips this far apart at least (cm), so one at rest never lies on or
+// crosses its neighbour; and a finger at rest stays this near (cm) to straight ahead of its knuckle
+const TIP_GAP = 1.75, SPLAY = 1.3;
+// A finger on its way to a key reaches no further to the side than this (cm) from straight
+// ahead of its knuckle: the hand brings it the rest of the way, and only a finger playing is
+// held to its key. The thumb, from the index's knuckle: out to the side, and in under the hand.
+const STRETCH = 2.8, THUMB_OUT = 7.5, THUMB_UNDER = 4.5;
+// How the hand's weight and place follow the fingers (ms): down into a key, back up; the roll;
+// the shift toward a finger that can't reach
+const SINK_MS = [45, 170], ROLL_MS = 130, SHIFT_MS = 90;
+// Never quite still: the wrist floats a little (cm) and turns (radians), slowly, more at rest
+const SWAY_UP = 0.07, SWAY_TURN = 0.008;
 const TRAVEL_FAST = 70;     // cm a second along the keys: a leap's speed
 const TRAVEL_UP = 1.3, TRAVEL_TIPS = 0.9, TRAVEL_TURN = 0.12;  // at that speed: knuckles up, resting tips up (cm); the turn (radians)
 // A glissando (an organ's palm roll-up): the wrist rides up and the hand tips forward, so the
@@ -59,10 +81,11 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const _v = new THREE.Vector3(), _h = new THREE.Vector3(), _d = new THREE.Vector3(), _k = new THREE.Vector3();
 const _p = new THREE.Vector3(), _e = new THREE.Vector3(), _c = new THREE.Vector3();
 const _q = new THREE.Quaternion(), _qa = new THREE.Quaternion(), _qy = new THREE.Quaternion(), _qi = new THREE.Quaternion();
-const _qc = [0, 1, 2, 3].map(() => new THREE.Quaternion());  // the thumb's inward turn at each joint
+const _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 // For checking: how far each fingertip ended up from its target in the last frame (cm)
-export const debug = {misses: []};
+// and where each hand and its joints were (cm): for hands_render.py's frames.json
+export const debug = {misses: [], pose: []};
 
 export async function create() {
   const canvas = document.createElement('canvas');
@@ -131,7 +154,14 @@ export async function create() {
       // straight ahead for this finger, along the back of the hand
       const ahead = rest[3].p.clone().sub(rest[0].p);
       ahead.addScaledVector(N, -ahead.dot(N)).normalize();
-      fingers.push({bones: names.map(n => bones[n]), rest, len, dir, ahead});
+      // the axes the thumb's two joints bend about (the model's own: a joint's x), turned so
+      // that a positive angle bends it toward the palm, away from the nail's side (its y)
+      const axes = [1, 2].map(i => {
+        const x = new THREE.Vector3(1, 0, 0).applyQuaternion(rest[i].q);
+        const nail = new THREE.Vector3(0, 1, 0).applyQuaternion(rest[i].q);
+        return x.multiplyScalar(_v.crossVectors(x, dir[i]).dot(nail) > 0 ? -1 : 1);
+      });
+      fingers.push({bones: names.map(n => bones[n]), rest, len, dir, ahead, axes});
     }
     const knuckles = new THREE.Vector3();
     for (let f = 2; f <= 5; f++) knuckles.add(fingers[f].rest[0].p);
@@ -143,7 +173,9 @@ export async function create() {
     const armSkin = material.clone();
     armSkin.vertexColors = false;
     armSkin.color.set(SKIN);
-    return {side, root, mesh, glow, N, fingers, knuckles, base, H: new THREE.Matrix4(), Hinv: new THREE.Matrix4(),
+    // what the hand carries from frame to frame: its weight in the keys, its roll, its shift
+    const state = {sink: 0, roll: 0, shift: new THREE.Vector3(), seen: false, clock: 0};
+    return {side, root, mesh, glow, N, fingers, knuckles, base, state, H: new THREE.Matrix4(), Hinv: new THREE.Matrix4(),
             wrist: bones.wrist.position.clone(), ...forearm(mesh, armSkin)};
   }
 
@@ -196,6 +228,13 @@ export async function create() {
   function pose(hand, item, view, S) {
     const k = S * 100;  // page pixels per model metre
     const rest = item.rest || 0;
+    // What the hand carries over from the last frame eases toward where it's going (times
+    // stretched in slow motion, as roll.js's are); a hand first seen is put straight there.
+    const st = hand.state;
+    const dt = st.seen ? clamp(view.dt || 16, 0, 100) : 1e6;
+    const ease = ms => 1 - Math.exp(-dt / (ms * (item.slow || 1)));
+    st.clock = st.seen ? st.clock + dt / (item.slow || 1) : 0;
+    st.seen = true;
     const front = -view.keyH / SIN;  // the keys' near edge
     // Where each finger plays its key: across where roll.js put it, down the key as far as a
     // finger of its length lies, and as far down as the key is pressed.
@@ -214,14 +253,30 @@ export async function create() {
     for (let f = 2; f <= 5; f++) { cx += keyAt[f].x / 4; cy += keyAt[f].y / 4; }
     const elbowX = view.seatX + hand.side * ELBOW_OUT * S;
     const speed = (item.speed || 0) / S;  // cm a second, to the right
-    const travel = clamp(Math.abs(speed) / TRAVEL_FAST, 0, 1) ** 1.5;
-    const yaw = ALONG_ARM * Math.atan2(cx - elbowX, FOREARM * S) - TRAVEL_TURN * travel * Math.sign(speed);
+    // accent: in slow motion (roll.js) a leap's lift and turn are made a little bigger, to be seen
+    const travel = clamp(Math.abs(speed) / TRAVEL_FAST, 0, 1) ** 1.5 * (item.accent || 1);
+    const sway = 1 + rest;  // the wrist's slow float, each hand in its own time
+    const yaw = ALONG_ARM * Math.atan2(cx - elbowX, FOREARM * S) - TRAVEL_TURN * travel * Math.sign(speed)
+      + SWAY_TURN * sway * Math.sin(st.clock / 950 + 2 * hand.side);
     const kn = hand.knuckles;
     const over = item.over || 0, under = item.under || 0;
-    let sink = 0;  // how hard the hand is pressing: its most pressed finger
-    for (let f = 1; f <= 5; f++) sink = Math.max(sink, item.tips[f].press * item.tips[f].on);
+    // How hard the hand is pressing (its most pressed finger) and on which side: its weight
+    // goes into the key and comes back out more slowly than a finger does, and the hand rolls
+    // toward the fingers that are down.
+    let down = 0, lean = 0, total = 0;
+    const pressed = [0, 0, 0, 0, 0, 0, 0];
+    for (let f = 1; f <= 5; f++) {
+      const w = pressed[f] = item.tips[f].press * item.tips[f].on;
+      down = Math.max(down, w);
+      lean += w * (f - 3) / 2;
+      total += w;
+    }
+    st.sink += (down - st.sink) * ease(SINK_MS[down > st.sink ? 0 : 1]);
+    st.roll += (ROLL * lean / Math.max(1, total) - st.roll) * ease(ROLL_MS);
+    const sink = st.sink;
     const glide = item.glide || 0;
-    const rise = KNUCKLES_UP + REST_UP * rest + OVER_UP * over + TRAVEL_UP * travel * (1 - glide) + GLIDE_UP * glide - SINK * sink;
+    const rise = KNUCKLES_UP + REST_UP * rest + OVER_UP * over + TRAVEL_UP * travel * (1 - glide) + GLIDE_UP * glide - SINK * sink
+      + SWAY_UP * sway * Math.sin(st.clock / 640 + hand.side);
     const at = new THREE.Vector3(cx, cy - (KNUCKLES_BACK + REST_BACK * rest - OVER_IN * over + UNDER_OUT * under) * S, rise * S);
     // the hand is never so far back that its thumb would hang off the front of the keys (on
     // short keys it would otherwise come in for every thumb note and go back out after)
@@ -248,16 +303,40 @@ export async function create() {
         key.copy(keyAt[f]);
         const reach = clamp(ahead(f, key.x), front + 0.8 * S, f === 1 ? key.y : -0.8 * S);
         key.y += (reach - key.y) * (1 - black[f]);
-        const up = restZ + COUNTER * S * Math.max(0, sink - t.press);
-        const x = t.x + at.x - home.x;
-        targets[f].set(x, ahead(f, x), up).lerp(key, t.on);
+        // at rest: up off the keys (the thumb less, hanging beside the hand), a little higher
+        // while the hand's weight is in another finger, but part of the way down with a
+        // neighbour that's playing
+        const beside = Math.max(pressed[f - 1], pressed[f + 1]) * (1 - t.press);
+        const up = restZ + S * (COUNTER * Math.max(0, sink - t.press) - REST * FOLLOW[f] * beside - (f === 1 ? THUMB_LOW : 0));
+        let x = t.x + at.x - home.x;
+        // straight ahead of its knuckle (the thumb: of the index's), as the hand lies now
+        const F = hand.fingers[Math.max(2, f)];
+        _h.copy(F.rest[0].p).applyMatrix4(hand.H);
+        _d.copy(F.ahead).transformDirection(hand.H);
+        const line = _h.x + (ahead(f, x) - _h.y) * _d.x / Math.max(0.3, _d.y);
+        if (f > 1) x = clamp(x, line - SPLAY * S, line + SPLAY * S);
+        const to = targets[f].set(x, ahead(f, x), up).lerp(key, t.on);
+        const out = f > 1 ? [STRETCH, STRETCH] : hand.side > 0 ? [THUMB_OUT, THUMB_UNDER] : [THUMB_UNDER, THUMB_OUT];
+        to.x += (clamp(to.x, line - out[0] * S, line + out[1] * S) - to.x) * (1 - t.press * t.press);
+      }
+      // Fingers 2 to 5 side by side, in their order: the one less on a key gives way (a hand
+      // shifted toward a far key brings its resting fingers along, up against the ones playing)
+      for (let pass = 0; pass < 4; pass++) {
+        for (let f = 2; f <= 4; f++) {
+          const short = TIP_GAP * S - hand.side * (targets[f + 1].x - targets[f].x);
+          const a = 1 - item.tips[f].on, b = 1 - item.tips[f + 1].on;
+          if (short <= 0 || a + b < 1e-3) continue;
+          targets[f].x -= hand.side * short * a / (a + b);
+          targets[f + 1].x += hand.side * short * b / (a + b);
+        }
       }
     };
     const tipAt = f => hand.fingers[f].bones[3].position.clone().applyMatrix4(hand.H);
-    for (let round = 0; ; round++) {
+    const place = () => {
       hand.H.makeTranslation(at.x, at.y, at.z)
         .multiply(_m.makeRotationZ(-yaw))
         .multiply(_m.makeRotationX(PITCH + GLIDE_PITCH * glide))
+        .multiply(_m.makeRotationY(hand.side * st.roll))
         .multiply(_m.makeScale(k, k, k))
         .multiply(hand.base)
         .multiply(_m.makeTranslation(-kn.x, -kn.y, -kn.z));
@@ -267,29 +346,36 @@ export async function create() {
         const local = targets[f].clone().applyMatrix4(hand.Hinv);
         if (f === 1) poseThumb(hand, local); else poseFinger(hand, f, local);
       }
-      if (round === 3) break;
+    };
+    for (let round = 0; round < 3; round++) {
+      place();
       // A finger that can't reach its key moves the whole hand toward it, as a player's
       // hand shifts for a thumb or a stretch; fingers short of keys on both sides cancel out.
+      // The more a finger is on its key and the further it's short, the more it counts, with
+      // no sudden start, so the hand never jumps as a finger comes to a key.
       const shift = new THREE.Vector3();
       let weight = 0;
       for (let f = 1; f <= 5; f++) {
         const t = item.tips[f];
-        if (t.on < 0.3) continue;
         const tip = tipAt(f), miss = targets[f].clone().sub(tip);
         // a thumb short of its place on a white key is still on the key: the hand stays back
         if (f === 1 && miss.y > 0 && tip.y > front + 0.3 * S) miss.y *= black[1];
-        if (miss.length() < 0.15 * S) continue;
-        const w = t.on * (0.4 + t.press);
-        shift.addScaledVector(miss, w);
+        const far = miss.length(), u = clamp((t.on - 0.1) / 0.5, 0, 1);
+        const w = u * u * (3 - 2 * u) * (0.4 + t.press);
+        if (far < 1e-6 || !w) continue;
+        shift.addScaledVector(miss, w * Math.max(0, far - 0.15 * S) / far);
         weight += w;
       }
       if (!weight) break;
-      shift.multiplyScalar(1 / weight);
+      shift.multiplyScalar(1 / Math.max(0.4, weight));
       shift.z *= 0.5;
       at.add(shift);
       at.sub(home).clampLength(0, 3 * S).add(home);
       at.z = clamp(at.z, (rise - 1.2) * S, (rise + 0.6) * S);
     }
+    st.shift.lerp(_v.copy(at).sub(home), ease(SHIFT_MS));
+    at.copy(home).add(st.shift);
+    place();
     hand.root.matrix.copy(hand.H);
     hand.root.matrixWorldNeedsUpdate = true;
 
@@ -335,6 +421,9 @@ export async function create() {
       const mid = F.bones[1].position.clone().lerp(F.bones[2].position, f === 1 ? 0.5 : 0.35).applyMatrix4(hand.H);
       labels.push({f, x: mid.x, y: view.floor - (mid.y * SIN + mid.z * COS), alpha: item.alpha});
     }
+    const cm = v => [+(v.x / S).toFixed(2), +(v.y / S).toFixed(2), +(v.z / S).toFixed(2)];
+    debug.pose.push({hand: item.hand, at: cm(at), yaw: +yaw.toFixed(3),
+                     joints: [1, 2, 3, 4, 5].map(f => hand.fingers[f].bones.map(b => cm(b.position.clone().applyMatrix4(hand.H))))});
     return {labels, center: new THREE.Vector3(cx, cy, 0)};
   }
 
@@ -369,38 +458,31 @@ export async function create() {
     }
   }
 
-  // The thumb: bent at its two joints until it's as long as the way to its target, then
-  // turned at its base to point there.
+  // The thumb: bent at its two joints (about their own axes, so it folds across the palm) until
+  // it's as long as the way to its target, then turned at its base to point there.
   function poseThumb(hand, target) {
-    const F = hand.fingers[1], L = F.len, e = F.dir;
-    const base = F.rest[0].p;
-    _k.crossVectors(hand.N, F.ahead).normalize();
-    // A thumb curls in toward the fingers (across the palm), never away from them: each joint
-    // is also turned about the back-of-hand normal, toward the little finger's side
-    // (from the index knuckle toward the little finger's), a little more at each joint.
-    _c.copy(hand.fingers[5].rest[0].p).sub(hand.fingers[2].rest[0].p);
-    _e.crossVectors(hand.N, F.ahead);
-    const inward = (_e.dot(_c) < 0 ? -1 : 1) * THUMB_CURL;
-    for (let i = 0; i < 4; i++) _qc[i].setFromAxisAngle(hand.N, inward * CURL_IN[i]);
-    const reach = b => {
-      _c.set(0, 0, 0).addScaledVector(_e.copy(e[0]).applyQuaternion(_qc[0]), L[0])
-        .addScaledVector(_e.copy(e[1]).applyAxisAngle(_k, 0.8 * b).applyQuaternion(_qc[1]), L[1])
-        .addScaledVector(_e.copy(e[2]).applyAxisAngle(_k, 1.8 * b).applyQuaternion(_qc[2]), L[2]);
-      return _c;
+    const F = hand.fingers[1], L = F.len, e = F.dir, base = F.rest[0].p;
+    const chain = b => {
+      _q1.setFromAxisAngle(F.axes[0], THUMB_MID * b);
+      _q2.setFromAxisAngle(F.axes[1], b).premultiply(_q1);
+      return _c.set(0, 0, 0).addScaledVector(e[0], L[0])
+        .addScaledVector(_e.copy(e[1]).applyQuaternion(_q1), L[1])
+        .addScaledVector(_e.copy(e[2]).applyQuaternion(_q2), L[2]);
     };
     _v.copy(target).sub(base);
-    const b = reachBend(_v.length(), -0.15, 1.2, x => reach(x).length());
-    reach(b);
+    const b = reachBend(_v.length(), THUMB_BEND[0], THUMB_BEND[1], x => chain(x).length());
+    chain(b);
     _q.setFromUnitVectors(_c.normalize(), _v.normalize());
     const turn = 2 * Math.acos(clamp(Math.abs(_q.w), 0, 1));
-    if (turn > 1.6) _q.copy(_qi.identity().slerp(_q, 1.6 / turn));
-    const bends = [0, 0.8 * b, 1.8 * b, 1.8 * b];
+    if (turn > THUMB_TURN) _q.copy(_qi.identity().slerp(_q, THUMB_TURN / turn));
+    _q1.premultiply(_q);
+    _q2.premultiply(_q);
+    const turns = [_q, _q1, _q2, _q2];
     _p.copy(base);
     for (let i = 0; i < 4; i++) {
-      _qa.setFromAxisAngle(_k, bends[i]);
-      F.bones[i].quaternion.copy(_q).multiply(_qc[i]).multiply(_qa).multiply(F.rest[i].q);
+      F.bones[i].quaternion.copy(turns[i]).multiply(F.rest[i].q);
       F.bones[i].position.copy(_p);
-      if (i < 3) _p.addScaledVector(_e.copy(e[i]).applyAxisAngle(_k, bends[i]).applyQuaternion(_qc[i]).applyQuaternion(_q), L[i]);
+      if (i < 3) _p.addScaledVector(_e.copy(e[i]).applyQuaternion(turns[i]), L[i]);
     }
   }
 
@@ -416,7 +498,8 @@ export async function create() {
   }
 
   // Draw the hands in list ({hand, alpha, tint, tips[1..5]: {x, y, press, on}}) onto ctx, in
-  // page pixels (speed: how fast the hand is moving along the keys, pixels a second); returns
+  // page pixels (speed: how fast the hand is moving along the keys, pixels a second; slow: how
+  // many times slower than at tempo it's moving; view.dt: ms since the last frame); returns
   // where to print each finger's number.
   function draw(ctx, view, list) {
     const {w, h, dpr} = view;
@@ -438,12 +521,14 @@ export async function create() {
     ground.position.set(w / 2, -keysLong, -0.9 * S);
     ground.scale.set(w * 3, h * 6, 1);
 
-    for (const hand of Object.values(hands)) {
+    for (const [name, hand] of Object.entries(hands)) {
       hand.root.visible = hand.arm.visible = false;
       for (const l of hand.glow) l.intensity = 0;
+      if (!list.some(i => i.hand === name)) hand.state.seen = false;
     }
     const labels = [];
     debug.misses = [];
+    debug.pose = [];
     // hands that meet ride one over the other (OVER_UP ...): from when their nearest fingertips
     // are a key and a half apart, fully once they're level
     const left = list.find(i => i.hand === 'left'), right = list.find(i => i.hand === 'right');

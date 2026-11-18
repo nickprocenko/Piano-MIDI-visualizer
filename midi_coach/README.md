@@ -153,24 +153,30 @@ slowly, then at speed). The last stage is the requirement itself. Each grade end
 **Review** (a mixed recheck of what you know, weakest first) and an **Exam** (the mock exam,
 below). Nothing is ever locked.
 
+The map shows one level at a time and never zooms. **Your route** and **Whole course** at the top
+right switch between its two starting views, and the breadcrumb beside them goes back up.
+
 | On the map | What it does |
 |------------|--------------|
-| Scroll / pinch | Zoom in and out. Each zoom level shows one level of the tree: grades, strands, families, requirements, then stages. Every node keeps its place, so zooming in reveals what was inside |
-| Drag | Move around |
-| Hover | Lights a node and its links and fades the rest |
-| Click | Opens a node in the panel on the right (its level, stages and lesson) and zooms in to it |
-| Search | *Search skills* at the top finds any node (*E flat major*, *echoes*) and zooms to it |
-| ⤢ Whole map (Home) | Zoom back out to the whole Roadmap |
-| ← Practice (Esc) | Back to the sheet |
+| Your route | The active goal's Path (or the route to a lesson you chose off it) as a road of stops, the next one pulsing under a pin, the goal's flag at the end. **▶ Play the next stop** starts it. The map opens here when you have a goal |
+| Whole course | Every grade as a medal along a road, its ring filling with your progress; the pin marks the grade you're in. Click one to open it |
+| A grade | A board with a lane per strand (Pieces, Scales, Reading, Aural, Theory, and a goal's bridges and drills), its families as badges top to bottom in the order they build on each other, then the grade's Review and mock exam. **‹ ›** go to the grade before or after |
+| Point at a family | Arrows show what it builds on and what builds on it in this grade; the rest fades |
+| Click a family | Its lessons slide out in a drawer, each with a bar of its exercises (one segment each, filled by progress). Click a lesson or an exercise to open it in the panel on the right |
+| Search | *Search skills* at the top finds any node (*E flat major*, *echoes*) and opens its grade and family |
+| Home | The whole course |
+| Esc | Closes the drawer, then goes back to the whole course, then Home |
 
-The map is drawn like a graph of notes: every node is a dot in its strand's colour, with its
-name underneath and no boxes. Busier families get bigger dots. Grades stack top to bottom and
-each strand keeps its column, and within a grade a family always sits below everything it
-builds on, so links run downward. At stage zoom a lesson's exercises hang below it on a stem.
-Review is a gold hexagon and Exam a gold shield. The fill shows how far along a node is.
-**Not started** is hollow. **Practiced** is half-filled: you've started on it. **Proficient**
-is solid: every graded step has passed since the last slip. **Mastered** adds a gold ring: every
-step passed again on a later day. Passing a later stage credits the earlier ones as Proficient.
+Each strand has its own icon (two notes for Pieces, steps for Scales, an eye for Sight-reading,
+an ear for Aural, a book for Theory), and each kind of node its own shape: a round medal for a
+grade, a rounded-square badge for a family, a card for a lesson, a bar segment for an exercise,
+a gold diamond for Review and for the exam. A ring round each icon fills with progress.
+**Not started** is an empty ring. **Practiced** starts it. **Proficient** fills the face with
+the strand's color: every graded step has passed since the last slip. **Mastered** turns the
+ring gold and adds a crown: every step passed again on a later day. Passing a later stage
+credits the earlier ones as Proficient. When you open the map after practicing, the rings you
+added to sweep up from where they were, and one that just filled bursts. Badges bob gently and
+notes drift behind the map; with Windows' *Show animations* off (reduced motion) it all stays still.
 A Mastered node is rechecked only when a Path needs it more than 30 days after its last pass,
 and a failed recheck takes it back to Proficient. The grey count after a grade, strand or family
 (*3/10*) is how many of its requirements are at Proficient or better. **★** marks its weakest part (the
@@ -329,10 +335,8 @@ while you have a lesson off it selected, the route to that lesson (everything it
 don't know yet, prerequisites first, marked *not saved*; *← goal* goes back). It lists the
 route's families in order with their rings. Each family holds its lessons (requirements), and
 each lesson opens and closes like a folder to show its exercises (stages); folders you close
-stay closed. Click a family or lesson to show it on the map and open it on the right. The
-route's dots are outlined on the map. The map shows a lesson among the rest of its family and
-doesn't zoom inside it; scroll in yourself to see its exercises as circles. Clicking a lesson
-on the map brings its route up here and opens its folder.
+stay closed. Click a family or lesson to show it on the map and open it on the right. The route's families and lessons are outlined on the map. Clicking a lesson on the map
+brings its route up here and opens its folder.
 Lessons are started only from the Route panel: click an exercise (**▶ Start**). It opens the
 lesson view, still under the Roadmap tab: the lesson's
 exercises down the left (its stages, each with its progress dot; click one to switch), the

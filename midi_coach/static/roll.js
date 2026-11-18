@@ -42,7 +42,7 @@ window.coachRoll = (() => {
   let spelling = SHARPS;
   // The cursor, moving the way the sheet's does: at bps from target, parking at until (Learn),
   // with a short ease from where it was drawn so a correction never jolts.
-  const cur = {target: 0, bps: 0, at: 0, until: null, ease: EASE_MS.learn, offset: 0, seen: false};
+  const cur = {target: 0, bps: 0, at: 0, until: null, ease: EASE_MS.learn, offset: 0, seen: false, speed: 1};
   let shown = false, raf = 0, width = 0, height = 0;
   let layout = null;  // where the last frame put the keys (for hands_render.py)
   let pan = 0, ppbShown = 0;  // beats dragged away from the cursor (as the sheet pans); pixels per beat drawn
@@ -136,12 +136,13 @@ window.coachRoll = (() => {
       pan = 0;  // the next cursor update snaps a dragged view back, as on the sheet
       cur.target = m.beat; cur.bps = m.bps || 0; cur.at = now;
       cur.until = typeof m.until === 'number' ? m.until : null;
+      cur.speed = m.speed > 0 ? m.speed : 1;  // the run's tempo, as a share of the piece's
       const steady = cur.bps > 0 && cur.until === null;  // Rehearse / Listen: moving at tempo
       cur.ease = steady ? EASE_MS.steady : EASE_MS.learn;
       cur.offset = drawn === null ? 0 : drawn - cursorBase(now);
       if (Math.abs(cur.offset) > (steady ? SNAP_BEATS.steady : SNAP_BEATS.learn)) cur.offset = 0;
     } else if (m.type === 'session' && !m.active) {
-      cur.target = cursorAt(now); cur.at = now; cur.bps = 0; cur.until = null; cur.offset = 0;
+      cur.target = cursorAt(now); cur.at = now; cur.bps = 0; cur.until = null; cur.offset = 0; cur.speed = 1;
     } else if (m.type === 'marks') {
       if (m.reset) notes.forEach(n => { n.mark = ''; });
       for (const k of m.marks || []) {
@@ -448,7 +449,12 @@ window.coachRoll = (() => {
   // ms: how long the hand takes to a new position, to open or close, and a finger to a key or
   // (slower) to where it rests. These are springs' times: a move starts gently, is quickest
   // halfway and settles, as an arm's does, rather than jumping off and creeping in.
-  const HAND_TIME = 110, SPREAD_TIME = 140, FINGER_TIME = [60, 170];
+  // The hand takes the time it has: a HAND_SHARE of the wait until its next note, from as quick
+  // as a leap at speed to an unhurried move (less unhurried while it holds a key it's leaving),
+  // so it doesn't dart to the next chord and then wait there. A finger late for its key
+  // (the same finger's last note only just over) hurries likewise, to be on the key as it plays.
+  const HAND_TIME = [90, 260], HAND_HELD = 150, HAND_SHARE = 0.25;
+  const SPREAD_TIME = 140, FINGER_TIME = [60, 170], FINGER_QUICK = 25;
   const AHEAD = 0.5;  // how much the notes coming count against the keys held, in placing the hand
   const HOLD_REACH = 1.2;  // white keys a finger holding a key lets the hand move on from under it
   const STRIKE_MS = 40, DOWN_MS = 110;  // a finger starts down this long before its note; and stays down at least this long
@@ -465,6 +471,14 @@ window.coachRoll = (() => {
   const SKIN = [240, 200, 170];
   const SWEEP_LEAD = 0.25, SWEEP_TAIL = 0.15;  // beats before a glissando the hand gets ready (flat, wrist up) at its first key; and eases out after
   const SWEEP_TIME = 45;  // ms: how closely the palm follows the slide
+  // Slow motion: a run slowed down (Learn / Rehearse / Listen below 100%) plays the hands'
+  // every move slowed down with it, up to SLOW_MAX times, so the times above are stretched by
+  // 1 / speed: the hand travels to the next chord, opens and turns, and each finger reaches and
+  // strikes, as at tempo, only slower, which is what a learner wants to watch. The lift and turn
+  // of a leap stay as big as at tempo (they go by how fast the hand would be moving at tempo),
+  // and grow up to ACCENT more at the slowest, to make the move easy to see.
+  const SLOW_MAX = 4, ACCENT = 0.4, SLOW_TAU = 400;  // ms SLOW_TAU: how gently a speed change takes effect
+  let slowMo = 1;
   let sweeps = {right: [], left: []};  // hand -> [{b0, b1, from, to}]: glissandos, first and last beat, first and last key
   let byFinger = {right: null, left: null};  // hand -> [finger] -> notes by beat
   const handState = {right: newHand(), left: newHand()};
@@ -473,10 +487,11 @@ window.coachRoll = (() => {
   const smooth = u => { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
 
   // on: how far each finger has gone to a key (0 = resting, 1 = over it or on it);
+  // to: where the anchor is heading, itself eased (see glideTo);
   // rest: how far the hand is into a rest (0 = playing, 1 = lifted off the keys)
   // va, vs, vx: how fast the anchor, the spread and each fingertip are moving (pixels a ms)
   function newHand() {
-    return {anchor: null, spread: null, rest: 0, glide: 0, va: 0, vs: 0, x: [0, 0, 0, 0, 0, 0], vx: [0, 0, 0, 0, 0, 0],
+    return {anchor: null, spread: null, to: null, vto: 0, rest: 0, glide: 0, va: 0, vs: 0, x: [0, 0, 0, 0, 0, 0], vx: [0, 0, 0, 0, 0, 0],
             y: [0, 0, 0, 0, 0, 0], press: [0, 0, 0, 0, 0, 0], on: [0, 0, 0, 0, 0, 0]};
   }
 
@@ -486,6 +501,14 @@ window.coachRoll = (() => {
     const w = 2 / time, x = w * dt, e = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
     const change = cur - target, temp = (vel + w * change) * dt;
     return [target + (change + temp) * e, (vel - w * temp) * e];
+  }
+
+  // A move that starts as gently as it ends, as an arm's does: cur follows a point that is
+  // itself sprung toward target, each over half the time. Returns [cur, vel, the point, its speed].
+  function glideTo(cur, vel, to, vto, target, time, dt) {
+    [to, vto] = spring(to, target, vto, time / 2, dt);
+    [cur, vel] = spring(cur, to, vel, time / 2, dt);
+    return [cur, vel, to, vto];
   }
 
   // The hand that best fits points {f, x, w}: x = anchor + dir·(f−1)·spread, by weighted least
@@ -562,7 +585,7 @@ window.coachRoll = (() => {
   function targets(hand, keys, at, ww) {
     // in beats: a finger goes down a moment before its note, to be at the bottom of the key as
     // it sounds, and stays down long enough to be seen, however short the note
-    const early = Math.max(0.02, Math.min(0.12, STRIKE_MS * beatRate)), down = Math.min(0.25, DOWN_MS * beatRate);
+    const early = Math.max(0.02, Math.min(0.12, STRIKE_MS * slowMo * beatRate)), down = Math.min(0.25, DOWN_MS * slowMo * beatRate);
     const out = [null];
     let lastEnd = -Infinity, nextStart = Infinity, sounding = false;
     for (let f = 1; f <= 5; f++) {
@@ -601,6 +624,7 @@ window.coachRoll = (() => {
     }
     const gap = sounding ? 0 : Math.min(at - lastEnd, nextStart - at);
     out.rest = smooth((gap - REST[0]) / (REST[1] - REST[0]));
+    out.wait = beatRate > 0 ? (nextStart - at) / beatRate : Infinity;  // ms to the hand's next note
     return out;
   }
 
@@ -653,12 +677,14 @@ window.coachRoll = (() => {
       }
       if (anchor === null) return false;
     }
-    const ease = tau => 1 - Math.exp(-dt / tau);
+    const ease = tau => 1 - Math.exp(-dt / (tau * slowMo));  // every time here slowed with the run
     const was = st.anchor;
-    if (st.anchor === null) { st.anchor = anchor; st.spread = spread; }
+    if (st.anchor === null) { st.anchor = st.to = anchor; st.spread = spread; }
     else {
-      [st.anchor, st.va] = spring(st.anchor, anchor, st.va, gliding ? SWEEP_TIME : HAND_TIME, dt);
-      [st.spread, st.vs] = spring(st.spread, spread, st.vs, SPREAD_TIME, dt);
+      const time = Math.max(HAND_TIME[0], Math.min(held.length ? HAND_HELD : HAND_TIME[1], tg.wait * HAND_SHARE / slowMo));
+      if (gliding) { [st.anchor, st.va] = spring(st.anchor, anchor, st.va, SWEEP_TIME * slowMo, dt); st.to = st.anchor; st.vto = st.va; }
+      else [st.anchor, st.va, st.to, st.vto] = glideTo(st.anchor, st.va, st.to, st.vto, anchor, time * slowMo, dt);
+      [st.spread, st.vs] = spring(st.spread, spread, st.vs, SPREAD_TIME * slowMo, dt);
     }
     st.rest += (tg.rest - st.rest) * ease(150);
     st.glide += ((gliding ? sw.glide : 0) - st.glide) * ease(60);
@@ -722,6 +748,7 @@ window.coachRoll = (() => {
         const most = Math.max(0, ...[1, 2, 3, 4, 5].map(past));
         for (let f = 1; f <= 5; f++) want[f] += dir * most;
         st.anchor += dir * most * ease(HAND_TAU);
+        st.to += dir * most * ease(HAND_TAU);
       } else {
         for (let f = 1; f <= 5; f++) if (!fixed(f) && past(f) > 0) want[f] = bound;
       }
@@ -733,12 +760,27 @@ window.coachRoll = (() => {
       // with the hand and settles into its place slowly, so the fingers don't fidget
       const busy = t ? Math.max(t.press, t.reach) : 0;
       if (was !== null) st.x[f] += (st.anchor - was) * (1 - busy);
-      [st.x[f], st.vx[f]] = spring(st.x[f], x, st.vx[f], FINGER_TIME[1] + (FINGER_TIME[0] - FINGER_TIME[1]) * busy, dt);
+      let time = (FINGER_TIME[1] + (FINGER_TIME[0] - FINGER_TIME[1]) * busy) * slowMo;
+      if (t && t.kind === 'next' && beatRate > 0) time = Math.max(FINGER_QUICK * slowMo, Math.min(time, (t.b - at) / beatRate * HAND_SHARE));
+      else if (t && t.press) time = Math.min(time, FINGER_QUICK * slowMo);
+      [st.x[f], st.vx[f]] = spring(st.x[f], x, st.vx[f], time, dt);
       st.y[f] += (y - st.y[f]) * ease(80);
       const press = t ? t.press : 0;
       st.press[f] += (press - st.press[f]) * ease(press > st.press[f] ? 22 : 70);  // down fast, up slower
       st.on[f] += ((t ? t.reach : 0) - st.on[f]) * ease(60);
     }
+    // Fingers 2 to 5 keep their order on the way, too: one hurrying to its key doesn't pass
+    // through a neighbour still settling (the one on a key stays, the other gives way)
+    const room = 0.45 * Math.min(ww, st.spread);
+    for (let f = 2; f <= 4; f++) {
+      const short = room - dir * (st.x[f + 1] - st.x[f]);
+      if (short <= 0 || (fixed(f) && fixed(f + 1))) continue;
+      const share = fixed(f) ? 0 : fixed(f + 1) ? 1 : 0.5;
+      st.x[f] -= dir * short * share;
+      st.x[f + 1] += dir * short * (1 - share);
+    }
+    // and a thumb with no key to go to stays out from under the index
+    if (!hit[1] && dir * (st.x[2] - st.x[1]) < 1.2 * ww) st.x[1] = st.x[2] - dir * 1.2 * ww;
     return true;
   }
 
@@ -764,6 +806,8 @@ window.coachRoll = (() => {
       beatRate += ((at - lastAt) / (now - lastFrame) - beatRate) * (beatRate ? 0.2 : 1);
     }
     lastFrame = now; lastAt = at;
+    const slowTo = Math.max(1, Math.min(SLOW_MAX, 1 / (cur.speed || 1)));
+    slowMo += (slowTo - slowMo) * (1 - Math.exp(-dt / SLOW_TAU));
     // The hands keep out of each other's way: the one less busy (fewer fingers on or going to
     // keys, last frame; a resting hand least) stays CLEAR white keys from the other's
     // fingertips (unless they've crossed, as in a crossing passage); hands as busy as each
@@ -790,13 +834,14 @@ window.coachRoll = (() => {
       for (const h of list) drawHand(h.hand, ww, floor, keyH, h.alpha);
       return;
     }
-    const view = {w: width, h: height, dpr: window.devicePixelRatio || 1, floor, keyH, ww, seatX: width / 2,
+    const view = {w: width, h: height, dpr: window.devicePixelRatio || 1, floor, keyH, ww, seatX: width / 2, dt,
                   whiteY: floor + keyH * TIP_WHITE, blackY: floor + keyH * TIP_BLACK};
     const labels = three.draw(ctx, view, list.map(({hand, alpha}) => {
       const st = handState[hand];
       const tips = [null];
       for (let f = 1; f <= 5; f++) tips.push({x: st.x[f], y: st.y[f], press: st.press[f], on: st.on[f]});
-      return {hand, alpha, tint: COLORS[hand] || OTHER, tips, rest: st.rest, glide: st.glide, speed: st.va * 1000};
+      return {hand, alpha, tint: COLORS[hand] || OTHER, tips, rest: st.rest, glide: st.glide, speed: st.va * 1000 * slowMo,
+              slow: slowMo, accent: 1 + ACCENT * (slowMo - 1) / (SLOW_MAX - 1)};
     }));
     // each finger's number on its first bone
     const size = Math.round(Math.max(9, Math.min(14, ww * 0.34)));
@@ -937,7 +982,8 @@ window.coachRoll = (() => {
       hands[hand] = {anchor: r(st.anchor), spread: r(st.spread), rest: r(st.rest), tips: [1, 2, 3, 4, 5].map(f =>
         ({f, x: r(st.x[f]), y: r(st.y[f]), press: r(st.press[f]), on: r(st.on[f])}))};
     }
-    return {beat, layout, hands, misses: hands3d && hands3d.debug ? hands3d.debug.misses : []};
+    const dbg = (hands3d && hands3d.debug) || {};
+    return {beat, layout, hands, misses: dbg.misses || [], pose: dbg.pose || []};
   }
   // The keyboard from lo to hi (MIDI pitches) instead of the piece's own range
   function keyRange(a, b) { lo = a; hi = b; rangeSet = true; }

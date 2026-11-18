@@ -1,18 +1,14 @@
-// The Atlas view and the step panel of the coach page (loaded after coach.html's script,
+// The Roadmap view and the step panel of the coach page (loaded after coach.html's script,
 // whose helpers - $, cmd, esc, store, statusEl, portSel - it uses).
 //
-// The tree comes from cmd('atlas') with a fixed position for every node (atlas/layout.py),
-// so this only draws: the zoom decides which level is shown (tier -> strand -> family ->
-// requirement -> stage), only what's in view is drawn, and edges are the bundles of that
-// level. Clicking zooms one level in, as far as a requirement (selected, not zoomed inside);
-// clicking a stage opens it in the side panel, and
-// "Practice" opens its lesson above the sheet music.
+// The tree comes from cmd('atlas'). The map shows one level at a time, with no zoom: your
+// route, the whole course, or one grade's board with a family's lessons in a drawer. Choosing
+// an exercise shows it in the side panel; "Practice" (or the Route panel) opens its lesson
+// above the sheet music.
 "use strict";
 
-const atlas = {data: null, byId: new Map(), kids: new Map(), states: {}, view: {x: 0, y: 0, s: 0.05},
-               level: 'tier', hover: null, selected: null, raf: 0, drag: null, pointer: null, loading: null};
-const LEVEL_AT = [[0.09, 'tier'], [0.2, 'strand'], [0.45, 'family'], [1.15, 'requirement'], [Infinity, 'stage']];
-const LEVEL_NAMES = {tier: 'Grades', strand: 'Strands', family: 'Families', requirement: 'Requirements', stage: 'Stages'};
+const atlas = {data: null, byId: new Map(), kids: new Map(), states: {}, stamp: 0, mode: null, tier: null, family: null,
+               selected: null, raf: 0, loading: null, viewEl: null, viewKey: '', origin: null, reveal: false};
 const RANKS = {not_started: 0, practised: 1, proficient: 2, mastered: 3};
 const STRAND_SHORT = {pieces: 'Pieces', technique: 'Scales', sight: 'Reading', aural: 'Aural', theory: 'Theory'};
 const STRAND_TINT = {pieces: '#d97757', technique: '#00b4b4', sight: '#7aa7ff', aural: '#c084fc', theory: '#e3b341'};
@@ -26,6 +22,7 @@ async function atlasLoad(force) {
     atlas.loading = cmd('atlas').then(data => {
       atlas.data = data;
       atlas.states = data.states || {};
+      atlas.stamp++;
       atlas.byId = new Map(data.nodes.map(n => [n.id, n]));
       atlas.kids = new Map();
       for (const n of data.nodes) if (n.parent) {
@@ -40,415 +37,531 @@ async function atlasLoad(force) {
 
 async function atlasRefreshStates() {
   if (!atlas.data) return;
-  try { atlas.states = (await cmd('atlas')).states || {}; atlasDraw(); } catch (err) {}
+  try { atlas.states = (await cmd('atlas')).states || {}; atlas.stamp++; atlasDraw(); } catch (err) {}
 }
 
 const stateOf = id => atlas.states[id] || {};
 const levelOf = id => stateOf(id).level || 'not_started';
 
-// -- view -----------------------------------------------------------------------------
+// -- views ----------------------------------------------------------------------------
+// The map shows one level at a time and never zooms: your route (the active goal's Path, or
+// the route to a lesson chosen off it) as a road of stops; the whole course as a road of grade
+// medals; or one grade as a board, a lane per strand of family badges, a family's lessons in a
+// drawer. Moving between them grows out of (or shrinks back into) what was clicked.
 
-function atlasLevel(s) { return LEVEL_AT.find(([max]) => s < max)[1]; }
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const GOLD = '#e3b341', NEUTRAL = '#c9d1d9';
 
-function atlasSize() { const r = $('atlas-svg').getBoundingClientRect(); return {w: r.width || 800, h: r.height || 600}; }
+// Strand and node glyphs on a 24-unit grid, stroked.
+const GLYPH = {
+  pieces: '<path d="M9 17V6l10-2v11"/><circle cx="7" cy="17" r="2.4"/><circle cx="17" cy="15" r="2.4"/>',
+  technique: '<path d="M3 19h4v-4h4v-4h4V7h4V3"/>',
+  sight: '<path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/>',
+  aural: '<path d="M7 9a5 5 0 0 1 10 0c0 3-3 3.5-3 6.5a2.5 2.5 0 0 1-5 0"/><path d="M10 9.5a2 2 0 0 1 4 0"/>',
+  theory: '<path d="M3 5.5c3-1.3 6-1.3 9 .5 3-1.8 6-1.8 9-.5V19c-3-1.3-6-1.3-9 .5-3-1.8-6-1.8-9-.5z"/><path d="M12 6v13.5"/>',
+  review: '<path d="M4 12a8 8 0 0 1 13.7-5.6L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15"/><path d="M4 20v-5h5"/>',
+  exam: '<path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9z"/>',
+  bridge: '<path d="M2 17h20"/><path d="M5 17v-3a7 7 0 0 1 14 0v3"/><path d="M9 17v-4.5M15 17v-4.5"/>',
+  goal: '<path d="M5 21V4"/><path d="M5 4h12l-2.5 4L17 12H5"/>',
+};
+const glyph = (k, size, color) => `<svg class="a-glyph" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="${color}" ` +
+  `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${GLYPH[k] || GLYPH.goal}</svg>`;
 
-const GUTTER = 120;  // screen px left of the tiers for their titles
+// A node's colour is its strand's; grades are neutral, Review, Exam and goal bridges gold.
+function tintOf(n) {
+  if (!n) return NEUTRAL;
+  if (n.level === 'review' || n.level === 'exam' || (n.temporary && !n.strand)) return GOLD;
+  return STRAND_TINT[n.strand || (n.id || '').split('.')[1]] || NEUTRAL;
+}
 
-function atlasFit(box, pad = 40) {
-  const {w, h} = atlasSize();
-  const s = Math.min((w - 2 * pad - GUTTER) / box[2], (h - 2 * pad) / box[3]);
-  atlas.view = {s, x: box[0] - GUTTER / s - (w / s - GUTTER / s - box[2]) / 2, y: box[1] - (h / s - box[3]) / 2};
+const reqsOf = id => (atlas.kids.get(id) || []).filter(k => k.level === 'requirement');
+const stagesOf = id => (atlas.kids.get(id) || []).filter(k => k.level === 'stage');
+const rankOf = id => RANKS[levelOf(id)] || 0;
+
+// How far along a node is, 0..1: a cluster's ring, a lesson's share of exercises proficient.
+function fracOf(n) {
+  if (!n) return 0;
+  if (['tier', 'strand', 'family'].includes(n.level)) return stateOf(n.id).ring || 0;
+  if (n.level === 'review' || n.level === 'exam' || n.level === 'stage') return rankOf(n.id) >= 2 ? 1 : rankOf(n.id) ? 0.4 : 0;
+  if (rankOf(n.id) >= 2) return 1;
+  const stages = stagesOf(n.id);
+  const done = stages.filter(s => rankOf(s.id) >= 2).length;
+  return stages.length ? Math.max(done / stages.length, rankOf(n.id) ? 0.12 : 0) : rankOf(n.id) ? 0.4 : 0;
+}
+
+// Gold once every lesson inside is mastered.
+function masteredOf(n) {
+  if (!n) return false;
+  if (n.level === 'requirement' || n.level === 'stage' || n.level === 'review' || n.level === 'exam') return levelOf(n.id) === 'mastered';
+  const reqs = n.level === 'family' ? reqsOf(n.id) : [];
+  return n.level === 'family' ? reqs.length > 0 && reqs.every(r => levelOf(r.id) === 'mastered') : (stateOf(n.id).ring || 0) >= 1;
+}
+
+// -- rings: a ring that grew since you last looked sweeps up from where it was ----------
+
+const seen = {map: null, key: '', timer: 0};
+function seenMap() {
+  const key = 'coach.atlasSeen.' + (document.body.dataset.instrument || 'piano');
+  if (seen.key !== key) {
+    seen.key = key;
+    try { seen.map = JSON.parse(localStorage.getItem(key)) || {}; } catch (err) { seen.map = {}; }
+  }
+  return seen.map;
+}
+function seenSave() {
+  clearTimeout(seen.timer);
+  seen.timer = setTimeout(() => { try { localStorage.setItem(seen.key, JSON.stringify(seen.map)); } catch (err) { /* private window */ } }, 400);
+}
+
+// An icon: a progress ring round a face (a rounded square for a family, a circle otherwise)
+// holding a glyph or a short label. kind: 'badge' | 'medal' | 'stop' | 'gate'.
+function iconHtml(id, f, tint, size, {kind = 'badge', glyphKey = null, label = '', mastered = false, next = false, dashed = false} = {}) {
+  const map = seenMap(), prev = map[id];
+  const from = prev != null && prev < f - 0.001 && !reduceMotion() ? prev : f;
+  const done = f >= 1;
+  const ringCol = mastered ? GOLD : tint;
+  const face = label
+    ? `<span class="a-label">${esc(label)}</span>`
+    : glyph(glyphKey, Math.round(size * 0.36), done ? 'var(--bg)' : tint);
+  return `<span class="a-ico a-${kind}${done ? ' a-done' : ''}${mastered ? ' a-mastered-ico' : ''}${next ? ' a-next' : ''}${dashed ? ' a-dashed' : ''}" ` +
+         `style="--tint:${tint};--ring:${ringCol};--size:${size}px">` +
+         (next ? '<span class="a-pulse"></span>' : '') +
+         `<svg class="a-ring" viewBox="0 0 40 40" aria-hidden="true"><circle class="a-ring-bg" cx="20" cy="20" r="18"/>` +
+         `<circle class="a-ring-fg" cx="20" cy="20" r="18" pathLength="100" data-ring="${esc(id)}" data-to="${f}" data-from="${from}" ` +
+         `style="stroke-dasharray:${(from * 100).toFixed(1)} 100"/></svg>` +
+         `<span class="a-face">${face}</span>` +
+         (mastered ? '<span class="a-crown" aria-hidden="true"></span><span class="a-glint" aria-hidden="true">✦</span>' : '') +
+         `</span>`;
+}
+
+// After a view is drawn: sweep the rings that grew, burst the ones that just filled, remember all.
+function ringsSweep(root) {
+  const map = seenMap();
+  const grew = [];
+  root.querySelectorAll('.a-ring-fg[data-ring]').forEach(c => {
+    const to = +c.dataset.to, from = +c.dataset.from;
+    map[c.dataset.ring] = to;
+    if (to > from) grew.push([c, from, to]);
+  });
+  seenSave();
+  if (!grew.length) return;
+  setTimeout(() => grew.forEach(([c, from, to], i) => {
+    c.style.transitionDelay = `${Math.min(i, 12) * 90}ms`;
+    c.style.strokeDasharray = `${(to * 100).toFixed(1)} 100`;
+    if (to >= 1 && from < 1) setTimeout(() => c.closest('.a-ico')?.classList.add('a-burst'), 1100 + Math.min(i, 12) * 90);
+  }), 350);
+}
+
+// -- state of the map ------------------------------------------------------------------
+
+const TIER_SHORT = t => { const m = /(\d+)/.exec(t.title); return m ? m[1] : t.title.split(/\s+/).filter(w => w.length > 2).map(w => w[0].toUpperCase()).join('').slice(0, 2); };
+const tiersSorted = () => [...atlas.data.tiers].sort((a, b) => a.order - b.order);
+
+function familyOf(n) {
+  while (n && n.level !== 'family' && n.parent) n = atlas.byId.get(n.parent);
+  return n && n.level === 'family' ? n : null;
+}
+
+// The route's stops in order (one per lesson), and the next one.
+function routeStops() {
+  const out = [];
+  for (const f of routeShown()) for (const r of f.requirements) out.push({...r, family: f.family, famTitle: f.title});
+  return out;
+}
+const nextStopId = () => (routeStops()[0] || {}).id || null;
+
+// Where the map is: atlas.mode 'route' | 'course' | 'grade', atlas.tier, atlas.family (drawer).
+function atlasGo(mode, tier = null, family = null) {
+  atlas.mode = mode;
+  if (mode === 'grade') atlas.tier = tier;
+  atlas.family = mode === 'grade' ? family : null;
   atlasDraw();
 }
 
-function atlasHome() {
-  const g = atlas.data.geometry;
-  atlasFit([0, 0, g.width, Math.min(g.height, g.width * 1.2)]);
-  atlas.home = atlas.view;
-}
+function atlasHome() { atlas.origin = null; atlasGo('course'); }
 
-// The Whole map button shows only when it would do something.
-function atlasAtHome() {
-  const v = atlas.view, h = atlas.home;
-  return !!h && Math.abs(v.s / h.s - 1) < 0.01 && Math.abs(v.x - h.x) * v.s < 2 && Math.abs(v.y - h.y) * v.s < 2;
-}
-
-function atlasZoomAt(px, py, factor) {
-  const v = atlas.view, s = Math.min(4, Math.max(0.02, v.s * factor));
-  const wx = v.x + px / v.s, wy = v.y + py / v.s;
-  atlas.view = {s, x: wx - px / s, y: wy - py / s};
-  atlasDraw();
-}
-
-// Zoom one level in onto a cluster, or select a node. A lesson (requirement) or exercise
-// (stage) is shown among its family, never zoomed inside: scroll in to see the exercises.
-function atlasActivate(id) {
+// Clicking a node shows it: on the route when it's there and the route is showing, else on
+// its grade's board, its family's drawer open; and it's selected for the side panel.
+function atlasActivate(id, from = null) {
   const n = atlas.byId.get(id);
   if (!n) return;
-  if (n.level === 'review' || n.level === 'exam') return atlasSelect(id);
-  if (n.level === 'requirement' || n.level === 'stage') {
-    atlasShowLesson(n.level === 'stage' ? n.parent : id);
-    return atlasSelect(id);
+  atlas.origin = from ? originOf(from) : null;
+  if (!(atlas.mode === 'route' && route.ids.has(id))) {
+    const fam = n.level === 'tier' || n.level === 'strand' || n.level === 'review' || n.level === 'exam' ? null : familyOf(n);
+    atlasGo('grade', n.tier || n.id.split('.')[0], fam && fam.id);
   }
-  atlasSelect(id);
-  atlasFit(n.box, 30);
+  atlas.reveal = true;
+  return atlasSelect(id);
 }
 
-// A lesson at requirement zoom, its family fitted when it can be; left where it is when it's
-// already in view at that zoom, or inside it where you scrolled in yourself.
-function atlasShowLesson(id) {
-  const n = atlas.byId.get(id), fam = n && atlas.byId.get(n.parent);
-  if (!n || !n.box) return;
-  const {w, h} = atlasSize(), v = atlas.view;
-  if ((atlas.level === 'requirement' || atlas.level === 'stage') && inView(n.box, v, w, h, -40)) return;
-  const box = (fam && fam.box) || n.box, pad = 30;
-  const s = Math.min(1.1, Math.max(0.5, Math.min((w - 2 * pad - GUTTER) / box[2], (h - 2 * pad) / box[3])));
-  const c = box[2] * s <= w - GUTTER && box[3] * s <= h ? box : n.box;  // too big a family: centre the lesson
-  atlas.view = {s, x: c[0] + c[2] / 2 - (w + GUTTER) / 2 / s, y: c[1] + c[3] / 2 - h / 2 / s};
-  atlasDraw();
+// The point (in the map's own pixels) a transition grows from.
+function originOf(el) {
+  const m = $('atlas-map').getBoundingClientRect(), r = el.getBoundingClientRect();
+  return [r.left + r.width / 2 - m.left, r.top + r.height / 2 - m.top];
 }
 
-// After a zoom or pan the node under a still mouse changes, so hover is re-read once drawn.
+function atlasSize() { const r = $('atlas-map').getBoundingClientRect(); return {w: r.width || 800, h: r.height || 600}; }
+
 function atlasDraw() {
   if (atlas.raf) return;
-  atlas.raf = requestAnimationFrame(() => {
-    atlas.raf = 0;
-    atlasRender();
-    const p = atlas.pointer;
-    if (p && !atlas.drag) {
-      const id = atlasHit(p.x, p.y);
-      if (id !== atlas.hover) { atlas.hover = id; atlasRender(); }
-    }
-  });
-}
-
-// The clickable node at a screen point. Labels lie over their shapes, so this looks
-// through them, but not through anything covering the map (search results, panels).
-function atlasHit(x, y) {
-  const els = document.elementsFromPoint(x, y);
-  if (!els.length || !$('atlas-svg').contains(els[0])) return null;
-  const hit = els.find(el => el.classList && el.classList.contains('a-click'));
-  return hit ? hit.dataset.id : null;
-}
-
-function atlasSetHover(id) {
-  if (id !== atlas.hover) { atlas.hover = id; atlasDraw(); }
-}
-
-// -- drawing --------------------------------------------------------------------------
-
-const GOLD = '#e3b341', NEUTRAL = '#c9d1d9', BG = '#0a0c12';
-const DEPTHS = ['tier', 'strand', 'family', 'requirement', 'stage'];
-
-// A node's colour is its strand's; grades are neutral, Review and Exam gold.
-function tintOf(n) {
-  if (n.level === 'review' || n.level === 'exam') return GOLD;
-  return STRAND_TINT[n.strand || n.id.split('.')[1]] || NEUTRAL;
-}
-
-// Progress is how filled-in a dot is: hollow, half (practiced), solid (proficient, mastered).
-function fillFor(id, tint) {
-  const lv = levelOf(id);
-  return lv === 'not_started' ? BG : lv === 'practised' ? `color-mix(in srgb, ${tint} 40%, ${BG})` : tint;
-}
-
-// Busier nodes get bigger dots: a radius in screen px from min (nothing inside) to max (36+).
-const dotPx = (count, min, max) => Math.min(max, min + Math.sqrt(count || 0) * (max - min) / 6);
-
-// Where a node's dot sits at this zoom, as [cx, cy, r] in world units. A family's dot heads
-// its area, leaving the rest for its name underneath.
-function dotOf(n, depth, s) {
-  const [x, y, bw, bh = bw] = n.box, st = stateOf(n.id);
-  switch (n.level) {
-    case 'tier': return [atlas.data.geometry.content_width / 2, y + bh / 2, 16 / s];
-    case 'strand': return [x + bw / 2, y + bh / 2, dotPx(st.total, 7, 16) / s];
-    case 'family': { const r = Math.min(dotPx(st.total, 5, 12) / s, bh * 0.22); return [x + bw / 2, y + r + 4 / s, r]; }
-    case 'requirement': return depth === 3 ? [x + bw / 2, y + 12, 10] : [x + bw / 2, y + 9, 7];
-    case 'stage': return [x + bw / 2, y + bh / 2, bw * 0.375];
-    default: return [x + bw / 2, y + bh / 2, bh / 2];
-  }
-}
-
-// The box an edge joins: a dot's square, or a Review or Exam shape.
-function edgeBox(n, depth, s) {
-  if (n.level === 'review' || n.level === 'exam') return n.box;
-  const [cx, cy, r] = dotOf(n, depth, s);
-  return [cx - r, cy - r, 2 * r, 2 * r];
-}
-
-function dotEl(n, [cx, cy, r], cls = '') {
-  const tint = tintOf(n), lv = levelOf(n.id);
-  return `<circle class="a-node${cls}${lv === 'mastered' ? ' a-gold' : ''}${n.temporary ? ' a-temp' : ''}${route.ids.has(n.id) ? ' a-onroute' : ''}" data-id="${n.id}" cx="${cx}" cy="${cy}" r="${r}" ` +
-         `style="stroke:${tint};fill:${fillFor(n.id, tint)}"><title>${esc(n.title)} · ${lv.replace('_', ' ').replace('practised', 'practiced')}</title></circle>`;
-}
-
-// An invisible target for hover and clicks around a dot and its name.
-const hitRect = (id, x, y, w, h) => `<rect class="a-hit a-click" data-id="${id}" x="${x}" y="${y}" width="${w}" height="${h}"/>`;
-
-function inView(box, v, w, h, margin = 200) {
-  const x0 = v.x - margin / v.s, y0 = v.y - margin / v.s, x1 = v.x + (w + margin) / v.s, y1 = v.y + (h + margin) / v.s;
-  return box[0] < x1 && box[0] + box[2] > x0 && box[1] < y1 && box[1] + box[3] > y0;
-}
-
-function label(x, y, text, px, s, opts = '') {
-  return `<text x="${x}" y="${y}" font-size="${(px / s).toFixed(2)}" ${opts}>${esc(text)}</text>`;
-}
-
-// A label no wider than `width` (world units): shrinks from maxPx, hidden below minPx.
-function fitLabel(x, y, text, maxPx, width, s, opts = '', minPx = 8) {
-  const px = Math.min(maxPx, (width * s) / (Math.max(text.length, 1) * 0.56));
-  return px < minPx ? '' : label(x, y, text, px, s, opts);
-}
-
-// One line that shrinks to fit `width` rather than being cut short, down to minPx.
-function shrinkLabel(x, y, text, maxPx, width, s, opts = '', minPx = 8) {
-  return label(x, y, text, Math.max(minPx, Math.min(maxPx, (width * s) / (Math.max(text.length, 1) * 0.56))), s, opts);
-}
-
-// Words in lines of at most `chars` characters; a longer word keeps a line to itself.
-function wrapWords(text, chars) {
-  const lines = [];
-  for (const word of text.split(/\s+/).filter(Boolean)) {
-    const last = lines.length - 1;
-    if (last >= 0 && lines[last].length + 1 + word.length <= chars) lines[last] += ' ' + word;
-    else lines.push(word);
-  }
-  return lines;
-}
-
-// A name centred under its dot, from its top at y: wrapped to fit `width` (world units) and
-// shrunk from maxPx towards minPx to keep it to two lines within `room` (screen px high),
-// never cut short. A trailing count ('3/10') is muted. Returns [svg, height, width] (world units).
-function nameLabel(cx, y, text, count, maxPx, width, s, opts = '', minPx = 9, room = Infinity) {
-  const full = count ? `${text} ${count}` : text;
-  let px = maxPx, lines;
-  for (;;) {
-    lines = wrapWords(full, Math.max(6, Math.floor((width * s) / (px * 0.56))));
-    if ((lines.length <= 2 && lines.length * px * 1.2 <= room) || px <= minPx) break;
-    px -= 0.5;
-  }
-  const lh = px * 1.2 / s;
-  const spans = lines.map((line, i) => {
-    const body = count && i === lines.length - 1 && line.endsWith(count)
-      ? esc(line.slice(0, -count.length)) + `<tspan class="a-muted">${esc(count)}</tspan>` : esc(line);
-    return `<tspan x="${cx}" dy="${i ? lh : 0}">${body}</tspan>`;
-  }).join('');
-  return [`<text x="${cx}" y="${y + px / s}" font-size="${(px / s).toFixed(2)}" text-anchor="middle" ${opts}>${spans}</text>`,
-          lines.length * lh, Math.max(...lines.map(l => l.length)) * 0.56 * px / s];
+  atlas.raf = requestAnimationFrame(() => { atlas.raf = 0; atlasRender(); });
 }
 
 function isWeakest(n) {
   const p = n.parent && atlas.states[n.parent];
-  return p && p.weakest === n.id && (p.ring ?? 1) < 1;
+  return p && p.weakest === n.id && (p.ring || 0) > 0 && p.ring < 1;  // only once something there has started
 }
 
-// Drawn like a graph of notes: dots coloured by strand, filled by progress, named underneath,
-// with no boxes. Hovering a dot lights it and its links and fades the rest.
+// -- drawing ---------------------------------------------------------------------------
+
+const DEPTH = {route: 0, course: 0, grade: 1};
+
 function atlasRender() {
-  const data = atlas.data;
-  if (!data) return;
-  const v = atlas.view, s = v.s, {w, h} = atlasSize(), geo = data.geometry;
-  const level = atlas.level = atlasLevel(s);
-  $('atlas-level').textContent = `${LEVEL_NAMES[level]} · ${Math.round(s * 100)}%`;
-  $('atlas-home').hidden = atlasAtHome();
-  const world = $('atlas-world');
-  world.setAttribute('transform', `scale(${s}) translate(${-v.x} ${-v.y})`);
-  world.style.setProperty('--halo', `${(3 / s).toFixed(2)}px`);
-  const depth = DEPTHS.indexOf(level);
-  const out = [];
-  const visible = data.nodes.filter(n => n.box && inView(n.box, v, w, h));
-  const focus = atlas.hover || atlas.selected;
-  const hov = atlas.hover && atlas.byId.get(atlas.hover);
-  const lit = new Set();
-  if (hov && hov.level !== 'tier') {
-    lit.add(hov.id).add(hov.parent);
-    for (const [a, b] of data.bundles[level] || []) {
-      if (a === hov.id) lit.add(b);
-      if (b === hov.id) lit.add(a);
-    }
+  if (!atlas.data) return;
+  if (!atlas.mode) atlas.mode = 'course';
+  if (atlas.mode === 'route' && !routeShown().length && !(path.state && path.state.goal)) atlas.mode = 'course';
+  if (atlas.mode === 'grade' && !atlas.byId.has(atlas.tier)) atlas.mode = 'course';
+  crumbsRender();
+  const name = atlas.mode + (atlas.mode === 'grade' ? ':' + atlas.tier : '');
+  const {w} = atlasSize();
+  const key = `${name}|${atlas.stamp}|${[...route.ids].join(',')}|${atlas.mode === 'grade' ? '' : Math.round(w / 40)}`;
+  const stage = $('atlas-stage');
+  let el = atlas.viewEl && atlas.viewEl.isConnected ? atlas.viewEl : null;
+  if (!el || atlas.viewKey !== key) {
+    const same = el && el.dataset.view === name;
+    const fresh = same ? el : document.createElement('div');
+    const top = same ? el.scrollTop : 0;
+    fresh.className = `av av-${atlas.mode}`;
+    fresh.dataset.view = name;
+    fresh.dataset.hov = '';
+    fresh.innerHTML = atlas.mode === 'route' ? routeHtml(w) : atlas.mode === 'course' ? courseHtml(w) : boardHtml(atlas.tier);
+    if (!same) {
+      const deeper = el ? DEPTH[atlas.mode] - DEPTH[(el.dataset.view || '').split(':')[0]] : 0;
+      viewSwap(stage, el, fresh, deeper);
+    } else fresh.scrollTop = top;
+    wireView(fresh);
+    ringsSweep(fresh);
+    atlas.viewEl = fresh;
+    atlas.viewKey = key;
   }
-  world.classList.toggle('a-fade', lit.size > 0);
-  const group = (id, body) => `<g class="a-g${lit.has(id) ? ' a-lit' : ''}">${body}</g>`;
+  drawerRender();
+  markSelection();
+}
 
-  // Grades: a faint line between them, the title and count in the margin; a dot each when
-  // zoomed right out. Sized to the grade's height on screen, so titles never collide.
-  for (const n of visible.filter(n => n.level === 'tier')) {
-    const [x, y, bw, bh] = n.box, st = stateOf(n.id), room = bh * s;
-    if (depth === 0) out.push(hitRect(n.id, x, y, bw, bh));
-    if (y > 0) out.push(`<line class="a-divider" x1="0" y1="${y - 30}" x2="${geo.width}" y2="${y - 30}"/>`);  // mid-gap (layout.TIER_GAP)
-    const tx = x - 14 / s, px = Math.min(depth === 0 ? 22 : 16, room - 8);  // in the gutter left of the grade
-    if (px >= 9) out.push(shrinkLabel(tx, y + (px + 4) / s, n.title, px, (GUTTER - 24) / s, s, 'text-anchor="end" class="a-tier-title"', 9));
-    if (st.total && room >= px + 30) out.push(label(tx, y + (px + 24) / s, `${st.done}/${st.total}`, 12, s, 'text-anchor="end" class="a-muted"'));
-    if (depth === 0) out.push(group(n.id, dotEl(n, dotOf(n, depth, s))));
-  }
-  // Strands: a dot per grade at strand level; below it, just the name in its colour atop the
-  // column. Every heading gets the size the tightest one allows, rather than each its own.
-  const strands = visible.filter(n => n.level === 'strand' && depth >= 1);
-  if (depth === 1) {
-    for (const n of strands) {
-      const [x, y, bw, bh] = n.box, st = stateOf(n.id), d = dotOf(n, depth, s);
-      const full = n.title.split(' · ')[1] || n.title;
-      const name = (isWeakest(n) ? '★ ' : '') + (full.length * 0.56 * 12 <= (bw - 16 / s) * s ? full : STRAND_SHORT[n.strand]);
-      const [text] = nameLabel(d[0], d[1] + d[2] + 4 / s, name, st.total ? `${st.done}/${st.total}` : '', 15, bw - 16 / s, s,
-                               `class="a-strand-title" style="fill:${tintOf(n)}"`);
-      out.push(hitRect(n.id, x, y, bw, bh), group(n.id, dotEl(n, d) + text));
-    }
-  } else if (depth >= 2) {
-    const heads = strands.map(n => ({n, full: n.title.split(' · ')[1] || n.title, short: STRAND_SHORT[n.strand], room: n.box[2] - 8 / s}));
-    const fit = key => Math.min(13, ...heads.map(h => (h.room * s) / (Math.max(h[key].length, 1) * 0.58)));
-    const key = fit('full') >= 10 ? 'full' : fit('short') >= 7 ? 'short' : null;
-    if (key) for (const {n, ...h} of heads) out.push(label(n.box[0] + 4 / s, n.box[1] - 6 / s, h[key], fit(key), s, `class="a-strand-title" style="fill:${tintOf(n)}"`));
-  }
-  // Families: a dot sized by its lessons, the name and count under it; below family level
-  // just the name in the strand's colour over its lessons.
-  for (const n of visible.filter(n => n.level === 'family' && depth >= 2)) {
-    const [x, y, bw, bh] = n.box, st = stateOf(n.id), count = st.total ? `${st.done}/${st.total}` : '';
-    if (depth === 2) {
-      const d = dotOf(n, depth, s), [cx, cy, r] = d;
-      const name = (isWeakest(n) ? '★ ' : '') + n.title + (st.total ? '' : ' (none yet)');
-      const room = (y + bh + 14 - (cy + r)) * s - 5;  // down to the next family (layout.FAM_GAP)
-      const [text, th, tw] = nameLabel(cx, cy + r + 3 / s, name, count, 12, bw - 4 / s, s, 'class="a-name"', 9, room);
-      const hw = Math.max(2 * r, tw) / 2 + 6 / s;
-      out.push(hitRect(n.id, cx - hw, cy - r - 4 / s, 2 * hw, 2 * r + th + 12 / s), group(n.id, dotEl(n, d) + text));
-    } else {
-      out.push(shrinkLabel(x + 8 / s, y + 16 / s, n.title + (count ? ` · ${count}` : ''), 12, bw - 16 / s, s,
-                           `class="a-family-title" style="fill:${tintOf(n)}"`));
-    }
-  }
-  // Requirements: a dot with the name under it; at stage zoom a small dot heading a stem
-  // that its stages hang from.
-  for (const n of visible.filter(n => n.level === 'requirement' && depth >= 3)) {
-    const [x, y, bw, bh] = n.box, d = dotOf(n, depth, s), [cx, cy, r] = d;
-    if (depth === 3) {
-      const px = Math.min(11, bw * s / 7), ty = cy + r + 3;
-      const title = px < 6.5 ? '' : `<foreignObject x="${x}" y="${ty}" width="${bw}" height="${Math.max(bh - (ty - y), 20)}"><div class="a-req-title" style="font-size:${(px / s).toFixed(2)}px;overflow:visible">${isWeakest(n) ? '★ ' : ''}${esc(n.title)}</div></foreignObject>`;
-      out.push(hitRect(n.id, x, y, bw, bh), group(n.id, dotEl(n, d) + title));
-    } else {
-      const last = atlas.byId.get((n.stages || []).at(-1));
-      const stem = last && last.box ? `<line class="a-stem" x1="${cx}" y1="${cy + r}" x2="${cx}" y2="${last.box[1] + last.box[3] / 2}" style="stroke:${tintOf(n)}"/>` : '';
-      const ty = cy + r + 1;
-      out.push(group(n.id, stem + dotEl(n, d) + `<foreignObject x="${x + 2}" y="${ty}" width="${bw - 4}" height="${Math.max(y + 34 - ty, 12)}"><div class="a-req-title" style="font-size:${Math.min(5.2, 11 / s).toFixed(2)}px">${esc(n.title)}</div></foreignObject>`));
-    }
-  }
-  // Stages: small dots down their requirement's stem.
-  if (depth === 4) {
-    for (const n of visible.filter(n => n.level === 'stage')) {
-      const d = dotOf(n, depth, s), [cx, cy, r] = d;
-      let body = dotEl(n, d, ` a-click a-stage${n.final ? ' a-final' : ''}`);
-      if (s > 2.2) body += label(cx + r + 4, cy + 3, n.title, 9, s, 'class="a-muted"');
-      if (n.writing && s > 1) body += label(cx + r + 4, cy + 3 + 11 / s, 'writing…', 9, s, 'class="a-writing"');
-      out.push(group(n.id, body));
-    }
-  }
-  // Review (hexagon) and Exam (shield) at the foot of each grade: gold outlines, filled by progress.
-  for (const n of visible.filter(n => (n.level === 'review' || n.level === 'exam') && depth >= 1)) {
-    const [x, y, bw, bh] = n.box, lv = levelOf(n.id), cls = `a-${n.level} a-click${lv === 'mastered' ? ' a-gold' : ''}`;
-    const solid = lv === 'proficient' || lv === 'mastered';
-    const tag = n.level === 'review' ? 'polygon' : 'path';
-    const shape = n.level === 'review'
-      ? `<polygon class="${cls}" data-id="${n.id}" points="${x + 14},${y} ${x + bw - 14},${y} ${x + bw},${y + bh / 2} ${x + bw - 14},${y + bh} ${x + 14},${y + bh} ${x},${y + bh / 2}" style="fill:${fillFor(n.id, GOLD)}">`
-      : `<path class="${cls}" data-id="${n.id}" d="M${x} ${y} H${x + bw} V${y + bh * 0.55} Q${x + bw} ${y + bh} ${x + bw / 2} ${y + bh} Q${x} ${y + bh} ${x} ${y + bh * 0.55} Z" style="fill:${fillFor(n.id, GOLD)}">`;
-    let body = `${shape}<title>${esc(n.title)}</title></${tag}>` +
-               fitLabel(x + bw / 2, y + bh / 2 + 4 / s, n.title, 13, bw * 0.86, s, `text-anchor="middle" class="a-gate-title${solid ? ' a-on-solid' : ''}"`, 7);
-    const best = stateOf(n.id).best;
-    if (best && depth >= 2) body += label(x + bw / 2, y + bh + 16 / s, `best ${best}/150`, 11, s, 'text-anchor="middle" class="a-muted"');
-    out.push(group(n.id, body));
-  }
+// The old view grows past you (going in) or shrinks away (going out) while the new one comes
+// from the clicked point; sideways (route <-> course) it slides.
+function viewSwap(stage, old, fresh, deeper) {
+  stage.append(fresh);
+  if (!old) return;
+  if (reduceMotion()) { old.remove(); return; }
+  const {w, h} = atlasSize(), [ox, oy] = atlas.origin || [w / 2, h / 3];
+  const how = deeper > 0 ? 'in' : deeper < 0 ? 'out' : 'side';
+  old.style.transformOrigin = `${ox}px ${oy + old.scrollTop}px`;
+  fresh.style.transformOrigin = `${ox}px ${oy}px`;
+  fresh.classList.add(`av-enter-${how}`);
+  old.classList.add(`av-leave-${how}`);
+  old.style.pointerEvents = 'none';
+  requestAnimationFrame(() => requestAnimationFrame(() => fresh.classList.remove(`av-enter-${how}`)));
+  setTimeout(() => old.remove(), 520);
+  atlas.origin = null;
+}
 
-  // Edges: the bundles of this level whose ends are near the view, dot to dot; at grade level
-  // a plain line down the grades. A link that skips a grade or a column would cut through the
-  // one between, so it is drawn only while one of its ends is hovered or selected; so are links
-  // between neighbouring columns at strand level, where the columns touch. Lit links take the
-  // colour of what's hovered or selected.
-  const edges = [];
-  const tierIndex = id => data.tiers.findIndex(t => t.id === id.split('.')[0]);
-  const colIndex = id => data.geometry.columns.findIndex(c => c.strand === id.split('.')[1]);
-  const hotTint = focus && atlas.byId.get(focus) ? tintOf(atlas.byId.get(focus)) : 'var(--accent)';
-  if (depth === 0) {
-    const tiers = data.nodes.filter(n => n.level === 'tier' && n.box).sort((a, b) => a.box[1] - b.box[1]);
-    for (let i = 1; i < tiers.length; i++) {
-      const [x1, y1, r1] = dotOf(tiers[i - 1], 0, s), [x2, y2, r2] = dotOf(tiers[i], 0, s);
-      edges.push(`<path class="a-edge" d="M${x1} ${y1 + r1} L${x2} ${y2 - r2}" stroke-width="${(1.5 / s).toFixed(2)}"/>`);
+// Clicks inside a view: a node (data-go) is shown or opened, an action (data-act) done.
+function wireView(el) {
+  el.onclick = e => {
+    const t = e.target.closest('[data-go],[data-act]');
+    if (!t || !el.contains(t)) return;
+    e.preventDefault();
+    if (t.dataset.act) return viewAction(t.dataset.act, t);
+    const n = atlas.byId.get(t.dataset.go);
+    if (!n) return;
+    if (n.level === 'tier') { atlas.origin = originOf(t); atlasGo('grade', n.id); return atlasSelect(n.id); }
+    if (n.level === 'family' && atlas.mode === 'grade') { atlasGo('grade', atlas.tier, n.id); return atlasSelect(n.id); }
+    atlasActivate(n.id, t);
+  };
+  // Links follow the pointer (or focus) over the view as a whole, so a rebuild under a still
+  // pointer, or leaving into the drawer, never leaves the board dimmed.
+  const hover = id => { if ((id || '') !== el.dataset.hov) { el.dataset.hov = id || ''; linksShow(el, id); } };
+  el.onpointerover = e => { const t = e.target.closest('[data-links]'); hover(t && el.contains(t) ? t.dataset.go : null); };
+  el.onpointerleave = () => hover(null);
+  el.onfocusin = e => { const t = e.target.closest('[data-links]'); hover(t ? t.dataset.go : null); };
+  el.onfocusout = () => hover(null);
+}
+
+function viewAction(act, t) {
+  if (act === 'route') { atlas.origin = null; atlasGo('route'); }
+  else if (act === 'course') atlasHome();
+  else if (act === 'next') pathNext();
+  else if (act === 'planner') pathShow();
+  else if (act === 'place') atlasPlaceForm();
+  else if (act === 'start') stepOpen(t.dataset.stage);
+  else if (act === 'tier') { const id = t.dataset.tier; atlasGo('grade', id); atlasSelect(id); }
+}
+
+// Breadcrumbs in the top bar: Your route | Whole course › Grade 2 › Scales, hands together.
+function crumbsRender() {
+  const box = $('atlas-level');
+  const hasRoute = routeShown().length || (path.state && path.state.goal);
+  const tier = atlas.mode === 'grade' && atlas.byId.get(atlas.tier), fam = atlas.family && atlas.byId.get(atlas.family);
+  let html = `<span class="a-switch"><button data-crumb="route"${atlas.mode === 'route' ? ' class="on"' : ''}${hasRoute ? '' : ' disabled title="Set a goal in the Planner to get a route"'}>Your route</button>` +
+             `<button data-crumb="course"${atlas.mode !== 'route' ? ' class="on"' : ''} title="Every grade (Home)">Whole course</button></span>`;
+  if (tier) html += `<span class="a-sep">›</span><button data-crumb="tier"${fam ? '' : ' class="here"'}>${esc(tier.title)}</button>`;
+  if (fam) html += `<span class="a-sep">›</span><button class="here" data-crumb="fam">${esc(fam.title)}</button>`;
+  box.innerHTML = html;
+  box.querySelectorAll('[data-crumb]').forEach(b => b.onclick = () => {
+    const c = b.dataset.crumb;
+    if (c === 'route') atlasGo('route');
+    else if (c === 'course') atlasHome();
+    else if (c === 'tier') { atlasGo('grade', atlas.tier); atlasSelect(atlas.tier); }
+  });
+}
+
+// Esc: close the drawer, then out to the whole course, then Home.
+function atlasBack() {
+  if (atlas.family) { atlasGo('grade', atlas.tier); return true; }
+  if (atlas.mode === 'grade') { atlasHome(); return true; }
+  return false;
+}
+
+// Selected things get a ring; on a new selection it's scrolled into view.
+function markSelection() {
+  const sel = atlas.selected, n = sel && atlas.byId.get(sel);
+  const ids = new Set(sel ? [sel] : []);
+  if (n && n.level === 'stage') ids.add(n.parent);
+  let first = null;
+  document.querySelectorAll('#atlas-map [data-go]').forEach(el => {
+    const on = ids.has(el.dataset.go) || (atlas.mode === 'route' && n && n.level === 'family' && el.dataset.family === sel);
+    el.classList.toggle('a-sel', on);
+    if (on && !first && !el.closest('.av-leave-in,.av-leave-out,.av-leave-side')) first = el;
+  });
+  if (atlas.reveal && first) first.scrollIntoView({block: 'nearest', inline: 'nearest', behavior: reduceMotion() ? 'auto' : 'smooth'});
+  atlas.reveal = false;
+}
+
+// A road through points, row by row, turning round at the ends (a serpentine).
+function roadPath(pts, w, turn = 60) {
+  let d = `M${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+    if (Math.abs(y0 - y1) < 1) d += ` L${x1} ${y1}`;
+    else { const side = x0 > w / 2 ? 1 : -1, bx = x0 + side * turn; d += ` C${bx} ${y0} ${bx} ${y1} ${x1} ${y1}`; }
+  }
+  return d;
+}
+
+// Points for n items in rows that snake left-right-left, across width w.
+function snake(n, w, {pad = 90, gap = 170, rowH = 170, top = 120} = {}) {
+  const per = Math.max(2, Math.min(7, Math.floor((w - 2 * pad) / gap) + 1));
+  const dx = per > 1 ? (w - 2 * pad) / (per - 1) : 0;
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / per), c = i % per;
+    pts.push([pad + (r % 2 ? per - 1 - c : c) * dx, top + r * rowH]);
+  }
+  return {pts, height: top + Math.ceil(n / per) * rowH};
+}
+
+// A floating "you are here" pin over a point.
+const pinHtml = (x, y) => `<span class="a-pin" style="left:${x}px;top:${y}px" aria-hidden="true"></span>`;
+
+// Your route: the stops still to do, the goal at the end of the road.
+function routeHtml(w) {
+  const st = path.state || {}, stops = routeStops();
+  const preview = route.preview;
+  const title = preview ? preview.title : st.goal ? st.goal.title : '';
+  if (!stops.length && !title) {
+    return `<div class="ar-empty"><span class="a-big-glyph">${glyph('goal', 48, 'var(--accent)')}</span><h2>No route yet</h2>` +
+           `<p>Set a goal in the Planner and its lessons line up here as a road, the next one first.</p>` +
+           `<p><button data-act="planner">Set a goal</button> <button data-act="place">Find where I start</button> <button data-act="course">See the whole course</button></p></div>`;
+  }
+  const next = stops[0];
+  const firstLesson = next && (next.stages || []).find(sg => sg.lesson);
+  const play = !preview && st.goal ? '<button class="a-play" data-act="next">▶ Play the next stop</button>'
+    : firstLesson ? `<button class="a-play" data-act="start" data-stage="${esc(firstLesson.id)}">▶ Start the first stop</button>` : '';
+  let html = `<div class="av-head"><div><div class="av-eyebrow">${preview ? 'Route to a lesson · not saved' : 'Your route'}</div><h2>${esc(title)}</h2>` +
+             `<p class="a-muted">${stops.length ? `${stops.length} lesson${stops.length === 1 ? '' : 's'} to go` : 'Everything on this route is done.'}</p></div>` +
+             `<div class="av-actions">${play}</div></div>`;
+  const all = stops.concat([{id: '__goal', title, goal: true}]);
+  const {pts, height} = snake(all.length, w, {top: 150});
+  html += `<div class="ar-road" style="height:${height}px">`;
+  html += `<svg class="ar-svg" width="${w}" height="${height}" aria-hidden="true"><path class="ar-bed" d="${roadPath(pts, w)}"/>` +
+          `<path class="ar-lane" d="${roadPath(pts, w)}"/></svg>`;
+  all.forEach((s, i) => {
+    const [x, y] = pts[i];
+    if (s.goal) {
+      html += `<div class="ar-stop ar-goal" style="left:${x - 75}px;top:${y - 34}px">` +
+              iconHtml('goal:' + title, 0, GOLD, 72, {kind: 'medal', glyphKey: 'goal'}) +
+              `<span class="ar-title">${esc(title)}</span><span class="ar-cap">Goal</span></div>`;
+      return;
     }
+    const n = atlas.byId.get(s.id) || {id: s.id, level: 'requirement'};
+    const tint = s.temporary ? GOLD : tintOf(atlas.byId.get(s.family) || n);
+    const strand = (atlas.byId.get(s.family) || n).strand || 'goal';
+    const f = (s.stages || []).length ? (s.stages.filter(sg => RANKS[sg.level] >= 2).length / s.stages.length) : fracOf(n);
+    const isNext = i === 0;
+    const cap = s.temporary ? (s.kind === 'drill' || s.kind === 'song' ? s.kind : 'bridge') : s.famTitle;
+    html += `<button class="ar-stop${isNext ? ' ar-next' : ''}" data-go="${esc(s.id)}" data-family="${esc(s.family)}" style="left:${x - 75}px;top:${y - 30}px;--bob:${-(hashOf(s.id) % 4000)}ms" title="${esc(s.title)}">` +
+            (isNext ? '<span class="ar-tag">Next stop</span>' : '') +
+            iconHtml(s.id, f, tint, isNext ? 64 : 54, {kind: 'stop', glyphKey: s.temporary ? 'bridge' : strand, next: isNext, dashed: s.temporary, mastered: levelOf(s.id) === 'mastered'}) +
+            `<span class="ar-title">${esc(s.title)}${s.recheck ? ' <span class="a-muted">(recheck)</span>' : ''}</span>` +
+            `<span class="ar-cap" style="color:${tint}">${esc(cap || '')}</span></button>`;
+  });
+  return html + pinHtml(pts[0][0], pts[0][1] - (stops.length ? 78 : 60)) + '</div>';
+}
+
+// The whole course: a road of grade medals, the one you're in marked.
+function courseHtml(w) {
+  const tiers = tiersSorted();
+  const next = nextStopId(), nextNode = next && atlas.byId.get(next);
+  const here = (nextNode && nextNode.tier) || (tiers.find(t => (stateOf(t.id).ring || 0) < 1) || tiers[tiers.length - 1]).id;
+  const total = tiers.reduce((a, t) => a + (stateOf(t.id).total || 0), 0), done = tiers.reduce((a, t) => a + (stateOf(t.id).done || 0), 0);
+  let html = `<div class="av-head"><div><div class="av-eyebrow">${esc(atlas.data.name || 'Roadmap')}</div><h2>Whole course</h2>` +
+             `<p class="a-muted">${done} of ${total} lessons proficient · choose a grade to open it</p></div></div>`;
+  const {pts, height} = snake(tiers.length, w, {gap: 150, rowH: 180, top: 150});
+  html += `<div class="ar-road" style="height:${height}px"><svg class="ar-svg" width="${w}" height="${height}" aria-hidden="true">` +
+          `<path class="ar-bed" d="${roadPath(pts, w)}"/><path class="ar-lane" d="${roadPath(pts, w)}"/></svg>`;
+  let pin = null;
+  tiers.forEach((t, i) => {
+    const [x, y] = pts[i], st = stateOf(t.id), f = st.ring || 0, isHere = t.id === here;
+    if (isHere) pin = [x, y - 82];
+    html += `<button class="ar-stop ar-tier${isHere ? ' ar-next' : ''}" data-go="${esc(t.id)}" style="left:${x - 75}px;top:${y - 40}px;--bob:${-(hashOf(t.id) % 4000)}ms">` +
+            iconHtml(t.id, f, isHere ? 'var(--accent)' : NEUTRAL, isHere ? 84 : 76, {kind: 'medal', label: TIER_SHORT(t), mastered: f >= 1, next: isHere}) +
+            `<span class="ar-title">${esc(t.title)}</span><span class="ar-cap">${st.total ? (f >= 1 ? 'Done' : `${st.done}/${st.total}`) : ''}</span></button>`;
+  });
+  return html + (pin ? pinHtml(pin[0], pin[1]) : '') + '</div>';
+}
+
+// One grade: a lane per strand (and one for a goal's bridges), family badges down each lane in
+// the order the layout gives them; Review and the mock exam at the end.
+function boardHtml(tierId) {
+  const tier = atlas.byId.get(tierId), st = stateOf(tierId);
+  const tiers = tiersSorted(), k = tiers.findIndex(t => t.id === tierId);
+  const order = Object.fromEntries((atlas.data.strands || []).map((s, i) => [s.id, i]));
+  const kids = atlas.kids.get(tierId) || [];
+  const lanes = kids.filter(c => c.level === 'strand').sort((a, b) => (order[a.strand] ?? 9) - (order[b.strand] ?? 9));
+  const goals = kids.find(c => c.level === 'family' && c.temporary);
+  const nextFam = (familyOf(atlas.byId.get(nextStopId())) || {}).id;
+  const byY = (a, b) => ((a.box || [0, 0])[1] - (b.box || [0, 0])[1]) || ((a.box || [0])[0] - (b.box || [0])[0]);
+  const badge = n => {
+    const s = stateOf(n.id), f = fracOf(n), tint = tintOf(n);
+    const count = s.total ? `${s.done}/${s.total}` : 'none yet';
+    return `<button class="ab-badge${route.ids.has(n.id) ? ' a-onroute' : ''}" data-go="${esc(n.id)}" data-links style="--bob:${-(hashOf(n.id) % 4000)}ms" title="${esc(n.title)}">` +
+           iconHtml(n.id, f, tint, 62, {kind: 'badge', glyphKey: n.temporary ? 'bridge' : n.strand, mastered: masteredOf(n), next: n.id === nextFam}) +
+           `<span class="ab-name">${isWeakest(n) ? '<span class="a-star" title="Weakest here">★</span> ' : ''}${esc(n.title)}</span>` +
+           `<span class="ab-count">${count}</span></button>`;
+  };
+  const prev = tiers[k - 1], next = tiers[k + 1];
+  let html = `<div class="av-head ab-head">` +
+             `<span class="ab-medal">${iconHtml(tierId, st.ring || 0, 'var(--accent)', 58, {kind: 'medal', label: TIER_SHORT(tier), mastered: (st.ring || 0) >= 1})}</span>` +
+             `<div><div class="av-eyebrow">${esc(atlas.data.name || 'Roadmap')}</div><h2>${esc(tier.title)}</h2>` +
+             `<p class="a-muted">${st.total ? `${st.done} of ${st.total} lessons proficient` : ''}</p></div>` +
+             `<div class="av-actions">${prev ? `<button data-act="tier" data-tier="${esc(prev.id)}" title="${esc(prev.title)}">‹ ${esc(prev.title)}</button>` : ''}` +
+             `${next ? `<button data-act="tier" data-tier="${esc(next.id)}" title="${esc(next.title)}">${esc(next.title)} ›</button>` : ''}</div></div>`;
+  html += `<div class="ab-wrap"><svg class="ab-links" aria-hidden="true"></svg><div class="ab-lanes" style="--lanes:${lanes.length + (goals ? 1 : 0)}">`;
+  for (const lane of lanes) {
+    const fams = (atlas.kids.get(lane.id) || []).filter(c => c.level === 'family').sort(byY);
+    const ls = stateOf(lane.id), tint = tintOf(lane);
+    html += `<section class="ab-lane" style="--tint:${tint}"><button class="ab-lane-head" data-go="${esc(lane.id)}" title="${esc(lane.title)}">` +
+            `${glyph(lane.strand, 18, tint)}<span>${esc(lane.title.split(' · ').pop())}</span>` +
+            `<span class="ab-count">${ls.total ? `${ls.done}/${ls.total}` : ''}</span></button>${fams.map(badge).join('')}</section>`;
   }
-  for (const [a, b, count] of depth > 0 ? data.bundles[level] || [] : []) {
-    const na = atlas.byId.get(a), nb = atlas.byId.get(b);
-    if (!na || !nb || !na.box || !nb.box) continue;
-    const near = inView(na.box, v, w, h, 400) || inView(nb.box, v, w, h, 400);
-    if (!near) continue;
-    const hot = focus && (a === focus || b === focus || atlasAncestors(focus).has(a) || atlasAncestors(focus).has(b));
-    const ta = tierIndex(a), tb = tierIndex(b);
-    if (!hot && ta >= 0 && tb >= 0 && tb - ta > 1) continue;
-    const [ax, ay, aw, ah] = edgeBox(na, depth, s), [bx, by, bw2, bh2] = edgeBox(nb, depth, s);
-    const width = (Math.min(1 + Math.log2(count) / 2, 3) * (hot ? 1.6 : 1)) / s;
-    let d;
-    if (by >= ay + ah - 1) {  // downward: bottom of a to top of b
-      const spread = ((hashOf(a + b) % 11) - 5) * Math.min(aw, bw2) / 14;
-      const x1 = ax + aw / 2 + spread, y1 = ay + ah, x2 = bx + bw2 / 2 + spread, y2 = by;
-      const dy = Math.max(30, Math.abs(y2 - y1) / 2);
-      d = `M${x1} ${y1} C${x1} ${y1 + dy} ${x2} ${y2 - dy} ${x2} ${y2}`;
-    } else {  // side by side (another column of the same grade): facing side to facing side
-      const ca = colIndex(a), cb = colIndex(b);
-      if (!hot && (depth === 1 || (ca >= 0 && cb >= 0 && Math.abs(ca - cb) > 1))) continue;
-      const right = bx > ax, spread = ((hashOf(a + b) % 7) - 3) / 10;
-      const x1 = right ? ax + aw : ax, x2 = right ? bx : bx + bw2;
-      const y1 = ay + ah * (0.5 + spread * 0.6), y2 = by + bh2 * (0.5 + spread * 0.6);
-      const dx = (right ? 1 : -1) * Math.max(20, Math.abs(x2 - x1) / 2);
-      d = `M${x1} ${y1} C${x1 + dx} ${y1} ${x2 - dx} ${y2} ${x2} ${y2}`;
-    }
-    edges.push(`<path class="a-edge${hot ? ' a-hot' : ''}" d="${d}" stroke-width="${width.toFixed(2)}"${hot ? ` style="stroke:${hotTint}"` : ''}/>`);
+  if (goals) html += `<section class="ab-lane ab-goals" style="--tint:${GOLD}"><div class="ab-lane-head">${glyph('bridge', 18, GOLD)}<span>${esc(goals.title)}</span></div>${badge(goals)}</section>`;
+  html += '</div></div>';
+  const gates = ['review', 'exam'].map(g => atlas.byId.get(`${tierId}.${g}`)).filter(Boolean);
+  if (gates.length) {
+    html += '<div class="ab-gates">' + gates.map(g => {
+      const best = stateOf(g.id).best;
+      return `<button class="ab-gate" data-go="${esc(g.id)}" style="--bob:${-(hashOf(g.id) % 4000)}ms">` +
+             iconHtml(g.id, fracOf(g), GOLD, 58, {kind: 'gate', glyphKey: g.level, mastered: levelOf(g.id) === 'mastered'}) +
+             `<span class="ab-name">${esc(g.title)}</span><span class="ab-count">${best ? `best ${best}/150` : g.level === 'review' ? 'Weakest lessons first' : 'Marked out of 150'}</span></button>`;
+    }).join('<span class="ab-gate-arrow" aria-hidden="true">→</span>') + '</div>';
   }
-  // A goal's temporary nodes: dashed links to what they build on and lead into.
-  if (depth >= 3) {
-    for (const [a, b] of data.temp_edges || []) {
-      const na = atlas.byId.get(a), nb = atlas.byId.get(b);
-      if (!na || !nb || !na.box || !nb.box || !(inView(na.box, v, w, h, 400) || inView(nb.box, v, w, h, 400))) continue;
-      const [ax, ay, aw, ah] = edgeBox(na, depth, s), [bx, by, bw2] = edgeBox(nb, depth, s);
-      edges.push(`<path class="a-edge a-temp-edge" d="M${ax + aw / 2} ${ay + ah} C${ax + aw / 2} ${ay + ah + 60} ${bx + bw2 / 2} ${by - 60} ${bx + bw2 / 2} ${by}" stroke-width="${(1.4 / s).toFixed(2)}"/>`);
-    }
+  return html;
+}
+
+// Pointing at a family draws what it builds on (in) and what builds on it (out), within the grade.
+function linksShow(view, id) {
+  const svg = view.querySelector('.ab-links'), wrap = view.querySelector('.ab-wrap');
+  if (!svg || !wrap) return;
+  view.querySelectorAll('.a-pre,.a-post').forEach(e => e.classList.remove('a-pre', 'a-post'));
+  const pairs = id ? (atlas.data.bundles.family || []).filter(([a, b]) => a === id || b === id) : [];
+  wrap.classList.toggle('a-dim', pairs.length > 0);
+  if (!pairs.length) { svg.innerHTML = ''; return; }
+  const box = wrap.getBoundingClientRect();
+  svg.setAttribute('width', wrap.scrollWidth); svg.setAttribute('height', wrap.scrollHeight);
+  const at = gid => {
+    const el = view.querySelector(`.ab-badge[data-go="${CSS.escape(gid)}"] .a-ico`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return {el: el.closest('.ab-badge'), x: r.left + r.width / 2 - box.left, y: r.top + r.height / 2 - box.top, r: r.width / 2};
+  };
+  const me = at(id);
+  if (!me) return;
+  me.el.classList.add('a-pre');
+  let out = '';
+  for (const [a, b] of pairs) {
+    const A = at(a), B = at(b);
+    if (!A || !B) continue;
+    (a === id ? B : A).el.classList.add(a === id ? 'a-post' : 'a-pre');
+    const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
+    const x1 = A.x + dx / len * (A.r + 4), y1 = A.y + dy / len * (A.r + 4), x2 = B.x - dx / len * (B.r + 8), y2 = B.y - dy / len * (B.r + 8);
+    const bend = Math.abs(dx) < 10 ? 50 : 0;
+    out += `<path class="ab-link" d="M${x1} ${y1} C${x1 + bend} ${y1 + dy / 3} ${x2 + bend} ${y2 - dy / 3} ${x2} ${y2}" marker-end="url(#ab-arrow)"/>`;
   }
-  // Review and exam: lines from each strand (its dot at strand level) down the funnel.
-  if (depth >= 1) {
-    for (const t of visible.filter(n => n.level === 'tier')) {
-      const rv = atlas.byId.get(`${t.id}.review`), ex = atlas.byId.get(`${t.id}.exam`);
-      if (!rv || !ex) continue;
-      for (const st of atlas.kids.get(t.id) || []) {
-        if (st.level !== 'strand') continue;
-        const [sx, sy, sw, sh] = depth === 1 ? edgeBox(st, depth, s) : st.box;
-        edges.push(`<path class="a-edge a-funnel" d="M${sx + sw / 2} ${sy + sh} L${rv.box[0] + rv.box[2] / 2} ${rv.box[1]}" stroke-width="${(1.2 / s).toFixed(2)}"/>`);
-      }
-      edges.push(`<path class="a-edge a-funnel" d="M${rv.box[0] + rv.box[2] / 2} ${rv.box[1] + rv.box[3]} L${ex.box[0] + ex.box[2] / 2} ${ex.box[1]}" stroke-width="${(2 / s).toFixed(2)}"/>`);
-    }
+  svg.innerHTML = `<defs><marker id="ab-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">` +
+                  `<path d="M0 0L10 5L0 10z" fill="var(--text)"/></marker></defs>${out}`;
+}
+
+// The drawer: a family's lessons, each a card with a bar of its exercises.
+function drawerRender() {
+  const dr = $('atlas-drawer');
+  const fam = atlas.mode === 'grade' && atlas.family && atlas.byId.get(atlas.family);
+  if (!fam) { dr.classList.remove('open'); dr.dataset.fam = ''; return; }
+  const key = `${fam.id}|${atlas.stamp}|${[...route.ids].length}`;
+  if (dr.dataset.key !== key) {
+    const tint = tintOf(fam), next = nextStopId();
+    const reqs = reqsOf(fam.id);
+    dr.innerHTML = `<div class="ad-head">${iconHtml('d:' + fam.id, fracOf(fam), tint, 44, {kind: 'badge', glyphKey: fam.temporary ? 'bridge' : fam.strand, mastered: masteredOf(fam)})}` +
+      `<div><h3>${esc(fam.title)}</h3><p class="a-muted">${reqs.length} lesson${reqs.length === 1 ? '' : 's'}</p></div>` +
+      `<button class="ad-close" title="Close (Esc)" aria-label="Close">✕</button></div>` +
+      (reqs.length ? '' : '<p class="a-muted">No lessons here yet.</p>') +
+      reqs.map(r => {
+        const stages = stagesOf(r.id), lv = levelOf(r.id);
+        const pips = stages.map(sg => `<button class="ad-pip ad-${levelOf(sg.id)}${sg.final ? ' ad-final' : ''}" data-go="${esc(sg.id)}" ` +
+          `title="${esc(sg.title)} · ${levelOf(sg.id).replace('_', ' ').replace('practised', 'practiced')}${sg.writing ? ' · writing…' : ''}"></button>`).join('');
+        return `<div class="ad-card${r.id === next ? ' ad-next' : ''}${lv === 'mastered' ? ' ad-gold' : ''}${route.ids.has(r.id) ? ' a-onroute' : ''}" data-go="${esc(r.id)}" style="--tint:${r.temporary ? GOLD : tint}">` +
+          (r.id === next ? '<span class="ad-tag">Next stop</span>' : '') +
+          `<span class="ad-title">${isWeakest(r) ? '<span class="a-star">★</span> ' : ''}${esc(r.title)}</span>` +
+          `<span class="ad-pips">${pips}</span>` +
+          `<span class="a-muted ad-count">${stages.filter(sg => rankOf(sg.id) >= 2).length}/${stages.length} exercises · ${lv.replace('_', ' ').replace('practised', 'practiced')}</span></div>`;
+      }).join('');
+    dr.dataset.key = key;
+    dr.querySelector('.ad-close').onclick = () => atlasGo('grade', atlas.tier);
+    dr.onclick = e => {
+      const t = e.target.closest('[data-go]');
+      if (t && dr.contains(t)) { e.stopPropagation(); atlas.reveal = false; atlasSelect(t.dataset.go); }
+    };
+    ringsSweep(dr);
   }
-  // Selection ring: round the selected dot, or the dot standing for it at this zoom (an
-  // exercise's lesson, a lesson's family); nothing when it's a heading here.
-  let sel = atlas.selected && atlas.byId.get(atlas.selected);
-  while (sel && DEPTHS.indexOf(sel.level) > depth) sel = atlas.byId.get(sel.parent);
-  const ringW = (2.5 / s).toFixed(2);
-  if (sel && sel.box && (sel.level === 'review' || sel.level === 'exam')) {
-    const [x, y, bw, bh] = sel.box, m = 4 / s;
-    out.push(`<rect class="a-selected" x="${x - m}" y="${y - m}" width="${bw + 2 * m}" height="${bh + 2 * m}" rx="${8 / s}" stroke-width="${ringW}"/>`);
-  } else if (sel && sel.box && DEPTHS.indexOf(sel.level) === depth) {
-    const [cx, cy, r] = dotOf(sel, depth, s);
-    out.push(`<circle class="a-selected" cx="${cx}" cy="${cy}" r="${r + 5 / s}" stroke-width="${ringW}"/>`);
-  }
-  $('atlas-world').innerHTML = edges.join('') + out.join('');
+  if (!dr.classList.contains('open')) requestAnimationFrame(() => dr.classList.add('open'));
+}
+
+// Notes drifting up behind the map, slowly: the map is never quite still.
+function ambientInit() {
+  const box = $('atlas-ambient');
+  if (!box || box.childElementCount) return;
+  const marks = ['♪', '♫', '♩', '♬', '𝄞'];
+  box.innerHTML = Array.from({length: 16}, (_, i) => {
+    const h = hashOf('amb' + i);
+    return `<span style="left:${h % 97}%;font-size:${14 + h % 22}px;animation-duration:${22 + h % 20}s;animation-delay:-${h % 30}s;` +
+           `--drift:${(h % 60) - 30}px">${marks[h % marks.length]}</span>`;
+  }).join('');
 }
 
 function hashOf(text) {
   let h = 0;
   for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
   return Math.abs(h);
-}
-
-const _ancestorCache = new Map();
-function atlasAncestors(id) {
-  if (_ancestorCache.has(id)) return _ancestorCache.get(id);
-  const set = new Set();
-  let n = atlas.byId.get(id);
-  while (n && n.parent) { set.add(n.parent); n = atlas.byId.get(n.parent); }
-  _ancestorCache.set(id, set);
-  return set;
 }
 
 // -- side panel -----------------------------------------------------------------------
@@ -1488,7 +1601,13 @@ async function atlasShow(open) {
   try {
     const first = !atlas.data;
     await atlasLoad();
-    if (first) { atlasHome(); pathShow(); } else { atlasRefreshStates(); goalsLoad(); }
+    ambientInit();
+    if (first) {  // opens on your route when there is one, else on the whole course
+      atlas.mode = 'course';
+      atlasDraw();
+      await pathShow();
+      if (path.state && path.state.goal && atlas.mode === 'course' && !atlas.selected) atlasGo('route');
+    } else { atlasRefreshStates(); goalsLoad(); }
   } catch (err) {
     const build = {flute: 'The flute Roadmap is built from your local flute syllabus: <code>python -m midi_coach.atlas.pan</code>',
                    sax: 'The saxophone Roadmap is built from your local saxophone syllabus: <code>python -m midi_coach.atlas.sax</code>',
@@ -1502,58 +1621,14 @@ async function atlasShow(open) {
 }
 
 (function atlasInput() {
-  const svg = $('atlas-svg');
-  // Wheel: zoom by how far it scrolled, so a trackpad's many small ticks don't race in;
-  // a sideways scroll (deltaY 0) does nothing. Pinch (ctrlKey) sends small deltas, so it's geared up.
-  svg.addEventListener('wheel', e => {
-    e.preventDefault();
-    const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? atlasSize().h : 1);
-    if (!dy) return;
-    const r = svg.getBoundingClientRect();
-    const k = e.ctrlKey ? 0.01 : 0.0014;  // 0.0014: one 100-px mouse notch = 1.15x
-    atlasZoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-Math.max(-300, Math.min(300, dy)) * k));
-  }, {passive: false});
-  // Primary button only. The node is taken at press and release from the point itself, since
-  // pointer capture sends every event to the svg (e.target is no help there).
-  svg.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
-    atlas.drag = {x: e.clientX, y: e.clientY, moved: false, id: atlasHit(e.clientX, e.clientY)};
-    svg.setPointerCapture(e.pointerId);
-  });
-  svg.addEventListener('pointermove', e => {
-    atlas.pointer = {x: e.clientX, y: e.clientY};
-    const d = atlas.drag;
-    if (d && !(e.buttons & 1)) atlas.drag = null;  // the release was lost (context menu, alt-tab)
-    else if (d) {
-      const dx = e.clientX - d.x, dy = e.clientY - d.y;
-      if (Math.abs(dx) + Math.abs(dy) > 3) d.moved = true;
-      if (d.moved) {
-        atlas.view.x -= dx / atlas.view.s; atlas.view.y -= dy / atlas.view.s;
-        d.x = e.clientX; d.y = e.clientY;
-        atlasDraw();
-      }
-      return;
-    }
-    atlasSetHover(atlasHit(e.clientX, e.clientY));
-  });
-  svg.addEventListener('pointerup', e => {
-    const d = atlas.drag;
-    atlas.drag = null;
-    if (d && !d.moved && d.id && atlasHit(e.clientX, e.clientY) === d.id) atlasActivate(d.id);
-  });
-  const endDrag = () => { atlas.drag = null; };
-  svg.addEventListener('pointercancel', endDrag);
-  svg.addEventListener('lostpointercapture', endDrag);
-  svg.addEventListener('pointerleave', () => { if (!atlas.drag) { atlas.pointer = null; atlasSetHover(null); } });
   window.addEventListener('resize', () => { if (!$('atlas-view').hidden) atlasDraw(); });
   document.addEventListener('keydown', e => {
     if ($('atlas-view').hidden || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
-    if (e.key === 'Escape') window.dispatchEvent(new CustomEvent('coach:navigate', {detail: {view: 'home'}}));
+    if (e.key === 'Escape' && !atlasBack()) window.dispatchEvent(new CustomEvent('coach:navigate', {detail: {view: 'home'}}));
     if (e.key === 'Home' && atlas.data) atlasHome();
   });
   // Out of the Roadmap is back to Home: modes change only there.
   $('atlas-close').addEventListener('click', () => window.dispatchEvent(new CustomEvent('coach:navigate', {detail: {view: 'home'}})));
-  $('atlas-home').addEventListener('click', () => atlas.data && atlasHome());
 
   let timer = null;
   const results = $('atlas-results');
@@ -1570,7 +1645,7 @@ async function atlasShow(open) {
       results.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
         results.hidden = true;
         const n = atlas.byId.get(b.dataset.go);
-        if (n) { atlasFit((n.level === 'stage' ? atlas.byId.get(n.parent) : n).box, 60); atlasSelect(n.id); }
+        if (n) atlasActivate(n.id);
       }));
     }, 180);
   });

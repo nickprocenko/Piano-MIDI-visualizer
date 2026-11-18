@@ -19,8 +19,8 @@ Options:
 The score is loaded as the coach page loads it (the part choices and Clean apply), and played
 at its own tempo in 60 frames a second: the hands ease from frame to frame as on the page. Each
 moment is `<out_dir>/<seconds>s.png`; `frames.json` has, per moment, the beat, where the keys
-are, each hand's fingertips (x, y in page pixels, press, on) and how far each 3D fingertip
-missed its key (cm).
+are, each hand's fingertips (x, y in page pixels, press, on), how far each 3D fingertip
+missed its key (cm) and where each 3D hand and its finger joints were (`pose`, cm).
 """
 
 from __future__ import annotations

@@ -222,7 +222,7 @@ class LiveSession:
         if self.hub:
             self.hub.marks([(n.beat, n.pitch, "pending") for n in g.notes])
             beat, bps, until = self._glide(idx)
-            self.hub.cursor(beat, bps, live=True, until=until)
+            self.hub.cursor(beat, bps, live=True, until=until, speed=self.speed)
 
     def _glide(self, idx: int) -> tuple:
         """(beat, beats/sec, until) for the wait-mode cursor: from the chord just played it
@@ -259,7 +259,7 @@ class LiveSession:
                 self._accompany(self.lead_in, self.groups[0].onset, now + LEAD_IN_DELAY_SEC)
         elif self.mode == LISTEN:
             if self.hub:
-                self.hub.cursor(self._beat[0], live=True)
+                self.hub.cursor(self._beat[0], live=True, speed=self.speed)
             self._clock = now + LISTEN_LEAD_SEC
             self._accompany(self.groups[0].onset, max(n.end for n in self.notes), self._clock)
             self._ticker = threading.Thread(target=self._tick, daemon=True)
@@ -268,7 +268,7 @@ class LiveSession:
             if self.hub:
                 first = self.groups[0]
                 self.hub.marks([(n.beat, n.pitch, "pending") for n in first.notes])
-                self.hub.cursor(self._beat[0], live=True)
+                self.hub.cursor(self._beat[0], live=True, speed=self.speed)
             if self.grid:
                 # The count-in starts the clock: the first note is due when it ends (plus any
                 # rest before it in its bar), whether or not anything has been played.
@@ -438,7 +438,7 @@ class LiveSession:
                     self._status()
                 if self.hub and now - last_cursor >= 0.25:
                     beat, slope = self.beat_at(ref_t)
-                    self.hub.cursor(beat, slope * self.speed, live=True)
+                    self.hub.cursor(beat, slope * self.speed, live=True, speed=self.speed)
                     last_cursor = now
                 if ref_t > end_ref + 1.0 * self.speed:
                     self.done_reason = "reached the end"

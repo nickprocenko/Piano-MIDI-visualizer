@@ -165,7 +165,7 @@ def test_learn_cursor_gets_to_the_next_chord_before_you_do(tmp_path, monkeypatch
     class Hub:
         glides: list = []
 
-        def cursor(self, beat, bps=0.0, live=False, until=None):
+        def cursor(self, beat, bps=0.0, live=False, until=None, speed=None):
             if until is not None:
                 self.glides.append((until - beat) / bps)
 

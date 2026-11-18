@@ -337,14 +337,19 @@ class DisplayHub:
             self._aids = msg
         self._broadcast(msg)
 
-    def cursor(self, beat: float, beats_per_sec: float = 0.0, live: bool = False, until: float | None = None) -> None:
+    def cursor(self, beat: float, beats_per_sec: float = 0.0, live: bool = False, until: float | None = None,
+               speed: float | None = None) -> None:
         """live=True: a practice session drives the cursor (the visualizer then lets it
         override Learn Mode's own scrolling); otherwise it's just positioning.
         until: the cursor moves at beats_per_sec from beat and parks there (Learn mode
-        flowing through a rest to the chord it waits for)."""
+        flowing through a rest to the chord it waits for).
+        speed: the run's tempo as a share of the piece's (0.5 = 50%); below 1 the falling notes'
+        hands move in slow motion."""
         msg = {"type": "cursorBeat", "beat": round(beat, 4), "bps": round(beats_per_sec, 4), "live": live}
         if until is not None:
             msg["until"] = round(until, 4)
+        if speed is not None:
+            msg["speed"] = round(speed, 3)
         with self._lock:
             self._cursor = msg
             self._cursor_at = time.monotonic()
