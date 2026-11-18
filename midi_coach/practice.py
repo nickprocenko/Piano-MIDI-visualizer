@@ -30,6 +30,10 @@ def main() -> None:
     if path:
         server.hub.load_score(server.library.get_score(path))
         server.hub.status(f"{pathlib.Path(path).stem} · pick Listen, Learn or Rehearse and press Start")
+    if os.environ.get("MIDI_COACH_PREVIEW"):  # a test copy of a fix closes itself when nobody's looking
+        from . import preview
+
+        threading.Thread(target=preview.watch_idle, args=(lambda: server.hub.clients,), daemon=True).start()
     if not os.environ.get("MIDI_COACH_NO_BROWSER"):
         server.hub.open_browser()
     print(f"Music Hub page: {url}  (Ctrl+C to quit)")

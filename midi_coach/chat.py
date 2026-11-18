@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import pathlib
 import re
 import threading
 import time
@@ -894,7 +895,8 @@ class Ledger:
         self._lock = threading.Lock()
 
     def _path(self):
-        return home() / "ai_spend.json"
+        # A test copy (preview.py) points this at the real coach's file, so the daily cap counts both.
+        return pathlib.Path(os.environ.get("MIDI_COACH_AI_SPEND") or home() / "ai_spend.json")
 
     def _load(self) -> dict:
         try:

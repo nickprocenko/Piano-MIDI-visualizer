@@ -918,6 +918,14 @@
   #update-bar button { padding: 3px 10px; border: 0; border-radius: 4px; background: var(--accent); color: #031414; font: inherit; font-weight: 600; cursor: pointer; }
   #update-bar button:disabled { opacity: .5; cursor: default; }
   #update-bar button[hidden] { display: none; }
+  /* A test copy of a fix (preview.py): an orange frame round the page and a label, so it can't be taken for the real Hub. */
+  #preview-frame { position: fixed; inset: 0; border: 3px solid #f08a24; pointer-events: none; z-index: 9998; }
+  #preview-tag { position: fixed; left: 10px; bottom: 10px; z-index: 9999; display: flex; align-items: center; gap: 8px; max-width: min(560px, calc(100vw - 20px));
+    padding: 5px 6px 5px 10px; border-radius: 6px; background: #f08a24; color: #1a0d00; font-size: 12.5px; box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+  #preview-tag b { white-space: nowrap; }
+  #preview-tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #preview-tag button { padding: 3px 10px; border: 0; border-radius: 4px; background: #1a0d00; color: #fff; font: inherit; font-weight: 600; cursor: pointer; flex: none; }
+  #preview-frame[hidden], #preview-tag[hidden] { display: none; }
   #checks-dlg { width: min(760px, calc(100vw - 32px)); }
   #report-dlg { width: min(480px, calc(100vw - 32px)); }
   #report-dlg textarea { min-height: 64px; padding: 6px 8px; border: 1px solid rgba(255,255,255,.15); border-radius: 4px; background: var(--bg); color: var(--text); font: 13px 'Segoe UI', Arial, sans-serif; resize: vertical; }
@@ -1149,6 +1157,8 @@
 </style>
 </head>
 <body data-view="home">
+<div id="preview-frame" hidden></div>
+<div id="preview-tag" hidden role="status"><b>TEST COPY</b><span id="preview-what"></span><button id="preview-close" type="button" title="Close this test copy. Say whether the fix works in Agent Quest’s Workshop.">Close</button></div>
 <nav id="dash" aria-label="Main navigation">
   <button class="brand" id="dash-brand" title="Go to Home">Music <b>Hub</b></button>
   <span id="file-wrap">
@@ -4432,6 +4442,7 @@ connect();
   async function poll() {
     let s;
     try { s = await cmd('code_status'); } catch (e) { return; }  // restarting, or the coach was closed
+    if (window.PREVIEW) { bar.hidden = true; return; }  // a test copy never updates or restarts
     if (!first) first = s;
     if (s.started !== first.started) { location.reload(); return; }
     if (restarting) return;
@@ -4457,6 +4468,35 @@ connect();
   poll();
   setInterval(poll, 20000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+})();
+</script>
+<script>
+// A test copy of a fix (preview.py, started from Agent Quest's Workshop): say so plainly, hide the
+// fix-checking button (that happens in Agent Quest), and open where the fix's report was made.
+(async function () {
+  let info;
+  try { info = (await cmd('preview')).preview; } catch (e) { return; }
+  if (!info) return;
+  window.PREVIEW = info;
+  document.title = 'TEST COPY · Music Hub';
+  document.getElementById('preview-frame').hidden = false;
+  const tag = document.getElementById('preview-tag');
+  document.getElementById('preview-what').textContent = info.fixed || info.said || info.id;
+  tag.title = 'This is a test copy running a fix that isn’t in your code yet. Your real songs and progress are copied in; nothing you do here changes them.' + (info.said ? '\n\nYou asked: ' + info.said : '');
+  tag.hidden = false;
+  const checks = document.getElementById('checks-btn');
+  if (checks) { checks.hidden = true; new MutationObserver(() => { if (!checks.hidden) checks.hidden = true; }).observe(checks, {attributes: true}); }
+  document.getElementById('preview-close').addEventListener('click', async (ev) => {
+    ev.target.disabled = true;
+    try { await cmd('preview_close'); document.getElementById('preview-what').textContent = 'Closing…'; }
+    catch (e) { document.getElementById('preview-what').textContent = e.message; ev.target.disabled = false; }
+  });
+  try {
+    const out = await cmd('preview_place');
+    await new Promise(r => setTimeout(r, out.loaded ? 1800 : 0));  // a piece just opened applies its own settings first
+    if (out.page && Object.keys(out.page).length) pageControl({...out.page, unguarded: true});
+    if (out.bar) setTimeout(() => cmd('seek', {bar: out.bar}).catch(() => {}), 400);
+  } catch (e) { /* the report's piece is gone: the copy just opens as usual */ }
 })();
 </script>
 <dialog id="save-as-dlg" class="file-dlg" aria-labelledby="save-as-title">

@@ -693,6 +693,18 @@ tempo, the loop and the cursor's bar (this becomes that piece's saved practice s
 you'd set them). It's off while a run is going. Opening
 `http://127.0.0.1:8765/#checks` opens the list straight away.
 
+**Test copies (being built).** A fix can also be tried in a *test copy* of the coach, so it never
+touches your own code until you say it works: `python -m midi_coach.preview open <report id>`
+starts one at `http://127.0.0.1:8766/` (about 10 seconds), running that fix's code with a copy of
+your songs, takes, lessons, Roadmap progress and settings (the voice and model folders are shared,
+since nothing writes to them). An orange frame and a **TEST COPY** label say what it's testing,
+and it opens on the piece and bar you reported from. Nothing you do there changes your real data.
+Anything you report from it (F9, or to the Maestro) joins your real list when it closes, marked as
+found in the test copy. **Close** on its label, `python -m midi_coach.preview close`, or 30 minutes
+with no page open ends it and deletes it. One test copy at a time. It can't take the keyboard while
+the Music Hub is in the middle of a run. Agent Quest's Workshop will drive this, and then checking
+fixes moves there from the 👀 button.
+
 **The backlog in Obsidian.** If your Obsidian vault has a `Projects/MidiCoach` folder (the vault
 is `~/Vault` unless `MIDI_COACH_VAULT` says otherwise), every report, fix and check rewrites
 `Projects/MidiCoach/Backlog.md`: what's ready to try, what's open, and what was done in the last
@@ -1264,6 +1276,8 @@ Takes are saved as `.mid` plus `.json` in `%USERPROFILE%\MidiCoach\takes` (overr
 | `MIDI_COACH_GENERATOR_MODEL` | `sonnet` | Model Claude Code uses to write the Roadmap's lessons (`python -m midi_coach.atlas.generate`) |
 | `MIDI_COACH_ATLAS_CONTENT` | `<home>/atlas/content` | Where the Roadmap's syllabus, built tree and lessons live (kept out of git: the syllabus is the exam board's copyright) |
 | `MIDI_COACH_MCP_PORT` | `8780` | Local MCP endpoint those runs connect to (next free port if taken) |
+| `MIDI_COACH_AI_SPEND` | `<home>/ai_spend.json` | The Maestro's spend log for the daily cap (a test copy points it at the real coach's, so both count) |
+| `MIDI_COACH_PREVIEW` | — | Set in a test copy of a fix (`midi_coach.preview`): its report id. Its page shows the TEST COPY label |
 | `MIDI_COACH_HAND_MODEL` | `<home>/models/pm2s_hand_part.onnx` | The hand model to split parts with; `off` uses the search instead |
 
 ## Development

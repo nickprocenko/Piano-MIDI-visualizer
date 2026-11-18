@@ -2001,6 +2001,11 @@ def _cmd_goto_report(body: dict) -> dict:
     place = bugs.place(str(body.get("id") or ""))
     if "error" in place:
         return place
+    return _open_place(place)
+
+
+def _open_place(place: dict) -> dict:
+    """Open the piece a report was made on, and say how to set the page up as it was."""
     if _busy():
         return {"error": "Stop the run first."}
     path = _find_piece(place)
@@ -2034,6 +2039,38 @@ def _cmd_answer(body: dict) -> dict:
     """The user picked an answer to a ❓ question (or wrote their own): the item joins its batch."""
     out = bugs.answer(str(body.get("id") or ""), str(body.get("choice") or ""))
     return out if "error" in out else {**out, **bugs.to_check(), "asks": len(bugs.questions())}
+
+
+def _cmd_preview(_body: dict) -> dict:
+    """In a test copy of a fix (preview.py): what it's testing, for the page's orange band.
+    {"preview": None} in the real coach."""
+    from . import preview
+
+    info = preview.inside()
+    if not info:
+        return {"preview": None}
+    return {"preview": {k: info.get(k) for k in ("id", "kind", "fixed", "said", "commit")}}
+
+
+def _cmd_preview_place(_body: dict) -> dict:
+    """A test copy opens where the fix's report was made (its piece, view and bar)."""
+    from . import preview
+
+    info = preview.inside() or {}
+    place = info.get("place") or {}
+    if not place:
+        return {"page": {}, "bar": None, "loaded": False}
+    return _open_place(place)
+
+
+def _cmd_preview_close(_body: dict) -> dict:
+    """The test copy's Close: ends this process and deletes its folder (from a process of its own)."""
+    from . import preview
+
+    if not preview.inside():
+        return {"error": "This isn't a test copy."}
+    preview.close_from_inside()
+    return {"closing": True}
 
 
 def _cmd_try_fix(body: dict) -> dict:
@@ -2429,7 +2466,7 @@ PAGE_COMMANDS = {"ports": _cmd_ports, "keyboards": _cmd_keyboards, "bluetooth_re
                  "youtube": _cmd_youtube,
                  "record": _cmd_record, "maestro": _cmd_maestro, "stop_playback": lambda _body: _quiet(),
                  "voice_status": _cmd_voice_status, "talk": _cmd_talk, "page_error": _cmd_page_error,
-                 "checks": _cmd_checks, "check": _cmd_check, "try_fix": _cmd_try_fix, "code_status": _cmd_code_status, "restart": _cmd_restart, "goto_report": _cmd_goto_report, "report": _cmd_report, "chat": lambda body: _voice_reply(body.get("text", "")),
+                 "checks": _cmd_checks, "check": _cmd_check, "try_fix": _cmd_try_fix, "preview": _cmd_preview, "preview_place": _cmd_preview_place, "preview_close": _cmd_preview_close, "code_status": _cmd_code_status, "restart": _cmd_restart, "goto_report": _cmd_goto_report, "report": _cmd_report, "chat": lambda body: _voice_reply(body.get("text", "")),
                  "transcript": _cmd_transcript, "view": _cmd_view, "tiles": _cmd_tiles, "tiles_set": _cmd_tiles_set}
 def _atlas_show(path: str) -> dict:
     """A lesson's music on the sheet. Opening a lesson means leaving whatever was running
