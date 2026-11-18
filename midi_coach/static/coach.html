@@ -404,7 +404,16 @@
   #atlas-ambient { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
   #atlas-ambient span { position: absolute; bottom: -40px; color: var(--accent); opacity: .07; animation: a-drift linear infinite; }
 
-  /* roads: your route and the whole course */
+  /* roads: your route and the whole course, told apart at a glance: your route is one warm road
+     winding down through green country to a gold goal; the whole course is rows of grades on a
+     cool blue map board */
+  .av-route { background: radial-gradient(ellipse 80% 45% at 50% 0%, rgba(227,179,65,.13), transparent 70%),
+                          linear-gradient(to bottom, rgba(52,88,48,.34), rgba(30,52,34,.26)); }
+  .av-course { background: repeating-linear-gradient(0deg, rgba(120,150,230,.05) 0 1px, transparent 1px 48px),
+                           repeating-linear-gradient(90deg, rgba(120,150,230,.05) 0 1px, transparent 1px 48px),
+                           linear-gradient(to bottom, rgba(38,56,110,.30), rgba(18,26,56,.22)); }
+  .av-route .av-eyebrow { color: #e3b341; }
+  .av-route .ar-bed { stroke: rgba(214,184,120,.16); stroke-width: 34; }
   .ar-road { position: relative; }
   .ar-svg { position: absolute; inset: 0; pointer-events: none; }
   .ar-bed { fill: none; stroke: rgba(255,255,255,.06); stroke-width: 26; stroke-linecap: round; stroke-linejoin: round; }

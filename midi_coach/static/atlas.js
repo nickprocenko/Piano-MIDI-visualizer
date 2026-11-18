@@ -361,6 +361,25 @@ function snake(n, w, {pad = 90, gap = 170, rowH = 170, top = 120} = {}) {
   return {pts, height: top + Math.ceil(n / per) * rowH};
 }
 
+// Your route's own shape: one road winding down the page, swinging right, back, left, back,
+// so it never looks like the whole course's straight rows of grades.
+function winding(n, w, {step = 130, top = 110} = {}) {
+  const amp = Math.max(0, Math.min(240, w / 2 - 110)), cx = w / 2;
+  const pts = [];
+  for (let i = 0; i < n; i++) pts.push([cx + amp * Math.sin(i * Math.PI / 2), top + i * step]);
+  return {pts, height: top + (n - 1) * step + 120};
+}
+
+// A road through points going down the page: S-bends that leave and reach each stop heading down.
+function curvePath(pts) {
+  let d = `M${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i], h = (y1 - y0) * .6;
+    d += ` C${x0} ${y0 + h} ${x1} ${y1 - h} ${x1} ${y1}`;
+  }
+  return d;
+}
+
 // A floating "you are here" pin over a point.
 const pinHtml = (x, y) => `<span class="a-pin" style="left:${x}px;top:${y}px" aria-hidden="true"></span>`;
 
@@ -382,10 +401,11 @@ function routeHtml(w) {
              `<p class="a-muted">${stops.length ? `${stops.length} lesson${stops.length === 1 ? '' : 's'} to go` : 'Everything on this route is done.'}</p></div>` +
              `<div class="av-actions">${play}</div></div>`;
   const all = stops.concat([{id: '__goal', title, goal: true}]);
-  const {pts, height} = snake(all.length, w, {top: 150});
+  const {pts, height} = winding(all.length, w);
+  const road = curvePath(pts);
   html += `<div class="ar-road" style="height:${height}px">`;
-  html += `<svg class="ar-svg" width="${w}" height="${height}" aria-hidden="true"><path class="ar-bed" d="${roadPath(pts, w)}"/>` +
-          `<path class="ar-lane" d="${roadPath(pts, w)}"/></svg>`;
+  html += `<svg class="ar-svg" width="${w}" height="${height}" aria-hidden="true"><path class="ar-bed" d="${road}"/>` +
+          `<path class="ar-lane" d="${road}"/></svg>`;
   all.forEach((s, i) => {
     const [x, y] = pts[i];
     if (s.goal) {
