@@ -173,6 +173,25 @@
   body[data-show=notes] #roll-wrap, body[data-show=both] #roll-wrap { display: block; }
   body[data-show=notes] main, body[data-show=both] main { flex-direction: column; align-items: stretch; padding: 0; }
   body[data-show=both] #strip { flex: none; height: min(var(--strip-h, 420px), 45%); }
+  /* Both: the bar between them is dragged to give the sheet more or less of the room (saved) */
+  #split { display: none; flex: none; height: 9px; cursor: row-resize; background: var(--panel); touch-action: none; position: relative; }
+  #split::after { content: ''; position: absolute; left: calc(50% - 24px); top: 3px; width: 48px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.25); }
+  #split:hover::after, #split:focus-visible::after, #split.dragging::after { background: var(--accent); }
+  #split:focus-visible { outline: none; }
+  body[data-show=both] #split { display: block; }
+  body[data-show=both] #strip.split, body.sheet-max[data-view=practice][data-show=both] #strip.split { height: var(--split); }
+  /* The Session controls folded away for room: the header keeps Start and the way back */
+  #menu-fold { flex: none; width: 28px; height: 28px; padding: 0; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: 13px/1 'Segoe UI Symbol', 'Segoe UI', sans-serif; cursor: pointer; }
+  #menu-fold:hover, #menu-fold:focus-visible { border-color: var(--accent); color: var(--text); }
+  #menu-unfold, #go-mini, body:not([data-view=practice]) #menu-fold, body.sheet-max #menu-fold { display: none; }
+  #menu-unfold { padding: 4px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+  #menu-unfold:hover, #menu-unfold:focus-visible { border-color: var(--accent); color: var(--text); }
+  #go-mini { min-width: 76px; padding: 4px 14px; border: 0; border-radius: 5px; background: var(--hit); color: #fff; font: 600 13px 'Segoe UI', Arial, sans-serif; cursor: pointer; }
+  #go-mini.stop, #go-mini.rec { background: var(--miss); }
+  #go-mini:disabled { opacity: .45; cursor: default; }
+  /* (Maximized hides the header, so there the controls show folded or not) */
+  body.menu-folded:not(.sheet-max)[data-view=practice] > #menu { display: none; }
+  body.menu-folded:not(.sheet-max)[data-view=practice] #menu-unfold, body.menu-folded:not(.sheet-max)[data-view=practice] #go-mini { display: inline-block; }
   #view button.on { background: rgba(0,180,180,.15); color: var(--accent); }
   #sheet-notice { max-width: 640px; margin: 48px auto; padding: 0 20px; color: var(--muted); font-size: 15px; text-align: center; }
   /* A sheet drawn from a file with no reliable beat: say so, and offer Auto clean */
@@ -1276,10 +1295,13 @@
   </span>
   <button id="pick-piece" title="Search your songs and lessons for another piece (the sheet stays until you choose one)">Change piece</button>
   <div id="status">Pick a song or lesson to begin.</div>
+  <button id="menu-unfold" aria-controls="menu" aria-expanded="false" title="Show the Session controls again: Play mode, Playing, Sheet, Maestro, Playback and the metronome">▾ Controls</button>
+  <button id="go-mini" tabindex="-1" aria-hidden="true">Start</button>
   <div id="conn" class="down">connecting…</div>
 </header>
 <div id="menu">
   <div id="session-row">
+    <button id="menu-fold" aria-controls="menu" aria-expanded="true" title="Fold the Session controls away to make room for the sheet and the falling notes (Start stays in the title bar)" aria-label="Fold the Session controls">▴</button>
     <div id="mode-picker">
       <label class="setting" id="mode-wrap">Play mode
         <select id="mode" aria-label="Choose a practice mode">
@@ -1504,6 +1526,7 @@
     </section>
     <div id="sheet-warn" role="note" hidden><span id="sheet-warn-text"></span><button id="cleanup-open" data-opens="sheet-settings" title="Under Sheet → This sheet" hidden></button><button id="sheet-warn-x" title="Ignore: don't show this note again for this sheet (Clean stays under Sheet → This sheet)" aria-label="Ignore this note">✕</button></div>
     <main><div id="strip"><button id="sheet-max" title="Maximize the sheet (Esc restores)" aria-label="Maximize the sheet" aria-pressed="false">⤢</button><iframe id="sheet" src="notation.html?grow=2.5" title="Sheet music"></iframe><p id="sheet-notice" hidden></p></div>
+      <div id="split" role="separator" aria-orientation="horizontal" aria-controls="strip" tabindex="0" aria-label="Sheet and falling notes divider" title="Drag up or down to show more of the sheet or more of the falling notes (arrow keys too; double-click goes back to the sheet's own height)"></div>
       <div id="roll-wrap"><canvas id="roll" aria-label="Falling notes"></canvas></div></main>
   </div>
   <section id="atlas-view" aria-label="Progress and learning path" hidden>
@@ -2073,6 +2096,78 @@ $('sheet-max').addEventListener('click', () => sheetMax(!document.body.classList
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && document.body.classList.contains('sheet-max') && !document.querySelector('details[open]')) sheetMax(false);
 });
+
+// ▴ folds the Session controls away for room; the header then has ▾ Controls and a copy of Start
+// that follows the real one (its label, colour and whether it can be pressed). Remembered.
+function menuFold(on) {
+  document.body.classList.toggle('menu-folded', on);
+  $('menu-fold').setAttribute('aria-expanded', String(!on));
+  $('menu-unfold').setAttribute('aria-expanded', String(!on));
+  store.set('menuFolded', on ? '1' : '');
+}
+function goMirror() {
+  const g = $('go'), m = $('go-mini');
+  m.textContent = g.textContent;
+  m.title = g.title;
+  m.disabled = g.disabled;
+  m.className = g.className;
+}
+$('menu-fold').addEventListener('click', () => { menuFold(true); $('menu-unfold').focus(); });
+$('menu-unfold').addEventListener('click', () => { menuFold(false); $('menu-fold').focus(); });
+$('go-mini').addEventListener('click', () => $('go').click());
+new MutationObserver(goMirror).observe($('go'), {childList: true, characterData: true, subtree: true, attributes: true});
+goMirror();
+// A drop-down opened from elsewhere (Sheet → This sheet from the sheet's note) needs the row shown.
+$('menu').addEventListener('toggle', e => { if (e.target.open) menuFold(false); }, true);
+menuFold(!!store.get('menuFolded', ''));
+
+// With Both, the bar between the sheet and the falling notes sets how much room the sheet gets
+// (a share of the stage, saved); double-click hands it back to the sheet's own height.
+(function () {
+  const bar = $('split'), strip = $('strip'), MIN = 10, MAX = 88;
+  function set(pct, save = true) {
+    if (pct === null) { strip.classList.remove('split'); strip.style.removeProperty('--split'); }
+    else {
+      pct = Math.min(MAX, Math.max(MIN, pct));
+      strip.classList.add('split');
+      strip.style.setProperty('--split', pct.toFixed(1) + '%');
+      bar.setAttribute('aria-valuenow', Math.round(pct));
+    }
+    if (save) store.set('splitPct', pct === null ? '' : pct.toFixed(1));
+  }
+  const now = () => strip.getBoundingClientRect().height / strip.parentElement.getBoundingClientRect().height * 100;
+  bar.setAttribute('aria-valuemin', MIN);
+  bar.setAttribute('aria-valuemax', MAX);
+  bar.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add('dragging');
+    const top = strip.parentElement.getBoundingClientRect();
+    const move = ev => set((ev.clientY - top.top) / top.height * 100, false);
+    const up = ev => {
+      bar.removeEventListener('pointermove', move);
+      bar.removeEventListener('pointerup', up);
+      bar.removeEventListener('pointercancel', up);
+      bar.classList.remove('dragging');
+      set(now());
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+    bar.addEventListener('pointercancel', up);
+  });
+  bar.addEventListener('dblclick', () => set(null));
+  bar.addEventListener('keydown', e => {
+    const step = e.shiftKey ? 10 : 3;
+    if (e.key === 'ArrowUp') set(now() - step);
+    else if (e.key === 'ArrowDown') set(now() + step);
+    else if (e.key === 'Home') set(null);
+    else return;
+    e.preventDefault();
+  });
+  const saved = parseFloat(store.get('splitPct', ''));
+  if (Number.isFinite(saved)) set(saved, false);
+})();
 
 $('playable-btn').addEventListener('click', async () => {
   const btn = $('playable-btn');
@@ -3041,7 +3136,7 @@ addEventListener('resize', mpClamp);
 // -- Quick-action tiles (tiles.py has the ids, defaults and each profile's layouts) ----------
 // Each tile does what its button on the page does. where(): the view it has to go to first
 // (through go(), so a run gets asked about), or null to act here. ok(): '' or why it can't now.
-const goShown = () => !!$('go').offsetParent;
+const goShown = () => !!($('go').offsetParent || $('go-mini').offsetParent);
 const hasPiece = () => !['', 'no score yet'].includes($('title').textContent.trim());
 const TILES = {
   play: {label: () => running ? '■ Stop' : document.body.dataset.view === 'record' ? '● Record' : '▶ Play',
