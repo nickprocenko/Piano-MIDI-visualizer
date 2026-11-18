@@ -884,11 +884,8 @@
   #mode-wrap { white-space: nowrap; }
   #mode-picker { display: flex; align-items: center; gap: 8px; min-width: 0; }
   #mode { padding: 6px 8px; }
-  #video-btn { padding: 7px 12px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
-  #video-btn:hover { border-color: var(--accent); color: var(--text); }
-  #video-btn[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
   /* Record a new idea: its own mode, the same stage with only the metronome and ● Record */
-  body[data-view=record] #mode-wrap, body[data-view=record] #video-btn, body[data-view=record] #video-panel,
+  body[data-view=record] #mode-wrap, body[data-view=record] #video-panel,
   body[data-view=record] #library, body[data-view=record] #pick-piece { display: none; }
   #pick-piece { padding: 5px 11px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
   #pick-piece:hover { border-color: var(--accent); color: var(--text); }
@@ -1143,6 +1140,7 @@
       <button role="menuitem" data-file="download" class="needs-score" title="Save the file this sheet comes from onto your computer (Downloads)">Download sheet file</button>
       <button role="menuitem" data-file="folders" title="Choose the folders where your songs are found, and whether new downloads are picked up">Song folders…</button>
       <button role="menuitem" data-file="youtube" title="Play a song’s video on youtube.com: the sheet follows it (through the Music Hub extension)">Play along on YouTube…</button>
+      <button role="menuitem" data-file="video" id="file-video" aria-controls="video-panel" title="Play along with a recording in a Session: a YouTube video plays above the sheet and the sheet follows it">Video above the sheet</button>
       <hr>
       <button role="menuitem" data-file="profile" title="Switch to another profile, or add one">Switch profile…</button>
     </div>
@@ -1290,7 +1288,6 @@
           <option value="listen">Listen</option>
         </select>
       </label>
-      <button id="video-btn" aria-pressed="false" aria-controls="video-panel" title="Play along with a recording: a YouTube video plays and the sheet follows it">▶ Video</button>
     </div>
   <div id="control-tabs">
     <details id="playing-settings">

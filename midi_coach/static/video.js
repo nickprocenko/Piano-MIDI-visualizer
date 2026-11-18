@@ -198,7 +198,6 @@ async function videoRefresh() {
 
 function videoShow(open) {
   $('video-panel').hidden = !open;
-  $('video-btn').setAttribute('aria-pressed', String(open));
   store.set('video', open ? '1' : '');
   if (open) return videoRefresh();
   videoStopTapping(false);
@@ -288,7 +287,6 @@ async function videoFind() {
   } catch (err) { box.textContent = err.message; }
 }
 
-$('video-btn').addEventListener('click', () => videoShow($('video-panel').hidden));
 $('video-use').addEventListener('click', () => videoChoose($('video-link').value));
 $('video-link').addEventListener('keydown', e => { if (e.key === 'Enter') videoChoose($('video-link').value); });
 $('video-find').addEventListener('click', videoFind);
@@ -306,7 +304,7 @@ $('video-clear').addEventListener('click', async () => {
 }));
 $('video-speed').addEventListener('change', e => { if (vid.ready) vid.player.setPlaybackRate(Number(e.target.value)); });
 document.addEventListener('keydown', e => {
-  if (e.key.toLowerCase() !== 't' || e.repeat || e.ctrlKey || e.altKey || e.metaKey || $('video-panel').hidden
+  if ((e.key || '').toLowerCase() !== 't' || e.repeat || e.ctrlKey || e.altKey || e.metaKey || $('video-panel').hidden
       || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
   e.preventDefault();
   videoTap();

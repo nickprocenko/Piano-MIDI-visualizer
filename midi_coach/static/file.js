@@ -1,5 +1,5 @@
 // File menu beside Home: open a file from the computer, save a copy of the sheet, download it,
-// choose the song folders, open the YouTube play-along.
+// choose the song folders, open the YouTube play-along or the video above the sheet.
 // The song folders dialog lives here too; Preferences (prefs.js) opens it. Loaded after profiles.js.
 (function () {
   const btn = $('file-btn'), list = $('file-menu');
@@ -12,6 +12,7 @@
     btn.setAttribute('aria-expanded', open);
     if (!open) return;
     list.querySelectorAll('.needs-score').forEach(b => { b.disabled = !hasScore(); });
+    $('file-video').textContent = $('video-panel').hidden ? 'Video above the sheet' : 'Hide the video';
     items()[0]?.focus();
   }
 
@@ -34,7 +35,7 @@
   });
   document.addEventListener('keydown', e => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-    const key = e.key.toLowerCase();
+    const key = (e.key || '').toLowerCase();
     if (key === 'o' && !e.shiftKey) { e.preventDefault(); ACTIONS.open(); }
     else if (key === 's' && e.shiftKey && hasScore()) { e.preventDefault(); ACTIONS['save-as'](); }
   });
@@ -50,6 +51,12 @@
     },
     folders: () => openFolders(),
     youtube: () => navigate('youtube'),
+    // The in-page player (video.js), shown above the sheet in a Session.
+    video: () => {
+      const open = $('video-panel').hidden;
+      if (open) navigate('practice');
+      videoShow(open);
+    },
     profile: () => $('profile-chip').click(),
   };
 
