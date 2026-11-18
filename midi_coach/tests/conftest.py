@@ -38,3 +38,9 @@ def _no_browser(monkeypatch):
     """Tests must never open the coach page in the user's browser."""
     monkeypatch.setenv("MIDI_COACH_NO_BROWSER", "1")
     monkeypatch.setattr("webbrowser.open", lambda *args, **kwargs: pytest.fail("a test tried to open a browser tab"))
+
+
+@pytest.fixture(autouse=True)
+def _no_fix_tests(monkeypatch):
+    """The runner doesn't run the whole suite on each fix inside the suite; test_fixtests.py turns it on."""
+    monkeypatch.setenv("MIDI_COACH_FIX_TESTS", "off")

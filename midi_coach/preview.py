@@ -288,6 +288,9 @@ def open_copy(report_id: str, wait: bool = True) -> dict:
         return {"error": "The test copy didn't start." + (f" Its last words: {tail}" if tail else "")}
     state["url"] = url
     _current_file().write_text(json.dumps(state, indent=2), encoding="utf-8")
+    from . import history
+
+    history.add(report_id, "opened", commit=info["commit"])
     return state
 
 

@@ -9,6 +9,7 @@ the Hub is closed, runs this module itself:
     python -m midi_coach.fixes works <id> [--save-first]
     python -m midi_coach.fixes still-wrong <id> [--note "…"]
     python -m midi_coach.fixes answer <id> <choice number or words>
+    python -m midi_coach.fixes history <id>       every step of that item (history.py)
 
 Each prints one JSON object. A fix only reaches the user's code through `works`; `still-wrong`
 drops it (it never got there), so nothing has to be undone.
@@ -21,7 +22,7 @@ import json
 import sys
 import time
 
-from . import bugs, fixgit, preview
+from . import bugs, fixgit, fixtests, history, preview
 
 DONE_DAYS = 7
 # The board's columns, in order.
@@ -62,6 +63,7 @@ def board(shots: bool = False) -> dict:
     status = preview.status()
     trying = status.get("id") if status.get("open") else None
     rows = []
+    stories = history.by_item()
     cutoff = time.time() - DONE_DAYS * 86400
     for stage in ("open", "check", "done"):
         for it in bugs.items(stage):
@@ -79,7 +81,11 @@ def board(shots: bool = False) -> dict:
                 row.update(question=t.get("question", ""), choices=t.get("choices", []))
             if stage == "check":
                 commit, tried = bugs._fix_commits(folder)
-                row.update(commit=commit, tried=bool(tried), files=_code_files(commit) if commit else [])
+                fix_md = folder / "fix.md"
+                tests = fixtests.parse_line(fix_md.read_text(encoding="utf-8") if fix_md.exists() else "")
+                row.update(commit=commit, tried=bool(tried), files=_code_files(commit) if commit else [],
+                           tests=tests or {"state": "pending" if commit else "unchecked", "line": ""})
+            row["history"] = stories.get(it["id"], [])[-12:]
             if stage == "done":
                 row["outcome"] = _outcome(folder)
             if shots and it["shot"]:
@@ -169,10 +175,12 @@ def _main() -> int:
     a = sub.add_parser("answer")
     a.add_argument("id")
     a.add_argument("choice")
+    sub.add_parser("history").add_argument("id")
     args = ap.parse_args()
     out = {"board": lambda: board(args.shots), "open": lambda: open_fix(args.id), "close": close_copy,
            "works": lambda: works(args.id, args.save_first), "still-wrong": lambda: still_wrong(args.id, args.note),
-           "answer": lambda: answer(args.id, args.choice)}[args.cmd]()
+           "answer": lambda: answer(args.id, args.choice),
+           "history": lambda: {"id": args.id, "history": history.of(args.id)}}[args.cmd]()
     print(json.dumps(out, ensure_ascii=False, default=str))
     return 1 if isinstance(out, dict) and "error" in out else 0
 

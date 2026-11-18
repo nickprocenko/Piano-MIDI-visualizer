@@ -377,7 +377,7 @@ def _fix_parts(folder: pathlib.Path) -> tuple[str, str]:
         return "", ""
     body = fix.read_text(encoding="utf-8").split("\n", 1)[-1]
     m = LOG_LINK_RE.search(body)
-    return " ".join(TRIED_RE.sub("", COMMIT_RE.sub("", LOG_LINK_RE.sub("", body))).split()), (m.group(1) if m else "")
+    return " ".join(TESTS_RE.sub("", TRIED_RE.sub("", COMMIT_RE.sub("", LOG_LINK_RE.sub("", body)))).split()), (m.group(1) if m else "")
 
 
 def _fix_commits(folder: pathlib.Path) -> tuple[str, str]:
@@ -430,6 +430,7 @@ def place(report_id: str) -> dict:
 CLAIM_STALE_SEC = 3 * 3600  # a claim older than this was left by a worker that stopped
 COMMIT_RE = re.compile(r"^Commit: ([0-9a-f]{6,40})\s*$", re.M)
 TRIED_RE = re.compile(r"^Tried: ([0-9a-f]{6,40})\s*$", re.M)  # Try it put the fix in the user's code as this commit
+TESTS_RE = re.compile(r"^Tests: (.+)$", re.M)  # the runner's test check of the fix (fixtests.py)
 
 
 def claimed_by(folder: pathlib.Path) -> dict | None:
@@ -578,6 +579,9 @@ def mark_ready(report_id: str, summary: str, build_log: str = "", files=(), by: 
         lines += ["", f"Commit: {commit}"]
     (folder / "fix.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     write_backlog()
+    from . import history
+
+    history.add(report_id, "built", by=by, commit=commit, files=[str(f) for f in files], summary=summary.strip())
     return {"ready": report_id, "kind": kind, **({"commit": commit} if commit else {})}
 
 
@@ -655,6 +659,10 @@ def verify(report_id: str, works: bool, note: str = "") -> dict:
     with (folder / "report.md").open("a", encoding="utf-8") as f:
         f.write("\n".join(addition) + "\n")
     write_backlog()
+    from . import history
+
+    history.add(report_id, "works" if works else "still_wrong",
+                **({"commit": merged.get("commit")} if merged else {}), **({} if works else {"note": note.strip()}))
     out = {"checked": report_id, "works": works}
     if undone is not None:
         out["undone"] = "commit" in undone or "dropped" in undone
@@ -792,6 +800,9 @@ def answer(report_id: str, choice: str, how: str = "on the coach page") -> dict:
              question="", choices=[])
     (folder / "triage.json").write_text(json.dumps(t, indent=1, ensure_ascii=False), encoding="utf-8")
     write_backlog()
+    from . import history
+
+    history.add(report_id, "answered", answer=choice)
     return {"answered": report_id, "answer": choice, "area": t["area"]}
 
 

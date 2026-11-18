@@ -152,8 +152,11 @@ class Runner:
     """One runner: fills free slots with workers each tick. `launch` runs Claude Code
     (claude_run.run), replaceable in tests; `wait` makes tick() wait for the workers it started."""
 
-    def __init__(self, launch=claude_run.run, slots: int = SLOTS, wait: bool = False):
+    def __init__(self, launch=claude_run.run, slots: int = SLOTS, wait: bool = False, tester=None):
+        from . import fixtests
+
         self.launch, self.slots, self.wait = launch, slots, wait
+        self.tester = tester or fixtests.check  # tests a fix made ready (MIDI_COACH_FIX_TESTS=off: never)
         self.busy: dict[str, str] = {}  # worker name -> what it is doing ("triage" / "build")
         self.paused_until = 0.0
         self.lock = threading.Lock()
@@ -228,6 +231,29 @@ class Runner:
                 why = ("it didn't finish: " + said.splitlines()[-1][:200]) if said else "it stopped without saying why"
                 bugs.stuck(it["id"], why, name)
         log(f"{name} done ({'error' if 'error' in out else 'ok'}): " + (said[-600:] or "(nothing said)").replace("\n", " | "))
+        if job["kind"] == "build" and os.environ.get("MIDI_COACH_FIX_TESTS", "on") != "off":
+            self._test_fixes(name, job)
+
+    def _test_fixes(self, name: str, job: dict) -> None:
+        """Run the tests on each fix this batch made ready (fixtests.py), still in this worker's slot so
+        two suites never run at once with a worker. A fix that breaks tests that passed before goes
+        back to be fixed again, once; after that the Workshop warns instead."""
+        from . import fixtests, history
+
+        ready = [it["id"] for it in bugs.items("check") if it["id"] in job["ids"]]
+        for item in ready:
+            try:
+                result = self.tester(item)
+            except Exception as exc:  # a broken test run never takes the runner down
+                log(f"{name}: couldn't test {item}: {type(exc).__name__}: {exc}")
+                continue
+            log(f"{name}: tested {item}: {result.get('line') or result.get('error')}")
+            if result.get("new") and not fixtests.sent_back_before(item):
+                why = ("The runner's test check, not Nick: tests that pass on his own code fail with this fix: "
+                       + ", ".join(result["new"]) + ". Fix the cause (or the test, if the fix changed what it checks) and mark it ready again.")
+                bugs.verify(item, False, why)
+                history.add(item, "sent_back", why=why, new=result["new"])
+                log(f"{name}: sent {item} back: {len(result['new'])} new test failure(s)")
 
 
 def run_forever() -> int:

@@ -697,6 +697,16 @@ test copy at a time, and it can't take the keyboard while the Music Hub is in th
 Fixes built before the test copy existed show no orange label, but are just as safe to open.
 From a terminal: `python -m midi_coach.preview open <report id>` / `close`.
 
+**Tested before you see it.** After a background worker finishes a batch, the runner runs the
+whole test suite on each fix itself (in a scratch copy, `~/MidiCoach/fixtests/`), and once on your
+own latest commit, so it can tell failures the fix *caused* from ones your code already had. Each
+card in the Workshop says ✓ how many passed, or ⚠ which tests the fix breaks. A fix that breaks
+tests is sent back to be fixed again once, by itself; if it still breaks them, it waits for you
+with the warning, and Works asks before adding it. `python -m midi_coach.fixtests <id>` tests one
+fix by hand. Every step of every fix (built, tested, sent back, opened, works / still wrong,
+answered) is kept in `~/MidiCoach/fixes/log.jsonl`: the card's **History**, or
+`python -m midi_coach.fixes history <id>`.
+
 **The fix board.** `python -m midi_coach.fixes board` lists every item in the Workshop's columns
 (❓ question, queued, building, ready to try, trying, done in the last week). `open <id>` /
 `close` start and stop a test copy. `works <id>` adds the fix to your code; with `--save-first`,
