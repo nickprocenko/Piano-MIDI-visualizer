@@ -705,6 +705,15 @@ with no page open ends it and deletes it. One test copy at a time. It can't take
 the Music Hub is in the middle of a run. Agent Quest's Workshop will drive this, and then checking
 fixes moves there from the 👀 button.
 
+**The fix board.** `python -m midi_coach.fixes board` lists every item in the Workshop's columns
+(❓ question, queued, building, ready to try, trying, done in the last week). `open <id>` /
+`close` start and stop a test copy. `works <id>` adds the fix to your code; with `--save-first`,
+your own uncommitted edits in its files are committed first ("Work in progress"), so the fix can
+go on top. `still-wrong <id> --note "…"` drops the fix and sends the item back. `answer <id> <n>`
+answers a worker's question. The running Hub serves the same as `cmd/fixes`, `cmd/fix_open`,
+`cmd/fix_close`, `cmd/fix_works`, `cmd/fix_still_wrong` and `cmd/fix_answer`. Those commands only
+answer this PC (no web page from elsewhere can use them), and never in a test copy.
+
 **The backlog in Obsidian.** If your Obsidian vault has a `Projects/MidiCoach` folder (the vault
 is `~/Vault` unless `MIDI_COACH_VAULT` says otherwise), every report, fix and check rewrites
 `Projects/MidiCoach/Backlog.md`: what's ready to try, what's open, and what was done in the last

@@ -2508,7 +2508,33 @@ _atlas = atlas_runtime.AtlasCoach(
     say=lambda text: hub.say(text, speaker="Examiner"),
 )
 PAGE_COMMANDS.update(_atlas.page_commands())
+
+
+def _fix_commands() -> dict:
+    """The fix board for Agent Quest's Workshop (fixes.py). Only from this PC (DisplayHub.local_only)."""
+    from . import fixes
+
+    def guarded(fn):
+        def run(body: dict) -> dict:
+            if os.environ.get("MIDI_COACH_PREVIEW"):  # a test copy's own code must never decide fixes
+                return {"error": "Not in a test copy."}
+            return fn(body)
+        return run
+
+    return {name: guarded(fn) for name, fn in {
+        "fixes": lambda b: fixes.board(bool(b.get("shots"))),
+        "fix_open": lambda b: fixes.open_fix(str(b.get("id") or "")),
+        "fix_close": lambda b: fixes.close_copy(),
+        "fix_works": lambda b: fixes.works(str(b.get("id") or ""), bool(b.get("save_first"))),
+        "fix_still_wrong": lambda b: fixes.still_wrong(str(b.get("id") or ""), str(b.get("note") or "")),
+        "fix_answer": lambda b: fixes.answer(str(b.get("id") or ""), str(b.get("choice") or "")),
+    }.items()}
+
+
+PAGE_COMMANDS.update(_fix_commands())
 hub.commands.update(PAGE_COMMANDS)
+hub.local_only |= {"fixes", "fix_open", "fix_close", "fix_works", "fix_still_wrong", "fix_answer",
+                   "check", "try_fix", "answer"}
 hub.voice_handler = _voice_audio
 hub.extension_hook = synced.note_extension  # the YouTube tab knows it's installed after a restart
 hub.transcribe_handler = lambda audio: {"heard": stt.transcribe(audio)}  # quiz answers said aloud: Whisper only, no API

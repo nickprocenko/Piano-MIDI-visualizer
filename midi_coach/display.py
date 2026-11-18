@@ -199,6 +199,10 @@ class DisplayHub:
         self._atlas: dict | None = None
         # name -> callable(body: dict) -> dict, for the coach page's POST /cmd/<name>
         self.commands: dict = {"speak_fingers": self._speak_fingers}
+        # Commands only this PC may send (no Origin, or a localhost page): ones that change the user's
+        # code or read their reports (the fix board). Any website can reach localhost, so the rest of
+        # the page's commands are open; these are not.
+        self.local_only: set[str] = set()
         # Learn mode: the coach says which finger plays the key you keep missing (live.py), when
         # the page's Sheet ▸ Say the fingering is on
         self.speak_fingers = False
@@ -510,6 +514,15 @@ class DisplayHub:
                 self._clients.remove(q)
 
 
+def _local_origin(origin: str | None) -> bool:
+    """A request from this PC: a program (no Origin header), or a page served from localhost."""
+    if not origin:
+        return True
+    from urllib.parse import urlparse
+
+    return urlparse(origin).hostname in ("127.0.0.1", "localhost", "::1")
+
+
 def _make_handler(hub: DisplayHub):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -560,10 +573,13 @@ def _make_handler(hub: DisplayHub):
                 except Exception as exc:
                     result = {"error": str(exc)}
                 return self._send(400 if "error" in result else 200, json.dumps(result).encode(), "application/json")
-            handler = hub.commands.get(path[len("/cmd/"):]) if path.startswith("/cmd/") else None
+            name = path[len("/cmd/"):] if path.startswith("/cmd/") else ""
+            handler = hub.commands.get(name) if name else None
             self._from_extension()
             if handler is None:
                 return self._send(404, b'{"error":"unknown command"}', "application/json")
+            if name in hub.local_only and not _local_origin(self.headers.get("Origin")):
+                return self._send(403, b'{"error":"only from this PC"}', "application/json")
             try:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}") if length else {}
