@@ -10,6 +10,7 @@ the Hub is closed, runs this module itself:
     python -m midi_coach.fixes still-wrong <id> [--note "…"]
     python -m midi_coach.fixes answer <id> <choice number or words>
     python -m midi_coach.fixes history <id>       every step of that item (history.py)
+    python -m midi_coach.fixes cancel <id> [--why "…"]   withdraw it (a fix made for it is dropped)
 
 Each prints one JSON object. A fix only reaches the user's code through `works`; `still-wrong`
 drops it (it never got there), so nothing has to be undone.
@@ -42,11 +43,17 @@ def _column(it: dict, stage: str, trying: str | None) -> str:
     return "queued"
 
 
+CANCELLED = "Cancelled in Agent Quest"
+
+
 def _outcome(folder) -> str:
-    """How a finished item ended: 'works' (its fix was kept) or 'closed' (no fix needed)."""
+    """How a finished item ended: 'works' (its fix was kept), 'cancelled' (the user withdrew it in
+    the Workshop) or 'closed' (no fix needed)."""
     text = (folder / "report.md").read_text(encoding="utf-8")
     works, closed = text.rfind(": works\n"), text.rfind(": no fix needed\n")
-    return "works" if works > closed else "closed"
+    if works > closed:
+        return "works"
+    return "cancelled" if text.find(CANCELLED, closed) > -1 and closed > -1 else "closed"
 
 
 def _code_files(commit: str) -> list[str]:
@@ -151,6 +158,33 @@ def still_wrong(report_id: str, note: str = "") -> dict:
     return bugs.verify(report_id, False, note)
 
 
+def cancel(report_id: str, why: str = "") -> dict:
+    """✖: the user withdraws a suggestion or report. It goes to done (as cancelled), and a fix a
+    worker already made for it is dropped, never added. Not while a worker is building it, and not
+    once its fix is in the user's code (Works or Still wrong decide that one)."""
+    found = bugs.find(report_id)
+    if found is None:
+        return {"error": f"No report {report_id}."}
+    kind, stage, folder = found
+    if stage == bugs.DONE[kind]:
+        return {"error": "That one is already done."}
+    if stage == "open" and bugs.claimed_by(folder):
+        return {"error": "A worker is building it right now. Cancel it once it's ready to try, or say Still wrong then."}
+    commit = ""
+    if stage == "check":
+        commit, tried = bugs._fix_commits(folder)
+        if tried or (commit and fixgit.in_code(commit)):
+            return {"error": "Its fix is already in your code: press Works to keep it or Still wrong to take it out."}
+    _close_if_trying(report_id)
+    out = bugs.close(report_id, CANCELLED + (f": {why.strip()}" if why.strip() else "."))
+    if "error" in out:
+        return out
+    if commit:
+        fixgit.forget(report_id)  # the worker's fix on its side branch is let go
+    history.add(report_id, "cancelled", **({"note": why.strip()} if why.strip() else {}))
+    return {"cancelled": report_id, "kind": kind, **({"dropped": commit} if commit else {})}
+
+
 def answer(report_id: str, choice: str) -> dict:
     return bugs.answer(report_id, choice, how="in Agent Quest")
 
@@ -176,11 +210,15 @@ def _main() -> int:
     a.add_argument("id")
     a.add_argument("choice")
     sub.add_parser("history").add_argument("id")
+    c = sub.add_parser("cancel")
+    c.add_argument("id")
+    c.add_argument("--why", default="")
     args = ap.parse_args()
     out = {"board": lambda: board(args.shots), "open": lambda: open_fix(args.id), "close": close_copy,
            "works": lambda: works(args.id, args.save_first), "still-wrong": lambda: still_wrong(args.id, args.note),
            "answer": lambda: answer(args.id, args.choice),
-           "history": lambda: {"id": args.id, "history": history.of(args.id)}}[args.cmd]()
+           "history": lambda: {"id": args.id, "history": history.of(args.id)},
+           "cancel": lambda: cancel(args.id, args.why)}[args.cmd]()
     print(json.dumps(out, ensure_ascii=False, default=str))
     return 1 if isinstance(out, dict) and "error" in out else 0
 

@@ -2452,12 +2452,13 @@ def _fix_commands() -> dict:
         "fix_works": lambda b: fixes.works(str(b.get("id") or ""), bool(b.get("save_first"))),
         "fix_still_wrong": lambda b: fixes.still_wrong(str(b.get("id") or ""), str(b.get("note") or "")),
         "fix_answer": lambda b: fixes.answer(str(b.get("id") or ""), str(b.get("choice") or "")),
+        "fix_cancel": lambda b: fixes.cancel(str(b.get("id") or ""), str(b.get("why") or "")),
     }.items()}
 
 
 PAGE_COMMANDS.update(_fix_commands())
 hub.commands.update(PAGE_COMMANDS)
-hub.local_only |= {"fixes", "fix_open", "fix_close", "fix_works", "fix_still_wrong", "fix_answer"}
+hub.local_only |= {"fixes", "fix_open", "fix_close", "fix_works", "fix_still_wrong", "fix_answer", "fix_cancel"}
 hub.voice_handler = _voice_audio
 hub.extension_hook = synced.note_extension  # the YouTube tab knows it's installed after a restart
 hub.transcribe_handler = lambda audio: {"heard": stt.transcribe(audio)}  # quiz answers said aloud: Whisper only, no API

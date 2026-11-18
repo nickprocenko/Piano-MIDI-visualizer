@@ -690,7 +690,7 @@ pushed; the Music Hub restarts with it when it has new Python code and isn't mid
 goes back to be fixed again with your words). If you have unsaved changes in a file the fix also
 changes, Works says which and offers **Save my changes first, then add the fix**: your edits are
 committed on their own ("Work in progress"), then the fix goes on top. If both changed the same
-lines, nothing is added and it says so. Anything you report from a test copy (F9, or to the
+lines, nothing is added and it says so. **✖ Cancel** (top right of a card) withdraws a suggestion or report you no longer want, with an optional reason: it moves to done as cancelled, and a fix already made for it is dropped, never added. It isn't offered while a worker is building the item (cancel once it's ready to try), or for a fix already put in your code by the old Try it button (Works or Still wrong decide those). From a terminal: `python -m midi_coach.fixes cancel <id> --why "…"`. Anything you report from a test copy (F9, or to the
 Maestro) joins your real list when it closes, marked as found in the test copy. **Close** on its
 label, **Close it** in the Workshop, or 30 minutes with no page open ends it and deletes it. One
 test copy at a time, and it can't take the keyboard while the Music Hub is in the middle of a run.

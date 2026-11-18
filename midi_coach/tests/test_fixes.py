@@ -106,3 +106,24 @@ def test_the_hub_refuses_fix_commands_from_a_website(monkeypatch):
         assert post("https://example.com")[0] == 403
     finally:
         hub.shutdown()
+
+
+def test_cancel_withdraws_a_suggestion_and_drops_its_fix(home, repo, monkeypatch):  # noqa: F811
+    queued, ready = report("bigger metronome button"), report("move the video button")
+    worker_fixes(monkeypatch, repo, ready)
+    assert fixes.cancel(queued, "changed my mind")["cancelled"] == queued
+    out = fixes.cancel(ready)
+    assert out["dropped"] and log_of(repo)[0] == "start"  # never added to your code
+    assert fixgit.git("show-ref", f"refs/fixes/{ready}", check=False).returncode  # let go
+    rows = {r["id"]: r for r in fixes.board()["items"]}
+    assert rows[queued]["column"] == "done" and rows[queued]["outcome"] == "cancelled"
+    assert rows[ready]["outcome"] == "cancelled" and rows[ready]["history"][-1]["event"] == "cancelled"
+    assert "changed my mind" in (home / "requests" / "done" / queued / "report.md").read_text(encoding="utf-8")
+    assert "already done" in fixes.cancel(queued)["error"]
+
+
+def test_cancel_waits_while_a_worker_builds_it(home, repo):  # noqa: F811
+    item = report("tiles")
+    bugs.claim(item, "worker-1")
+    assert "building it right now" in fixes.cancel(item)["error"]
+    assert bugs.find(item)[1] == "open"
