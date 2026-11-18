@@ -398,8 +398,8 @@ TOPICS = {"flute": "the flute", "sax": "the saxophone", "voice": "singing", "fid
 PAGE_MENUS = {
     "playing": "MIDI input, what you play, and each track's part, show, mute and volume",
     "sheet": "sheet or falling notes, how the sheet is drawn, chords and lyrics, clean-up",
-    "maestro": "coaching style, when the Maestro talks during a run, the reading voice",
-    "voice": "the reading voice and its volume (in the Maestro menu)",
+    "maestro": "Assistant settings (Settings ▾ on the Maestro panel): coaching style, when the Maestro talks during a run, the reading voice",
+    "voice": "the reading voice and its volume (in the Maestro panel's Assistant settings)",
     "playback": "step bar by bar, restart, loop, bookmarks, which bars to play, tempo, lead-in",
     "settings": "Preferences: connections, microphone and speakers, shortcuts",
     "sound_out": "where Listen and the parts you don't play are heard (in Playing)",
@@ -591,7 +591,7 @@ TOOLS = [
     },
     {
         "name": "set_tiles",
-        "description": "Change the quick-action tiles on the Maestro panel for one part of the app: add "
+        "description": "Change the Quick tools (the tiles on the Maestro panel) for one part of the app: add "
                        "tiles (to the end), take tiles off, or put that part back to its defaults. A tile "
                        "from another part works there too (it goes there first). Tiles: "
                        + "; ".join(f"{k}: {v}" for k, v in tiles.TILES.items()),

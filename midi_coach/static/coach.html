@@ -895,12 +895,23 @@
                    width: min(400px, calc(100vw - 32px)); display: flex; flex-direction: column;
                    background: var(--panel); border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
                    box-shadow: 0 10px 34px rgba(0,0,0,.45); }
-  #mp-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; cursor: grab; user-select: none; touch-action: none; }
+  #mp-head { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; cursor: grab; user-select: none; touch-action: none; }
   #maestro-panel.dragging #mp-head { cursor: grabbing; }
   #mp-name { color: var(--accent); font: 700 12px 'Segoe UI', Arial, sans-serif; letter-spacing: .1em; text-transform: uppercase; margin-right: auto; }
   #mp-unread { width: 8px; height: 8px; border-radius: 50%; background: #f2b84b; }
   #mp-toggle { padding: 2px 9px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
   #mp-toggle:hover { border-color: var(--accent); }
+  /* Assistant settings (Settings ▾): its panel spans the Maestro panel, below the bar or (.up) above it */
+  #maestro-settings > summary { padding: 2px 8px; border: 1px solid rgba(255,255,255,.15); border-radius: 5px; color: var(--muted); font-size: 12px; white-space: nowrap; cursor: pointer; list-style: none; }
+  #maestro-settings > summary::-webkit-details-marker { display: none; }
+  #maestro-settings > summary:hover, #maestro-settings[open] > summary { border-color: var(--accent); color: var(--accent); }
+  #maestro-settings .menu-panel { left: 8px; right: 8px; top: calc(100% + 4px); width: auto; cursor: default; }
+  #maestro-settings.up .menu-panel { top: auto; bottom: calc(100% + 4px); }
+  #maestro-settings label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  #maestro-settings select { background: var(--bg); color: var(--text); border: 1px solid rgba(255,255,255,.15); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  .mp-set-title { color: var(--accent); font: 700 11px 'Segoe UI', Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+  body.running #maestro-settings .setting { opacity: .5; pointer-events: none; }  /* as the Session row's, while a run goes */
+  body:has(#menu.record) #maestro-settings .play-only, body:has(#menu.listen) #maestro-settings .not-listen { display: none; }
   #mp-close { padding: 2px 6px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
   #mp-close:hover { color: var(--text); }
   #maestro-panel.closed { display: none; }  /* off the screen until Ask Maestro */
@@ -929,8 +940,9 @@
   #mp-grip { position: absolute; top: -1px; right: -1px; width: 14px; height: 14px; cursor: nesw-resize;
              border-top: 2px solid rgba(255,255,255,.25); border-right: 2px solid rgba(255,255,255,.25); border-top-right-radius: 10px; }
   #mp-grip:hover { border-color: var(--accent); }
-  /* Quick-action tiles (tiles.py): under the bar, folded or open; the pencil edits this view's set */
+  /* Quick tools (tiles.py): under the bar, folded or open; the pencil edits this view's set */
   #mp-tiles { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px 8px; }
+  #mp-tiles::before { content: 'Quick tools'; flex-basis: 100%; margin-bottom: -2px; color: var(--muted); font: 600 10.5px 'Segoe UI', Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; }
   #mp-tiles:empty { display: none; }
   .mp-tile { flex: none; padding: 5px 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 6px; background: transparent; color: var(--text); font: 12.5px 'Segoe UI', Arial, sans-serif; white-space: nowrap; cursor: pointer; }
   .mp-tile:hover:not(:disabled) { border-color: var(--accent); }
@@ -1274,19 +1286,6 @@
   </div>
       </div>
     </details>
-    <details id="maestro-settings">
-      <summary title="How the Maestro coaches you, when it speaks during a run, and whether it reads replies aloud">Maestro ▾</summary>
-      <div class="menu-panel">
-  <label class="setting" title="How the Maestro coaches you: Warm is encouraging, Strict is dry and demanding">Style <select id="style">
-    <option value="friend">Friend</option><option value="strict">Strict</option></select></label>
-  <label class="setting" title="When you press Start, the Maestro says hello: the piece, its key signature, your best score on it"><input type="checkbox" id="talk-greet" checked> Hello at Start</label>
-  <label class="setting" title="What the Maestro says when a pass ends. Every pass: always a remark. When something’s new: only when the playing changed or a slip shows up (a word otherwise). Nothing: stays quiet; the pass line still shows above the sheet.">After a pass <select id="talk-passes">
-    <option value="every">Every pass</option><option value="news">When something’s new</option><option value="off">Nothing</option></select></label>
-  <label class="setting" title="When a run of two or more passes ends, the Maestro sums it up: your best pass and the bar to work on"><input type="checkbox" id="talk-signoff" checked> Sum up at the end</label>
-  <label class="setting play-only not-listen" title="With Loop on, the Maestro changes the bars, hand, tempo or mode between passes the way a teacher would, and says what it did. Say “no” or “undo” to put it back."><input type="checkbox" id="autopilot"> Maestro decides</label>
-  <label class="setting" id="voice-wrap" title="Read the Maestro's and Claude's comments aloud"><input type="checkbox" id="voice"> Read replies aloud <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
-      </div>
-    </details>
     <details id="screen-controls" class="play-only">
       <summary title="Step bar by bar, restart, loop, bookmark bars, drag the bar timeline; which bars, the tempo and the lead-in. Double-click a bar on the sheet to jump there">Playback ▾</summary>
       <div id="transport-controls" class="menu-panel">
@@ -1447,11 +1446,27 @@
     <button id="mp-hush" class="hush" title="The Maestro finishes this sentence, then stops (Esc, or say “that's enough”). Press again to stop at once. A run keeps going"><span class="first">■ Stop</span><span class="now">■ Now</span></button>
     <span id="level" aria-hidden="true"><i></i></span>
     <button id="mp-clear" title="Empty the panel (today's log stays on disk)">Clear</button>
+    <!-- Assistant settings: how the Maestro coaches you (a drop-down like the Session row's, opening
+         below the bar, or above it when the panel sits low) -->
+    <details id="maestro-settings">
+      <summary title="Assistant settings: how the Maestro coaches you, when it speaks during a run, and whether it reads replies aloud" aria-label="Assistant settings">Settings ▾</summary>
+      <div class="menu-panel">
+  <div class="mp-set-title">Assistant settings</div>
+  <label class="setting" title="How the Maestro coaches you: Warm is encouraging, Strict is dry and demanding">Style <select id="style">
+    <option value="friend">Friend</option><option value="strict">Strict</option></select></label>
+  <label class="setting" title="When you press Start, the Maestro says hello: the piece, its key signature, your best score on it"><input type="checkbox" id="talk-greet" checked> Hello at Start</label>
+  <label class="setting" title="What the Maestro says when a pass ends. Every pass: always a remark. When something’s new: only when the playing changed or a slip shows up (a word otherwise). Nothing: stays quiet; the pass line still shows above the sheet.">After a pass <select id="talk-passes">
+    <option value="every">Every pass</option><option value="news">When something’s new</option><option value="off">Nothing</option></select></label>
+  <label class="setting" title="When a run of two or more passes ends, the Maestro sums it up: your best pass and the bar to work on"><input type="checkbox" id="talk-signoff" checked> Sum up at the end</label>
+  <label class="setting play-only not-listen" title="With Loop on, the Maestro changes the bars, hand, tempo or mode between passes the way a teacher would, and says what it did. Say “no” or “undo” to put it back."><input type="checkbox" id="autopilot"> Maestro decides</label>
+  <label class="setting" id="voice-wrap" title="Read the Maestro's and Claude's comments aloud"><input type="checkbox" id="voice"> Read replies aloud <select id="voice-name" title="Which voice"></select> <input type="range" id="voice-vol" min="5" max="100" step="5" value="100" title="Voice volume"></label>
+      </div>
+    </details>
     <button id="mp-toggle" aria-expanded="false" title="Open the conversation">▴</button>
     <button id="mp-close" title="Close (Ask Maestro brings it back)" aria-label="Close the Maestro">✕</button>
   </div>
   <span id="mp-grip" title="Drag to resize" aria-hidden="true"></span>
-  <div id="mp-tiles" role="toolbar" aria-label="Quick actions"></div>
+  <div id="mp-tiles" role="toolbar" aria-label="Quick tools"></div>
   <div id="mp-tray" aria-label="Tiles you can add"></div>
   <ol id="mp-log" aria-live="polite" aria-label="Today's conversation"></ol>
   <div id="coach-composer">
@@ -1743,6 +1758,12 @@ function restartTimeline() {
 function positionControlPanel(details) {
   const panel = details.querySelector('.menu-panel');
   if (!details.open || !panel) return;
+  if (details.id === 'maestro-settings') {  // spans the Maestro panel: below its bar if it fits, else above
+    details.classList.remove('up');
+    const head = $('mp-head').getBoundingClientRect(), h = panel.offsetHeight + 8;
+    if (head.bottom + h > innerHeight && head.top - h >= 0) details.classList.add('up');
+    return;
+  }
   panel.style.left = '0px';
   const overflow = panel.getBoundingClientRect().right - (window.innerWidth - 16);
   if (overflow > 0) panel.style.left = `${-overflow}px`;
@@ -1821,7 +1842,7 @@ function showSheetWarning(payload) {
   btn.textContent = payload.cleanup === 'on' ? 'Show original' : 'Auto clean';
   btn.disabled = false;
   $('cleanup-open').hidden = !payload.warning && !(playable && playable.warning);
-  $('cleanup-open').textContent = (payload.warning ? btn.textContent : 'Clean') + ' in Maestro ▾';
+  $('cleanup-open').textContent = (payload.warning ? btn.textContent : 'Clean') + ' in Sheet ▾';
   showPlayable(playable, payload.path);
   syncSheetTools();
 }
@@ -2004,9 +2025,10 @@ $('details-btn').addEventListener('click', async () => {
   }
 });
 
-// The drop-downs beside the mode buttons (Playing, Sheet, Maestro, Playback): one open at
-// a time, closed by a click elsewhere (or on the sheet's iframe, which blurs the window) or Escape.
-const controlMenus = [...document.querySelectorAll('#control-tabs > details')];
+// The drop-downs beside the mode buttons (Playing, Sheet, Playback) and the Maestro panel's
+// Assistant settings: one open at a time, closed by a click elsewhere (or on the sheet's
+// iframe, which blurs the window) or Escape.
+const controlMenus = [...document.querySelectorAll('#control-tabs > details'), $('maestro-settings')];
 controlMenus.forEach(details => {
   details.addEventListener('toggle', () => {
     if (!details.open) return;
@@ -2887,7 +2909,7 @@ function mpClamp() {
   mpPlace(left, bottom);
 }
 $('mp-head').addEventListener('pointerdown', e => {
-  if (mpNarrow.matches || e.button !== 0 || e.target.closest('button, select, input')) return;
+  if (mpNarrow.matches || e.button !== 0 || e.target.closest('button, select, input, details')) return;
   const r = mp.getBoundingClientRect(), dx = e.clientX - r.left, dy = r.bottom - e.clientY;
   mp.classList.add('dragging');
   $('mp-head').setPointerCapture(e.pointerId);
@@ -3854,7 +3876,8 @@ async function openMenu(name) {
     return;
   }
   const menu = $(m.open);
-  if (!menu.offsetParent && await window.coachGo('practice') === false) return;  // the drop-downs live on the Session's row
+  if (menu.closest('#maestro-panel')) mpSetClosed(false);  // Assistant settings: on the Maestro panel, every view
+  else if (!menu.offsetParent && await window.coachGo('practice') === false) return;  // the drop-downs live on the Session's row
   menu.open = true;
   const target = m.light ? document.querySelector(m.light) : menu.querySelector('summary');
   lightUp(target.closest('label') || target);
@@ -4373,7 +4396,7 @@ connect();
           <label>Voice <span class="pref-pair"><select id="pref-voice-name"></select><button type="button" class="pref-btn" id="pref-voice-test">Test</button></span></label>
           <label>Voice volume <span class="pref-pair"><input type="range" id="pref-voice-vol" min="5" max="100" step="5"><span class="pref-val" id="pref-voice-vol-val"></span></span></label>
         </div>
-        <p class="dlg-hint">The same settings as the Maestro menu over the sheet.</p>
+        <p class="dlg-hint">The same settings as Settings ▾ on the Maestro panel.</p>
       </section>
       <section data-pane="sheet" role="tabpanel" hidden>
         <h3>Sheet</h3>
